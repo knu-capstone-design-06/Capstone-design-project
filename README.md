@@ -279,7 +279,7 @@ Capstone-design/
 | `backend/app/modules` | 업무별 API·서비스·저장 로직 |
 | `backend/app/infrastructure` | DB·스토리지·외부 서비스 연결 |
 | `backend/app/common` | 공통 설정·예외·상수 |
-| `ai-server/app/modules` | 음성 처리·명령 해석·지원 판단 |
+| `ai-server/app/modules` | 비전 특징 추출·불편 상태 판단 |
 | `ai-server/app/inference` | 직접 실행하는 모델의 로딩·추론 코드 |
 | `db` | DB 변경 이력, 구조, 초기 데이터 |
 | `contract` | API·이벤트·AI 명령 형식과 예시 |
