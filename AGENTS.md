@@ -8,7 +8,7 @@
 ## 1. 기본 원칙
 
 - 하나의 PR은 하나의 목적만 다룹니다.
-- 새 브랜치를 만들지 않고 `docs/Convention.md`의 작업 브랜치에서 작업합니다. 역할 브랜치는 `feat/frontend`, `feat/backend`, `feat/vision`, `feat/ai`, 공용 브랜치는 `feat/infra`, `feat/db`, `feat/docs`입니다.
+- 다른 이름의 브랜치를 만들지 않고 `docs/Convention.md`의 작업 브랜치에서 작업합니다. 역할 브랜치는 `feat/frontend`, `feat/backend`, `feat/vision`, `feat/ai`이고, 공용 브랜치 `feat/infra`, `feat/db`, `feat/docs`는 필요할 때 이 이름으로 만들어 씁니다.
 - `main`, `test`에 직접 push하지 않습니다. 반드시 PR로 병합합니다.
 - 공유 브랜치(`main`, `test`, 공용 브랜치, 다른 사람의 역할 브랜치)에 force-push, rebase, 기록 수정을 하지 않습니다.
 - 자기 역할 브랜치의 기록을 고쳐 force-push할 때는 `--force-with-lease`를 쓰고, 그 브랜치를 받아간 팀원에게 알립니다.
@@ -98,7 +98,7 @@
 - 변경과 관련된 빌드·테스트·수동 확인을 수행하고 결과를 PR에 적습니다.
 - 공용 영역을 수정·삭제했다면 논의한 회의 날짜나 결정 내용을 PR에 적습니다.
 - UI 변경은 스크린샷, API 변경은 요청·응답 예시를 첨부합니다.
-- 작성자 외 1명 이상 승인 후 병합합니다. 작업 브랜치는 병합 후에도 삭제하지 않습니다.
+- 작성자 외 1명 이상 승인 후 병합합니다. 역할 브랜치는 병합 후에도 삭제하지 않습니다.
 
 ## 7. AI 에이전트 작업 규칙
 
