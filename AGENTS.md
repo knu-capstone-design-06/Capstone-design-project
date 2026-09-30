@@ -1,7 +1,7 @@
 # AGENTS.md
 
 이 저장소에서 작업하는 팀원과 AI 에이전트(Claude Code 등)가 함께 지키는 공통 규칙입니다.
-브랜치·커밋·PR의 세부 규칙은 [`Docs/Convention.md`](Docs/Convention.md), 프로젝트 개요와 목표 구조는 [`README.md`](README.md)를 따릅니다.
+브랜치·커밋·PR의 세부 규칙은 [`docs/Convention.md`](docs/Convention.md), 프로젝트 개요와 목표 구조는 [`README.md`](README.md)를 따릅니다.
 우리 팀은 GitHub Issue를 쓰지 않습니다. 논의와 결정은 PR 본문과 회의 기록에 남깁니다.
 이 문서와 두 문서가 충돌하면 작업을 멈추고 팀에 확인합니다.
 
@@ -26,7 +26,7 @@
 | `backend/app/common/`, `backend/app/infrastructure/` | 공통 설정·예외·상수, DB·외부 연결 |
 | `ai-server/app/common/`, `ai-server/app/infrastructure/` | 공통 설정, 외부 연결 |
 | 루트 설정 파일 | `docker-compose.yml`, `.gitignore`, `infra/`, 각 서비스의 `Dockerfile`·의존성 파일 |
-| 공통 문서 | `README.md`, `AGENTS.md`, `CLAUDE.md`, `Docs/Convention.md` |
+| 공통 문서 | `README.md`, `AGENTS.md`, `CLAUDE.md`, `docs/Convention.md` |
 
 규칙:
 
@@ -45,7 +45,7 @@
 | 백엔드 | backend | `backend/`, `db/` |
 | 컴퓨터 비전 | vision | 저장 위치는 팀에서 확정 예정 |
 | AI | ai | `ai-server/` |
-| 문서 | docs | `docs/`, `Docs/` |
+| 문서 | docs | `docs/` |
 
 - 자기 담당 영역 안의 기능 폴더(예: `frontend/src/features/<feature>/`, `backend/app/modules/<module>/`)는 자유롭게 작업합니다.
 - 다른 담당자의 영역을 수정해야 하면 먼저 팀 채널이나 PR에서 공유하고, 그 담당자의 리뷰를 받습니다.
@@ -107,6 +107,6 @@ AI 에이전트는 위 규칙을 모두 따르고, 추가로 다음을 지킵니
 - 요청받지 않은 리팩터링, 의존성 추가, 폴더 구조 변경을 하지 않습니다.
 - `main`, `develop`에 push하거나 force-push하지 않습니다. 저장소 규칙(브랜치 보호 등)을 우회하지 않습니다.
 - 커밋과 PR의 작성자는 작업한 팀원입니다. 커밋 메시지와 PR 본문에 `Co-Authored-By: Claude ...`, `Generated with Claude Code` 같은 AI 표시를 넣지 않습니다.
-- 커밋 메시지·PR 본문은 `Docs/Convention.md` 형식과 PR 양식을 따릅니다.
+- 커밋 메시지·PR 본문은 `docs/Convention.md` 형식과 PR 양식을 따릅니다.
 - 비밀값이나 개인정보로 보이는 내용을 발견하면 커밋하지 않고 사용자에게 알립니다.
 - 확실하지 않은 인터페이스·요구사항은 추측해서 구현하지 않고 `contract/`나 사용자에게 확인합니다.
