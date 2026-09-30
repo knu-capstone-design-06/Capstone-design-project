@@ -1,0 +1,1 @@
+"""Capstone AI server application."""
