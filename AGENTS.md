@@ -67,7 +67,8 @@
 - `app/modules/<module>/`: `router.py`(엔드포인트) → `service.py`(업무 로직) → `repository.py`(DB 접근) 방향으로만 호출합니다.
 - 요청·응답 형식은 `schemas.py`, DB 모델은 `models.py`, 모듈 전용 예외는 `exceptions.py`, 테스트는 `tests/`에 둡니다.
 - DB·스토리지·외부 API 연결 코드는 `app/infrastructure/`에, 여러 모듈이 쓰는 설정·상수·예외는 `app/common/`에 둡니다.
-- AI 서버의 결과는 백엔드가 검증한 뒤 주문 상태나 UI에 반영합니다.
+- AI 서버와 외부 AI API의 결과는 백엔드가 검증한 뒤 주문 상태나 UI에 반영합니다.
+- 외부 AI API(STT·LLM·Jev)는 backend가 호출합니다. ai-server는 외부 AI API를 호출하지 않습니다.
 
 ### ai-server (FastAPI)
 
