@@ -1,0 +1,112 @@
+openapi: 3.1.0
+info:
+  title: Backend ↔ AI Server API
+  version: 0.1.0
+  description: |
+    FastAPI backend와 ai-server 사이의 내부 API 명세입니다.
+    ai-server는 Docker 내부 네트워크에서만 접근하며 외부에 포트를 공개하지 않습니다.
+    ai-server는 자체 모델 추론(비전 특징, 불편 상태 판단)만 하고 DB·외부 AI API를 쓰지 않습니다. (AGENTS.md 4장)
+servers:
+  - url: http://ai-server:8001
+    description: docker compose 내부 주소 (backend 환경변수 AI_SERVER_URL)
+
+paths:
+  /health:
+    get:
+      summary: ai-server 프로세스 상태 확인
+      operationId: getAiHealth
+      responses:
+        "200":
+          description: 정상
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              example: { status: ok, service: ai-server }
+
+  /v1/analyze:
+    post:
+      summary: 시간 구간 특징 → 5가지 불편 상태 점수
+      description: |
+        backend가 세션 ID를 붙여 frontend의 구간 특징을 전달합니다.
+        backend는 타임아웃(기본 2초)을 두고, 실패하면 판단 없이 진행합니다.
+        특징이 부족하면 measurable=false, states=null로 응답합니다.
+      operationId: analyzeWindow
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnalyzeRequest"
+            example:
+              session_id: 3f2c9a0e7b1d4c5e8f6a2b1c0d9e8f7a
+              screen_id: menu_list
+              window_start: "2026-10-01T10:00:00Z"
+              window_end: "2026-10-01T10:00:03Z"
+              touch: { tap_count: 6, miss_tap_count: 3, repeat_tap_count: 2, back_count: 0, dwell_ms: 3000 }
+              vision: { face_detected: true, face_size_ratio: 0.35, assistive_device: false, confidence: 0.9 }
+      responses:
+        "200":
+          description: 판단 결과
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalyzeResponse"
+              examples:
+                measurable:
+                  value:
+                    session_id: 3f2c9a0e7b1d4c5e8f6a2b1c0d9e8f7a
+                    measurable: true
+                    states: { normal: 0.167, touch_difficulty: 0.833, navigation_difficulty: 0, visual_difficulty: 0.056, hesitation: 0.1 }
+                    model_version: dummy-0.1
+                not_measurable:
+                  value:
+                    session_id: 3f2c9a0e7b1d4c5e8f6a2b1c0d9e8f7a
+                    measurable: false
+                    states: null
+                    model_version: dummy-0.1
+        "422":
+          description: 요청 형식 오류
+
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status, service]
+      properties:
+        status: { type: string, const: ok }
+        service: { type: string, const: ai-server }
+
+    # TouchFeatures, VisionFeatures, StateScores는 frontend-backend.openapi.yaml과 같은 형식입니다.
+    TouchFeatures:
+      $ref: "./frontend-backend.openapi.yaml#/components/schemas/TouchFeatures"
+    VisionFeatures:
+      $ref: "./frontend-backend.openapi.yaml#/components/schemas/VisionFeatures"
+    StateScores:
+      $ref: "./frontend-backend.openapi.yaml#/components/schemas/StateScores"
+
+    AnalyzeRequest:
+      type: object
+      required: [session_id, screen_id, window_start, window_end, touch]
+      properties:
+        session_id: { type: string }
+        screen_id: { type: string }
+        window_start: { type: string, format: date-time }
+        window_end: { type: string, format: date-time }
+        touch: { $ref: "#/components/schemas/TouchFeatures" }
+        vision:
+          oneOf:
+            - $ref: "#/components/schemas/VisionFeatures"
+            - type: "null"
+
+    AnalyzeResponse:
+      type: object
+      required: [session_id, measurable, model_version]
+      properties:
+        session_id: { type: string }
+        measurable: { type: boolean, description: 특징이 부족해 판단할 수 없으면 false }
+        states:
+          oneOf:
+            - $ref: "#/components/schemas/StateScores"
+            - type: "null"
+        model_version: { type: string, description: 판단 모델 버전 (실험 기록용) }
