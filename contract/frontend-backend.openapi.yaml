@@ -1,0 +1,202 @@
+openapi: 3.1.0
+info:
+  title: Frontend ↔ Backend API
+  version: 0.1.0
+  description: |
+    React 키오스크(frontend)와 FastAPI backend 사이의 API 명세입니다.
+    frontend는 backend와만 통신합니다. (AGENTS.md 4장)
+    Docker 연결 확인용 최소 범위이며, 주문·음성·WebSocket은 이후 추가합니다.
+servers:
+  - url: http://localhost:8000
+    description: docker compose 로컬 실행
+
+paths:
+  /health:
+    get:
+      summary: backend 프로세스 상태 확인
+      operationId: getBackendHealth
+      responses:
+        "200":
+          description: 정상
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              example: { status: ok, service: backend }
+
+  /api/v1/connectivity:
+    get:
+      summary: backend → ai-server 연결 확인 (Docker 네트워크 확인용)
+      operationId: getConnectivity
+      responses:
+        "200":
+          description: 확인 결과
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConnectivityResponse"
+              example: { backend: ok, ai_server: ok }
+
+  /api/v1/sessions:
+    post:
+      summary: 키오스크 이용 세션 시작
+      operationId: createSession
+      responses:
+        "201":
+          description: 생성됨
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionCreateResponse"
+              example:
+                session_id: 3f2c9a0e7b1d4c5e8f6a2b1c0d9e8f7a
+                started_at: "2026-10-01T10:00:00Z"
+
+  /api/v1/sessions/{session_id}/features:
+    post:
+      summary: 시간 구간 특징 전송 → 불편 상태와 지원 방식 응답
+      description: |
+        frontend가 1~3초 구간마다 터치 통계와 비전 특징을 보냅니다.
+        backend는 ai-server로 불편 상태를 판단하고, 지원 방식을 결정해 돌려줍니다.
+        ai-server 호출이 실패하면 ai_available=false, preset=none으로 응답합니다.
+      operationId: sendFeatureWindow
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FeatureWindowRequest"
+            example:
+              screen_id: menu_list
+              window_start: "2026-10-01T10:00:00Z"
+              window_end: "2026-10-01T10:00:03Z"
+              touch: { tap_count: 6, miss_tap_count: 3, repeat_tap_count: 2, back_count: 0, dwell_ms: 3000 }
+              vision: { face_detected: true, face_size_ratio: 0.35, assistive_device: false, confidence: 0.9 }
+      responses:
+        "200":
+          description: 판단 결과
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeatureWindowResponse"
+              example:
+                session_id: 3f2c9a0e7b1d4c5e8f6a2b1c0d9e8f7a
+                ai_available: true
+                states: { normal: 0.167, touch_difficulty: 0.833, navigation_difficulty: 0, visual_difficulty: 0.056, hesitation: 0.1 }
+                model_version: dummy-0.1
+                support: { preset: large_button, requires_confirmation: true, decided_by: rule_placeholder }
+        "404":
+          description: 없는 세션
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example: { detail: session not found }
+        "422":
+          description: 요청 형식 오류
+
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status, service]
+      properties:
+        status: { type: string, const: ok }
+        service: { type: string, const: backend }
+
+    ConnectivityResponse:
+      type: object
+      required: [backend, ai_server]
+      properties:
+        backend: { type: string, const: ok }
+        ai_server: { type: string, enum: [ok, unreachable] }
+
+    SessionCreateResponse:
+      type: object
+      required: [session_id, started_at]
+      properties:
+        session_id: { type: string }
+        started_at: { type: string, format: date-time }
+
+    TouchFeatures:
+      type: object
+      description: 한 구간 동안의 터치 통계 (frontend가 계산)
+      required: [tap_count, miss_tap_count, repeat_tap_count, back_count, dwell_ms]
+      properties:
+        tap_count: { type: integer, minimum: 0, description: 전체 터치 횟수 }
+        miss_tap_count: { type: integer, minimum: 0, description: 버튼 밖 터치 횟수 }
+        repeat_tap_count: { type: integer, minimum: 0, description: 같은 위치 반복 터치 횟수 }
+        back_count: { type: integer, minimum: 0, description: 뒤로가기 횟수 }
+        dwell_ms: { type: integer, minimum: 0, description: 현재 화면 체류 시간(ms) }
+
+    VisionFeatures:
+      type: object
+      description: 한 구간 동안의 비전 특징. 세부 항목은 Vision AI와 확정 예정
+      required: [face_detected, confidence]
+      properties:
+        face_detected: { type: boolean }
+        face_size_ratio: { type: [number, "null"], minimum: 0, maximum: 1, description: 화면 대비 얼굴 크기 }
+        assistive_device: { type: [boolean, "null"], description: 휠체어·지팡이 등 검출 여부 }
+        confidence: { type: number, minimum: 0, maximum: 1, description: 측정 신뢰도 }
+
+    FeatureWindowRequest:
+      type: object
+      required: [screen_id, window_start, window_end, touch]
+      properties:
+        screen_id: { type: string, description: 현재 화면 ID }
+        window_start: { type: string, format: date-time }
+        window_end: { type: string, format: date-time }
+        touch: { $ref: "#/components/schemas/TouchFeatures" }
+        vision:
+          description: 카메라 측정이 없으면 null
+          oneOf:
+            - $ref: "#/components/schemas/VisionFeatures"
+            - type: "null"
+
+    StateScores:
+      type: object
+      description: 5가지 불편 상태 점수(0~1). 여러 상태가 동시에 높을 수 있음
+      required: [normal, touch_difficulty, navigation_difficulty, visual_difficulty, hesitation]
+      properties:
+        normal: { type: number, minimum: 0, maximum: 1, description: 정상 사용 }
+        touch_difficulty: { type: number, minimum: 0, maximum: 1, description: 터치 조작 불편 }
+        navigation_difficulty: { type: number, minimum: 0, maximum: 1, description: 메뉴 탐색 불편 }
+        visual_difficulty: { type: number, minimum: 0, maximum: 1, description: 시각적 불편 }
+        hesitation: { type: number, minimum: 0, maximum: 1, description: 망설임·혼란 }
+
+    UIPreset:
+      type: string
+      enum: [none, large_text, large_button, simple_screen, step_guide, voice_guide]
+      description: none=화면 유지, 큰 글씨, 큰 버튼, 간편 화면, 단계별 안내, 음성 안내
+
+    SupportDecision:
+      type: object
+      required: [preset, requires_confirmation, decided_by]
+      properties:
+        preset: { $ref: "#/components/schemas/UIPreset" }
+        requires_confirmation: { type: boolean, description: true면 사용자 확인 후 적용 }
+        decided_by: { type: string, enum: [rule_placeholder, jev], description: Jev 연동 전에는 rule_placeholder }
+
+    FeatureWindowResponse:
+      type: object
+      required: [session_id, ai_available, support]
+      properties:
+        session_id: { type: string }
+        ai_available: { type: boolean, description: ai-server 호출 실패 시 false }
+        states:
+          oneOf:
+            - $ref: "#/components/schemas/StateScores"
+            - type: "null"
+        model_version: { type: [string, "null"] }
+        support: { $ref: "#/components/schemas/SupportDecision" }
+
+    ErrorResponse:
+      type: object
+      required: [detail]
+      properties:
+        detail: { type: string }
