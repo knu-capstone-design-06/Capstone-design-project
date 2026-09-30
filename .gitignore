@@ -1,0 +1,22 @@
+# bkit (local tooling)
+.bkit/
+
+# Node
+node_modules/
+dist/
+build/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Env
+.env
+.env.*
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
