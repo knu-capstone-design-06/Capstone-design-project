@@ -302,6 +302,11 @@ Capstone-design/
 
 시간 정보는 관측 시각과 서버 수신 시각을 구분합니다. 같은 세션·화면 방문·배치 버전의 정보를 연결하고, 오래된 판단 결과는 적용하지 않습니다.
 
+현재 명세 파일:
+
+- [`contract/frontend-backend.openapi.yaml`](contract/frontend-backend.openapi.yaml): 프론트엔드 ↔ 백엔드
+- [`contract/backend-ai.openapi.yaml`](contract/backend-ai.openapi.yaml): 백엔드 ↔ AI 서버
+
 ## 역할 분담
 
 | 담당 | 주요 업무 |
