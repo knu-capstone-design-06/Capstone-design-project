@@ -1,0 +1,40 @@
+from typing import Literal
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+from app.common.config.settings import Settings, get_settings
+
+
+class HealthResponse(BaseModel):
+    status: Literal["ok"] = "ok"
+    service: Literal["backend"] = "backend"
+
+
+def create_app(settings: Settings | None = None) -> FastAPI:
+    settings = settings if settings is not None else get_settings()
+    application = FastAPI(
+        title=settings.app_name,
+        version="0.1.0",
+        docs_url="/docs" if settings.docs_enabled else None,
+        redoc_url="/redoc" if settings.docs_enabled else None,
+        openapi_url="/openapi.json" if settings.docs_enabled else None,
+    )
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_credentials=False,
+        allow_methods=["GET"],
+        allow_headers=["Content-Type"],
+    )
+
+    @application.get("/health", response_model=HealthResponse, tags=["health"])
+    def health() -> HealthResponse:
+        """Process liveness only; does not verify DB or AI connectivity."""
+        return HealthResponse()
+
+    return application
+
+
+app = create_app()
