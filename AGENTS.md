@@ -2,6 +2,7 @@
 
 이 저장소에서 작업하는 팀원과 AI 에이전트(Claude Code 등)가 함께 지키는 공통 규칙입니다.
 커밋 형식과 PR 양식은 [`Docs/Convention.md`](Docs/Convention.md), 프로젝트 개요와 목표 구조는 [`README.md`](README.md)를 따릅니다.
+시스템 구성과 처리 흐름은 **산학협력프로젝트 수행계획서(최종)**를 기준으로 합니다. README와 계획서가 다르면 계획서를 따릅니다.
 우리 팀은 GitHub Issue를 쓰지 않습니다. `Docs/Convention.md`에서 이슈를 요구하는 항목은 이 문서의 규칙(PR 본문·회의 기록)으로 대신합니다.
 그 밖에 이 문서와 두 문서가 충돌하면 작업을 멈추고 팀에 확인합니다.
 
@@ -25,7 +26,7 @@
 | `db/` | 마이그레이션, 스키마, 시드 데이터 |
 | `frontend/src/shared/`, `frontend/src/app/` | 공통 UI·API·훅·타입, 라우팅·Provider·레이아웃 |
 | `backend/app/common/`, `backend/app/infrastructure/` | 공통 설정·예외·상수, DB·외부 연결 |
-| `ai-server/app/common/`, `ai-server/app/infrastructure/` | 공통 설정, 외부 연결 |
+| `ai-server/app/common/`, `ai-server/app/infrastructure/` | 공통 설정, 모델 파일 로딩 |
 | 루트 설정 파일 | `docker-compose.yml`, `.gitignore`, `infra/`, 각 서비스의 `Dockerfile`·의존성 파일 |
 | 공통 문서 | `README.md`, `AGENTS.md`, `CLAUDE.md`, `Docs/Convention.md` |
 
@@ -35,7 +36,7 @@
 - **수정·삭제**(기존 이름·형식·동작 변경, 필수 인자 추가, 파일·필드 삭제, 이동, 이름 변경)는 **먼저 회의나 팀 채널에서 논의**하고, 영향받는 담당자의 동의를 받은 뒤 구현합니다.
   - PR 본문에 논의한 회의 날짜나 결정 내용을 적습니다.
   - 영향받는 담당자를 PR 리뷰어로 지정합니다.
-- 의존성 추가·버전 변경은 해당 서비스 담당자와 공유합니다. 새 인프라(S3, Redis, 큐 등)는 필요성이 확인된 뒤 합의해서 도입합니다.
+- 의존성 추가·버전 변경은 해당 서비스 담당자와 공유합니다. 계획서에 없는 새 인프라(Redis, 큐 등)는 필요성이 확인된 뒤 합의해서 도입합니다.
 
 ### 공용 코드를 만들거나 고칠 때 주의할 점
 
@@ -50,11 +51,14 @@
 
 | 영역 | 담당 | 주요 경로 |
 |---|---|---|
-| 프론트엔드 | frontend | `frontend/` |
-| 백엔드 | backend | `backend/`, `db/` |
-| 컴퓨터 비전 | vision | 저장 위치는 팀에서 확정 예정 |
-| AI | ai | `ai-server/` |
-| 문서 | docs | `docs/`, `Docs/` |
+| Front-end | 황지영 | `frontend/` |
+| Back-end | 정원보 | `backend/`(아래 Decision AI 모듈 제외), `db/` |
+| Vision AI | 김승용 | `ai-server/` (비전 특징 추출, 불편 상태 판단 모델) |
+| Decision AI | 이지원 | `backend/app/modules/`의 음성·지원 결정 모듈, Whisper·ChatGPT·Jev 연동, Jev 지침·프롬프트 |
+| 문서 | 전원 | `docs/`, `Docs/` |
+
+- 판단 모델 학습·검증은 Vision AI와 Decision AI가 함께 맡습니다.
+- 음성·지원 결정 모듈의 폴더 이름은 처음 만드는 PR에서 정하고, 이 표에 반영합니다.
 
 - 자기 담당 영역 안의 기능 폴더(예: `frontend/src/features/<feature>/`, `backend/app/modules/<module>/`)는 자유롭게 작업합니다.
 - 다른 담당자의 영역을 수정해야 하면 먼저 팀 채널이나 PR에서 공유하고, 그 담당자의 리뷰를 받습니다.
@@ -62,14 +66,26 @@
 ## 4. 서비스 간 경계
 
 ```text
-frontend ──HTTP/WebSocket──▶ backend ──▶ DB (Supabase PostgreSQL)
-vision   ──HTTP────────────▶ backend ──▶ ai-server ──▶ Jev · STT · LLM · TTS
+                 터치 로그·웹캠 프레임·음성
+frontend (React) ─────────────────────────▶ backend (FastAPI, EC2)
+                 ◀───────────────────────── UI 프리셋·응답
+                                              │
+          ┌───────────────────┬───────────────┼────────────────────┐
+          ▼                   ▼               ▼                    ▼
+  ai-server (자체 모델)   외부 AI API       Supabase           Amazon S3
+  비전 특징 추출          Whisper (STT)     행동 로그·         영상·음성 파일
+  불편 상태 판단          ChatGPT (의도)    분석 결과
+                          Jev (지원 결정)
 ```
 
-- **DB에는 backend만 접근합니다.** frontend, ai-server, 비전 프로그램은 DB에 직접 연결하거나 Supabase 클라이언트로 조회·저장하지 않고, backend API를 거칩니다.
-- **frontend는 backend와만 통신합니다.** ai-server나 외부 AI API(Jev, LLM, STT)를 브라우저에서 직접 호출하지 않습니다.
-- **ai-server는 판단만 하고 상태를 바꾸지 않습니다.** 해석 결과와 지원 후보를 backend에 돌려주고, 주문 변경·UI 적용 여부는 backend가 검증해서 결정합니다.
-- 서비스 간 요청·응답 형식은 `contract/`에 먼저 정의하고 그에 맞춰 구현합니다.
+처리 순서: 수집(frontend) → 특징 추출·결합(backend·ai-server) → 불편 상태 판단(ai-server) → 지원 방식 결정(backend→Jev) → 검증 후 UI 프리셋 적용(backend→frontend). 사용자가 떠날 때까지 반복합니다.
+
+- **frontend는 backend와만 통신합니다.** ai-server, Supabase, S3, 외부 AI API(Whisper·ChatGPT·Jev)를 브라우저에서 직접 호출하지 않습니다.
+- **DB(Supabase)와 S3에는 backend만 접근합니다.** frontend와 ai-server는 직접 연결하거나 Supabase·S3 클라이언트를 쓰지 않습니다.
+- **외부 AI API(Whisper·ChatGPT·Jev)는 backend가 호출합니다.** ai-server는 외부 API를 호출하지 않습니다.
+- **ai-server는 자체 모델 추론만 합니다.** 비전 특징과 불편 상태(여러 상태 동시 출력)를 backend에 돌려주고, 주문·세션 상태를 바꾸거나 저장하지 않습니다.
+- **최종 적용은 backend가 결정합니다.** Jev·ChatGPT의 결과를 현재 세션·화면·주문 상태와 대조해 검증한 뒤 frontend에 보냅니다. 정상 사용으로 판단되면 화면을 바꾸지 않습니다.
+- 서비스 간 요청·응답 형식은 `contract/`에 먼저 정의하고 그에 맞춰 구현합니다. 터치 특징과 비전 특징을 어느 서비스에서 결합할지도 `contract/`에서 정합니다.
 - 서비스 주소·포트·키는 코드에 적지 않고 환경변수로 받습니다.
 
 ## 5. 파일별 역할과 규칙
@@ -96,8 +112,11 @@ vision   ──HTTP────────────▶ backend ──▶ ai-
 - 데이터 흐름: `pages` → `hook` → `api` → `shared/api` 클라이언트 → backend. 컴포넌트에서 직접 `fetch`·`axios`를 호출하지 않습니다.
 - 기능끼리는 서로의 내부 파일을 직접 import하지 않고 `index.ts`를 통해 사용합니다.
 - `VITE_`로 시작하는 환경변수는 브라우저에 그대로 노출됩니다. API 키·비밀값을 넣지 않습니다.
-- 접근성 모드(큰 글씨, 큰 버튼, 낮은 화면 등)를 바꾸거나 터치·음성을 전환해도 장바구니·주문 상태가 유지되어야 합니다. 상태를 컴포넌트 안에만 두지 않습니다.
-- 터치 로그 수집은 `contract/`의 이벤트 형식을 따르고, 화면마다 제각각 형식으로 보내지 않습니다.
+- UI 프리셋(큰 글씨, 큰 버튼, 간편 화면, 단계별 안내, 음성 안내)은 미리 정의한 설정으로 관리하고, backend가 보낸 프리셋 이름으로 적용합니다. 화면마다 따로 스타일을 바꾸는 코드를 만들지 않습니다.
+- 프리셋을 적용하거나 터치·음성을 전환해도 장바구니·선택 내용이 유지되어야 합니다. 상태를 컴포넌트 안에만 두지 않습니다.
+- 갑작스러운 화면 변경을 막기 위해, 확인이 필요한 프리셋은 사용자에게 먼저 묻고 수락·거절 결과를 backend에 보냅니다.
+- 터치 로그(위치, 횟수, 반복·오조작, 체류 시간, 뒤로가기)는 `contract/`의 이벤트 형식을 따르고, 화면마다 제각각 형식으로 보내지 않습니다.
+- 웹캠(`getUserMedia`)과 음성(`MediaRecorder`) 수집 코드는 한 곳에서 관리하고, 전송 주기·해상도는 `contract/`에 정한 값을 씁니다.
 
 ### backend (FastAPI)
 
@@ -112,32 +131,39 @@ vision   ──HTTP────────────▶ backend ──▶ ai-
 | `modules/<module>/exceptions.py` | 모듈 전용 예외 | 공용 예외(→ `common/exceptions/`) |
 | `modules/<module>/tests/` | 모듈 테스트 | 실제 운영 DB 사용 |
 | `infrastructure/database/` | DB 연결·세션 관리 | 모듈별 쿼리 |
-| `infrastructure/external/` | ai-server 등 외부 서비스 클라이언트 | 업무 로직 |
-| `infrastructure/storage/`, `queue/` | 스토리지·큐 연결(도입이 합의된 경우만) | — |
+| `infrastructure/external/` | ai-server, Whisper, ChatGPT, Jev 클라이언트 | 업무 로직, 프롬프트 내용 |
+| `infrastructure/storage/` | Amazon S3 업로드·조회 | 파일 이름에 개인정보 포함 |
+| `infrastructure/queue/` | 큐 연결(도입이 합의된 경우만) | — |
 | `common/config/` | 환경변수를 읽는 설정 객체 | 코드 곳곳에서 `os.getenv` 직접 호출 |
 | `common/exceptions/`, `constants/`, `utils/` | 공용 예외·상수·도구 | 모듈 전용 내용 |
 
 - 호출 방향은 `router → service → repository`만 허용합니다. 거꾸로 호출하거나 단계를 건너뛰지 않습니다.
 - 다른 모듈의 데이터가 필요하면 그 모듈의 `repository`를 직접 쓰지 않고 `service`를 호출합니다.
 - API 응답은 항상 `schemas.py`의 모델로 반환합니다. DB 모델을 그대로 내보내지 않습니다.
-- ai-server·비전의 결과는 그대로 믿지 않고, 현재 세션·화면·주문 상태와 맞는지 검증한 뒤 반영합니다. 오래된 판단 결과는 적용하지 않습니다.
-- 외부 호출(ai-server, Jev 등)에는 타임아웃과 실패 시 동작을 정합니다. 외부 호출이 실패해도 주문 기능은 계속 동작해야 합니다.
+- ai-server·Jev·ChatGPT의 결과는 그대로 믿지 않고, 현재 세션·화면·주문 상태와 맞는지 검증한 뒤 반영합니다. 오래된 판단 결과는 적용하지 않습니다.
+- Jev에는 허용된 지원 방식(큰 글씨, 큰 버튼, 간편 화면, 단계별 안내, 음성 안내, 유지)만 선택지로 주고, 목록 밖 응답은 무시합니다.
+- ChatGPT의 음성 의도 해석 결과는 정해진 구조(메뉴 선택, 화면 이동, 도움 요청 등)로만 받고, 없는 메뉴·옵션은 확인 질문으로 처리합니다.
+- Jev 지침과 ChatGPT 프롬프트는 코드에 흩어 두지 않고 파일로 관리하며, 실험에 쓴 버전을 기록할 수 있게 합니다.
+- 외부 호출(ai-server, Whisper, ChatGPT, Jev)에는 타임아웃·재시도 횟수와 실패 시 동작을 정합니다. 외부 호출이 실패해도 주문 기능은 계속 동작해야 합니다.
+- 외부 API는 사용량만큼 비용이 나갑니다. 반복 호출 주기를 정하고, 테스트 코드에서는 실제 API 대신 모의 응답을 씁니다.
 - 오류 응답은 `contract/`에 정한 공통 오류 형식을 따릅니다.
 
 ### ai-server (FastAPI)
 
 | 경로 | 역할 | 하지 않을 것 |
 |---|---|---|
-| `app/main.py` | 앱 생성, 라우터 등록 | 모델 로딩 외 무거운 초기화 로직 |
-| `app/modules/<module>/` | 음성 처리, 명령 해석, 지원 판단 로직 | DB 접근, 주문 상태 변경 |
-| `app/inference/` | 직접 실행하는 모델의 로딩·추론 | API 엔드포인트, 외부 API 호출 |
-| `app/infrastructure/` | Jev·LLM·STT·TTS API 클라이언트 | 판단 로직 |
+| `app/main.py` | 앱 생성, 라우터 등록, 시작 시 모델 로딩 | 추론 로직 구현 |
+| `app/modules/<module>/` | 비전 특징 추출(MediaPipe·OpenCV), 특징 결합, 불편 상태 판단 엔드포인트 | DB·S3 접근, 외부 AI API 호출, 주문 상태 변경 |
+| `app/inference/` | 판단 모델(PyTorch→ONNX) 로딩·추론 | API 엔드포인트 |
+| `app/infrastructure/` | 모델 파일 경로·로딩 설정 | 판단 로직 |
 | `app/common/` | 설정, 공용 예외·상수 | 모듈 전용 내용 |
 
-- 결과는 `contract/`에 정한 구조화된 형식(허용된 명령·지원 선택지 안에서)으로만 반환합니다. 자유 형식 텍스트를 명령으로 넘기지 않습니다.
-- Jev 지침·LLM 프롬프트는 코드에 흩어 두지 않고 파일로 관리하며, 실험에 쓴 버전을 기록할 수 있게 합니다.
-- 외부 AI API 호출에는 타임아웃·재시도 횟수를 정하고, 실패하면 규칙 기반 결과나 "판단 불가"를 명시적으로 반환합니다.
-- 모델 가중치와 대용량 데이터는 Git에 올리지 않고, 저장 위치·버전·사용 방법을 문서로 남깁니다.
+- 판단 결과는 5가지 상태(정상 사용, 터치 조작 불편, 메뉴 탐색 불편, 시각적 불편, 망설임·혼란)별 점수를 함께 반환합니다. 한 번에 여러 상태가 나올 수 있습니다.
+- 비전 특징에는 검출 신뢰도·가림 등 측정 유효성을 함께 담고, 사람이 없거나 측정할 수 없으면 "측정 불가"를 명시적으로 반환합니다.
+- 결과 형식은 `contract/`에 정한 구조를 따르고, 모델·특징 버전을 응답에 포함합니다.
+- 추론 시간이 판단 주기보다 길어지지 않게 하고, 무거운 전처리는 요청마다 반복하지 않습니다.
+- 모델 가중치(`.pt`, `.onnx`)와 학습 데이터는 Git에 올리지 않고, 저장 위치·버전·사용 방법을 문서로 남깁니다.
+- 학습 데이터(불편 상황 재현 세션)는 세션 단위로 라벨을 붙이고, 학습·검증·평가 세션을 섞지 않습니다.
 
 ### db
 
@@ -172,8 +198,10 @@ vision   ──HTTP────────────▶ backend ──▶ ai-
 
 - API 키, 비밀번호, DB 접속 정보, `.env`, 개인 식별 정보는 커밋하지 않습니다.
 - 필요한 환경변수는 값 없이 `.env.example`에 기록합니다.
-- 원본 영상, 촬영 이미지, 대용량 데이터셋, 모델 가중치는 Git에 직접 올리지 않습니다.
-- 카메라 영상은 필요한 특징만 추출해 전달하고, 원본 영상을 서버에 저장하지 않는 것을 기본으로 합니다.
+- 원본 영상, 촬영 이미지, 음성 파일, 대용량 데이터셋, 모델 가중치는 Git에 직접 올리지 않습니다.
+- 영상·음성 파일은 backend를 통해 Amazon S3에만 저장합니다. 버킷은 비공개로 두고, 파일 이름·경로에 이름 같은 개인정보를 넣지 않습니다.
+- 영상·음성은 촬영 동의를 받은 실험 세션에서만 저장하고, 실시간 판단에는 추출한 특징만 사용합니다.
+- 분석·개선에 쓰는 통계는 개인을 식별할 수 없는 집계 형태로 만듭니다.
 - 실험 참가자 데이터는 파일럿과 최종 평가를 분리하고, 정해진 저장소에만 보관합니다.
 
 ## 8. PR 전 확인
