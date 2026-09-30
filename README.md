@@ -58,18 +58,17 @@
 ```mermaid
 flowchart TD
     USER[사용자] --> FE[React 프론트엔드]
-    CAMERA[카메라] --> VISION[기기 내 비전 추론 프로그램]
+    CAMERA[카메라] --> FE
 
-    FE -->|상품·주문·세션·터치 로그·음성 요청| BE[FastAPI 백엔드]
-    VISION -->|비전 특징·검출 결과·측정 유효성| BE
+    FE -->|상품·주문·세션·터치 로그·비전 입력·음성 요청| BE[FastAPI 백엔드]
 
     BE <--> DB[(Supabase PostgreSQL)]
-    BE -->|상황 정보 또는 음성 요청| AI[AI 서버]
+    BE -->|영상·터치 특징 분석 요청| AI[AI 서버]
 
-    AI <--> JEV[Jev API]
-    AI <--> VOICE[STT·LLM·TTS]
+    BE <--> JEV[Jev API]
+    BE <--> VOICE[STT·LLM·TTS]
 
-    AI -->|지원 선택 또는 구조화된 음성 명령| BE
+    AI -->|판단 결과| BE
     BE -->|검증된 명령·지원 제안·응답| FE
     FE -->|수락·거절·적용 결과| BE
 ```
