@@ -34,4 +34,15 @@ HTTP 오류는 `ApiError.status`와 `ApiError.body`로 확인합니다. 404는 `
 node --test frontend/src/shared/api/client.test.mjs
 ```
 
-현재 저장소의 React 진입 파일과 패키지 설정은 비어 있습니다. 이번 추가는 API 연결 모듈이며 실행 가능한 화면, 주기적인 특징 수집, 지원 UI 적용은 포함하지 않습니다. TypeScript에서 `.ts` 확장자 import를 사용하므로 추후 Vite 구성 시 `noEmit`과 `allowImportingTsExtensions`를 설정해야 합니다.
+## 샘플 주문 화면 실행
+
+React·Vite·TypeScript로 샘플 주문 화면을 실행할 수 있습니다. Node.js 22.18 이상에서 `frontend/`로 이동한 뒤 실행합니다.
+
+```sh
+pnpm install
+pnpm dev
+```
+
+`pnpm build`로 TypeScript 검사와 배포 빌드를, `pnpm test`로 API 및 주문 상태 테스트를 실행합니다. 의존성 버전은 `pnpm-lock.yaml`에 기록합니다.
+
+상품 선택·장바구니·주문 확인·모의 결제, 새로고침 후 상태 복원과 수동 접근성 설정을 제공합니다. 상세 동작과 수동 확인 절차는 [`src/features/order/README.md`](src/features/order/README.md)에 있습니다. 실제 주문 API, 주기적인 특징 수집, 음성 및 자동 지원 판단은 아직 연결하지 않았습니다. API 모듈의 `.ts` 확장자 import를 위해 `noEmit`과 `allowImportingTsExtensions`를 설정했습니다.
