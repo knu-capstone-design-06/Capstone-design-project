@@ -119,6 +119,9 @@ legend { font-weight: 600; margin-bottom: 12px; }
 .large-button .cart-row { padding: 28px 0; }
 .large-button .cart-controls { flex-wrap: wrap; }
 .large-button .dialog-quantity { flex-wrap: wrap; }
+.large-text .order-confirm { font-size: 22px; font-weight: 800; line-height: 1; }
+.large-button .order-confirm { min-height: 88px; border: 3px solid #0d3026; box-shadow: 0 0 0 4px #d4e2c9, 0 6px 12px #163f3526; }
+.large-button .order-confirm:disabled { box-shadow: none; }
 .simple-screen .product-art, .simple-screen .description, .simple-screen .product-category, .simple-screen .eyebrow { display: none; }
 .simple-screen .product-info { padding: 26px 22px; }
 .simple-screen .product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
