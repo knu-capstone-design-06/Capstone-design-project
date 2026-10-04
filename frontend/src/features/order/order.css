@@ -98,13 +98,15 @@ legend { font-weight: 600; margin-bottom: 12px; }
 .option-buttons button { flex: 1; }
 .dialog-quantity { display: flex; justify-content: space-between; align-items: center; margin-bottom: 28px; gap: 16px; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
-.large-text { --base-size: 22px; }
-.large-text .description, .large-text .cart-row > div > span, .large-text .cart-footer p { font-size: .9em; }
-.large-text .product-info strong { font-size: 1.2em; }
-.large-text .product-price { font-size: 1.15em; }
-.large-text .intro p { line-height: 1.8; }
-.large-text .product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.large-text .order-layout { grid-template-columns: minmax(0, 1fr) 390px; }
+/* 글자 확대는 상위 컨테이너의 em 기준과 배치를 바꾸지 않습니다. */
+.large-text .product-info strong { font-size: 21px; }
+.large-text .product-price { font-size: 20px; }
+.large-text .description, .large-text .product-category { font-size: 15px; }
+.large-text .intro p, .large-text .guide, .large-text .options-dialog p { font-size: 20px; }
+.large-text .cart-row strong, .large-text .cart-heading h2, .large-text legend { font-size: 21px; }
+.large-text .cart-row > div > span, .large-text .total > span, .large-text .cart-footer p { font-size: 16px; }
+.large-text .categories button, .large-text .support-options button, .large-text .primary, .large-text .option-buttons button { font-size: 18px; }
+.large-text .product-price > span { font-size: 16px; }
 .large-button button { min-height: 72px; padding: 16px 24px; }
 .large-button .product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px; }
 .large-button .product { padding: 0; }
@@ -120,6 +122,6 @@ legend { font-weight: 600; margin-bottom: 12px; }
 .simple-screen .product-art, .simple-screen .description, .simple-screen .product-category, .simple-screen .eyebrow { display: none; }
 .simple-screen .product-info { padding: 26px 22px; }
 .simple-screen .product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-@media (max-width: 1100px) { .header { padding: 20px 24px; } main { padding: 24px; } .order-layout { gap: 22px; grid-template-columns: minmax(0, 1fr) 310px; } .product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .large-text .order-layout { grid-template-columns: 1fr; } .large-text .cart { position: static; } .footer, .support-panel { padding: 22px 24px; } }
-@media (max-width: 760px) { .header { gap: 12px; flex-wrap: wrap; } .brand { margin-right: auto; } .sample-badge { order: 3; width: 100%; text-align: center; } .order-layout { grid-template-columns: 1fr; } .cart { position: static; } .steps { gap: 14px; margin-bottom: 28px; flex-wrap: wrap; } .intro h1 { font-size: 1.7em; } .product-grid { gap: 12px; } .product-art { min-height: 120px; font-size: 3em; } .product-info { padding: 14px; } .categories { flex-wrap: wrap; } .review-card .cart-row { flex-wrap: wrap; } .large-text .product-grid, .simple-screen .product-grid { grid-template-columns: 1fr; } .dialog-quantity { flex-wrap: wrap; } }
+@media (max-width: 1100px) { .header { padding: 20px 24px; } main { padding: 24px; } .order-layout { gap: 22px; grid-template-columns: minmax(0, 1fr) 310px; } .product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .footer, .support-panel { padding: 22px 24px; } }
+@media (max-width: 760px) { .header { gap: 12px; flex-wrap: wrap; } .brand { margin-right: auto; } .sample-badge { order: 3; width: 100%; text-align: center; } .order-layout { grid-template-columns: 1fr; } .cart { position: static; } .steps { gap: 14px; margin-bottom: 28px; flex-wrap: wrap; } .intro h1 { font-size: 1.7em; } .product-grid { gap: 12px; } .product-art { min-height: 120px; font-size: 3em; } .product-info { padding: 14px; } .categories { flex-wrap: wrap; } .review-card .cart-row { flex-wrap: wrap; } .simple-screen .product-grid { grid-template-columns: 1fr; } .dialog-quantity { flex-wrap: wrap; } }
 @media (max-width: 760px) { .large-button .product-grid { grid-template-columns: 1fr; } }
