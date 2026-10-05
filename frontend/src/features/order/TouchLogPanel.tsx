@@ -58,7 +58,7 @@ function DraftPanel() {
       {warning && <p className="touch-log-warning" role="status">{warning}</p>}
       <div className="touch-log-summary">
         <span>보관 <strong>{snapshot?.events.length ?? 0}</strong> / {logLimit.toLocaleString('ko-KR')}</span>
-        <span>현재 세션 누름 기록 <strong>{currentEvents.filter(event => event.kind === 'pointer_start').length}</strong></span>
+        <span>보관 중인 현재 세션 누름 <strong>{currentEvents.filter(event => event.kind === 'pointer_start').length}</strong></span>
       </div>
       <p className="touch-log-session">세션 <code>{snapshot?.sessionId ?? '연결 대기'}</code></p>
       <h3>최근 기록 20개 · 최신순</h3>

@@ -14,6 +14,27 @@ function rectOf(element: HTMLElement): Rect {
   const rect = element.getBoundingClientRect();
   return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
 }
+// 뷰포트와 스크롤·클리핑 컨테이너에서 실제로 남아 있는 사각 영역입니다.
+function visibleRectOf(element: HTMLElement): Rect | null {
+  if (!element.getClientRects().length || getComputedStyle(element).visibility !== 'visible') return null;
+  const bounds = element.getBoundingClientRect();
+  let left = Math.max(0, bounds.left);
+  let top = Math.max(0, bounds.top);
+  let right = Math.min(document.documentElement.clientWidth, bounds.right);
+  let bottom = Math.min(document.documentElement.clientHeight, bounds.bottom);
+  for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+    const style = getComputedStyle(parent);
+    const clipX = /^(auto|scroll|hidden|clip)$/.test(style.overflowX);
+    const clipY = /^(auto|scroll|hidden|clip)$/.test(style.overflowY);
+    if (!clipX && !clipY) continue;
+    const rect = parent.getBoundingClientRect();
+    const innerLeft = rect.left + parent.clientLeft;
+    const innerTop = rect.top + parent.clientTop;
+    if (clipX) { left = Math.max(left, innerLeft); right = Math.min(right, innerLeft + parent.clientWidth); }
+    if (clipY) { top = Math.max(top, innerTop); bottom = Math.min(bottom, innerTop + parent.clientHeight); }
+  }
+  return right > left && bottom > top ? { x: left, y: top, width: right - left, height: bottom - top } : null;
+}
 function targetInfo(element: HTMLElement) {
   return {
     id: element.dataset.logTarget ?? null,
@@ -54,9 +75,12 @@ export function useTouchLog(screen: string, category: string, productId: string 
       const target = element && scope.contains(element) ? targetInfo(element) : null;
       const start = point(event);
       const candidates = target ? [] : [...scope.querySelectorAll<HTMLElement>(selector)]
-        .filter(candidate => !candidate.matches(':disabled, [aria-disabled="true"]')
-          && candidate.getClientRects().length > 0 && getComputedStyle(candidate).visibility === 'visible')
-        .map(candidate => ({ ...targetInfo(candidate), distance: distanceToRect(start, rectOf(candidate)) }));
+        .filter(candidate => !candidate.matches(':disabled, [aria-disabled="true"]'))
+        .map(candidate => {
+          const visibleRect = visibleRectOf(candidate);
+          return visibleRect ? { ...targetInfo(candidate), visibleRect, distance: distanceToRect(start, visibleRect) } : null;
+        })
+        .filter(candidate => candidate !== null);
       const minimum = candidates.length ? Math.min(...candidates.map(candidate => candidate.distance)) : null;
       const id = record('pointer_start', {
         start, target,

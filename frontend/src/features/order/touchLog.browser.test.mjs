@@ -83,6 +83,58 @@ test('로컬 로그: 중복 방지, 화면·옵션·설정, 세션 복원·분�
   } finally { await browser.close(); }
 });
 
+test('주변 후보는 화면·컨테이너에서 보이는 부분만 사용하고 누름 표시는 보관 범위를 밝힌다', async () => {
+  const browser = await chromium.launch({ channel: 'msedge', headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1100, height: 650 } });
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => window.kioskTouchLogDraft);
+    await page.evaluate(() => window.scrollTo(0, 250));
+    await page.waitForFunction(() => window.scrollY === 250);
+    await page.mouse.click(890, 2);
+    const outside = await page.evaluate(() => window.kioskTouchLogDraft.read().events.filter(event => event.kind === 'pointer_start').at(-1));
+    assert.equal(outside.data.target, null);
+    assert(outside.data.nearestCandidates.every(candidate => candidate.rect.y + candidate.rect.height > 0));
+    assert(outside.data.nearestCandidates.every(candidate => candidate.id !== 'support-toggle'));
+    // 중첩 컨테이너 안의 완전 가림과 부분 가림을 모두 검사합니다.
+    const fixture = await page.evaluate(() => {
+      document.querySelectorAll('.kiosk button, .kiosk a').forEach(element => {
+        element.dataset.reviewAriaDisabled = element.getAttribute('aria-disabled') ?? '';
+        element.setAttribute('aria-disabled', 'true');
+      });
+      const box = document.createElement('div');
+      box.style.cssText = 'position:fixed;left:20px;top:100px;width:200px;height:100px;overflow:hidden;background:white;z-index:50';
+      box.innerHTML = '<button data-log-target="clipped-hidden" style="position:absolute;left:0;top:-60px;width:80px;height:40px;min-height:0;padding:0">hidden</button><button data-log-target="clipped-partial" style="position:absolute;left:0;top:70px;width:80px;height:60px;min-height:0;padding:0">partial</button>';
+      document.querySelector('.kiosk').append(box);
+      box.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 91, clientX: 25, clientY: 105 }));
+      box.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 91, clientX: 25, clientY: 105 }));
+      return window.kioskTouchLogDraft.read().events.filter(event => event.kind === 'pointer_start').at(-1);
+    });
+    assert.equal(fixture.data.nearestCandidates[0].id, 'clipped-partial');
+    assert.equal(fixture.data.nearestCandidates[0].visibleRect.height, 30);
+    assert.equal(fixture.data.nearestCandidates[0].distance, 65);
+    await page.evaluate(() => {
+      document.querySelector('[data-log-target="clipped-partial"]').parentElement.remove();
+      document.querySelectorAll('[data-review-aria-disabled]').forEach(element => {
+        if (element.dataset.reviewAriaDisabled) element.setAttribute('aria-disabled', element.dataset.reviewAriaDisabled);
+        else element.removeAttribute('aria-disabled');
+        delete element.dataset.reviewAriaDisabled;
+      });
+      window.scrollTo(0, 0);
+    });
+    await page.getByRole('button', { name: '터치 로그 보기', exact: true }).click();
+    await page.waitForFunction(() => document.querySelector('.touch-log-summary')?.innerText.includes('보관 중인 현재 세션 누름'));
+    await page.evaluate(() => {
+      for (let i = 0; i < 1010; i++) {
+        document.scrollingElement.scrollTop = i % 2;
+        document.dispatchEvent(new Event('scroll'));
+      }
+    });
+    await page.waitForFunction(() => document.querySelector('.touch-log-summary strong')?.textContent === '1000');
+    assert.match(await page.locator('.touch-log-summary').innerText(), /보관 중인 현재 세션 누름 0/);
+  } finally { await browser.close(); }
+});
+
 test('개발 확인 창은 수집을 오염시키지 않고 표시 정지·재개·내보내기를 제공한다', async () => {
   const browser = await chromium.launch({ channel: 'msedge', headless: true });
   try {
