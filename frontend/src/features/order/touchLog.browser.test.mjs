@@ -82,3 +82,46 @@ test('로컬 로그: 중복 방지, 화면·옵션·설정, 세션 복원·분�
     console.log('브라우저 확인: StrictMode 중복 없음, 세션·방문, 모달 주변 입력, UI 설정, 실제 터치 스크롤 통과');
   } finally { await browser.close(); }
 });
+
+test('개발 확인 창은 수집을 오염시키지 않고 표시 정지·재개·내보내기를 제공한다', async () => {
+  const browser = await chromium.launch({ channel: 'msedge', headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1100, height: 800 } });
+    await page.goto(url);
+    await page.waitForFunction(() => window.kioskTouchLogDraft);
+    const read = () => page.evaluate(() => window.kioskTouchLogDraft.read());
+    const originalIds = (await read()).events.map(event => event.id);
+    await page.getByRole('button', { name: '터치 로그 보기', exact: true }).click();
+    await page.locator('.touch-log-events button').first().waitFor();
+    await page.locator('.touch-log-events button').last().click();
+    await page.locator('.touch-log-detail summary').click();
+    assert.deepEqual((await read()).events.map(event => event.id), originalIds);
+    await page.getByRole('button', { name: '표시 일시정지', exact: true }).click();
+    const frozen = await page.locator('.touch-log-summary').innerText();
+    await page.locator('[data-log-target="category:커피"]').click();
+    assert((await read()).events.some(event => event.kind === 'category_change'));
+    await new Promise(resolve => setTimeout(resolve, 600));
+    assert.equal(await page.locator('.touch-log-summary').innerText(), frozen);
+    await page.getByRole('button', { name: '표시 재개', exact: true }).click();
+    await page.waitForFunction(value => document.querySelector('.touch-log-summary')?.innerText !== value, frozen);
+    assert.notEqual(await page.locator('.touch-log-summary').innerText(), frozen);
+    const beforeTools = (await read()).events.map(event => event.id);
+    await page.locator('.touch-log-events').evaluate(element => { element.scrollTop = 100; });
+    const downloadEvent = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'JSON 내보내기', exact: true }).click();
+    const download = await downloadEvent;
+    assert.equal(download.suggestedFilename(), 'touch-log-draft.json');
+    assert.deepEqual((await read()).events.map(event => event.id), beforeTools);
+    if (process.env.TOUCH_LOG_SCREENSHOT) await page.screenshot({ path: process.env.TOUCH_LOG_SCREENSHOT });
+    await page.setViewportSize({ width: 390, height: 700 });
+    const bounds = await page.locator('.touch-log-panel').boundingBox();
+    assert(bounds.x >= 0 && bounds.x + bounds.width <= 390 && bounds.y >= 0 && bounds.y + bounds.height <= 700);
+    await page.getByRole('button', { name: '터치 로그 창 닫기', exact: true }).click();
+    assert.equal(await page.locator('#touch-log-panel').count(), 0);
+    if (process.env.TOUCH_LOG_PRODUCTION_URL) {
+      await page.goto(process.env.TOUCH_LOG_PRODUCTION_URL);
+      await page.locator('.kiosk').waitFor();
+      assert.equal(await page.locator('.touch-log-tools').count(), 0);
+    }
+  } finally { await browser.close(); }
+});

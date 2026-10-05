@@ -1,9 +1,9 @@
 import { useEffect, useRef } from 'react';
 import { createTouchLog, distanceToRect } from './touchLog.ts';
-import type { LogContext, Point, Rect } from './touchLog.ts';
+import type { LogContext, Point, Rect, SavedLog } from './touchLog.ts';
 import type { Settings } from './model.ts';
 
-type DraftInspector = { read: () => unknown; exportJson: () => void; status: () => string | null };
+type DraftInspector = { read: () => SavedLog; exportJson: () => void; status: () => string | null };
 declare global { interface Window { kioskTouchLogDraft?: DraftInspector } }
 type Gesture = {
   id: string; context: LogContext; start: Point; last: Point; maxDistance: number;

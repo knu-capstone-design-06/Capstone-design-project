@@ -9,7 +9,7 @@ export type LogEvent = LogContext & {
   kind: string; data: unknown;
 };
 type StoragePort = Pick<Storage, 'getItem' | 'setItem'>;
-type SavedLog = { version: 1; sessionId: string; startedAt: number; events: LogEvent[] };
+export type SavedLog = { version: 1; sessionId: string; startedAt: number; events: LogEvent[] };
 
 export function distanceToRect(point: Point, rect: Rect) {
   return Math.hypot(
