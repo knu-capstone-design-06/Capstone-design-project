@@ -1,0 +1,23 @@
+.touch-log-tools { position: fixed; right: 16px; bottom: 16px; z-index: 100; width: min(380px, calc(100vw - 32px)); color: #213c34; font: 13px/1.5 system-ui, sans-serif; }
+.touch-log-tools button { min-height: 36px; padding: 7px 11px; font-size: 12px; border-radius: 8px; }
+.touch-log-launcher { display: block; margin-left: auto; background: #173e34; color: white; box-shadow: 0 4px 16px #173e3426; }
+.touch-log-launcher:hover { background: #27574a; }
+.touch-log-panel { background: #fffefb; border: 1px solid #cad6ce; border-radius: 14px; padding: 16px; margin-bottom: 8px; box-shadow: 0 12px 40px #173e3426; max-height: min(620px, calc(100dvh - 84px)); overflow-y: auto; overscroll-behavior: contain; }
+.touch-log-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
+.touch-log-heading span { font-size: 11px; color: #64746b; }
+.touch-log-heading h2 { margin: 2px 0 0; font-size: 19px; }
+.touch-log-toolbar { display: flex; gap: 8px; }
+.touch-log-hint { font-size: 11px; color: #64746b; margin: 8px 0 12px; }
+.touch-log-warning { padding: 8px; background: #fff2d4; border-radius: 6px; }
+.touch-log-summary { display: flex; flex-wrap: wrap; gap: 8px 14px; background: #eef3ee; padding: 9px; border-radius: 8px; font-size: 11px; }
+.touch-log-summary strong { font-size: 14px; }
+.touch-log-session { margin: 8px 0 14px; font-size: 10px; overflow-wrap: anywhere; }
+.touch-log-panel h3 { font-size: 12px; margin: 0 0 6px; }
+.touch-log-events { list-style: none; margin: 0; padding: 0; max-height: 200px; overflow-y: auto; overscroll-behavior: contain; }
+.touch-log-events button { display: flex; width: 100%; justify-content: space-between; align-items: center; gap: 8px; border-color: transparent; text-align: left; background: transparent; }
+.touch-log-events button[aria-pressed="true"] { background: #e7efe8; border-color: #b5c7b9; color: #213c34; }
+.touch-log-events small { margin-left: 8px; color: #64746b; font-size: 10px; }
+.touch-log-events time { color: #64746b; font-size: 10px; white-space: nowrap; }
+.touch-log-detail { margin-top: 12px; border-top: 1px solid #dce4dc; padding-top: 10px; }
+.touch-log-detail summary { cursor: pointer; font-size: 12px; }
+.touch-log-detail pre { margin: 8px 0 0; padding: 10px; border-radius: 8px; background: #f0f3ef; max-height: 200px; overflow: auto; font-size: 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
