@@ -95,7 +95,7 @@ flowchart TD
 
 AI 서버는 판단 결과를 반환하고, 백엔드가 지원을 선택해 적용 조건을 검증합니다. 음성 명령에 따른 주문 변경도 백엔드가 검증합니다. 프론트엔드는 실제 UI 적용 결과를 다시 전달합니다.
 
-비전 추론은 AI 서버에서 실행하는 구성을 기준으로 합니다. 카메라 영상을 AI 서버로 전달하는 방식은 `contract/`에서 정합니다. 지금 명세(0.1.0)는 프론트엔드가 터치 통계와 비전 특징을 보내는 형식입니다. 비전 학습 코드의 최종 저장 위치는 팀에서 별도로 정합니다.
+비전 추론은 AI 서버에서 실행하는 구성을 기준으로 합니다. 카메라 영상을 AI 서버로 전달하는 방식은 `contract/`에서 정합니다. 프론트엔드 ↔ 백엔드 명세 0.2.0은 기존 0.1.0의 터치 통계·비전 특징 전송 형식을 유지합니다. 비전 학습 코드의 최종 저장 위치는 팀에서 별도로 정합니다.
 
 ## 데이터 처리 흐름
 
@@ -315,8 +315,10 @@ Capstone-design/
 
 현재 명세 파일:
 
-- [`contract/frontend-backend.openapi.yaml`](contract/frontend-backend.openapi.yaml): 프론트엔드 ↔ 백엔드
+- [`contract/frontend-backend.openapi.yaml`](contract/frontend-backend.openapi.yaml): 프론트엔드 ↔ 백엔드 0.2.0. 기존 네 API 형식 유지 및 상품·장바구니·모의 주문 API 초안 추가
 - [`contract/backend-ai.openapi.yaml`](contract/backend-ai.openapi.yaml): 백엔드 ↔ AI 서버
+
+신규 주문 API 6개는 `x-contract-status: draft`로 표시한 팀 검토용 명세입니다. 설계 이유·미정 정책은 [`docs/Product-Cart-Order-API-Draft.md`](docs/Product-Cart-Order-API-Draft.md)에 기록합니다. 명세 반영은 서버 구현이나 실제 주문·결제 연결 완료를 의미하지 않습니다. 팀 검토 후 프론트 호출 함수·타입·화면, 백엔드 라우터·서비스·저장소와 샘플 데이터를 함께 맞춥니다. 구체적인 담당자·일정은 팀에서 정하고 PR에 기록합니다.
 
 ## 역할 분담
 
@@ -354,15 +356,9 @@ Capstone-design/
 
 ## 실행 안내
 
-백엔드와 AI 서버의 실행 방법은 [`backend/README.md`](backend/README.md), [`ai-server/README.md`](ai-server/README.md)에 있습니다. 프론트엔드는 아직 실행할 앱이 없고, API 연결 모듈 설명은 [`frontend/README.md`](frontend/README.md)에 있습니다.
+프론트엔드 샘플 앱은 로컬 개발 서버로 실행합니다. 루트 `docker-compose.yml`에는 백엔드와 AI 서버 두 서비스만 포함돼 있습니다.
 
-백엔드와 AI 서버는 저장소 루트에서 함께 띄웁니다.
-
-```powershell
-docker compose up --build
-```
-
-백엔드 상태는 http://127.0.0.1:8000/health 에서 확인합니다. AI 서버는 Docker 내부 네트워크에서만 접근합니다. Compose로 띄울 때는 `backend/.env`를 읽지 않으므로, 바꿀 값은 `docker-compose.yml`의 `environment`에 넣습니다.
+서비스별 상세 안내는 [`frontend/README.md`](frontend/README.md), [`backend/README.md`](backend/README.md), [`ai-server/README.md`](ai-server/README.md)를 참고합니다.
 
 ### 프론트엔드 샘플 화면
 
@@ -380,12 +376,24 @@ pnpm dev
 
 ### 백엔드·AI 서버 및 통합 실행
 
-실행 절차는 각 서비스 구현과 함께 확정합니다. 현재 프론트엔드 샘플 화면은 Docker로 실행하지 않습니다.
+Docker Desktop의 Linux 컨테이너 엔진을 실행한 뒤 저장소 루트에서 사용합니다.
+
+```powershell
+docker compose up --build
+```
+
+백엔드 상태는 http://127.0.0.1:8000/health 에서 확인합니다. 이 응답은 백엔드 프로세스 상태만 나타내며 AI 서버나 DB 연결을 보장하지 않습니다. AI 서버는 호스트 포트를 공개하지 않고, 백엔드가 Docker 네트워크의 `http://ai-server:8001`로 호출합니다.
+
+Compose 이미지에는 `backend/.env`를 복사하지 않으며 현재 Compose에도 `env_file` 설정이 없습니다. 필요한 환경변수는 Compose의 `environment` 등 실행 환경에서 주입합니다. 루트 `.env`를 Compose 변수 치환에 사용하는 것과 컨테이너에 값을 전달하는 것은 별개입니다.
+
+두 서버 연결의 기존 검증 기록은 [PR #14](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/14)에 있습니다. 2026-10-07 문서 정리에서는 Docker 빌드·기동·통합 테스트를 재실행하지 않았습니다.
+
+프론트엔드 샘플 앱은 Compose에 포함되지 않습니다. 백엔드의 `/api/v1/connectivity`, 세션 생성·특징 전송 API도 아직 미구현이므로, 현재 구성을 세 서비스의 전체 기능 연동 완료로 간주하지 않습니다.
 
 - API 키와 DB 자격 증명은 저장소에 커밋하지 않습니다.
 - `.env.example`에는 실제 비밀값 없이 필요한 항목을 문서화합니다.
 - 서비스 간 연결 주소와 설정은 환경변수로 관리합니다.
-- 프론트엔드는 실행할 앱이 준비되면 `docker-compose.yml`에 추가합니다.
+- 프론트엔드 컨테이너화와 전체 API 연동은 후속 작업입니다.
 
 ## 참고 자료
 - [Jev 공식 문서](https://docs.typesafe.ai/introduction)
