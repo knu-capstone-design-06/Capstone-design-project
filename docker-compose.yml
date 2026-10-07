@@ -1,38 +1,17 @@
-# 로컬 통합 환경. AI 서버는 호스트 포트를 공개하지 않습니다.
-name: capstone-local
-
-x-runtime: &runtime
-  restart: unless-stopped
-  logging:
-    driver: json-file
-    options:
-      max-size: "10m"
-      max-file: "3"
-
+# backend와 ai-server를 함께 띄웁니다. ai-server는 Docker 내부 네트워크에서만 접근합니다.
+# frontend는 실행할 앱이 준비되면 추가합니다.
 services:
-  frontend:
-    <<: *runtime
-    build: ./frontend
-    ports:
-      - "127.0.0.1:${FRONTEND_PORT:-5173}:8080"
-    depends_on:
-      backend:
-        condition: service_healthy
-
   backend:
-    <<: *runtime
     build: ./backend
     ports:
-      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       AI_SERVER_URL: http://ai-server:8001
-      AI_SERVER_TIMEOUT_SECONDS: "${AI_SERVER_TIMEOUT_SECONDS:-2}"
     depends_on:
       ai-server:
         condition: service_healthy
 
   ai-server:
-    <<: *runtime
     build: ./ai-server
     expose:
       - "8001"
