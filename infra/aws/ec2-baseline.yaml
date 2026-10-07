@@ -13,9 +13,9 @@ Parameters:
     Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
   InstanceType:
     Type: String
-    Default: t3.medium
+    Default: t3.small
     AllowedValues:
-      - t3.medium
+      - t3.small
 
 Resources:
   Ec2Role:
