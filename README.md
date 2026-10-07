@@ -354,15 +354,15 @@ Capstone-design/
 
 ## 실행 안내
 
-백엔드와 AI 서버의 실행 방법은 [`backend/README.md`](backend/README.md), [`ai-server/README.md`](ai-server/README.md)에 있습니다. 프론트엔드는 아직 실행할 앱이 없고, API 연결 모듈 설명은 [`frontend/README.md`](frontend/README.md)에 있습니다.
+세 서비스의 Docker 실행·검증·중지 방법은 [`infra/README.md`](infra/README.md)에 있습니다. 개별 실행 방법은 [`backend/README.md`](backend/README.md), [`ai-server/README.md`](ai-server/README.md), [`frontend/README.md`](frontend/README.md)를 참고합니다.
 
-백엔드와 AI 서버는 저장소 루트에서 함께 띄웁니다.
+프론트엔드·백엔드·AI 서버를 저장소 루트에서 함께 띄웁니다.
 
 ```powershell
-docker compose up --build
+docker compose up -d --build --wait --wait-timeout 180
 ```
 
-백엔드 상태는 http://127.0.0.1:8000/health 에서 확인합니다. AI 서버는 Docker 내부 네트워크에서만 접근합니다. Compose로 띄울 때는 `backend/.env`를 읽지 않으므로, 바꿀 값은 `docker-compose.yml`의 `environment`에 넣습니다.
+화면은 http://127.0.0.1:5173 , 백엔드 상태는 http://127.0.0.1:8000/health 에서 확인합니다. AI 서버는 Docker 내부 네트워크에서만 접근합니다. Compose 설정 항목은 루트 `.env.example`과 `infra/README.md`를 참고합니다. 현재 화면은 샘플 데이터로 동작하며 실제 주문·DB 연결은 포함하지 않습니다.
 
 ### 프론트엔드 샘플 화면
 
@@ -380,12 +380,12 @@ pnpm dev
 
 ### 백엔드·AI 서버 및 통합 실행
 
-실행 절차는 각 서비스 구현과 함께 확정합니다. 현재 프론트엔드 샘플 화면은 Docker로 실행하지 않습니다.
+Docker 통합 환경은 세 서비스의 상태와 백엔드→AI 통신을 검증합니다. 주문·세션 등 업무 API 연결은 별도 구현 대상입니다.
 
 - API 키와 DB 자격 증명은 저장소에 커밋하지 않습니다.
 - `.env.example`에는 실제 비밀값 없이 필요한 항목을 문서화합니다.
 - 서비스 간 연결 주소와 설정은 환경변수로 관리합니다.
-- 프론트엔드는 실행할 앱이 준비되면 `docker-compose.yml`에 추가합니다.
+- 프론트엔드 웹서버의 `/backend/` 경로는 같은 출처에서 백엔드에 요청하도록 전달합니다.
 
 ## 참고 자료
 - [Jev 공식 문서](https://docs.typesafe.ai/introduction)
