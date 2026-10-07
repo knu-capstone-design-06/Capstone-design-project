@@ -1,0 +1,24 @@
+# Vision module only (python -m app.modules.vision.run, tests/test_vision_observe.py). The server does not need
+# these: ai-server/requirements.txt and the Dockerfile stay as they are.
+# mediapipe 0.10.33 is pinned on purpose: the last release without the usage-metrics uploader, 0.10.35 is the first
+# with it (wheel check of 2026-10-07 in the vision design note, section 6); 0.10.33 also runs the full-range face
+# detector. The other pins are what mediapipe 0.10.33 installed with Python 3.12.10 on Windows 11 (pip freeze,
+# 2026-10-08). Optional, not pinned: imageio-ffmpeg (H.264 overlay video; its bundled ffmpeg binary is GPL).
+mediapipe==0.10.33
+absl-py==2.5.0
+cffi==2.1.1
+contourpy==1.4.0
+cycler==0.12.1
+flatbuffers==25.12.19
+fonttools==4.66.1
+kiwisolver==1.5.1
+matplotlib==3.11.2
+numpy==2.5.3
+opencv-contrib-python==5.0.0.93
+packaging==26.3
+pillow==12.3.0
+pycparser==3.0
+pyparsing==3.3.3
+python-dateutil==2.9.0.post0
+six==1.17.0
+sounddevice==0.5.6
