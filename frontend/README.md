@@ -1,6 +1,14 @@
 # 프론트엔드 API 연결
 
-`src/shared/api/`는 `contract/frontend-backend.openapi.yaml` 0.1.0의 네 API를 제공합니다. 프론트엔드는 backend와만 통신합니다.
+`src/shared/api/`는 기존 0.1.0의 네 API(상태 확인·연결 확인·세션 생성·특징 전송) 호출 함수를 제공합니다. `contract/frontend-backend.openapi.yaml` 0.2.0에서도 이 형식을 유지합니다. 호출 함수가 있다는 것이 서버 구현 완료를 의미하지는 않습니다. 프론트엔드는 backend와만 통신합니다.
+
+## 주문 API 명세 반영 상태
+
+OpenAPI 0.2.0에 상품 조회, 장바구니 조회·추가·수량 변경·삭제, 모의 주문 확정의 신규 6개 API를 팀 검토용 초안으로 추가했습니다. 요청·응답의 기준 형식은 [OpenAPI](../contract/frontend-backend.openapi.yaml), 설계 이유와 미정 정책은 [주문 API 검토 문서](../docs/Product-Cart-Order-API-Draft.md)를 확인합니다. 신규 operation의 `x-contract-status: draft`는 팀 검토 대기 상태입니다.
+
+현재 API 클라이언트에는 신규 주문 API 타입·호출 함수가 없고 주문 화면은 샘플 상태를 사용합니다. 팀 검토 후 백엔드 구현·샘플 데이터와 함께 상품 조회, 서버 장바구니, 주문 확정을 연결합니다. 변경 요청에는 `expected_version`과 `Idempotency-Key`가 필요하며 DELETE의 버전은 쿼리로 전달합니다. 버전 충돌은 최신 장바구니를 표시하고 재확인하며, 신규 오류는 `code`, `detail`, `cart`로 구분합니다.
+
+아래 예시는 기존 네 API 클라이언트의 사용법입니다.
 
 ```ts
 import { createBackendApi } from './src/shared/api/index.ts';
@@ -26,7 +34,7 @@ const result = await api.sendFeatureWindow(session.session_id, {
 
 호출자는 `ai_available: false` 또는 `preset: none`이면 화면을 유지하고, `requires_confirmation: true`이면 사용자 수락 후 지원을 적용해야 합니다. 세션이나 화면이 바뀐 뒤 도착한 이전 응답은 적용하지 않아야 합니다. 각 메서드의 마지막 인자로 `AbortSignal`을 전달해 요청을 취소할 수 있습니다.
 
-HTTP 오류는 `ApiError.status`와 `ApiError.body`로 확인합니다. 404는 `detail` 문자열을 메시지로 사용합니다. 422 응답 본문은 명세에 정의되지 않아 원문을 보존합니다. 네트워크 오류와 요청 취소는 그대로 전달하며 세션 생성 등을 자동 재시도하지 않습니다. 반환 타입은 명세를 표현하며 응답에 대한 런타임 스키마 검증은 제공하지 않습니다.
+기존 네 API의 HTTP 오류는 `ApiError.status`와 `ApiError.body`로 확인합니다. 404는 `detail` 문자열을 메시지로 사용합니다. 기존 특징 API의 422 응답 본문은 명세에 정의되지 않아 원문을 보존합니다. 신규 주문 API의 422는 별도로 `OrderApiError`에 정의했습니다. 네트워크 오류와 요청 취소는 그대로 전달하며 세션 생성 등을 자동 재시도하지 않습니다. 반환 타입은 기존 명세를 표현하며 응답에 대한 런타임 스키마 검증은 제공하지 않습니다.
 
 검증(Node.js 22.18 이상, 추가 의존성 없음):
 
