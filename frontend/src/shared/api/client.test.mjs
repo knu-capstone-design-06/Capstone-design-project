@@ -1,0 +1,72 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { ApiError, createBackendApi } from './client.ts';
+
+test('명세의 경로, HTTP 메서드와 본문으로 backend만 호출한다', async () => {
+  const calls = [];
+  const results = [
+    { status: 'ok', service: 'backend' },
+    { backend: 'ok', ai_server: 'unreachable' },
+    { session_id: 'session-1', started_at: '2026-10-01T10:00:00Z' },
+    { session_id: 'session-1', ai_available: false, states: null,
+      support: { preset: 'none', requires_confirmation: false, decided_by: 'rule_placeholder' } },
+  ];
+  const api = createBackendApi('http://localhost:8000/', async (url, init) => {
+    calls.push({ url, ...init });
+    return Response.json(results[calls.length - 1], { status: calls.length === 3 ? 201 : 200 });
+  });
+  assert.deepEqual(await api.getBackendHealth(), results[0]);
+  assert.deepEqual(await api.getConnectivity(), results[1]);
+  assert.deepEqual(await api.createSession(), results[2]);
+  const features = {
+    screen_id: 'menu_list', window_start: '2026-10-01T10:00:00Z',
+    window_end: '2026-10-01T10:00:03Z',
+    touch: { tap_count: 6, miss_tap_count: 3, repeat_tap_count: 2, back_count: 0, dwell_ms: 3000 },
+    vision: null,
+  };
+  const controller = new AbortController();
+  assert.deepEqual(await api.sendFeatureWindow('session/1', features, controller.signal), results[3]);
+  assert.deepEqual(calls.map(({ url, method }) => [url, method]), [
+    ['http://localhost:8000/health', 'GET'],
+    ['http://localhost:8000/api/v1/connectivity', 'GET'],
+    ['http://localhost:8000/api/v1/sessions', 'POST'],
+    ['http://localhost:8000/api/v1/sessions/session%2F1/features', 'POST'],
+  ]);
+  assert.equal(calls[2].body, undefined);
+  assert.deepEqual(JSON.parse(calls[3].body), features);
+  assert.equal(calls[3].headers['Content-Type'], 'application/json');
+  assert.equal(calls[3].signal, controller.signal);
+});
+
+test('404 및 형식이 확정되지 않은 422 응답을 보존한다', async () => {
+  for (const [status, body] of [[404, { detail: 'session not found' }], [422, { detail: [{ msg: 'invalid' }] }]]) {
+    const api = createBackendApi('', async () => Response.json(body, { status }));
+    await assert.rejects(api.getBackendHealth(), (error) => {
+      assert.ok(error instanceof ApiError);
+      assert.equal(error.status, status);
+      assert.deepEqual(error.body, body);
+      return true;
+    });
+  }
+});
+
+test('비 JSON 오류와 잘못된 성공 응답을 처리한다', async () => {
+  const api = createBackendApi('', async () => new Response('Bad Gateway', { status: 502 }));
+  await assert.rejects(api.getBackendHealth(), (error) => error.status === 502 && error.body === 'Bad Gateway');
+  const malformed = createBackendApi('', async () => new Response('invalid'));
+  await assert.rejects(malformed.getBackendHealth(), /JSON/);
+});
+
+test('네트워크 오류와 취소를 호출자에게 전달하며 자동 재시도하지 않는다', async () => {
+  for (const error of [new TypeError('offline'), new DOMException('Aborted', 'AbortError')]) {
+    let calls = 0;
+    const api = createBackendApi('', async () => { calls++; throw error; });
+    await assert.rejects(api.createSession(), (caught) => caught === error);
+    assert.equal(calls, 1);
+  }
+});
+
+test('빈 세션 ID를 서버로 보내지 않는다', () => {
+  const api = createBackendApi('', async () => { assert.fail('호출되면 안 됨'); });
+  assert.throws(() => api.sendFeatureWindow(' ', {}), /세션 ID/);
+});
