@@ -1,0 +1,333 @@
+openapi: 3.1.0
+info:
+  title: Voice API
+  version: 0.1.0
+  description: |
+    음성 요청을 backend로 전달하는 API 명세입니다. (상태: 팀 검토 전 제안)
+    근거 문서: docs/Voice-MCP-Implementation.md
+
+    STT(음성 → 텍스트)
+    - 기본: frontend가 Chrome 내장 Web Speech API(SpeechRecognition, ko-KR)로 변환하고 텍스트만 보냅니다.
+      녹음 시작·종료 방식(말 끝 감지, 버튼 등)은 frontend가 정합니다.
+    - 예비: Chrome 인식을 쓸 수 없을 때만 녹음 파일을 /api/v1/voice/transcriptions(Whisper)로 보냅니다. 선택 구현입니다.
+
+    처리 원칙
+    - 음성 요청(voice/requests)은 접수만 하고 바로 응답합니다. backend가 OpenAI API로 맥락을 해석하고
+      MCP 도구로 장바구니·화면을 변경합니다. 결과는 알림 채널(SSE, 별도 명세)과 요청 상태 조회로 확인합니다.
+    - 인식이 틀릴 수 있으므로 인식 후보와 신뢰도를 함께 보내고, 애매하면 확인 질문(needs_clarification)을 돌려줍니다.
+    - 외부 AI API(OpenAI)는 backend가 호출합니다. frontend는 backend의 이 API만 호출합니다.
+    - 음성 처리가 실패해도 터치 주문은 계속 동작해야 합니다.
+
+    길이·크기·동시 요청 수 등 제한값은 제안값이며 팀 합의 후 확정합니다.
+servers:
+  - url: http://localhost:8000
+    description: backend 직접 호출 (docker compose)
+  - url: http://localhost:8080/backend
+    description: frontend nginx 프록시 경유 (docker compose)
+
+paths:
+  /api/v1/sessions/{session_id}/voice/requests:
+    post:
+      summary: 음성 요청 접수 (인식된 텍스트 전달)
+      description: |
+        frontend가 인식한 텍스트와 후보를 보내면 즉시 202를 반환합니다.
+        backend는 OpenAI API + MCP 도구로 처리하고, 결과(장바구니 변경, 화면 이동, 안내 문장)를
+        알림 채널 이벤트와 아래 상태 조회 API로 전달합니다.
+        - 한 세션에서 처리 중인 음성 요청은 1개만 허용합니다. 처리 중에 새 요청이 오면 409입니다.
+        - 같은 `Idempotency-Key`로 재시도하면 새로 접수하지 않고 처음 접수 결과를 반환합니다.
+      operationId: createVoiceRequest
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VoiceRequestCreate"
+            examples:
+              chrome:
+                summary: Chrome 인식 결과 (후보 포함)
+                value:
+                  text: 아이스 아메리카노 두 개 담고 결제로 가줘
+                  alternatives:
+                    - { text: 아이스 아메리카노 두 개 담고 결제로 가줘, confidence: 0.91 }
+                    - { text: 아이스 아메리카노 도 개 담고 결제로 가줘, confidence: 0.42 }
+                  screen_id: menu_list
+                  stt_source: chrome
+              whisper:
+                summary: 예비 STT(Whisper) 결과 (후보 없음)
+                value:
+                  text: 라떼 하나
+                  alternatives: []
+                  screen_id: menu_list
+                  stt_source: whisper
+      responses:
+        "202":
+          description: 접수됨
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VoiceRequestAccepted"
+              example:
+                request_id: vr_01J9Z3K8
+                status: accepted
+                accepted_at: "2026-10-07T10:00:00Z"
+        "404":
+          description: 없는 세션
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VoiceErrorResponse" }
+              example: { code: session_not_found, detail: 세션을 찾을 수 없습니다. }
+        "409":
+          description: 이미 처리 중인 요청이 있음, 또는 같은 키에 다른 내용
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VoiceErrorResponse" }
+              examples:
+                in_progress:
+                  value: { code: request_in_progress, detail: 이전 음성 요청을 처리하고 있습니다. }
+                key_reused:
+                  value: { code: idempotency_key_reused, detail: 같은 키로 다른 요청을 보냈습니다. }
+        "422":
+          description: 요청 형식 오류 (빈 텍스트, 범위 밖 신뢰도 등)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VoiceErrorResponse" }
+              example: { code: invalid_request, detail: text가 비어 있습니다. }
+        "503":
+          description: 외부 AI 일시 불가
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VoiceErrorResponse" }
+              example: { code: ai_unavailable, detail: 음성 요청을 잠시 처리할 수 없습니다. }
+
+  /api/v1/sessions/{session_id}/voice/requests/{request_id}:
+    get:
+      summary: 음성 요청 처리 상태 조회
+      description: |
+        알림 채널을 쓰지 못할 때(연결 끊김, 개발 중 확인)의 대안입니다. 1초 이상 간격으로 조회합니다.
+        장바구니 내용은 장바구니 조회 API로 다시 확인합니다.
+      operationId: getVoiceRequest
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+        - name: request_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 현재 상태
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VoiceRequestStatus"
+              examples:
+                processing:
+                  value: { request_id: vr_01J9Z3K8, status: processing, reply_text: null, actions: [], error: null }
+                completed:
+                  value:
+                    request_id: vr_01J9Z3K8
+                    status: completed
+                    reply_text: 아이스 아메리카노 두 잔을 담았어요. 결제 화면으로 이동할게요.
+                    actions: [cart_updated, ui_changed]
+                    error: null
+                needs_clarification:
+                  value:
+                    request_id: vr_01J9Z3K9
+                    status: needs_clarification
+                    reply_text: 라떼는 아이스와 따뜻한 것 중 어떤 걸로 드릴까요?
+                    actions: []
+                    error: null
+                failed:
+                  value:
+                    request_id: vr_01J9Z3KA
+                    status: failed
+                    reply_text: 지금은 음성 주문이 어려워요. 화면을 눌러 주문해 주세요.
+                    actions: []
+                    error: { code: ai_unavailable, detail: 외부 AI 응답 시간 초과 }
+        "404":
+          description: 없는 세션 또는 요청
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VoiceErrorResponse" }
+              example: { code: voice_request_not_found, detail: 음성 요청을 찾을 수 없습니다. }
+
+  /api/v1/voice/transcriptions:
+    post:
+      summary: "[예비] 녹음 파일 → 텍스트 변환 (Whisper)"
+      description: |
+        Chrome 음성 인식을 쓸 수 없을 때만 사용하는 예비 경로입니다. 선택 구현이며, 구현하지 않으면 404입니다.
+        상태를 바꾸지 않습니다. 결과 텍스트는 stt_source=whisper로 voice/requests에 보냅니다.
+        - 허용 형식: audio/webm(opus), audio/ogg(opus), audio/mp4, audio/wav
+        - 최대 길이 30초, 최대 크기 1MB (frontend nginx 기본 요청 크기 제한 1MB에 맞춤)
+        - 녹음 파일은 변환 후 저장하지 않습니다.
+      operationId: createTranscription
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/TranscriptionRequest"
+            encoding:
+              audio:
+                contentType: audio/webm, audio/ogg, audio/mp4, audio/wav
+      responses:
+        "200":
+          description: 변환 성공. 말소리가 없으면 text는 빈 문자열
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TranscriptionResponse"
+              example: { text: 라떼 하나, language: ko, duration_ms: 1800 }
+        "413":
+          description: 파일 크기 초과
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VoiceErrorResponse" }
+              example: { code: audio_too_large, detail: 녹음 파일은 1MB 이하여야 합니다. }
+        "415":
+          description: 지원하지 않는 형식
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VoiceErrorResponse" }
+              example: { code: unsupported_format, detail: 지원하지 않는 오디오 형식입니다. }
+        "422":
+          description: 길이 초과 또는 요청 형식 오류
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VoiceErrorResponse" }
+              example: { code: audio_too_long, detail: 녹음은 30초 이하여야 합니다. }
+        "503":
+          description: STT 서비스 일시 불가
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VoiceErrorResponse" }
+              example: { code: stt_unavailable, detail: 음성 인식을 잠시 사용할 수 없습니다. }
+
+components:
+  parameters:
+    SessionId:
+      name: session_id
+      in: path
+      required: true
+      schema: { type: string }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: 사용자 발화마다 frontend가 만드는 UUID. 응답을 못 받아 재시도할 때만 같은 값을 씁니다.
+      schema: { type: string, format: uuid }
+
+  schemas:
+    VoiceRequestCreate:
+      type: object
+      required: [text, alternatives, screen_id, stt_source]
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: 최종 인식 문장 (가장 신뢰도 높은 후보)
+        alternatives:
+          type: array
+          maxItems: 5
+          description: |
+            인식 후보와 신뢰도 (Chrome SpeechRecognition의 maxAlternatives 결과, 신뢰도 높은 순).
+            backend는 OpenAI 해석 시 맥락으로 함께 사용합니다. 후보가 없으면 빈 배열.
+          items:
+            $ref: "#/components/schemas/RecognitionAlternative"
+        screen_id:
+          type: string
+          description: 요청 시점의 화면 ID (터치 로그와 같은 값 사용)
+        stt_source:
+          type: string
+          enum: [chrome, whisper]
+          description: 텍스트를 만든 STT. 인식률 비교·실험 기록용
+
+    RecognitionAlternative:
+      type: object
+      required: [text, confidence]
+      properties:
+        text: { type: string, maxLength: 500 }
+        confidence:
+          type: [number, "null"]
+          minimum: 0
+          maximum: 1
+          description: 0~1. 브라우저가 값을 주지 않으면 null
+
+    VoiceRequestAccepted:
+      type: object
+      required: [request_id, status, accepted_at]
+      properties:
+        request_id: { type: string }
+        status: { type: string, const: accepted }
+        accepted_at: { type: string, format: date-time }
+
+    VoiceRequestStatus:
+      type: object
+      required: [request_id, status, reply_text, actions, error]
+      properties:
+        request_id: { type: string }
+        status:
+          type: string
+          enum: [accepted, processing, completed, needs_clarification, failed]
+          description: |
+            accepted=접수됨, processing=처리 중, completed=처리 완료,
+            needs_clarification=정보가 부족해 확인 질문 필요(다음 발화를 새 요청으로 보냄), failed=실패
+        reply_text:
+          type: [string, "null"]
+          description: 사용자에게 보여주거나 읽어 줄 안내 문장. 읽는 방식(TTS)은 부르는 쪽이 정합니다.
+        actions:
+          type: array
+          description: 이 요청으로 발생한 알림 이벤트 종류 (알림 채널 명세의 event 이름)
+          items:
+            type: string
+            enum: [cart_updated, ui_changed, confirmation_required]
+        error:
+          oneOf:
+            - $ref: "#/components/schemas/VoiceErrorResponse"
+            - type: "null"
+
+    TranscriptionRequest:
+      type: object
+      required: [audio]
+      properties:
+        audio:
+          type: string
+          format: binary
+          description: 녹음 파일 (최대 30초, 1MB)
+        language:
+          type: string
+          default: ko
+          description: ISO 639-1 언어 코드
+
+    TranscriptionResponse:
+      type: object
+      required: [text, language, duration_ms]
+      properties:
+        text: { type: string }
+        language: { type: string }
+        duration_ms: { type: integer, minimum: 0 }
+
+    VoiceErrorResponse:
+      type: object
+      required: [code, detail]
+      properties:
+        code:
+          type: string
+          enum:
+            - invalid_request
+            - session_not_found
+            - voice_request_not_found
+            - request_in_progress
+            - idempotency_key_reused
+            - ai_unavailable
+            - unsupported_format
+            - audio_too_large
+            - audio_too_long
+            - stt_unavailable
+          description: frontend 분기용 오류 코드
+        detail:
+          type: string
+          description: 오류 설명. 내부 예외·키·외부 API 응답 원문은 넣지 않습니다.
