@@ -354,6 +354,16 @@ Capstone-design/
 
 ## 실행 안내
 
+백엔드와 AI 서버의 실행 방법은 [`backend/README.md`](backend/README.md), [`ai-server/README.md`](ai-server/README.md)에 있습니다. 프론트엔드는 아직 실행할 앱이 없고, API 연결 모듈 설명은 [`frontend/README.md`](frontend/README.md)에 있습니다.
+
+백엔드와 AI 서버는 저장소 루트에서 함께 띄웁니다.
+
+```powershell
+docker compose up --build
+```
+
+백엔드 상태는 http://127.0.0.1:8000/health 에서 확인합니다. AI 서버는 Docker 내부 네트워크에서만 접근합니다. Compose로 띄울 때는 `backend/.env`를 읽지 않으므로, 바꿀 값은 `docker-compose.yml`의 `environment`에 넣습니다.
+
 ### 프론트엔드 샘플 화면
 
 Node.js 22.18 이상과 pnpm이 필요합니다. 저장소 루트에서 실행합니다.
@@ -375,7 +385,7 @@ pnpm dev
 - API 키와 DB 자격 증명은 저장소에 커밋하지 않습니다.
 - `.env.example`에는 실제 비밀값 없이 필요한 항목을 문서화합니다.
 - 서비스 간 연결 주소와 설정은 환경변수로 관리합니다.
-- `docker-compose.yml` 구성 완료 후 통합 실행 절차를 추가합니다.
+- 프론트엔드는 실행할 앱이 준비되면 `docker-compose.yml`에 추가합니다.
 
 ## 참고 자료
 - [Jev 공식 문서](https://docs.typesafe.ai/introduction)
