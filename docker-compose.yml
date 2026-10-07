@@ -12,7 +12,9 @@ x-runtime: &runtime
 services:
   frontend:
     <<: *runtime
-    build: ./frontend
+    build:
+      context: .
+      dockerfile: infra/frontend/Dockerfile
     ports:
       - "127.0.0.1:${FRONTEND_PORT:-5173}:8080"
     depends_on:

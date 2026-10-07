@@ -10,6 +10,10 @@ docker compose ps
 
 프로젝트 이름은 `capstone-local`입니다. frontend, backend, ai-server가 모두 healthy인지 확인합니다.
 
+프론트엔드 실행 설정은 `infra/frontend/`의 Dockerfile과 nginx.conf에서 관리합니다.
+저장소 루트를 빌드 컨텍스트로 사용하며, Dockerfile.dockerignore로 필요한 소스만 포함합니다.
+`frontend/`의 기존 파일은 수정하지 않고 빌드 입력으로 사용합니다.
+
 | 주소 | 용도 |
 | --- | --- |
 | http://127.0.0.1:5173 | 빌드된 프론트엔드 샘플 화면 |
