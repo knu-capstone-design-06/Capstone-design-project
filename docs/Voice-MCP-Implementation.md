@@ -57,9 +57,16 @@ MCP 방식에서는 상태 변경이 프론트의 요청에서 시작하지 않�
 
 ### 3.2 MCP 서버·도구 (Decision AI + Back-end)
 
-도구는 backend 서비스 함수와 1:1로 대응합니다. 프론트용 REST API와 MCP 도구가 같은 함수를 부릅니다.
+MCP 서버는 외부 AI의 도구 호출을 backend 호출로 바꿔 주는 역할입니다.
 
-| 도구 | 하는 일 | 대응 서비스 |
+- **도구 이름·설명·입력 형식과 도구를 묶는 단위는 MCP 담당이 정합니다.** backend의 함수 이름이나 API 경로와 맞출 필요가 없습니다.
+- **backend와 맞춰야 하는 것은 데이터 형식입니다.** 도구가 backend에 넘기는 값(`product_id`, `temperature`, `quantity`, `expected_version` 등)은 backend가 받는 형식과 같아야 합니다. 기준은 [`Product-Cart-Order-API-Draft.md`](Product-Cart-Order-API-Draft.md)이고, backend 형식이 바뀌면 도구도 함께 고칩니다.
+- 도구와 backend API가 1:1일 필요는 없습니다. 예를 들어 도구 하나가 장바구니를 조회해 `version`을 얻은 뒤 추가 API를 부르면, AI가 버전을 직접 다루지 않아도 됩니다.
+- AI는 이름보다 **설명**을 보고 도구를 고르므로 설명을 명확하게 씁니다. 이름은 영문·숫자·밑줄로 짓고 서버 안에서 겹치지 않게 합니다.
+
+아래는 필요한 기능의 예시이며, 도구 이름은 확정이 아닙니다.
+
+| 도구(예시) | 하는 일 | 사용하는 backend 기능 |
 |---|---|---|
 | `get_menu` | 상품·옵션·판매 가능 여부 조회 | 상품 조회 |
 | `get_cart` | 현재 장바구니와 `version` 조회 | 장바구니 조회 |
