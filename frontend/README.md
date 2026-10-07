@@ -5,7 +5,7 @@
 ```ts
 import { createBackendApi } from './src/shared/api/index.ts';
 
-// 실제 실행 환경의 backend 주소를 전달합니다.
+// 직접 연결할 때는 실제 backend 주소를 전달합니다.
 const api = createBackendApi('http://localhost:8000');
 await api.getBackendHealth();
 await api.getConnectivity();
@@ -46,3 +46,30 @@ pnpm dev
 `pnpm build`로 TypeScript 검사와 배포 빌드를, `pnpm test`로 API 및 주문 상태 테스트를 실행합니다. 의존성 버전은 `pnpm-lock.yaml`에 기록합니다.
 
 상품 선택·장바구니·주문 확인·모의 결제, 새로고침 후 상태 복원과 수동 접근성 설정을 제공합니다. 상세 동작과 수동 확인 절차는 [`src/features/order/README.md`](src/features/order/README.md)에 있습니다. 실제 주문 API, 주기적인 특징 수집, 음성 및 자동 지원 판단은 아직 연결하지 않았습니다. API 모듈의 `.ts` 확장자 import를 위해 `noEmit`과 `allowImportingTsExtensions`를 설정했습니다.
+
+## Docker 실행과 백엔드 연결
+
+Docker Desktop의 Linux 엔진과 WSL 통합을 활성화한 뒤 저장소 루트에서 실행합니다.
+
+```sh
+docker compose up --build -d
+curl --fail http://127.0.0.1:8080/backend/health
+```
+
+화면은 `http://127.0.0.1:8080`에서 열립니다. 상태 확인 응답은 `{"status":"ok","service":"backend"}`입니다. 이는 백엔드 프로세스 상태만 확인하며 DB·AI 연결을 보장하지 않습니다.
+
+프론트 이미지는 Node.js에서 빌드한 정적 파일을 Nginx로 제공합니다. 브라우저의 `/backend/health` 요청은 Nginx가 Docker 내부 `http://backend:8000/health`로 전달합니다. `/backend/api/v1/...`도 같은 방식으로 전달하며 백엔드 오류 응답을 그대로 반환합니다. 화면 경로는 `index.html`로 처리합니다.
+
+화면 코드에서 기본 프록시 클라이언트를 사용할 수 있습니다.
+
+```ts
+import { backendApi } from './src/shared/api/index.ts';
+
+const health = await backendApi.getBackendHealth();
+```
+
+현재 백엔드는 `/health`만 구현돼 있습니다. 세션·특징·연결 상태 API는 구현 전까지 404를 반환하며, 주문 화면은 계속 샘플 데이터와 모의 결제를 사용합니다.
+
+로컬 `pnpm dev`도 `/backend/`를 `http://127.0.0.1:8000`으로 전달합니다. 다른 백엔드에 연결하려면 `BACKEND_URL=http://127.0.0.1:8000 pnpm dev`처럼 실행 환경에서 주소를 전달합니다. Docker에서는 Compose의 frontend `BACKEND_URL` 환경변수로 대상 주소를 설정합니다. 주소는 브라우저에 Docker 서비스 이름을 노출하지 않고 프록시에서 사용합니다.
+
+종료는 저장소 루트에서 `docker compose down`으로 합니다.
