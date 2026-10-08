@@ -26,6 +26,13 @@ export function OrderPage() {
   useEffect(() => { if (selected) dialog.current?.showModal(); else if (dialog.current?.open) dialog.current.close(); }, [selected]);
   const count = state.cart.reduce((sum, item) => sum + item.quantity, 0);
   const sum = total(state.cart);
+  const combinedEnlargement = state.settings.largeText && state.settings.largeButton;
+  function toggleCombinedEnlargement() {
+    setState(current => {
+      const enabled = !(current.settings.largeText && current.settings.largeButton);
+      return { ...current, settings: { ...current.settings, largeText: enabled, largeButton: enabled } };
+    });
+  }
   function closeOptions() { setSelected(null); opener.current?.focus(); }
   function finish() {
     if (!state.cart.length) return;
@@ -45,7 +52,7 @@ export function OrderPage() {
   });
   return <><div ref={touchLog.root} className={`kiosk ${state.settings.largeText ? 'large-text' : ''} ${state.settings.largeButton ? 'large-button' : ''} ${state.settings.simpleScreen ? 'simple-screen' : ''}`}>
     <header className="header"><a data-log-target="menu-home" className="brand" href="#" onClick={event => { event.preventDefault(); setScreen('menu'); }}>온기<span>ONGI COFFEE</span></a><span className="sample-badge">샘플 주문 · 실제 결제 없음</span><button data-log-target="support-toggle" className="support-trigger" aria-expanded={supportOpen} aria-controls="support-panel" onClick={() => setSupportOpen(!supportOpen)}>화면 도움 {supportOpen ? '닫기' : '열기'}</button></header>
-    {supportOpen && <section id="support-panel" className="support-panel" aria-label="화면 도움 설정"><div><h2>편한 화면으로 주문하세요</h2><p>설정을 바꿔도 담은 메뉴는 그대로 유지됩니다.</p></div><div className="support-options">{(Object.keys(supportLabels) as (keyof Settings)[]).map(key => <button data-log-target={`support:${key}`} key={key} aria-pressed={state.settings[key]} onClick={() => setState(current => ({ ...current, settings: { ...current.settings, [key]: !current.settings[key] } }))}>{state.settings[key] ? '✓ ' : ''}{supportLabels[key]}</button>)}<button data-log-target="support-reset" onClick={() => setState(current => ({ ...current, settings: { ...initialState.settings } }))}>기본 화면</button></div></section>}
+    {supportOpen && <section id="support-panel" className="support-panel" aria-label="화면 도움 설정"><div><h2>편한 화면으로 주문하세요</h2><p>설정을 바꿔도 담은 메뉴는 그대로 유지됩니다.</p></div><div className="support-options">{(Object.keys(supportLabels) as (keyof Settings)[]).map(key => <button data-log-target={`support:${key}`} key={key} aria-pressed={state.settings[key]} onClick={() => setState(current => ({ ...current, settings: { ...current.settings, [key]: !current.settings[key] } }))}>{state.settings[key] ? '✓ ' : ''}{supportLabels[key]}</button>)}<button data-log-target="support:combinedEnlargement" aria-pressed={combinedEnlargement} onClick={toggleCombinedEnlargement}>{combinedEnlargement ? '✓ ' : ''}큰 글씨 + 큰 버튼 (테스트)</button><button data-log-target="support-reset" onClick={() => setState(current => ({ ...current, settings: { ...initialState.settings } }))}>기본 화면</button></div></section>}
     <main>
       <div className="cart-notice" role="status" aria-live="polite" hidden={!notice || screen !== 'menu'}>{notice}<button data-log-target="notice-close" aria-label="담기 완료 안내 닫기" onClick={() => setNotice('')}>✕</button></div>
       <nav className="steps" aria-label="주문 단계">{['메뉴 선택', '주문 확인', '주문 완료'].map((label, index) => <span key={label} aria-current={index === ['menu', 'review', 'complete'].indexOf(screen) ? 'step' : undefined}><b>0{index + 1}</b> {label}</span>)}</nav>
