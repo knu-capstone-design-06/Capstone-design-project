@@ -6,12 +6,12 @@
 
 ## 층과 파일
 
-비전 쪽 처리를 `입력 → 추론 → 관측값 → 상황 → 전달` 다섯 층으로 나눴고, 파일 하나가 한 층을 맡습니다. 층끼리는 앞 층의 결과만 받으므로, 모델을 바꾸면 추론 층만, 규칙이 정해지면 상황 층만 고치면 됩니다.
+비전 쪽 처리를 `입력 → 추론 → 관측값 → 상황 → 전달` 다섯 층으로 나눴고, 파일 하나가 한 층을 맡습니다. 층끼리는 앞 층의 결과만 받습니다. 같은 점 의미와 출력 형식을 유지하는 모델 교체는 추론 층에서 처리하고, 출력 구조가 달라지면 관측값 · 그리기도 함께 맞춥니다. 규칙이 정해지면 상황 층만 채웁니다.
 
 | 층 | 파일 | 하는 일 |
 |---|---|---|
 | 입력 | `sources.py` | 프레임 입력: 영상 파일 · 이미지 폴더 · 웹캠(`--camera`일 때만 엶). 프레임마다 시각을 붙임 |
-| 추론 | `inference.py` | MediaPipe 3종 모델 불러오기와 프레임별 추론만. 결과를 단순한 배열(`FrameInference`)로 넘김. 팀이 정하면 `app/inference/`로 옮길 수 있게 따로 둠 |
+| 추론 | `app/inference/vision.py` | MediaPipe 3종 모델 불러오기와 프레임별 추론만(AGENTS.md: 직접 실행하는 모델의 로딩 · 추론 코드는 `app/inference/`에). 결과를 단순한 배열(`FrameInference`)로 넘김. 이 폴더의 `inference.py`는 같은 이름을 다시 내보내는 호환용 |
 | 관측값 | `features.py` | 추론 결과로 관측값 계산(아래 CSV 열): 기하 · 연속 구간 · 밝기와 선명도. MediaPipe 없이도 돌아감 |
 | 상황 | `situation.py` | **자리만 있음** — 상황 태그 형식과 빈 규칙 표. 어떤 상황을 카메라가 맡을지는 팀 결정과 데이터 분석 뒤에 채움(기준값 없음) |
 | 전달 | — | 아직 없음. 다른 서비스로 보내는 형식은 `contract/`에서 정함 |
@@ -33,8 +33,10 @@ py -3.12 -m venv .venv
 ## 실행
 
 ```powershell
-# 영상 파일 또는 이미지 폴더 (--step 2 = 두 장마다 한 장, --width 640 = 폭 640으로 줄임, 비율 유지)
-.venv\Scripts\python.exe -m app.modules.vision.run <영상 파일 또는 이미지 폴더> --step 2 --width 640
+# 영상 파일 (--step 2 = 두 장마다 한 장, --width 640 = 폭 640으로 줄임, 비율 유지)
+.venv\Scripts\python.exe -m app.modules.vision.run <영상 파일> --step 2 --width 640
+# 이미지 폴더: 사진에는 시각이 없어 명목 초당 장수(--fps)가 필요. manifest.json이 있으면 그 값을 씀(실측 촬영 시각이 아님)
+.venv\Scripts\python.exe -m app.modules.vision.run <이미지 폴더> --fps 15 --width 640
 # 카메라: 창을 띄우고 q로 멈춤, 또는 창 없이 정한 시간만
 .venv\Scripts\python.exe -m app.modules.vision.run --camera 0 --show
 .venv\Scripts\python.exe -m app.modules.vision.run --camera 0 --seconds 30
@@ -45,6 +47,7 @@ py -3.12 -m venv .venv
 - 멈추기: `--show` 창에서 `q` · 창 닫기, 또는 콘솔에서 Ctrl+C. 그때까지 처리한 프레임이 저장됩니다. 창도 `--seconds`도 없이 카메라를 돌리면 멈추는 방법을 알려 주는 오류가 납니다.
 - 카메라 실행의 `overlay.mp4`는 실제로 처리한 초당 장수로 저장됩니다(`imageio-ffmpeg`가 있을 때 H.264로 바꾸면서; 없으면 MPEG-4 Part 2, 카메라가 알린 초당 장수). `imageio-ffmpeg`는 고정하지 않은 선택 패키지이고, 들어 있는 ffmpeg 실행 파일은 GPL입니다.
 - 저장 도중 끊겨 그래프 등이 빠졌으면 `--replot <결과 폴더>`로 `observations.csv`에서 다시 만듭니다.
+- 녹화 영상 옆에 `<영상>.times.csv`(`frame,t_s`)가 있으면 그 실측 시각을 씁니다. 번호가 0, 1, 2…로 이어지지 않거나 시각이 되돌아가거나 프레임보다 짧으면 오류로 멈춥니다. 한 실행 안에서 프레임 크기가 바뀌어도 멈춥니다(overlay 영상은 첫 프레임 크기로 고정).
 - 처리 시간을 잴 때는 `--show` 없이 돌립니다(창에 그리는 시간은 `meta.json`의 `output_ms`에 따로 적힘).
 
 ## 테스트
