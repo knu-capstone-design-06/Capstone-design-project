@@ -12,7 +12,7 @@
 - [저장소 규칙](../AGENTS.md)
 - [프로젝트 개요](../README.md)
 - [협업 규칙](Convention.md)
-- [프론트엔드 ↔ 백엔드 계약](../contract/frontend-backend.openapi.yaml): 0.1.0
+- [프론트엔드 ↔ 백엔드 계약](../contract/frontend-backend.openapi.yaml): 0.2.0. 기존 0.1.0 터치 형식 유지, 신규 주문 API는 팀 검토용 초안
 - [백엔드 ↔ AI 서버 계약](../contract/backend-ai.openapi.yaml): 0.1.0
 - [상품·장바구니·주문 API 검토 초안](Product-Cart-Order-API-Draft.md): 확정 명세가 아닌 관련 제안
 

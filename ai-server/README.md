@@ -40,14 +40,15 @@ backend를 호스트에서 직접 실행해 연결할 때는 backend의 `AI_SERV
 
 ## Docker
 
-저장소 루트에서 실행합니다.
+Docker 엔진을 실행한 뒤 저장소 루트에서 백엔드와 함께 실행합니다.
 
 ```powershell
-docker build -t capstone-ai-server ./ai-server
-docker run --rm -p 127.0.0.1:8001:8001 capstone-ai-server
+docker compose up --build
 ```
 
-Compose에서는 포트를 외부에 공개하지 않고 backend가 `http://ai-server:8001`로 호출합니다. Compose 파일은 이번 변경에 포함하지 않았습니다.
+루트 Compose에는 backend와 ai-server가 포함돼 있습니다. AI 서버의 호스트 포트를 공개하지 않으며 backend가 `http://ai-server:8001`로 호출합니다. 호스트 브라우저에서 `localhost:8001`로 접근하는 구성은 아닙니다.
+
+기존 두 서버 실행·통신 검증 기록은 [PR #14](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/14)를 참고합니다. 2026-10-07 문서 정리에서는 Docker 테스트를 재실행하지 않았습니다.
 
 ## 테스트
 
