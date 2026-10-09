@@ -43,7 +43,14 @@ def main() -> int:
             print(f"already here: {name}")
             continue
         tmp = dst + ".part"
-        urllib.request.urlretrieve(BASE + rel, tmp)
+        try:
+            urllib.request.urlretrieve(BASE + rel, tmp)
+        except OSError as e:   # URLError is an OSError: report, clean up, go on with the next file
+            if os.path.exists(tmp):
+                os.remove(tmp)
+            print(f"download failed for {name}: {e}", file=sys.stderr)
+            ok = False
+            continue
         got = sha256(tmp)
         if got != digest:
             os.remove(tmp)

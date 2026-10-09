@@ -59,14 +59,15 @@ class MediaPipeModels:
     def __init__(self, model_dir: str, face_detector: str = "short_range"):
         self.face_detector_model = FACE_DETECTOR_MODELS[face_detector]
 
-        def path(name):
+        paths = {}
+        for name in (FACE_LANDMARKER_MODEL, self.face_detector_model, POSE_LANDMARKER_MODEL):
             p = os.path.join(model_dir, name)
             if not os.path.isfile(p):
                 raise FileNotFoundError(f"model file missing: {p} (python app/modules/vision/models/download_models.py)")
-            return p
+            paths[name] = p   # all three checked before any model is created, so a missing file leaves none open
 
         self.face_lm = V.FaceLandmarker.create_from_options(V.FaceLandmarkerOptions(
-            base_options=mpp.BaseOptions(model_asset_path=path(FACE_LANDMARKER_MODEL)),
+            base_options=mpp.BaseOptions(model_asset_path=paths[FACE_LANDMARKER_MODEL]),
             running_mode=V.RunningMode.VIDEO,             # frames in order -> tracking (doc 28 section 0)
             num_faces=1,                                  # smoothing only with num_faces=1 [D1] (doc 28 sections 1, 4-4)
             output_face_blendshapes=False,                # no observation uses blendshapes
@@ -74,13 +75,13 @@ class MediaPipeModels:
         # min_face_detection / min_face_presence / min_tracking confidence: library default 0.5 [D1] -
         # a library pass mark, not our criterion (doc 28 section 0).
         self.face_det = V.FaceDetector.create_from_options(V.FaceDetectorOptions(
-            base_options=mpp.BaseOptions(model_asset_path=path(self.face_detector_model)),
+            base_options=mpp.BaseOptions(model_asset_path=paths[self.face_detector_model]),
             running_mode=V.RunningMode.VIDEO))
         # min_detection_confidence 0.5 and min_suppression_threshold 0.3: library defaults [D2].
         # The detector counts faces and gives the face detection score (doc 28 section 3, '사람 수' and
         # '입력 품질' rows) while the landmarker stays at num_faces=1 so its smoothing stays on.
         self.pose = V.PoseLandmarker.create_from_options(V.PoseLandmarkerOptions(
-            base_options=mpp.BaseOptions(model_asset_path=path(POSE_LANDMARKER_MODEL)),
+            base_options=mpp.BaseOptions(model_asset_path=paths[POSE_LANDMARKER_MODEL]),
             running_mode=V.RunningMode.VIDEO,
             num_poses=1))                                 # library default 1 [D3]; body = fallback presence cue
         # min_pose_detection / presence / tracking confidence: library default 0.5 [D3].
