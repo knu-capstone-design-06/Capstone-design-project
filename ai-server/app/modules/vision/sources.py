@@ -152,8 +152,8 @@ class VideoFileSource:
 
 class ImageFolderSource:
     """Reads the images of a folder in file-name order. Images carry no time, so the caller gives a
-    nominal frame rate; frame time = index / fps. If the folder has a manifest.json (written by
-    make_synthetic.py), its fps and labels are used."""
+    nominal frame rate; frame time = index / fps. If the folder has a manifest.json (synthetic test input from
+    the vision owner's generator, which is not in this repository), its fps and labels are used."""
 
     kind = "folder"
     measured_times = False

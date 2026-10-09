@@ -153,5 +153,5 @@ def environment() -> dict:
         "processor": platform.processor(),
         "cpu_name": _cpu_name(),
         "cpu_count": os.cpu_count(),
-        "delegate": "CPU (Windows Python builds are CPU-only, doc 28 section 6)",
+        "delegate": "CPU (no delegate set in BaseOptions; Windows Python builds are CPU-only, doc 28 section 6)",
     }

@@ -3,8 +3,8 @@
 Output only - nothing here feeds back into the observations. Korean labels use the first Korean-capable font
 found in KOREAN_FONTS (Malgun Gothic on Windows; Nanum Gothic or Noto Sans CJK on Linux); without one the
 default font is used and one line is logged.
-Chart colours: the reference categorical palette of the dataviz guide used for these plots
-(slot order blue, orange, aqua, yellow, magenta, green, violet, red), solid hairline grid, one y-axis per panel.
+Chart colours: a fixed categorical palette (slot order blue, orange, aqua, yellow, magenta, green, violet, red;
+a layout choice), solid hairline grid, one y-axis per panel.
 """
 from __future__ import annotations
 

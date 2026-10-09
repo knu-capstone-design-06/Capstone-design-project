@@ -136,7 +136,9 @@ class Observer:
     def reset_session(self):
         """Start a new session: the reference for 'ratio to the session start' is taken again.
 
-        Kiosk: a session starts at the first touch (doc 27 section 0, '세션'). Offline: the start of the file."""
+        Kiosk: when a session starts is not decided by the team yet (doc 27 section 0, the vision owner's plan, uses
+        the first touch; the order screen of PR #33 asks for a server session at page load and at a new order).
+        Offline: the start of the file."""
         self.ref = None
         self.prev_face = None
         self.face_cont = Continuity()

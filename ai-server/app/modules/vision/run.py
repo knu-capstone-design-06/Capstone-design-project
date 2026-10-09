@@ -82,8 +82,8 @@ def _cell(v):
 
 def _pin_process(mask: int | None, high: bool) -> dict:
     """Optional measurement condition (Windows): restrict the process to the logical CPUs in `mask` and/or raise
-    its priority. Team convention for timing on the i5-1340P dev PC: P-cores = logical CPUs 0-7 (mask 0xFF) and
-    high priority, because unpinned runs were 2-2.5x slower (workspace note research/13, section 5-2 footnote)."""
+    its priority. Vision owner's timing condition on the i5-1340P dev PC: P-cores = logical CPUs 0-7 (mask 0xFF)
+    and high priority, because unpinned runs were 2-2.5x slower (workspace note research/13, section 5-2 footnote)."""
     done = {"affinity_mask": None, "high_priority": False}
     if os.name != "nt" or (mask is None and not high):
         return done
