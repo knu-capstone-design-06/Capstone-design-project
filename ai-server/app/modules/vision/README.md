@@ -79,7 +79,7 @@ py -3.12 -m venv .venv
 | `face_state` · `body_state` | 얼굴 · 몸 보임 / 못 봄(모델 결과 유무). 결과가 비면 '못 봄'이고 '사람 없음'이 아님 |
 | `face_count` | 얼굴 검출 결과 개수 |
 | `iod_px` · `iod_frac_w` · `iod_ratio_start` | 눈 사이 거리(px, 두 눈꼬리 쌍 33·133, 362·263의 중심 사이) · ÷ 화면 폭 · 세션의 첫 얼굴 프레임 대비 비율 |
-| `yaw_deg` · `pitch_deg` · `roll_deg` | 고개 방향(도): 얼굴 변환 행렬의 회전을 OpenCV `RQDecomp3x3`으로 나눈 각. yaw + = 화면 오른쪽, pitch + = 아래, roll + = 반시계 |
+| `yaw_deg` · `pitch_deg` · `roll_deg` | 고개 방향(도): 얼굴 변환 행렬의 회전을 OpenCV `RQDecomp3x3`으로 나눈 각. 부호는 MediaPipe 얼굴 기하 공간(오른손 좌표계, 카메라는 원점에서 −Z 방향을 봄 — MediaPipe Face Mesh 문서)과 "+ 회전 → + 각"(테스트로 고정)에서 풀어 쓴 방향입니다: yaw + = 화면 오른쪽, pitch + = 아래, roll + = 반시계. 실제로 고개를 돌린 영상으로는 아직 확인하지 않았습니다 |
 | `dyaw_start_deg` · `dpitch_start_deg` | 세션 첫 얼굴 프레임 대비 yaw · pitch 차이 |
 | `face_cx` · `face_cy` · `face_y_max` | 얼굴 점 상자 중심(0~1) · 얼굴 점의 가장 아래 y |
 | `face_run_id` · `face_run_s` · `face_unseen_s` | 얼굴이 이어서 보인 구간 번호 · 그 구간의 지난 시간(초) · 마지막으로 본 뒤 지난 시간(초) |

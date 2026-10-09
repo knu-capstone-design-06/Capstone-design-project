@@ -204,14 +204,14 @@ class VisionHelperTests(unittest.TestCase):
 
         from app.modules.vision.features import head_angles_deg
 
-        # rotation about x -> pitch (index 1), about y -> yaw (index 0), about z -> roll (index 2)
+        # rotation about x -> pitch (index 1), about y -> yaw (index 0), about z -> roll (index 2); + rotation -> + angle
         for axis, index in ((0, 1), (1, 0), (2, 2)):
             rvec = np.zeros(3)
             rvec[axis] = math.radians(10.0)
             matrix = np.eye(4)
             matrix[:3, :3] = cv2.Rodrigues(rvec)[0]
             angles = head_angles_deg(matrix)
-            self.assertAlmostEqual(abs(angles[index]), 10.0)
+            self.assertAlmostEqual(angles[index], 10.0)   # sign too: OpenCV 5.0.0 RQDecomp3x3 gives +10 for +10 deg
             for other in {0, 1, 2} - {index}:
                 self.assertAlmostEqual(angles[other], 0.0)
 
