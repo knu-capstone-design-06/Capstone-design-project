@@ -180,9 +180,9 @@ Jev에는 다음 정보를 전달합니다.
 
 | 영역 | 기술 | 상태 |
 |---|---|---|
-| 프론트엔드 | React, Vite, TypeScript | TypeScript 기준 구조 설계 |
-| 백엔드 | Python, FastAPI | 계획 |
-| AI 서버 | Python, FastAPI | 분리 구성 설계 |
+| 프론트엔드 | React, Vite, TypeScript | 샘플 주문 화면 구현 |
+| 백엔드 | Python, FastAPI | 초기 실행 환경 구현 |
+| AI 서버 | Python, FastAPI | 초기 실행 환경 구현 |
 | 데이터베이스 | Supabase PostgreSQL | RDS에서 변경 |
 | 영상 처리 | OpenCV | 계획 |
 | 얼굴·자세 특징 | MediaPipe | 후보 특징 검증 예정 |
