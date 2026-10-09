@@ -70,3 +70,38 @@ test('빈 세션 ID를 서버로 보내지 않는다', () => {
   const api = createBackendApi('', async () => { assert.fail('호출되면 안 됨'); });
   assert.throws(() => api.sendFeatureWindow(' ', {}), /세션 ID/);
 });
+
+test('상품·Cart·주문 API의 경로·본문·중복 키와 같은 출처 쿠키를 사용한다', async () => {
+  const calls = [], key = 'fcf3640b-d36f-4cf4-8ab0-93ce1a0867c5';
+  const api = createBackendApi('/backend', async (url, init) => { calls.push({ url, ...init }); return Response.json({}); });
+  await api.getProducts();
+  await api.getCart('session/1');
+  await api.addCartItem('session/1', { product_id: 'americano', temperature: 'iced', quantity: 2, expected_version: 0 }, key);
+  await api.updateCartItem('session/1', 'item/1', { quantity: 3, expected_version: 1 }, key);
+  await api.deleteCartItem('session/1', 'item/1', 2, key);
+  await api.createOrder('session/1', { expected_version: 3 }, key);
+  assert.deepEqual(calls.map(call => [call.method, call.url]), [
+    ['GET', '/backend/api/v1/products'], ['GET', '/backend/api/v1/sessions/session%2F1/cart'],
+    ['POST', '/backend/api/v1/sessions/session%2F1/cart/items'],
+    ['PATCH', '/backend/api/v1/sessions/session%2F1/cart/items/item%2F1'],
+    ['DELETE', '/backend/api/v1/sessions/session%2F1/cart/items/item%2F1?expected_version=2'],
+    ['POST', '/backend/api/v1/sessions/session%2F1/orders'],
+  ]);
+  assert(calls.every(call => call.credentials === 'same-origin'));
+  assert(calls.slice(2).every(call => call.headers['Idempotency-Key'] === key));
+  assert.equal(calls[4].body, undefined);
+  assert.equal(calls[4].headers['Content-Type'], undefined);
+  assert.deepEqual(JSON.parse(calls[5].body), { expected_version: 3 });
+});
+
+test('처리 중 중복의 오류 본문과 Retry-After를 보존한다', async () => {
+  // 처리 중 오류 코드는 합의 전이며 클라이언트는 서버 본문과 간격을 보존합니다.
+  const body = { code: 'pending_example', detail: '처리 중', cart: null };
+  const api = createBackendApi('', async () => Response.json(body, { status: 409, headers: { 'Retry-After': '1' } }));
+  await assert.rejects(api.createOrder('session-1', { expected_version: 1 }, 'key'), error => {
+    assert.equal(error.status, 409);
+    assert.equal(error.retryAfterSeconds, 1);
+    assert.deepEqual(error.body, body);
+    return true;
+  });
+});
