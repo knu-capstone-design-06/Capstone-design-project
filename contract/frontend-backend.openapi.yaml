@@ -3,8 +3,6 @@ info:
   title: Frontend ↔ Backend API
   version: 0.3.0
   x-order-api-status: draft
-  x-status-checked-at: "2026-10-10"
-  x-backend-reference: "origin/main ff79f1a (PR #26); merged into feat/frontend on 2026-10-10"
   description: |
     React 키오스크(frontend)와 FastAPI backend 사이의 API 명세입니다.
     frontend는 backend와만 통신합니다. (AGENTS.md 4장)
