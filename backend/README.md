@@ -52,7 +52,7 @@ API 문서: http://127.0.0.1:8000/docs
 
 ## Docker Compose
 
-현재 `main`의 루트 Compose에는 백엔드와 AI 서버가 포함돼 있습니다. Docker 엔진을 실행한 뒤 저장소 루트에서 시작합니다. 세 서비스 통합 구성은 [PR #24](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/24)에서 검토 중입니다.
+현재 `main`의 루트 Compose에는 백엔드와 AI 서버가 포함돼 있습니다. Docker 엔진을 실행한 뒤 저장소 루트에서 시작합니다. 프론트엔드 서비스는 [PR #25](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/25)에서 같은 Compose에 추가됐습니다.
 
 ```powershell
 docker compose up --build

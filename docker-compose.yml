@@ -1,5 +1,5 @@
 # backend와 ai-server를 함께 띄웁니다. ai-server는 Docker 내부 네트워크에서만 접근합니다.
-# frontend는 실행할 앱이 준비되면 추가합니다.
+# frontend는 127.0.0.1:8080에서 화면을 제공하고 /backend/ 요청을 backend로 전달합니다.
 services:
   frontend:
     build: ./frontend

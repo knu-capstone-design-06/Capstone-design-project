@@ -356,7 +356,7 @@ Capstone-design/
 
 ## 실행 안내
 
-프론트엔드 샘플 앱은 로컬 개발 서버로 실행합니다. 루트 `docker-compose.yml`에는 백엔드와 AI 서버 두 서비스만 포함돼 있습니다.
+프론트엔드 샘플 앱은 로컬 개발 서버나 루트 Compose로 실행합니다. 루트 `docker-compose.yml`에는 프론트엔드, 백엔드, AI 서버 세 서비스가 포함돼 있습니다.
 
 서비스별 상세 안내는 [`frontend/README.md`](frontend/README.md), [`backend/README.md`](backend/README.md), [`ai-server/README.md`](ai-server/README.md)를 참고합니다.
 
@@ -388,12 +388,12 @@ Compose 이미지에는 `backend/.env`를 복사하지 않으며 현재 Compose�
 
 두 서버 연결의 기존 검증 기록은 [PR #14](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/14)에 있습니다. 2026-10-07 문서 정리에서는 Docker 빌드·기동·통합 테스트를 재실행하지 않았습니다.
 
-프론트엔드 샘플 앱은 Compose에 포함되지 않습니다. 백엔드의 `/api/v1/connectivity`, 세션 생성·특징 전송 API도 아직 미구현이므로, 현재 구성을 세 서비스의 전체 기능 연동 완료로 간주하지 않습니다.
+프론트엔드 샘플 앱도 Compose에 포함되며 설정상 http://127.0.0.1:8080 에서 화면을 제공합니다. 백엔드의 `/api/v1/connectivity`, 세션 생성·특징 전송 API도 아직 미구현이므로, 현재 구성을 세 서비스의 전체 기능 연동 완료로 간주하지 않습니다.
 
 - API 키와 DB 자격 증명은 저장소에 커밋하지 않습니다.
 - `.env.example`에는 실제 비밀값 없이 필요한 항목을 문서화합니다.
 - 서비스 간 연결 주소와 설정은 환경변수로 관리합니다.
-- 프론트엔드 컨테이너화와 전체 API 연동은 후속 작업입니다.
+- 프론트엔드 이미지 빌드와 세 서비스 통합 실행은 아직 확인하지 않았습니다. 전체 API 연동은 후속 작업입니다.
 
 ## 참고 자료
 - [Jev 공식 문서](https://docs.typesafe.ai/introduction)
