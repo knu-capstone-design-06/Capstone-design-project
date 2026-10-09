@@ -119,8 +119,9 @@ export class OrderController {
       const apiError = error instanceof ApiError ? error : null;
       const body = apiError && typeof apiError.body === 'object' && apiError.body !== null
         ? apiError.body as Partial<OrderApiError> : null;
+      const finalCodes: string[] = ['cart_version_conflict', 'price_changed', 'product_unavailable', 'quantity_limit_exceeded', 'empty_cart', 'idempotency_key_reused'];
       const uncertain = !apiError || apiError.status >= 500 || apiError.status === 429
-        || (apiError.status === 409 && apiError.retryAfterSeconds !== null);
+        || (apiError.status === 409 && apiError.retryAfterSeconds !== null && !finalCodes.includes(body?.code ?? ''));
       if (uncertain) {
         const seconds = apiError?.retryAfterSeconds ?? 0;
         const retryAt = Date.now() + seconds * 1000;
