@@ -319,6 +319,7 @@ Capstone-design/
 
 - [`contract/frontend-backend.openapi.yaml`](contract/frontend-backend.openapi.yaml): 프론트엔드 ↔ 백엔드 0.2.0. 기존 네 API 형식 유지 및 상품·장바구니·모의 주문 API 초안 추가
 - [`contract/backend-ai.openapi.yaml`](contract/backend-ai.openapi.yaml): 백엔드 ↔ AI 서버
+- [`contract/voice.openapi.yaml`](contract/voice.openapi.yaml): 프론트엔드 ↔ 백엔드 음성 요청 0.1.0. 팀 검토 전 제안
 
 신규 주문 API 6개는 `x-contract-status: draft`로 표시한 팀 검토용 명세입니다. 설계 이유·미정 정책은 [`docs/Product-Cart-Order-API-Draft.md`](docs/Product-Cart-Order-API-Draft.md)에 기록합니다. 명세 반영은 서버 구현이나 실제 주문·결제 연결 완료를 의미하지 않습니다. 팀 검토 후 프론트 호출 함수·타입·화면, 백엔드 라우터·서비스·저장소와 샘플 데이터를 함께 맞춥니다. 구체적인 담당자·일정은 팀에서 정하고 PR에 기록합니다.
 
