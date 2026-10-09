@@ -43,6 +43,7 @@ py -3.12 -m venv .venv
 ```
 
 - 결과 폴더: `app/modules/vision/runs/<입력 이름 또는 live>_<날짜>_<시각>/`(Git에 올라가지 않음). 시작과 끝에 콘솔에 나옵니다. 다른 곳에 두려면 `--out <폴더>`.
+- 카메라 실행 결과(`overlay.mp4` · `contact_sheet.png`)에는 찍힌 사람의 얼굴이 담깁니다. `runs/`는 Git(`.gitignore`)과 ai-server Docker 이미지(`ai-server/.dockerignore`)에서 빠지며, 결과를 옮기거나 보관할 때는 `AGENTS.md` §5의 데이터 규칙을 따릅니다.
 - 결과 파일: `observations.csv`(프레임마다 한 줄, 아래), `overlay.mp4`(점 · 선 + 값 칸), `contact_sheet.png`(고르게 뽑은 12장), `plot_observations.png` · `plot_quality_timing.png`, `timing.csv`(단계별 p50 · p95 · 최대 · 첫 프레임 ms), `meta.json`(입력 · 설정 · 모델 해시 · 환경 · 끝난 이유), `run.log`(단계별 기록 · 오류 전문).
 - 멈추기: `--show` 창에서 `q` · 창 닫기, 또는 콘솔에서 Ctrl+C. 그때까지 처리한 프레임이 저장됩니다. 창도 `--seconds`도 없이 카메라를 돌리면 멈추는 방법을 알려 주는 오류가 납니다.
 - 카메라 실행의 `overlay.mp4`는 실제로 처리한 초당 장수로 저장됩니다(`imageio-ffmpeg`가 있을 때 H.264로 바꾸면서; 없으면 MPEG-4 Part 2, 카메라가 알린 초당 장수). `imageio-ffmpeg`는 고정하지 않은 선택 패키지이고, 들어 있는 ffmpeg 실행 파일은 GPL입니다.
