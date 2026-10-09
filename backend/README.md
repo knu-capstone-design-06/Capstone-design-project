@@ -171,7 +171,7 @@ Invoke-RestMethod -Method Post "$base/api/v1/sessions/$($session.session_id)/fea
 프론트는 [상품·장바구니·주문 초안](../docs/Product-Cart-Order-API-Draft.md)에 맞춰 API 호출·응답 표시·수동 재시도를 준비했습니다. 상품·장바구니·주문 서버 API는 아직 구현 대기입니다. 프론트용 테스트 응답이 실제 서버 구현을 대신하지 않습니다.
 
 백엔드 담당자와 확인할 작업:
-
+- 요청 타임아웃은 우선 기존 15초를 유지하고 상수로 분리했습니다. 최종 시간과 시간 초과 후 처리 중 응답·재시도 정책은 백엔드 담당자와 협의하겠습니다.
 - 기존 `modules/sessions/`의 세션 ID를 사용해 상품 조회·Cart 조회/변경·모의 주문 연결
 - 서버 상품 ID·coffee/drink/food·iced/hot/푸드 null과 샘플 데이터 공급
 - 항목별 수량 한도, 서버 가격·옵션·판매 가능 여부·금액 계산 검증
