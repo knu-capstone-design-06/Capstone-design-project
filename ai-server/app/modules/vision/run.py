@@ -364,6 +364,7 @@ def _run(args, log, pinned) -> int:
     tile_idx = set(np.linspace(0, max(n_expected - 1, 0), args.tiles).round().astype(int).tolist())
 
     rows, tiles, last, writer = [], [], None, None
+    frame_shape = None   # the overlay video keeps the first frame's size, so a size change is an error
     overlay_tmp = os.path.join(args.out, "overlay_tmp.mp4")
     # Output-only costs, timed apart from the measured stages (ms_* in observations.csv).
     out_ms = {"compose": [], "video_write": [], "window": []}
@@ -376,6 +377,12 @@ def _run(args, log, pinned) -> int:
     t_run = time.perf_counter()
     try:
         for fr in frames:
+            shape = fr.image.shape[:2]
+            if frame_shape is None:
+                frame_shape = shape
+            elif shape != frame_shape:
+                raise ValueError(f"frame size changed within the input: {frame_shape[::-1]} -> {shape[::-1]} "
+                                 "(frames of one run must have one size)")
             phase = src.phase_of(fr.src_ref) if src.kind == "folder" else ""
             row, draw = obs.process(fr, source_kind=kind, syn_phase=phase)
             rows.append(row)
