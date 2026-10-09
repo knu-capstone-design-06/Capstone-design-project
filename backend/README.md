@@ -181,4 +181,3 @@ Invoke-RestMethod -Method Post "$base/api/v1/sessions/$($session.session_id)/fea
 
 복원·장기 보관·정밀 만료·동적 가격 변경은 첫 시연 후순위 방향입니다. 사용자와 검토한 방향이며 팀 전체 합의는 아직 확인되지 않았습니다. 세부 정책은 담당자가 결정·구현하고 계약에는 합의 후 반영합니다.
 
-이번 작업에서 이전에 추가했던 주문 Python 코드·테스트·환경 설정을 제거했고, backend 경로에는 이 Markdown 메모만 남겼습니다. 음성 연동·DB·서비스 의존성·Docker 설정은 변경하지 않습니다.
