@@ -360,7 +360,7 @@ Capstone-design/
 
 ## 실행 안내
 
-프론트엔드는 로컬 개발 서버로 실행합니다. 루트 `docker-compose.yml`에는 백엔드와 AI 서버 두 서비스만 포함돼 있습니다.
+프론트엔드는 로컬 개발 서버(`pnpm dev`)나 루트 `docker-compose.yml`의 `frontend` 서비스로 실행합니다. Compose에는 frontend·backend·ai-server 세 서비스가 있습니다.
 
 서비스별 상세 안내는 [`frontend/README.md`](frontend/README.md), [`backend/README.md`](backend/README.md), [`ai-server/README.md`](ai-server/README.md)를 참고합니다.
 
