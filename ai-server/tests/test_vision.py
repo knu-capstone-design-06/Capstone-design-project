@@ -184,5 +184,51 @@ class VisionHelperTests(unittest.TestCase):
         self.assertIsNone(effective_fps([1.0, 1.0]))
 
 
+@unittest.skipUnless(HAS_NUMPY_CV2, SKIP_REASON)
+class SidecarTimesTests(unittest.TestCase):
+    """Frame times of a recorded clip come from <clip>.times.csv only when that file is complete and in order."""
+
+    def _clip_with_sidecar(self, *lines):
+        import tempfile
+
+        from app.modules.vision.sources import TIMES_SUFFIX
+
+        clip = os.path.join(tempfile.mkdtemp(), "clip.mp4")   # read_times opens the sidecar only
+        with open(clip + TIMES_SUFFIX, "w", encoding="utf-8", newline="") as f:
+            f.write("\n".join(lines) + "\n")
+        return clip
+
+    def test_complete_sidecar_gives_the_times_in_frame_order(self):
+        import tempfile
+
+        from app.modules.vision.sources import read_times
+
+        clip = self._clip_with_sidecar("frame,t_s", "0,0.0", "1,0.05", "2,0.1")
+        self.assertEqual(read_times(clip), [0.0, 0.05, 0.1])
+        self.assertIsNone(read_times(os.path.join(tempfile.mkdtemp(), "no_sidecar.mp4")))
+
+    def test_incomplete_or_disordered_sidecar_is_refused(self):
+        from app.modules.vision.sources import read_times
+
+        for lines in (("frame,t_s",),                          # header only
+                      ("frame,t_s", "0,0.0", "2,0.1"),         # frame 1 missing
+                      ("frame,t_s", "0,0.0", "1,-0.1"),        # time goes backwards
+                      ("frame,t_s", "0,0.0", "1,nan"),         # not a finite time
+                      ("t,x", "0,0.0")):                       # wrong columns
+            with self.assertRaises(ValueError, msg=repr(lines)):
+                read_times(self._clip_with_sidecar(*lines))
+
+    def test_video_frame_beyond_the_sidecar_is_an_error(self):
+        from app.modules.vision.sources import VideoFileSource
+
+        src = VideoFileSource.__new__(VideoFileSource)   # no video file is opened
+        src.path, src.src_fps, src.times = "clip.mp4", 30.0, [0.0, 0.05]
+        self.assertEqual(src._t(1), 0.05)
+        with self.assertRaises(ValueError):
+            src._t(2)
+        src.times = None
+        self.assertAlmostEqual(src._t(3), 0.1)             # no sidecar: index / container fps
+
+
 if __name__ == "__main__":
     unittest.main()

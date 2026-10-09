@@ -10,7 +10,9 @@ doc 28 = the vision design note kept outside this repository (see inference.py).
 """
 from __future__ import annotations
 
+import csv
 import json
+import math
 import os
 import time
 from dataclasses import dataclass
@@ -45,13 +47,31 @@ TIMES_SUFFIX = ".times.csv"   # optional sidecar of a recorded clip: a header li
 
 
 def read_times(video_path: str) -> list[float] | None:
-    """Frame times (s) from the sidecar of a recorded clip, or None when there is no sidecar."""
+    """Frame times (s) from the sidecar of a recorded clip, or None when there is no sidecar.
+
+    The sidecar is trusted only when it is complete: frame numbers 0, 1, 2, ... in order and finite, non-decreasing
+    times. Anything else raises, because a time silently taken from the wrong frame would corrupt every
+    continuity and frame-rate value downstream."""
     p = video_path + TIMES_SUFFIX
     if not os.path.isfile(p):
         return None
-    with open(p, encoding="utf-8") as f:
-        rows = [line.strip().split(",") for line in f if line.strip()]
-    return [float(r[1]) for r in rows[1:]]   # first line is the header
+    times: list[float] = []
+    with open(p, encoding="utf-8-sig", newline="") as f:
+        for expected, row in enumerate(csv.DictReader(f)):
+            try:
+                frame, t_s = int(row["frame"]), float(row["t_s"])
+            except (KeyError, TypeError, ValueError) as e:
+                raise ValueError(f"{p}: expected columns 'frame,t_s' with numbers (line {expected + 2})") from e
+            if frame != expected:
+                raise ValueError(f"{p}: frame numbers must run 0, 1, 2, ... (got {frame} at line {expected + 2})")
+            if not math.isfinite(t_s):
+                raise ValueError(f"{p}: time of frame {frame} is not a finite number")
+            if times and t_s < times[-1]:
+                raise ValueError(f"{p}: time of frame {frame} goes backwards ({t_s} < {times[-1]})")
+            times.append(t_s)
+    if not times:
+        raise ValueError(f"{p}: the sidecar has no frame times")
+    return times
 
 
 def effective_fps(times) -> float | None:
@@ -96,9 +116,11 @@ class VideoFileSource:
         self.manifest = None
 
     def _t(self, src_i: int) -> float:
-        if self.times is not None and src_i < len(self.times):
-            return self.times[src_i]
-        return src_i / self.src_fps
+        if self.times is None:
+            return src_i / self.src_fps
+        if src_i >= len(self.times):
+            raise ValueError(f"{self.path + TIMES_SUFFIX}: no time for frame {src_i} ({len(self.times)} times listed)")
+        return self.times[src_i]
 
     def expected_frames(self) -> int:
         return (self.src_frame_count + self.step - 1) // self.step
