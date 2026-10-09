@@ -1,6 +1,6 @@
 # 백엔드 초기 실행 환경
 
-Python 3.12 기반 FastAPI 백엔드입니다. 상태 확인, 환경변수·CORS 설정 및 내부 AI 서버 호출 클라이언트를 포함합니다. DB·세션·프론트엔드 요청 처리는 후속 작업이며, `/health` 성공이 DB나 AI 연결의 성공을 뜻하지 않습니다.
+Python 3.12 기반 FastAPI 백엔드입니다. 상태 확인, AI 연결 확인, 임시 세션 생성과 특징 전송 API를 제공합니다. DB·주문·인증은 아직 연결하지 않았으며, `/health` 성공이 DB나 AI 연결의 성공을 뜻하지 않습니다.
 
 ## 로컬 실행 (PowerShell)
 
@@ -46,13 +46,13 @@ API 문서: http://127.0.0.1:8000/docs
 | AI_SERVER_URL | http://ai-server:8001 | AI 서버 HTTP(S) 출처 |
 | AI_SERVER_TIMEOUT_SECONDS | 2 | 양의 유한한 초 단위 숫자 |
 
-예: `CORS_ORIGINS=["http://localhost:5173"]`. 실제 프론트 출처에 맞춰 설정하며 경로나 와일드카드는 허용하지 않습니다. 현재 API는 GET만 지원하므로 CORS도 GET만 허용합니다. CORS는 사용자 인증 기능이 아닙니다.
+예: `CORS_ORIGINS=["http://localhost:5173","http://127.0.0.1:5173"]`. 실제 프론트 출처에 맞춰 설정하며 경로나 와일드카드는 허용하지 않습니다. CORS는 GET·POST를 허용합니다. 기본 허용 출처는 localhost이므로 127.0.0.1에서 직접 교차 출처 요청을 보낼 때는 위 설정이 필요합니다. CORS는 사용자 인증 기능이 아닙니다.
 
 `.env`에는 실제 비밀값을 넣을 수 있지만 Git에 커밋하지 않습니다. `.env.example`은 항목 설명만 공유합니다. DB·외부 API 설정은 실제 연동 시 추가합니다.
 
 ## Docker Compose
 
-루트 Compose에 백엔드와 AI 서버가 포함돼 있습니다. Docker 엔진을 실행한 뒤 저장소 루트에서 두 서비스를 함께 시작합니다.
+현재 `main`의 루트 Compose에는 백엔드와 AI 서버가 포함돼 있습니다. Docker 엔진을 실행한 뒤 저장소 루트에서 시작합니다. 세 서비스 통합 구성은 [PR #24](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/24)에서 검토 중입니다.
 
 ```powershell
 docker compose up --build
@@ -60,7 +60,7 @@ docker compose up --build
 
 백엔드는 `http://127.0.0.1:8000`, AI 서버는 Docker 내부의 `http://ai-server:8001`을 사용합니다. Compose에는 `env_file`이 없고 이미지에도 `.env`가 없으므로, 로컬 직접 실행과 달리 `backend/.env`는 읽지 않습니다. 필요한 값은 실행 환경에서 컨테이너에 주입합니다.
 
-기존 두 서버 실행·통신 검증 기록은 [PR #14](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/14)를 참고합니다. 2026-10-07 문서 정리에서는 Docker 테스트를 재실행하지 않았습니다. 프론트엔드는 Compose에 포함되지 않으며 세 서비스 전체 연동은 후속 작업입니다.
+기존 두 서버 실행·통신 검증 기록은 [PR #14](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/14)를 참고합니다. 2026-10-07에는 별도 백엔드 테스트 컨테이너에서 실행 중인 AI 서버와 새 연결 API를 실제 호출해 확인했습니다. 주문 화면의 실제 API 연동은 후속 작업입니다.
 
 ## Backend → AI 내부 연동
 
@@ -70,8 +70,7 @@ docker compose up --build
 서버 시작이나 백엔드 `/health` 호출 시에는 AI 서버 접속을 시도하지 않습니다.
 
 `/v1/analyze`는 **AI 서버의 엔드포인트**입니다. 백엔드에 동일 경로를 추가하지
-않았습니다. 프론트엔드용 라우터와 세션 생성·인증이 아직 없으므로 실제 사용자
-요청에서 AI 분석을 호출하는 흐름은 `contract/frontend-backend.openapi.yaml`에 맞춰 후속 구현해야 합니다.
+않았습니다. 프론트엔드용 특징 전송 라우터가 임시 세션을 확인한 뒤 이 클라이언트를 호출합니다. 사용자 인증은 아직 구현하지 않았습니다.
 
 서비스 계층에서 사용할 패턴:
 
@@ -88,7 +87,7 @@ async def analyze_window(ai: AiServerClient, window: AnalyzeRequest):
 ```
 
 - `session_id`는 백엔드가 관리하는 세션 값으로 채워 전달합니다. 이 클라이언트는
-  세션을 생성하거나 인증하지 않습니다.
+  세션을 생성하거나 인증하지 않습니다. 세션 생성과 존재 확인은 `modules/sessions/`에서 처리합니다.
 - 기본 2초는 HTTP I/O 제한과 전체 호출 제한에 모두 적용합니다. 자동 재시도는 없습니다.
 - 연결 오류, 타임아웃, HTTP 오류(422 포함), 잘못된 JSON·응답 구조, 세션 불일치는
   `None`을 반환합니다. 정상 상태 점수를 임의로 만들어 반환하지 않습니다.
@@ -100,10 +99,9 @@ async def analyze_window(ai: AiServerClient, window: AnalyzeRequest):
 - `TouchFeatures`, `VisionFeatures`, `StateScores`의 현재 형식은
   `contract/frontend-backend.openapi.yaml`(0.2.0, 기존 0.1.0 형식 유지)에 정의돼 있습니다. 다만 비전
   세부 특징과 터치 통계 계산 기준에는 팀 검토 항목이 남아 있습니다.
-  백엔드 구현은 아직 JSON 객체로 전달·수신하며 내부 필드, 점수 범위, 5개 상태
-  키를 검증하지 않습니다. 예시의 `hesitation`을 다른 이름으로 변환하지 않습니다.
-  `ai_schemas.py`의 임시 `JsonObject`를 계약에 맞는 구체 모델로 교체하는 작업이 남아 있습니다.
-  따라서 현재 결과를 검증된 상태 점수로 간주해 실제 UI 결정에 사용하면 안 됩니다.
+  연결 API는 `modules/sessions/schemas.py`에서 입력 필드와 반환 점수 5개·범위·타입을 검증합니다.
+  내부 전송 클라이언트의 `JsonObject`는 그대로 유지하므로 직접 사용하는 다른 호출자는 별도의 의미 검증이 필요합니다.
+  현재 AI는 dummy 모델이고 지원 선택 기준도 미정이므로 검증된 점수라도 자동 UI 결정에는 사용하지 않습니다.
 
 `ai-server` 호스트 이름은 동일 Docker 네트워크에서 해석됩니다. 루트 Compose는
 AI 서버의 호스트 포트를 공개하지 않습니다. 두 서버를
@@ -116,10 +114,46 @@ MockTransport를 사용하므로 실제 AI 서버·DB·Docker가 필요하지 �
 
 ```powershell
 python -m unittest discover -s tests -v
+python -m unittest discover -s app/modules -p 'test_*.py' -v
 ```
 
-정상 요청·응답, vision 생략/null, 판단 불가, HTTP 오류, 연결 실패, 전체 타임아웃,
-잘못된 응답·세션 불일치, 호출 취소, health 응답 및 연결 종료를 확인합니다.
+기존 AI 클라이언트 테스트는 정상 요청·응답, vision 생략/null, 판단 불가, HTTP 오류,
+연결 실패, 전체 타임아웃, 잘못된 응답·세션 불일치, 호출 취소, health 응답과 연결 종료를 확인합니다.
+새 모듈 테스트는 세션 생성·격리, 입력 검증, AI 점수 검증, 연결 장애와 측정 불가의 구분,
+POST CORS를 확인합니다.
+
+## 연결 API (contract 0.1.0)
+
+| 요청 | 결과 |
+| --- | --- |
+| GET /api/v1/connectivity | 200, backend=ok 및 ai_server=ok 또는 unreachable |
+| POST /api/v1/sessions | 201, session_id와 UTC started_at |
+| POST /api/v1/sessions/{session_id}/features | 200, AI 점수 또는 판단 없는 응답 |
+
+2026-10-07 사용자와 확인한 연결 검증 범위입니다. 세션은 단일 프로세스 메모리에만 보관하며 재시작하면 초기화됩니다.
+세션 만료·정리·영속 저장은 아직 없으므로 장기 운영 또는 여러 worker/인스턴스에 사용하지 않습니다.
+터치 원시 로그의 통계 계산과 비전 추출은 구현하지 않고 계약에 정의된 특징만 전달합니다.
+AI 측정 불가는 ai_available=true, states=null입니다. 통신 오류·타임아웃·잘못된 AI 응답은
+ai_available=false, states=null, model_version=null입니다. 모든 경우 support는
+`{"preset":"none","requires_confirmation":false,"decided_by":"rule_placeholder"}`로 화면을 유지합니다.
+없는 세션은 404 `{"detail":"session not found"}`, 잘못된 입력은 422를 반환합니다.
+
+PowerShell에서 실행할 예시(백엔드 실행 후):
+
+```powershell
+$base = 'http://127.0.0.1:8000'
+Invoke-RestMethod "$base/api/v1/connectivity"
+$session = Invoke-RestMethod -Method Post "$base/api/v1/sessions"
+$body = @{
+    screen_id = 'menu_list'
+    window_start = '2026-10-01T10:00:00Z'
+    window_end = '2026-10-01T10:00:03Z'
+    touch = @{ tap_count=6; miss_tap_count=3; repeat_tap_count=2; back_count=0; dwell_ms=3000 }
+} | ConvertTo-Json -Depth 4
+Invoke-RestMethod -Method Post "$base/api/v1/sessions/$($session.session_id)/features" -ContentType 'application/json' -Body $body
+```
+
+프론트엔드의 API 호출·화면 반영 코드는 이번 변경에 포함하지 않습니다.
 
 ## 참고
 
