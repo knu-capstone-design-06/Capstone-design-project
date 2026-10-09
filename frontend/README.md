@@ -109,7 +109,7 @@ import { backendApi } from './src/shared/api/index.ts';
 const health = await backendApi.getBackendHealth();
 ```
 
-최신 원격 main에는 `/health`, 연결 확인, 임시 세션 생성, 특징 전송이 구현돼 있습니다. 상품·장바구니·모의 주문은 아직 구현 전이며 현재 프론트 브랜치에 main의 연결·세션 구현을 병합했습니다. 공개 환경의 세션 접근·인증·쿠키·CORS 정책은 백엔드 담당자와 합의할 사항입니다. 프론트 작업에서 서버 설정을 변경하지 않습니다.
+백엔드에는 `/health`, 연결 확인, 임시 세션 생성, 특징 전송이 구현돼 있습니다. 상품·장바구니·모의 주문은 아직 구현 전입니다. 공개 환경의 세션 접근·인증·쿠키·CORS 정책은 백엔드 담당자와 합의할 사항입니다. 프론트 작업에서 서버 설정을 변경하지 않습니다.
 
 로컬 `pnpm dev`도 `/backend/`를 `http://127.0.0.1:8000`으로 전달합니다. 다른 백엔드에 연결하려면 `BACKEND_URL=http://127.0.0.1:8000 pnpm dev`처럼 실행 환경에서 주소를 전달합니다. Docker에서는 Compose의 frontend `BACKEND_URL` 환경변수로 대상 주소를 설정합니다. 주소는 브라우저에 Docker 서비스 이름을 노출하지 않고 프록시에서 사용합니다.
 
