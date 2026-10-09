@@ -18,6 +18,7 @@ matplotlib.use("Agg")   # headless: never open a window
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import font_manager
+from matplotlib.ticker import MaxNLocator
 from mediapipe.tasks.python.vision.face_landmarker import FaceLandmarksConnections
 from mediapipe.tasks.python.vision.pose_landmarker import PoseLandmarksConnections
 from PIL import Image, ImageDraw, ImageFont
@@ -362,7 +363,7 @@ def plot_observations(rows, title, out_path, phase_labels):
     axes[1].step(t, counts, where="mid", color=SERIES[0])
     axes[1].set_title("얼굴 수 (Face Detector 결과 개수)", loc="left", fontsize=10, color=INK)
     axes[1].set_ylim(-0.3, max(1.0, float(np.nanmax(counts))) + 0.3)
-    axes[1].yaxis.set_major_locator(matplotlib.ticker.MaxNLocator(integer=True))
+    axes[1].yaxis.set_major_locator(MaxNLocator(integer=True))
     _lines(axes[2], t, [(_col(rows, "iod_frac_w"), "눈 사이 거리 ÷ 화면 폭")], "눈 사이 거리 ÷ 화면 폭 (얼굴 못 본 프레임은 빈칸)")
     _lines(axes[3], t, [(_col(rows, "iod_ratio_start"), "시작 대비")],
            "눈 사이 거리: 세션 시작(첫 얼굴 프레임) 대비 비율 — 1 = 시작 때와 같음")

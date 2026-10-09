@@ -45,7 +45,7 @@ import cv2
 import numpy as np
 
 from app.modules.vision import render
-from app.modules.vision.features import COLUMNS, Observer
+from app.modules.vision.features import COLUMNS, SEEN, Observer
 from app.inference.vision import (FACE_DETECTOR_MODELS, FACE_LANDMARKER_MODEL, POSE_LANDMARKER_MODEL,
                                           MediaPipeModels, environment)
 from app.modules.vision.sources import LiveCameraSource, effective_fps, open_source
@@ -528,7 +528,7 @@ def _run(args, log, pinned) -> int:
         return meta
 
     meta = _step(log, failed, "meta.json", _meta)
-    seen = sum(r["face_state"] == "보임" for r in rows)
+    seen = sum(r["face_state"] == SEEN for r in rows)
     line = f"{src.name}: {len(rows)} frames ({n_expected} expected), face seen {seen}/{len(rows)}"
     if stats:
         tot = next(s for s in stats if s["stage"] == "ms_total")
