@@ -9,7 +9,7 @@
 | `blaze_face_short_range.tflite` | 229,746 | `b4578f35…380b0152f` | https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite |
 | `blaze_face_full_range.tflite` | 1,083,786 | `3698b18f…aed2b181b` | https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_full_range/float16/1/blaze_face_full_range.tflite |
 
-- 쓰는 곳: `observe.py` — 얼굴 점(Face Landmarker), 얼굴 검출(기본 short-range, `--face-detector full_range`면 full-range), 몸 점(Pose Landmarker lite). full-range 검출기는 mediapipe 0.10.33부터 돕니다.
+- 쓰는 곳: `inference.py` — 얼굴 점(Face Landmarker), 얼굴 검출(기본 short-range, `--face-detector full_range`면 full-range), 몸 점(Pose Landmarker lite). full-range 검출기는 mediapipe 0.10.33부터 돕니다.
 - 전체 해시는 `download_models.py`에 있고, 실행할 때마다 `runs/<이름>/meta.json`의 `models`에도 적힙니다.
 
 ## 라이선스
