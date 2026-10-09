@@ -19,6 +19,16 @@ import cv2
 import numpy as np
 
 NAN = float("nan")
+
+
+def _ratio(value: float, reference: float) -> float:
+    """value / reference, or NaN when the ratio has no meaning (zero or non-finite reference or value).
+    No small-denominator cut-off: that would be an arbitrary threshold (doc 28 section 0)."""
+    if not (math.isfinite(value) and math.isfinite(reference)) or reference <= 0.0:
+        return NAN
+    return value / reference
+
+
 SEEN, NOT_SEEN = "보임", "못 봄"   # doc 28 sections 1, 3: an empty result is '못 봄' (not seen), never 'no person'
 
 # --- landmark indices ---------------------------------------------------------------------------------------
@@ -184,14 +194,14 @@ class Observer:
             yaw, pitch, roll = head_angles_deg(inf.face_matrix) if inf.face_matrix is not None else (NAN, NAN, NAN)
             if self.ref is None:      # session-start reference = first frame of the session with a face
                 self.ref = {"iod": iod, "yaw": yaw, "pitch": pitch, "t_s": t_s}
-            row.update(iod_px=iod, iod_frac_w=iod / W, iod_ratio_start=iod / self.ref["iod"],
+            row.update(iod_px=iod, iod_frac_w=iod / W, iod_ratio_start=_ratio(iod, self.ref["iod"]),
                        yaw_deg=yaw, pitch_deg=pitch, roll_deg=roll,
                        dyaw_start_deg=yaw - self.ref["yaw"], dpitch_start_deg=pitch - self.ref["pitch"],
                        face_cx=cx, face_cy=cy, face_y_max=y1)
             if self.prev_face is not None:   # continuity of position and size since the last frame with a face
                 p = self.prev_face
                 row["face_shift"] = math.hypot((cx - p["cx"]) * W, (cy - p["cy"]) * H) / W
-                row["iod_step"] = iod / p["iod"]
+                row["iod_step"] = _ratio(iod, p["iod"])
             self.prev_face = {"cx": cx, "cy": cy, "iod": iod}
             draw.update(face_px=px, eye_a=eye_a, eye_b=eye_b, face_center_px=(cx * W, cy * H),
                         face_box_px=(x0 * W, y0 * H, x1 * W, y1 * H))

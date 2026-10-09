@@ -20,6 +20,17 @@ HAS_MEDIAPIPE = HAS_NUMPY_CV2 and importlib.util.find_spec("mediapipe") is not N
 SKIP_REASON = "vision packages not installed (pip install -r app/modules/vision/requirements.txt)"
 
 
+def _fake_face(eye_gap):
+    """478 face points at the centre; the eye corners put the two eye centres eye_gap (fraction of the width) apart."""
+    import numpy as np
+
+    pts = np.full((478, 2), 0.5)
+    half = eye_gap / 2
+    pts[33], pts[133] = (0.5 - half - 0.02, 0.4), (0.5 - half + 0.02, 0.4)
+    pts[362], pts[263] = (0.5 + half - 0.02, 0.4), (0.5 + half + 0.02, 0.4)
+    return pts
+
+
 @unittest.skipUnless(HAS_NUMPY_CV2, SKIP_REASON)
 class FeaturesOnFakeInferenceTests(unittest.TestCase):
     def test_features_layer_runs_on_fake_inference_outputs_without_mediapipe(self):
@@ -90,6 +101,34 @@ class FeaturesOnFakeInferenceTests(unittest.TestCase):
         self.assertEqual(r0["lapvar_frame"], 0.0)
         self.assertEqual(r0["bright_face"], 100.0)
         self.assertGreaterEqual(r0["ms_total"], r0["ms_features"])
+
+    def test_eye_distance_ratios_are_blank_when_the_reference_distance_is_zero(self):
+        from types import SimpleNamespace
+
+        import numpy as np
+
+        from app.modules.vision.features import SEEN, Observer
+        from app.modules.vision.sources import Frame
+
+        ms = {"ms_prep": 0.0, "ms_face_lm": 0.0, "ms_face_det": 0.0, "ms_pose": 0.0}
+        outputs = [   # first face with the two eye centres at the same point (distance 0), then a normal face
+            SimpleNamespace(face_points=_fake_face(0.0), face_matrix=np.eye(4), detections=[], pose=None, ms=ms),
+            SimpleNamespace(face_points=_fake_face(0.10), face_matrix=np.eye(4), detections=[], pose=None, ms=ms),
+        ]
+
+        class FakeModels:
+            def infer(self, frame):
+                return outputs[frame.index]
+
+        observer = Observer(FakeModels())
+        image = np.full((480, 640, 3), 100, np.uint8)
+        r0, r1 = [observer.process(Frame(i, i * 0.5, image, str(i), 0.0))[0] for i in range(2)]
+        self.assertEqual(r0["iod_px"], 0.0)
+        self.assertTrue(math.isnan(r0["iod_ratio_start"]))       # 0 / 0 has no meaning: blank, not an error
+        self.assertTrue(math.isnan(r1["iod_ratio_start"]))       # the session reference distance is 0
+        self.assertTrue(math.isnan(r1["iod_step"]))
+        self.assertEqual((r0["face_state"], r1["face_state"]), (SEEN, SEEN))   # the other observations go on
+        self.assertAlmostEqual(r1["face_cx"], 0.5)
 
 
 @unittest.skipUnless(HAS_MEDIAPIPE, SKIP_REASON)
