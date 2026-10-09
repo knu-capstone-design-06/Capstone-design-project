@@ -46,7 +46,7 @@ import numpy as np
 
 from app.modules.vision import render
 from app.modules.vision.features import COLUMNS, Observer
-from app.modules.vision.inference import (FACE_DETECTOR_MODELS, FACE_LANDMARKER_MODEL, POSE_LANDMARKER_MODEL,
+from app.inference.vision import (FACE_DETECTOR_MODELS, FACE_LANDMARKER_MODEL, POSE_LANDMARKER_MODEL,
                                           MediaPipeModels, environment)
 from app.modules.vision.sources import LiveCameraSource, effective_fps, open_source
 

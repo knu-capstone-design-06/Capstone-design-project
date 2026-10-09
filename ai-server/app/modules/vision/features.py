@@ -8,7 +8,7 @@ Source shorthands used in the comments:
   doc 28, doc 27 = the vision owner's design notes 28_mediapipe_limits_and_reach.md (sections 0-8) and
            27_before_after_table.md (section 1-4, the vision observations), kept in the project workspace
            (01_requirements/research/), not in this repository; [C5] [D17] are entries of doc 28's source list
-  [D1] [D2] [D3] = the MediaPipe Face Landmarker / Face Detector / Pose Landmarker docs (URLs in inference.py)
+  [D1] [D2] [D3] = the MediaPipe Face Landmarker / Face Detector / Pose Landmarker docs (URLs in app/inference/vision.py)
 """
 from __future__ import annotations
 

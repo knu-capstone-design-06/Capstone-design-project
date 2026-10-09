@@ -138,7 +138,7 @@ class InferenceOnBlankFramesTests(unittest.TestCase):
         import numpy as np
 
         from app.modules.vision.features import COLUMNS, NOT_SEEN, Observer
-        from app.modules.vision.inference import (FACE_DETECTOR_MODEL, FACE_LANDMARKER_MODEL, POSE_LANDMARKER_MODEL,
+        from app.inference.vision import (FACE_DETECTOR_MODEL, FACE_LANDMARKER_MODEL, POSE_LANDMARKER_MODEL,
                                                   MediaPipeModels)
         from app.modules.vision.sources import Frame
 
