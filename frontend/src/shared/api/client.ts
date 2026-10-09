@@ -12,6 +12,8 @@ import type {
   ProductList,
 } from './types.ts';
 
+const ORDER_REQUEST_TIMEOUT_MS = 15_000;
+
 export class ApiError extends Error {
   readonly status: number;
   readonly body: unknown;
@@ -52,7 +54,7 @@ export function createBackendApi(baseUrl: string, fetcher: typeof fetch = fetch)
   }
 
   function orderRequest<T>(path: string, init: RequestInit): Promise<T> {
-    const timeout = AbortSignal.timeout(15_000);
+    const timeout = AbortSignal.timeout(ORDER_REQUEST_TIMEOUT_MS);
     return request(path, {
       ...init, credentials: 'same-origin',
       signal: init.signal ? AbortSignal.any([init.signal, timeout]) : timeout,
