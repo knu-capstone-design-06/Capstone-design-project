@@ -7,8 +7,9 @@
 | --- | --- | --- |
 | `kiosk.sessions` | `session_id text` 기본 키, `started_at timestamptz` 필수 | 백엔드가 발급한 세션 ID와 생성 시각 |
 
-`kiosk`는 Supabase Data API에 노출하지 않는 비공개 스키마입니다. `anon`과
-`authenticated` 역할에는 접근 권한을 부여하지 않았고 테이블 RLS를 켰습니다.
+`kiosk`의 Data API 노출 여부는 Supabase 대시보드 설정으로 관리하며 이 SQL 파일에는 포함되지 않습니다.
+`anon`과 `authenticated` 역할에는 스키마·테이블 접근 권한을 부여하지 않았고 테이블 RLS를 켰습니다.
+따라서 노출 목록에 들어가더라도 이 브라우저 역할로는 읽을 수 없습니다.
 브라우저가 DB에 직접 접속하지 않으며, 이후 백엔드의 서버 측 DB 연결을 통해서만 사용합니다.
 
 현재 백엔드의 세션 저장소는 메모리 기반입니다. 이 테이블을 실제로 사용하도록
