@@ -95,7 +95,7 @@ flowchart TD
 
 AI 서버는 판단 결과를 반환하고, 백엔드가 지원을 선택해 적용 조건을 검증합니다. 음성 명령에 따른 주문 변경도 백엔드가 검증합니다. 프론트엔드는 실제 UI 적용 결과를 다시 전달합니다.
 
-비전 추론은 AI 서버에서 실행하는 구성을 기준으로 합니다. 카메라 영상을 AI 서버로 전달하는 방식은 `contract/`에서 정합니다. 지금 명세(0.1.0)는 프론트엔드가 터치 통계와 비전 특징을 보내는 형식입니다. 비전 학습 코드의 최종 저장 위치는 팀에서 별도로 정합니다.
+비전 추론은 AI 서버에서 실행하는 구성을 기준으로 합니다. 카메라 영상을 AI 서버로 전달하는 방식은 `contract/`에서 정합니다. 프론트엔드 ↔ 백엔드 명세 0.2.0은 기존 0.1.0의 터치 통계·비전 특징 전송 형식을 유지합니다. 비전 학습 코드의 최종 저장 위치는 팀에서 별도로 정합니다.
 
 ## 데이터 처리 흐름
 
@@ -315,8 +315,10 @@ Capstone-design/
 
 현재 명세 파일:
 
-- [`contract/frontend-backend.openapi.yaml`](contract/frontend-backend.openapi.yaml): 프론트엔드 ↔ 백엔드
+- [`contract/frontend-backend.openapi.yaml`](contract/frontend-backend.openapi.yaml): 프론트엔드 ↔ 백엔드 0.2.0. 기존 네 API 형식 유지 및 상품·장바구니·모의 주문 API 초안 추가
 - [`contract/backend-ai.openapi.yaml`](contract/backend-ai.openapi.yaml): 백엔드 ↔ AI 서버
+
+신규 주문 API 6개는 `x-contract-status: draft`로 표시한 팀 검토용 명세입니다. 설계 이유·미정 정책은 [`docs/Product-Cart-Order-API-Draft.md`](docs/Product-Cart-Order-API-Draft.md)에 기록합니다. 명세 반영은 서버 구현이나 실제 주문·결제 연결 완료를 의미하지 않습니다. 팀 검토 후 프론트 호출 함수·타입·화면, 백엔드 라우터·서비스·저장소와 샘플 데이터를 함께 맞춥니다. 구체적인 담당자·일정은 팀에서 정하고 PR에 기록합니다.
 
 ## 역할 분담
 
