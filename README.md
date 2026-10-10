@@ -392,7 +392,7 @@ Compose 이미지에는 `backend/.env`를 복사하지 않으며 현재 Compose�
 
 두 서버 연결의 기존 검증 기록은 [PR #14](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/14)에 있습니다. 2026-10-07 문서 정리에서는 Docker 빌드·기동·통합 테스트를 재실행하지 않았습니다.
 
-프론트엔드는 Compose에 포함되지 않습니다. 확인한 원격 main에는 연결 확인·세션 생성·특징 전송이 구현돼 있으며 현재 프론트 브랜치에도 병합했습니다. 상품·장바구니·모의 주문과 세 서비스의 전체 기능 연동은 구현·검증 대기입니다.
+Compose의 frontend는 Nginx의 `/backend/` 프록시로 backend를 호출합니다([프론트엔드 README](frontend/README.md#docker-실행과-백엔드-연결)). 연결 확인·세션 생성·특징 전송은 backend에 구현돼 있으며, 상품·장바구니·모의 주문과 세 서비스의 전체 기능 연동은 구현·검증 대기입니다.
 
 - API 키와 DB 자격 증명은 저장소에 커밋하지 않습니다.
 - `.env.example`에는 실제 비밀값 없이 필요한 항목을 문서화합니다.
