@@ -1,0 +1,5 @@
+# Run outputs (camera pictures included) and downloaded model files stay out of Git (AGENTS.md section 5).
+runs/
+models/*.task
+models/*.tflite
+models/*.part

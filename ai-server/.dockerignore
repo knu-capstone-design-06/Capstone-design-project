@@ -7,3 +7,8 @@ __pycache__/
 .pytest_cache/
 .git/
 tests/
+# vision module: local run outputs (camera pictures included) and downloaded model files
+app/modules/vision/runs/
+app/modules/vision/models/*.task
+app/modules/vision/models/*.tflite
+app/modules/vision/models/*.part
