@@ -76,6 +76,10 @@ ul { list-style: none; margin: 0; padding: 0; }
 .cart-notice { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 18px; margin-bottom: 24px; border: 1px solid #b8cbb4; border-radius: 12px; background: #e7eee0; font-weight: 600; }
 .cart-notice[hidden] { display: none; }
 .cart-notice button { flex-shrink: 0; background: transparent; border: none; }
+.order-progress { padding: 12px 18px; border-radius: 12px; background: #e7eee0; }
+.order-feedback { margin-bottom: 24px; padding: 16px 18px; border: 1px solid #d5b58d; border-radius: 12px; background: #fff5e7; }
+.order-feedback p { margin: 0 0 12px; line-height: 1.6; }
+.order-feedback p:last-child { margin-bottom: 0; }
 .review-card { padding: 28px; background: white; border-radius: 18px; border: 1px solid #e1e5da; }
 .review-card h2 { font-size: 1.15em; }
 .review-card .cart-row { display: flex; gap: 24px; align-items: center; justify-content: space-between; }
@@ -126,5 +130,9 @@ legend { font-weight: 600; margin-bottom: 12px; }
 .simple-screen .product-info { padding: 26px 22px; }
 .simple-screen .product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 @media (max-width: 1100px) { .header { padding: 20px 24px; } main { padding: 24px; } .order-layout { gap: 22px; grid-template-columns: minmax(0, 1fr) 310px; } .product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .footer, .support-panel { padding: 22px 24px; } }
+/* 1080×1920 시연 화면을 포함한 세로 화면에서는 기본 상품 목록을 3열로 표시합니다. */
+@media (min-width: 761px) and (max-width: 1100px) and (orientation: portrait) {
+  .product-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
 @media (max-width: 760px) { .header { gap: 12px; flex-wrap: wrap; } .brand { margin-right: auto; } .sample-badge { order: 3; width: 100%; text-align: center; } .order-layout { grid-template-columns: 1fr; } .cart { position: static; } .steps { gap: 14px; margin-bottom: 28px; flex-wrap: wrap; } .intro h1 { font-size: 1.7em; } .product-grid { gap: 12px; } .product-art { min-height: 120px; font-size: 3em; } .product-info { padding: 14px; } .categories { flex-wrap: wrap; } .review-card .cart-row { flex-wrap: wrap; } .simple-screen .product-grid { grid-template-columns: 1fr; } .dialog-quantity { flex-wrap: wrap; } }
 @media (max-width: 760px) { .large-button .product-grid { grid-template-columns: 1fr; } }

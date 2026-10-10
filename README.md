@@ -8,14 +8,18 @@
 
 ## 현재 구현 상태
 
-프론트엔드는 샘플 데이터로 실행할 수 있는 주문 시제품을 구현했습니다.
+프론트엔드는 OpenAPI 0.3.0 초안에 맞춰 서버 응답을 사용하는 상품·장바구니·모의 주문 화면을 준비했습니다. 실제 주문 API 연결 완료와 팀 전체 합의는 아직 확인되지 않았습니다.
 
-- 상품 분류, 온도·수량 선택, 장바구니 수정·삭제와 총액 계산
-- 주문 확인, 모의 결제와 샘플 주문번호 표시
-- 화면 이동·새로고침 후 장바구니와 접근성 설정 유지
-- 큰 글씨, 큰 버튼, 간편 화면, 단계별 안내와 기본 화면 복귀
+- 서버 상품의 분류·가격·온도·판매 가능 여부 표시
+- 성공 응답 후 장바구니 수량·금액 확정 표시, 요청 중 변경 차단
+- 버전 충돌 시 최신 장바구니 표시, 응답 유실 시 같은 키·본문으로 수동 재시도
+- 주문 성공 응답의 주문번호 표시, 새 주문·새로고침 시 새 서버 세션 요청
+- 접근성 설정만 로컬 유지, 큰 글씨·큰 버튼·간편 화면·단계별 안내
+- 기존 로컬 터치·상호작용 기록 유지; 서버 통계 전송·AI 자동 지원은 미연결
 
-실제 상품·주문·DB 연결, 음성 인터페이스, 터치·비전 정보 수집, AI·Jev 기반 자동 지원은 아직 화면에 연결하지 않았습니다. 실제 결제나 서버 주문은 발생하지 않습니다.
+백엔드에는 상태·연결 확인, 임시 세션 생성, 특징 전송이 구현돼 있고 상품·Cart·Order 서버 API는 구현 대기입니다. 주문 API가 없는 서버에서는 연결 대기를 표시합니다. 브라우저 테스트는 미리 준비한 HTTP 응답으로 프론트 동작을 검증하며 서버 구현을 대신하지 않습니다.
+
+첫 시연에 필수가 아닌 완료 화면 복원·서버 재시작 후 보관·장기 보관·정밀 만료·동적 가격 변경은 후순위로 둡니다. 공개 환경의 세션 접근 정책과 수량·버전·중복 요청 처리 정책은 백엔드 담당자와 합의해야 합니다. 백엔드 코드는 이번 프론트 작업에서 수정하지 않으며, 음성·MCP·실제 결제·재고 차감은 이번 범위에서 제외합니다.
 
 ## 프로젝트 목표
 
@@ -95,7 +99,7 @@ flowchart TD
 
 AI 서버는 판단 결과를 반환하고, 백엔드가 지원을 선택해 적용 조건을 검증합니다. 음성 명령에 따른 주문 변경도 백엔드가 검증합니다. 프론트엔드는 실제 UI 적용 결과를 다시 전달합니다.
 
-비전 추론은 AI 서버에서 실행하는 구성을 기준으로 합니다. 카메라 영상을 AI 서버로 전달하는 방식은 `contract/`에서 정합니다. 프론트엔드 ↔ 백엔드 명세 0.2.0은 기존 0.1.0의 터치 통계·비전 특징 전송 형식을 유지합니다. 비전 학습 코드의 최종 저장 위치는 팀에서 별도로 정합니다.
+비전 추론은 AI 서버에서 실행하는 구성을 기준으로 합니다. 카메라 영상을 AI 서버로 전달하는 방식은 `contract/`에서 정합니다. 프론트엔드 ↔ 백엔드 명세 0.3.0은 기존 0.1.0의 터치 통계·비전 특징 전송 형식을 유지합니다. 비전 학습 코드의 최종 저장 위치는 팀에서 별도로 정합니다.
 
 ## 데이터 처리 흐름
 
@@ -178,8 +182,8 @@ Jev에는 다음 정보를 전달합니다.
 
 | 영역 | 기술 | 상태 |
 |---|---|---|
-| 프론트엔드 | React, Vite, TypeScript | TypeScript 기준 구조 설계 |
-| 백엔드 | Python, FastAPI | 계획 |
+| 프론트엔드 | React, Vite, TypeScript | 주문 API 응답 처리·수동 접근성 UI 준비 |
+| 백엔드 | Python, FastAPI | 원격 main에 연결·임시 세션 API 구현, 주문 API 대기 |
 | AI 서버 | Python, FastAPI | 분리 구성 설계 |
 | 데이터베이스 | Supabase PostgreSQL | RDS에서 변경 |
 | 영상 처리 | OpenCV | 계획 |
@@ -315,10 +319,10 @@ Capstone-design/
 
 현재 명세 파일:
 
-- [`contract/frontend-backend.openapi.yaml`](contract/frontend-backend.openapi.yaml): 프론트엔드 ↔ 백엔드 0.2.0. 기존 네 API 형식 유지 및 상품·장바구니·모의 주문 API 초안 추가
+- [`contract/frontend-backend.openapi.yaml`](contract/frontend-backend.openapi.yaml): 프론트엔드 ↔ 백엔드 0.3.0. 기존 네 API 형식 유지 및 상품·장바구니·모의 주문 API 초안 추가
 - [`contract/backend-ai.openapi.yaml`](contract/backend-ai.openapi.yaml): 백엔드 ↔ AI 서버
 
-신규 주문 API 6개는 `x-contract-status: draft`로 표시한 팀 검토용 명세입니다. 설계 이유·미정 정책은 [`docs/Product-Cart-Order-API-Draft.md`](docs/Product-Cart-Order-API-Draft.md)에 기록합니다. 명세 반영은 서버 구현이나 실제 주문·결제 연결 완료를 의미하지 않습니다. 팀 검토 후 프론트 호출 함수·타입·화면, 백엔드 라우터·서비스·저장소와 샘플 데이터를 함께 맞춥니다. 구체적인 담당자·일정은 팀에서 정하고 PR에 기록합니다.
+신규 주문 API 6개는 `x-contract-status: draft`로 표시한 팀 검토용 명세입니다. 설계 이유·미정 정책은 [`docs/Product-Cart-Order-API-Draft.md`](docs/Product-Cart-Order-API-Draft.md)에 기록합니다. 명세 반영은 서버 구현이나 실제 주문·결제 연결 완료를 의미하지 않습니다. 프론트 호출 함수·타입·화면은 초안에 맞춰 준비했으며 `x-frontend-status: prepared`, 서버 주문 API는 `x-backend-status: pending`으로 구분합니다. 팀 검토 후 백엔드 라우터·서비스·저장소와 상품 데이터를 구현하고 실제 요청·응답으로 프론트를 검증합니다. 구체적인 담당자·일정은 팀에서 정하고 PR에 기록합니다.
 
 ## 역할 분담
 
@@ -356,11 +360,11 @@ Capstone-design/
 
 ## 실행 안내
 
-프론트엔드 샘플 앱은 로컬 개발 서버로 실행합니다. 루트 `docker-compose.yml`에는 백엔드와 AI 서버 두 서비스만 포함돼 있습니다.
+프론트엔드는 로컬 개발 서버(`pnpm dev`)나 루트 `docker-compose.yml`의 `frontend` 서비스로 실행합니다. Compose에는 frontend·backend·ai-server 세 서비스가 있습니다.
 
 서비스별 상세 안내는 [`frontend/README.md`](frontend/README.md), [`backend/README.md`](backend/README.md), [`ai-server/README.md`](ai-server/README.md)를 참고합니다.
 
-### 프론트엔드 샘플 화면
+### 프론트엔드 주문 화면
 
 Node.js 22.18 이상과 pnpm이 필요합니다. 저장소 루트에서 실행합니다.
 
@@ -370,7 +374,7 @@ pnpm install
 pnpm dev
 ```
 
-터미널에 표시되는 로컬 주소로 접속합니다. 샘플 화면은 백엔드·AI 서버·DB·API 키 없이 실행할 수 있습니다.
+터미널에 표시되는 로컬 주소로 접속합니다. 앱을 실행할 수는 있지만 상품 탐색부터 주문 완료까지 이용하려면 상품·Cart·Order API가 구현된 백엔드가 필요합니다. 서버 없이 화면을 검증하는 브라우저 테스트 방법은 [주문 기능 README](frontend/src/features/order/README.md#백엔드-없이-화면-검증)를 참고합니다.
 
 빌드·테스트와 상세 안내는 [프론트엔드 README](frontend/README.md)를 참고합니다.
 
@@ -388,7 +392,7 @@ Compose 이미지에는 `backend/.env`를 복사하지 않으며 현재 Compose�
 
 두 서버 연결의 기존 검증 기록은 [PR #14](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/14)에 있습니다. 2026-10-07 문서 정리에서는 Docker 빌드·기동·통합 테스트를 재실행하지 않았습니다.
 
-프론트엔드 샘플 앱은 Compose에 포함되지 않습니다. 백엔드의 `/api/v1/connectivity`, 세션 생성·특징 전송 API도 아직 미구현이므로, 현재 구성을 세 서비스의 전체 기능 연동 완료로 간주하지 않습니다.
+Compose의 frontend는 Nginx의 `/backend/` 프록시로 backend를 호출합니다([프론트엔드 README](frontend/README.md#docker-실행과-백엔드-연결)). 연결 확인·세션 생성·특징 전송은 backend에 구현돼 있으며, 상품·장바구니·모의 주문과 세 서비스의 전체 기능 연동은 구현·검증 대기입니다.
 
 - API 키와 DB 자격 증명은 저장소에 커밋하지 않습니다.
 - `.env.example`에는 실제 비밀값 없이 필요한 항목을 문서화합니다.
