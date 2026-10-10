@@ -180,7 +180,7 @@ Jev에는 다음 정보를 전달합니다.
 |---|---|---|
 | 프론트엔드 | React, Vite, TypeScript | TypeScript 기준 구조 설계 |
 | 백엔드 | Python, FastAPI | 계획 |
-| AI 서버 | Python, FastAPI | 분리 구성 설계 |
+| AI 서버 | Python, FastAPI | 초기 실행 환경 구현 |
 | 데이터베이스 | Supabase PostgreSQL | RDS에서 변경 |
 | 영상 처리 | OpenCV | 계획 |
 | 얼굴·자세 특징 | MediaPipe | 후보 특징 검증 예정 |
@@ -317,6 +317,7 @@ Capstone-design/
 
 - [`contract/frontend-backend.openapi.yaml`](contract/frontend-backend.openapi.yaml): 프론트엔드 ↔ 백엔드 0.2.0. 기존 네 API 형식 유지 및 상품·장바구니·모의 주문 API 초안 추가
 - [`contract/backend-ai.openapi.yaml`](contract/backend-ai.openapi.yaml): 백엔드 ↔ AI 서버
+- [`contract/voice.openapi.yaml`](contract/voice.openapi.yaml): 프론트엔드 ↔ 백엔드 음성 요청 0.1.0. 팀 검토 전 제안
 
 신규 주문 API 6개는 `x-contract-status: draft`로 표시한 팀 검토용 명세입니다. 설계 이유·미정 정책은 [`docs/Product-Cart-Order-API-Draft.md`](docs/Product-Cart-Order-API-Draft.md)에 기록합니다. 명세 반영은 서버 구현이나 실제 주문·결제 연결 완료를 의미하지 않습니다. 팀 검토 후 프론트 호출 함수·타입·화면, 백엔드 라우터·서비스·저장소와 샘플 데이터를 함께 맞춥니다. 구체적인 담당자·일정은 팀에서 정하고 PR에 기록합니다.
 
@@ -393,7 +394,7 @@ Compose 이미지에는 `backend/.env`를 복사하지 않으며 현재 Compose�
 - API 키와 DB 자격 증명은 저장소에 커밋하지 않습니다.
 - `.env.example`에는 실제 비밀값 없이 필요한 항목을 문서화합니다.
 - 서비스 간 연결 주소와 설정은 환경변수로 관리합니다.
-- 프론트엔드 컨테이너화와 전체 API 연동은 후속 작업입니다.
+- 프론트엔드 이미지 빌드와 세 서비스 통합 실행은 아직 확인하지 않았습니다. 전체 API 연동은 후속 작업입니다.
 
 ## 참고 자료
 - [Jev 공식 문서](https://docs.typesafe.ai/introduction)
