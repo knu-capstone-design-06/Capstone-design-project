@@ -15,9 +15,7 @@
 - 화면 이동·새로고침 후 장바구니와 접근성 설정 유지
 - 큰 글씨, 큰 버튼, 간편 화면, 단계별 안내와 기본 화면 복귀
 
-실제 상품·주문·DB 연결, 음성 인터페이스, 비전 정보 수집, AI·Jev 기반 자동 지원은 아직 화면에 연결하지 않았습니다. 터치·스크롤 원시 기록은 주문 화면에서 수집해 브라우저에만 보관하는 초안이며, API 명세용 집계 통계 계산과 서버 전송은 하지 않습니다. 실제 결제나 서버 주문은 발생하지 않습니다.
-
-백엔드는 상태 확인, AI 연결 확인, 임시 세션 생성과 특징 전송 API를 제공하고, AI 서버는 명세의 예시 값을 그대로 돌려주는 자리 표시 판단 API를 제공합니다. 주문 화면은 아직 이 API를 호출하지 않습니다.
+실제 상품·주문·DB 연결, 음성 인터페이스, 터치·비전 정보 수집, AI·Jev 기반 자동 지원은 아직 화면에 연결하지 않았습니다. 실제 결제나 서버 주문은 발생하지 않습니다.
 
 ## 프로젝트 목표
 
@@ -180,8 +178,8 @@ Jev에는 다음 정보를 전달합니다.
 
 | 영역 | 기술 | 상태 |
 |---|---|---|
-| 프론트엔드 | React, Vite, TypeScript | 샘플 주문 화면 구현 |
-| 백엔드 | Python, FastAPI | 초기 실행 환경 구현 |
+| 프론트엔드 | React, Vite, TypeScript | TypeScript 기준 구조 설계 |
+| 백엔드 | Python, FastAPI | 계획 |
 | AI 서버 | Python, FastAPI | 초기 실행 환경 구현 |
 | 데이터베이스 | Supabase PostgreSQL | RDS에서 변경 |
 | 영상 처리 | OpenCV | 계획 |
@@ -359,7 +357,7 @@ Capstone-design/
 
 ## 실행 안내
 
-프론트엔드 샘플 앱은 로컬 개발 서버나 루트 Compose로 실행합니다. 루트 `docker-compose.yml`에는 프론트엔드, 백엔드, AI 서버 세 서비스가 포함돼 있습니다.
+프론트엔드 샘플 앱은 로컬 개발 서버로 실행합니다. 루트 `docker-compose.yml`에는 백엔드와 AI 서버 두 서비스만 포함돼 있습니다.
 
 서비스별 상세 안내는 [`frontend/README.md`](frontend/README.md), [`backend/README.md`](backend/README.md), [`ai-server/README.md`](ai-server/README.md)를 참고합니다.
 
@@ -391,7 +389,7 @@ Compose 이미지에는 `backend/.env`를 복사하지 않으며 현재 Compose�
 
 두 서버 연결의 기존 검증 기록은 [PR #14](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/14)에 있습니다. 2026-10-07 문서 정리에서는 Docker 빌드·기동·통합 테스트를 재실행하지 않았습니다.
 
-프론트엔드 샘플 앱도 Compose에 포함되며 설정상 http://127.0.0.1:8080 에서 화면을 제공합니다. 백엔드의 `/api/v1/connectivity`, 임시 세션 생성·특징 전송 API는 구현됐지만 주문 화면은 아직 이 API를 호출하지 않으므로, 현재 구성을 세 서비스의 전체 기능 연동 완료로 간주하지 않습니다.
+프론트엔드 샘플 앱은 Compose에 포함되지 않습니다. 백엔드의 `/api/v1/connectivity`, 세션 생성·특징 전송 API도 아직 미구현이므로, 현재 구성을 세 서비스의 전체 기능 연동 완료로 간주하지 않습니다.
 
 - API 키와 DB 자격 증명은 저장소에 커밋하지 않습니다.
 - `.env.example`에는 실제 비밀값 없이 필요한 항목을 문서화합니다.

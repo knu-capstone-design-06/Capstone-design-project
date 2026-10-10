@@ -76,7 +76,7 @@ import { backendApi } from './src/shared/api/index.ts';
 const health = await backendApi.getBackendHealth();
 ```
 
-현재 백엔드에는 `/health`와 연결 확인·임시 세션 생성·특징 전송 API가 구현돼 있습니다. 주문 화면은 아직 이 API를 호출하지 않고 계속 샘플 데이터와 모의 결제를 사용합니다.
+현재 백엔드는 `/health`만 구현돼 있습니다. 세션·특징·연결 상태 API는 구현 전까지 404를 반환하며, 주문 화면은 계속 샘플 데이터와 모의 결제를 사용합니다.
 
 로컬 `pnpm dev`도 `/backend/`를 `http://127.0.0.1:8000`으로 전달합니다. 다른 백엔드에 연결하려면 `BACKEND_URL=http://127.0.0.1:8000 pnpm dev`처럼 실행 환경에서 주소를 전달합니다. Docker에서는 Compose의 frontend `BACKEND_URL` 환경변수로 대상 주소를 설정합니다. 주소는 브라우저에 Docker 서비스 이름을 노출하지 않고 프록시에서 사용합니다.
 
