@@ -35,6 +35,7 @@ Vite의 기존 `/backend/` 프록시를 사용합니다. 실제 주문 확인에
 
 ```powershell
 $env:PLAYWRIGHT_MODULE='file:///절대경로/playwright/index.mjs'
+$env:PLAYWRIGHT_CHANNEL='msedge'
 $env:ORDER_BROWSER_URL='http://127.0.0.1:5173'
 node --test src/features/order/order.browser.test.mjs
 $env:TOUCH_LOG_BROWSER_URL=$env:ORDER_BROWSER_URL
@@ -42,9 +43,11 @@ node --test src/features/order/touchLog.browser.test.mjs
 node --test src/features/order/touchLog.test.mjs
 ```
 
+`PLAYWRIGHT_CHANNEL`을 지정하지 않으면 설치된 Microsoft Edge(`msedge`)로 실행합니다. 설치된 Google Chrome은 `chrome`, Playwright가 관리하는 Chromium은 `default`로 선택합니다. `default`는 실행 채널을 생략하므로 해당 Playwright 버전의 Chromium 브라우저가 미리 설치돼 있어야 합니다. 주문·터치 로그 테스트에 같은 설정을 사용합니다.
+
 `orderApiFixture.mjs`는 요청 순서·내용을 확인하고 미리 준비한 HTTP 응답만 전달합니다. 실제 앱에서 import하지 않으며 서버 상품 공급·옵션 검증·Cart 변경·주문번호 발급 로직을 구현하지 않습니다.
 
-프론트 상태/API 19개, 로컬 터치 기록 단위 테스트 5개, 주문 브라우저 4개, 기존 터치 기록 브라우저 3개와 TypeScript/Vite 빌드를 확인했습니다. 서버 실제 동작에 대한 검증 결과는 아닙니다.
+프론트 상태/API 22개와 로컬 터치 기록 단위 테스트 5개, TypeScript/Vite 빌드를 확인했습니다. 주문 브라우저 7개와 터치 기록 브라우저 3개는 Edge·Chrome에서 각각 모두 통과했습니다. 서버 실제 동작에 대한 검증 결과는 아닙니다.
 
 - 상품 분류·iced/hot·푸드 null 요청과 화면 표시
 - 응답 후 수량·금액 표시, 처리 중 버튼 차단

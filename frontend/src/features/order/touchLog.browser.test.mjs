@@ -4,9 +4,11 @@ import test from 'node:test';
 import { bootstrap, cartResponse, iced, installOrderResponses, mutation, orderResponse } from './orderApiFixture.mjs';
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ?? 'playwright');
 const url = process.env.TOUCH_LOG_BROWSER_URL ?? 'http://127.0.0.1:5173';
+const channel = process.env.PLAYWRIGHT_CHANNEL ?? 'msedge';
+const launchOptions = { headless: true, ...(channel === 'default' ? {} : { channel }) };
 
 test('로컬 로그: 중복 방지, 화면·옵션·설정, 세션 복원·분리, 실제 터치 스크롤', async () => {
-  const browser = await chromium.launch({ channel: 'msedge', headless: true });
+  const browser = await chromium.launch(launchOptions);
   try {
     const context = await browser.newContext({ viewport: { width: 1100, height: 650 }, hasTouch: true });
     const page = await context.newPage();
@@ -101,7 +103,7 @@ test('로컬 로그: 중복 방지, 화면·옵션·설정, 세션 복원·분�
 });
 
 test('주변 후보는 화면·컨테이너에서 보이는 부분만 사용하고 누름 표시는 보관 범위를 밝힌다', async () => {
-  const browser = await chromium.launch({ channel: 'msedge', headless: true });
+  const browser = await chromium.launch(launchOptions);
   try {
     const page = await browser.newPage({ viewport: { width: 1100, height: 650 } });
     const responses = await installOrderResponses(page, bootstrap('log-near'));
@@ -159,7 +161,7 @@ test('주변 후보는 화면·컨테이너에서 보이는 부분만 사용하�
 });
 
 test('개발 확인 창은 수집을 오염시키지 않고 표시 정지·재개·내보내기를 제공한다', async () => {
-  const browser = await chromium.launch({ channel: 'msedge', headless: true });
+  const browser = await chromium.launch(launchOptions);
   try {
     const page = await browser.newPage({ viewport: { width: 1100, height: 800 } });
     const responses = await installOrderResponses(page, bootstrap('log-tools'));

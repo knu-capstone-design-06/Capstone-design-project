@@ -7,6 +7,8 @@ import { bootstrap, cartResponse, food, hot, iced, installOrderResponses, mutati
 
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ?? 'playwright');
 const url = process.env.ORDER_BROWSER_URL ?? 'http://127.0.0.1:5173';
+const channel = process.env.PLAYWRIGHT_CHANNEL ?? 'msedge';
+const launchOptions = { headless: true, ...(channel === 'default' ? {} : { channel }) };
 async function open(browser, steps) {
   const page = await browser.newPage({ viewport: { width: 1080, height: 1920 }, hasTouch: true });
   const errors = [];
@@ -39,7 +41,7 @@ async function noOverflow(page) {
 }
 
 test('1080×1920: API 응답으로 상품·옵션·수량·삭제·완료·새 이용과 접근성 설정 표시', async () => {
-  const browser = await chromium.launch({ channel: 'msedge', headless: true });
+  const browser = await chromium.launch(launchOptions);
   try {
     const a = 'session-test-1', b = 'session-test-2', c = 'session-test-3';
     const confirmed = cartResponse(a, 5, [iced(3), food]);
@@ -108,7 +110,7 @@ test('1080×1920: API 응답으로 상품·옵션·수량·삭제·완료·새 �
 });
 
 test('응답 유실에는 로컬 확정 표시 없이 같은 키·버전·본문으로 추가·주문을 재시도', async () => {
-  const browser = await chromium.launch({ channel: 'msedge', headless: true });
+  const browser = await chromium.launch(launchOptions);
   try {
     const session = 'session-retry', cart = cartResponse(session, 1, [iced()]);
     const { page, errors, fixture } = await open(browser, [
@@ -142,7 +144,7 @@ test('응답 유실에는 로컬 확정 표시 없이 같은 키·버전·본문
 });
 
 test('버전 충돌 응답의 최신 Cart를 표시하고 재조작에는 최신 버전·새 키를 사용', async () => {
-  const browser = await chromium.launch({ channel: 'msedge', headless: true });
+  const browser = await chromium.launch(launchOptions);
   try {
     const session = 'session-conflict';
     const { page, errors, fixture } = await open(browser, [
@@ -170,7 +172,7 @@ test('버전 충돌 응답의 최신 Cart를 표시하고 재조작에는 최신
 });
 
 test('재확인 실패 뒤 처음부터 다시 주문하고 새 연결 실패에서도 복구한다', async () => {
-  const browser = await chromium.launch({ channel: 'msedge', headless: true });
+  const browser = await chromium.launch(launchOptions);
   try {
     for (const large of [false, true]) {
       const first = `session-abandon-${large}`, second = `session-restart-${large}`;
@@ -222,7 +224,7 @@ test('재확인 실패 뒤 처음부터 다시 주문하고 새 연결 실패에
 });
 
 test('상품 담기 재확인 실패 뒤 옵션 창을 닫고 새 주문을 시작한다', async () => {
-  const browser = await chromium.launch({ channel: 'msedge', headless: true });
+  const browser = await chromium.launch(launchOptions);
   try {
     const first = 'session-modal-abandon', second = 'session-modal-restart';
     const { page, errors, fixture } = await open(browser, [
@@ -250,7 +252,7 @@ test('상품 담기 재확인 실패 뒤 옵션 창을 닫고 새 주문을 시�
 });
 
 test('변경 요청의 코드 없는 404·410 뒤 새 이용을 시작할 수 있다', async () => {
-  const browser = await chromium.launch({ channel: 'msedge', headless: true });
+  const browser = await chromium.launch(launchOptions);
   try {
     for (const status of [404, 410]) {
       const first = `session-ended-${status}`, second = `session-new-${status}`;
@@ -276,7 +278,7 @@ test('변경 요청의 코드 없는 404·410 뒤 새 이용을 시작할 수 �
 });
 
 test('주문 API가 없는 서버에서는 연결 대기를 표시하고 임의의 상품·주문을 만들지 않음', async () => {
-  const browser = await chromium.launch({ channel: 'msedge', headless: true });
+  const browser = await chromium.launch(launchOptions);
   try {
     const { page, errors, fixture } = await open(browser, [
       { method: 'GET', path: '/api/v1/products', status: 404, body: { detail: 'Not Found' } },
