@@ -36,6 +36,7 @@ OPTIONAL = {"people_behind_count": 0, "companion_box": None, "mouth_motion": 0.0
 LOST = {"face_state": NOT_SEEN, "yaw_deg": NAN, "face_cx": NAN}                  # face lost, shoulders stay
 GONE = {**LOST, "body_state": NOT_SEEN, "pose_vis_shoulders": NAN, "shoulder_cx": NAN, "shoulder_cy": NAN}
 RIGHT_BOX = (0.75, 0.25, 0.95, 0.95)        # companion box right of the user's face (face_cx 0.5)
+LEFT_BOX = (0.05, 0.25, 0.25, 0.95)         # and left of it
 
 
 def face(n):
@@ -222,6 +223,15 @@ class EventTests(unittest.TestCase):
             row["t_s"] = round(row["t_s"] + 3.0, 6)                         # the gap falls inside the turn
         self.assertNotIn("look_back", kinds(detect_events(turn, P, landmarker_num_faces=1)))
 
+    def test_counts_must_be_whole_numbers_of_at_least_zero(self):
+        """Item 6 (r2): the contract's TouchFeatures counts are integer, minimum 0: other values are errors, not
+        missing values; a whole number written as a float is fine."""
+        for bad in (-1, 1.5, "two", True):
+            with self.assertRaises(ValueError, msg=repr(bad)):
+                detect_events(put(rows_of(face(5)), 2, 2, tap_count=bad), P, landmarker_num_faces=1)
+        events = detect_events(put(rows_of(face(20)), 0, 19, people_behind_count=2.0), P, landmarker_num_faces=1)
+        self.assertEqual([e["obs"]["people_behind_count"] for e in events if e["kind"] == "people_behind"], [2])
+
     def test_yaw_toward_the_companion_needs_no_return(self):
         """Item 1: the main user keeps looking toward the companion's side to the end: one yaw_toward_companion,
         and no sweep (a sweep needs the return)."""
@@ -246,6 +256,7 @@ class LookingBackWithPeopleBehindTests(unittest.TestCase):
         self.assertEqual(check_output(out, events, P), [])
         look = [item for item in out["evidence"] if item["event_id"] == "look_back@5"]
         self.assertEqual([item["obs"] for item in look], ["yaw_deg", "side", "face_lost_s", "pose_vis_shoulders"])
+        self.assertEqual({item["t"] for item in look}, {1.3})        # the event's time = its end (the return)
 
     def test_low_face_visibility_does_not_block_it(self):
         """Face loss is the look_back cue: a face seen in under face_visible_min of the frames still gives the tag."""
@@ -269,6 +280,20 @@ class LookingBackWithPeopleBehindTests(unittest.TestCase):
         put(rows, 30, 30, tap_count=1)                     # a touch: rules out the other two tags here
         out, _ = run(rows)
         self.assertEqual((out["name"], out["alternatives"]), (NONE, []))
+
+    def test_no_yaw_at_all_leaves_the_look_back_cue_unknown(self):
+        """Item 3 (r2): faces are seen but every yaw is missing, so no turn can be seen: with a person standing
+        behind, the window is unknown, not none."""
+        out, _ = run(put(rows_of(face(30)), 0, 29, people_behind_count=1, yaw_deg=NAN))
+        self.assertEqual(out["name"], UNKNOWN)
+        self.assertEqual([a["name"] for a in out["alternatives"]], [BEHIND])
+
+    def test_no_shoulder_value_during_face_loss_leaves_the_look_back_cue_unknown(self):
+        """Item 3 (r2): the face is lost after a turn but the shoulder values are missing, so whether the person
+        turned back cannot be told: unknown, not none."""
+        rows = rows_of(face(5), [(1, {"yaw_deg": 50.0}), (5, {**LOST, "pose_vis_shoulders": NAN})], face(10))
+        out, _ = run(put(rows, 0, 20, people_behind_count=1))
+        self.assertEqual(out["name"], UNKNOWN)
 
     def test_people_behind_without_look_backs(self):
         rows = put(put(rows_of(face(30)), 0, 29, people_behind_count=1), 15, 15, tap_count=1)
@@ -314,6 +339,50 @@ class ConsultingCompanionTests(unittest.TestCase):
         out, _ = run(put(companion_window(sweep(+1)), 0, 18, mouth_motion=NAN))
         self.assertEqual(out["name"], COMPANION)
         self.assertEqual(out["confidence"], {"events": 3, "quality_ok": False})
+
+    def test_one_mouth_value_and_the_rest_missing_is_not_no_movement(self):
+        """Item 2 (r2): mouth_motion is 0 on one face frame and blank on the others: 'no movement' is not concluded,
+        so mouth motion is left out (quality_ok false) instead of ruling the tag out."""
+        rows = put(companion_window(sweep(+1)), 0, 18, mouth_motion=NAN)
+        rows[2]["mouth_motion"] = 0.0
+        out, _ = run(rows)
+        self.assertEqual(out["name"], COMPANION)
+        self.assertEqual(out["confidence"], {"events": 3, "quality_ok": False})
+
+    def test_mouth_movement_counts_with_the_key_missing_on_some_rows(self):
+        """Item 2 (r2): rows without the mouth_motion key do not hide the movement seen on the others."""
+        rows = companion_window(sweep(+1))
+        for row in rows[:3]:
+            row.pop("mouth_motion")
+        out, _ = run(rows)
+        self.assertEqual(out["confidence"], {"events": 4, "quality_ok": True})
+        self.assertIn("mouth_moving", [i.split("@")[0] for i in ids(out)])
+
+    def test_a_small_yaw_toward_the_companion_counts(self):
+        """Item 8 (r2): the decision table's 'yaw toward the companion' is its side only - a yaw well inside
+        offscreen_yaw_deg on the companion's side counts (README: [설계 제안] note on menu reading)."""
+        out, events = run(companion_window([(6, {"yaw_deg": 10.0})]))
+        self.assertEqual(out["name"], COMPANION)
+        self.assertIn("yaw_toward_companion", kinds(events))
+        self.assertNotIn("yaw_sweep_offscreen", kinds(events))
+
+    def test_the_companion_side_is_read_at_each_frame(self):
+        """Item 4 (r2): the companion stands right for 2.5 s, then left; the user then looks left. The side at those
+        frames decides, not the median of the whole stay (which is right)."""
+        rows = put(put(rows_of(face(28), [(9, {"yaw_deg": -40.0})], face(3)), 0, 24, companion_box=RIGHT_BOX),
+                   25, 39, companion_box=LEFT_BOX)
+        out, _ = run(put(rows, 29, 34, mouth_motion=0.3))
+        self.assertEqual(out["name"], COMPANION)
+
+    def test_positions_from_before_the_window_do_not_decide_a_frame(self):
+        """Item 4 (r2): six seconds of the companion on the right before the window [6.0, 7.9]; inside it the
+        companion is on the left and the user looks left."""
+        rows = put(put(rows_of(face(65), [(11, {"yaw_deg": -40.0})], face(4)), 0, 59, companion_box=RIGHT_BOX),
+                   60, 79, companion_box=LEFT_BOX)
+        out, _ = assess(put(rows, 66, 70, mouth_motion=0.3), 7.9, dataclasses.replace(P, window_s=1.9),
+                        landmarker_num_faces=1)
+        self.assertEqual(out["name"], COMPANION)
+        self.assertIn("yaw_toward_companion@65", ids(out))
 
     def test_no_companion(self):
         out, _ = run(put(companion_window(sweep(+1)), 0, 18, companion_box=None))
@@ -387,6 +456,35 @@ class LookingAroundTests(unittest.TestCase):
             row["shoulder_cx"] = 0.4 + 0.01 * i                            # drifts 0.22 across the window
         out, _ = run(rows)
         self.assertEqual(out["name"], NONE)
+
+    def test_a_touch_seen_rules_out_even_with_counts_missing_elsewhere(self):
+        """Item 1 (r2): tap_count is missing on three rows, and a touch is on another: the touch still rules the tag
+        out (none, not unknown)."""
+        rows = put(around_window(), 11, 11, tap_count=1)
+        for row in rows[3:6]:
+            row.pop("tap_count")
+        out, _ = run(rows)
+        self.assertEqual(out["name"], NONE)
+
+    def test_a_person_seen_behind_rules_out_even_with_counts_missing_elsewhere(self):
+        """Item 1 (r2): people_behind_count is missing on one row, and a person stands behind on the others."""
+        rows = put(around_window(), 0, 22, people_behind_count=1)
+        rows[15].pop("people_behind_count")
+        out, _ = run(rows)
+        self.assertEqual(out["name"], NONE)
+
+    def test_a_body_movement_seen_rules_out_even_with_shoulders_partly_missing(self):
+        """Observed evidence first, as for item 1 (r2): the shoulders move where they are seen."""
+        rows = around_window()
+        for i, row in enumerate(rows):
+            row["shoulder_cx"] = 0.4 + 0.01 * i
+        out, _ = run(put(rows, 3, 5, shoulder_cx=NAN, shoulder_cy=NAN))
+        self.assertEqual(out["name"], NONE)
+
+    def test_stillness_needs_every_body_frame_observed(self):
+        """The shoulders are missing on three body frames and still on the rest: 'still' is not concluded."""
+        out, _ = run(put(around_window(), 3, 5, shoulder_cx=NAN, shoulder_cy=NAN))
+        self.assertEqual(out["name"], UNKNOWN)
 
     def test_no_dwell_event_is_needed(self):
         """Item 2: '터치 없음' is no touch in the window; a dwell event only adds support (here dwell_min_s is longer
@@ -468,6 +566,14 @@ class WindowTests(unittest.TestCase):
         self.assertEqual([outs[t]["name"] for t in (3.0, 4.0, 5.0)], [BEHIND, BEHIND, NONE])
         self.assertIn("look_back@5", ids(outs[4.0]))     # 0.5-1.3 s still overlaps [1.0, 4.0]; gone at [2.0, 5.0]
 
+    def test_a_touch_counts_in_the_window_its_row_belongs_to(self):
+        """Item 5 (r2): a row's counts belong to the interval that ends at its time, and the row to the window its
+        time is in. Window [0.45, 2.2]: a touch on row 4 (0.4 s) is outside it, one on row 5 (0.5 s) inside."""
+        params = dataclasses.replace(P, window_s=1.75)
+        before, _ = assess(put(around_window(), 4, 4, tap_count=1), 2.2, params, landmarker_num_faces=1)
+        inside, _ = assess(put(around_window(), 5, 5, tap_count=1), 2.2, params, landmarker_num_faces=1)
+        self.assertEqual((before["name"], inside["name"]), (AROUND, NONE))
+
     def test_a_turn_keeps_its_facing_frame_from_before_the_window(self):
         """Item 7: the facing frame before the first turn (0.4 s) lies just before the window [0.45, 3.0]."""
         rows = put(rows_of(face(5), look_back(), face(5), look_back(), face(5)), 0, 30, people_behind_count=1)
@@ -491,9 +597,12 @@ class CheckRuleTests(unittest.TestCase):
         evidence = [dict(self.out["evidence"][0], event_id="look_back@999")] + self.out["evidence"][1:]
         self.assertTrue(any("no event of this window" in p for p in self.changed(evidence=evidence)))
 
-    def test_evidence_event_must_overlap_the_window(self):
-        self.assertTrue(any("does not overlap the window" in p for p in self.changed(window_s=[2.7, 3.0])))
-        self.assertEqual(self.changed(window_s=[1.0, 3.0]), [])          # overlapping events are fine
+    def test_evidence_time_must_lie_inside_the_window(self):
+        """Item 9 (r2): an event is evidence when its time (its end) lies inside the window; t is that time."""
+        self.assertTrue(any("outside the window" in p for p in self.changed(window_s=[2.7, 3.0])))
+        self.assertEqual(self.changed(window_s=[1.0, 3.0]), [])          # ends 1.3, 2.6, 3.0: all inside
+        evidence = [dict(item, t=0.5) if item["event_id"] == "look_back@5" else item for item in self.out["evidence"]]
+        self.assertTrue(any("is not the time (end)" in p for p in self.changed(evidence=evidence)))
 
     def test_evidence_must_repeat_an_observation_of_the_event(self):
         evidence = [dict(self.out["evidence"][0], value=7)] + self.out["evidence"][1:]
@@ -510,6 +619,11 @@ class CheckRuleTests(unittest.TestCase):
         self.assertTrue(any("fewer than min_events" in p for p in
                             check_output(self.out, self.events, dataclasses.replace(P, min_events=4))))
         self.assertTrue(any("evidence events" in p for p in self.changed(confidence={**few, "events": 2})))
+
+    def test_an_alternative_needs_evidence_even_when_unknown(self):
+        """Item 7 (r2): an alternative without an event of this window breaks the check, whatever its confidence."""
+        empty = {"name": AROUND, "display_text": DISPLAY_TEXT[AROUND], "evidence": [], "confidence": UNKNOWN}
+        self.assertTrue(any("no evidence event" in p for p in self.changed(alternatives=[empty])))
 
     def test_alternatives_need_min_events_too(self):
         """Item 6: an alternative whose {events, quality_ok} confidence is below min_events breaks rule 2."""
