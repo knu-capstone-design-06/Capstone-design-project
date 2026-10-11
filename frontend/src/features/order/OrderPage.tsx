@@ -30,7 +30,7 @@ export function OrderPage() {
   const heading = useRef<HTMLHeadingElement>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const opener = useRef<HTMLButtonElement | null>(null);
-  const touchLog = useTouchLog(screen, category === 'all' ? '전체' : categoryLabels[category], selected?.product_id ?? null, settings);
+  const touchLog = useTouchLog(screen, category === 'all' ? '전체' : categoryLabels[category], selected?.product_id ?? null, settings, state.session?.session_id ?? null);
   useEffect(() => { void controller.initialize(); }, [controller]);
   useEffect(() => { try { localStorage.setItem(settingsStorageKey, JSON.stringify(settings)); } catch { setStorageWarning(true); } }, [settings]);
   useEffect(() => { heading.current?.focus(); }, [screen]);
@@ -55,7 +55,6 @@ export function OrderPage() {
   async function startNewOrder() {
     closeOptions();
     if (await controller.startNewOrder()) {
-      touchLog.startNewSession();
       setScreen('menu'); setOrderNumber(''); setCategory('all');
     }
   }

@@ -44,11 +44,12 @@ function targetInfo(element: HTMLElement) {
   };
 }
 
-export function useTouchLog(screen: string, category: string, productId: string | null, settings: Settings) {
+export function useTouchLog(screen: string, category: string, productId: string | null, settings: Settings, serverSessionId: string | null) {
   const root = useRef<HTMLDivElement>(null);
   const tracker = useRef<ReturnType<typeof createTouchLog> | null>(null);
   const context = useRef<LogContext>({ screen, visitId: '', settings });
   const previous = useRef<{ screen: string; category: string; productId: string | null; settings: Settings } | null>(null);
+  const interruptGestures = useRef<() => void>(() => {});
 
   // effect에서 초기화하고 StrictMode 재설정에서도 세션·방문을 유지합니다.
   useEffect(() => {
@@ -56,14 +57,24 @@ export function useTouchLog(screen: string, category: string, productId: string 
       let storage: Storage | null = null;
       try { storage = sessionStorage; } catch { /* 메모리에만 기록 */ }
       tracker.current = createTouchLog(storage);
+      if (tracker.current.resumed) {
+        const last = tracker.current.read().events.at(-1);
+        tracker.current.record(last ?? { screen, visitId: '', settings }, 'session_end', { reason: 'page_reload' });
+        tracker.current.newSession();
+      }
       context.current = { screen, visitId: crypto.randomUUID(), settings: { ...settings } };
-      tracker.current.record(context.current, tracker.current.resumed ? 'session_resume' : 'session_start');
+      tracker.current.record(context.current, 'session_start', { reason: 'page_load', server_session_id: null });
       tracker.current.record(context.current, 'screen_enter');
       previous.current = { screen, category, productId, settings: { ...settings } };
     }
     const recorder = tracker.current;
     const gestures = new Map<number, Gesture>();
     const cancelled = new Map<number, Gesture>();
+    const interrupt = () => {
+      for (const gesture of gestures.values()) recorder.record(gesture.context, 'pointer_interrupted', { inputId: gesture.id, lastObserved: gesture.last });
+      gestures.clear(); cancelled.clear();
+    };
+    interruptGestures.current = interrupt;
     const record = (kind: string, data: unknown) => recorder.record(context.current, kind, data);
     const point = (event: PointerEvent) => ({ x: event.clientX, y: event.clientY });
     function down(event: PointerEvent) {
@@ -127,8 +138,7 @@ export function useTouchLog(screen: string, category: string, productId: string 
     root.current?.querySelectorAll('*').forEach(element => positions.set(element, { x: element.scrollLeft, y: element.scrollTop }));
     function touchEnd(event: TouchEvent) { if (!event.touches.length) cancelled.clear(); }
     function pageHide() {
-      for (const gesture of gestures.values()) recorder.record(gesture.context, 'pointer_interrupted', { inputId: gesture.id, lastObserved: gesture.last });
-      gestures.clear(); cancelled.clear();
+      interrupt();
       record('screen_leave', { reason: 'pagehide' });
       record('session_suspend', { reason: 'pagehide' });
     }
@@ -163,6 +173,7 @@ export function useTouchLog(screen: string, category: string, productId: string 
       document.removeEventListener('touchend', touchEnd); document.removeEventListener('touchcancel', touchEnd);
       window.removeEventListener('pagehide', pageHide); window.removeEventListener('pageshow', pageShow);
       if (window.kioskTouchLogDraft === inspector) delete window.kioskTouchLogDraft;
+      if (interruptGestures.current === interrupt) interruptGestures.current = () => {};
     };
   }, []);
 
@@ -170,6 +181,16 @@ export function useTouchLog(screen: string, category: string, productId: string 
     const recorder = tracker.current;
     const prior = previous.current;
     if (!recorder || !prior) return;
+    if (recorder.read().serverSessionId !== serverSessionId) {
+      interruptGestures.current();
+      recorder.record(context.current, 'screen_leave', { reason: 'server_session_change' });
+      recorder.record(context.current, 'session_end', { reason: 'server_session_change' });
+      recorder.newSession(serverSessionId);
+      context.current = { screen, visitId: crypto.randomUUID(), settings: { ...settings } };
+      recorder.record(context.current, 'session_start', { reason: 'server_session_change', server_session_id: serverSessionId });
+      recorder.record(context.current, 'screen_enter');
+      prior.screen = screen;
+    }
     if (prior.screen !== screen) {
       recorder.record(context.current, 'screen_leave', { to: screen });
       context.current = { screen, visitId: crypto.randomUUID(), settings: { ...settings } };
@@ -185,18 +206,7 @@ export function useTouchLog(screen: string, category: string, productId: string 
     }
     context.current.settings = { ...settings };
     previous.current = { screen, category, productId, settings: { ...settings } };
-  }, [screen, category, productId, settings]);
+  }, [screen, category, productId, settings, serverSessionId]);
 
-  function startNewSession() {
-    const recorder = tracker.current;
-    if (!recorder) return;
-    recorder.record(context.current, 'screen_leave', { reason: 'new_order' });
-    recorder.record(context.current, 'session_end', { reason: 'new_order' });
-    recorder.newSession();
-    context.current = { screen: 'menu', visitId: crypto.randomUUID(), settings: structuredClone(context.current.settings) };
-    recorder.record(context.current, 'session_start', { reason: 'new_order' });
-    recorder.record(context.current, 'screen_enter', { from: 'complete' });
-    if (previous.current) previous.current.screen = 'menu';
-  }
-  return { root, startNewSession };
+  return { root };
 }

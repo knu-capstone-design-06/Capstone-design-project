@@ -34,7 +34,7 @@ export class OrderController {
 
   initialize(): Promise<boolean> {
     if (this.initializing) return this.initializing;
-    if (this.state.session) return Promise.resolve(true);
+    if (this.state.session && this.state.status !== 'disconnected') return Promise.resolve(true);
     this.initializing = this.connect().finally(() => { this.initializing = null; });
     return this.initializing;
   }
@@ -46,6 +46,7 @@ export class OrderController {
       const products = await this.api.getProducts();
       stage = 'session';
       const session = await this.api.createSession();
+      this.set({ session });
       stage = 'cart';
       const cart = await this.api.getCart(session.session_id);
       if (cart.session_id !== session.session_id) throw new Error('세션 응답 불일치');

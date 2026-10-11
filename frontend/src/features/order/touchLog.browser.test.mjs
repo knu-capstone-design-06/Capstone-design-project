@@ -7,7 +7,7 @@ const url = process.env.TOUCH_LOG_BROWSER_URL ?? 'http://127.0.0.1:5173';
 const channel = process.env.PLAYWRIGHT_CHANNEL ?? 'msedge';
 const launchOptions = { headless: true, ...(channel === 'default' ? {} : { channel }) };
 
-test('로컬 로그: 중복 방지, 화면·옵션·설정, 세션 복원·분리, 실제 터치 스크롤', async () => {
+test('로컬 로그: 중복 방지, 화면·옵션·설정, 서버 세션 연결·새로고침 분리, 실제 터치 스크롤', async () => {
   const browser = await chromium.launch(launchOptions);
   try {
     const context = await browser.newContext({ viewport: { width: 1100, height: 650 }, hasTouch: true });
@@ -26,11 +26,13 @@ test('로컬 로그: 중복 방지, 화면·옵션·설정, 세션 복원·분�
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(url);
     await page.waitForFunction(() => window.kioskTouchLogDraft);
+    await page.waitForFunction(id => window.kioskTouchLogDraft.read().serverSessionId === id, first);
     const read = () => page.evaluate(() => window.kioskTouchLogDraft.read());
     const click = id => page.locator(`[data-log-target="${id}"]`).click();
     let log = await read();
-    assert.equal(log.events.filter(event => event.kind === 'session_start').length, 1);
-    assert.equal(log.events.filter(event => event.kind === 'screen_enter').length, 1);
+    assert.equal(log.events.filter(event => event.kind === 'session_start' && event.serverSessionId === first).length, 1);
+    assert.equal(log.events.filter(event => event.kind === 'screen_enter' && event.sessionId === log.sessionId).length, 1);
+    assert.equal(log.events.find(event => event.kind === 'session_start' && event.serverSessionId === first).data.server_session_id, first);
     const session = log.sessionId;
     const visit = log.events.at(-1).visitId;
     await click('category:커피');
@@ -60,23 +62,35 @@ test('로컬 로그: 중복 방지, 화면·옵션·설정, 세션 복원·분�
     log = await read();
     assert(log.events.some(event => event.kind === 'ui_settings_change'));
     assert.notEqual(log.events.filter(event => event.kind === 'screen_enter').at(-1).visitId, visit);
+    await page.evaluate(() => document.querySelector('.kiosk').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 123, clientX: 1, clientY: 1 })));
     await page.reload();
     await page.waitForFunction(() => window.kioskTouchLogDraft);
+    await page.waitForFunction(id => window.kioskTouchLogDraft.read().serverSessionId === id, second);
     log = await read();
-    assert.equal(log.sessionId, session);
-    assert(log.events.some(event => event.kind === 'session_resume'));
-    // 서버 주문은 새로고침 시 새 이용을 시작하지만 로컬 로그 복원은 유지됩니다.
+    assert.notEqual(log.sessionId, session);
+    assert(log.events.some(event => event.kind === 'session_end' && event.sessionId === session));
+    assert.equal(log.events.filter(event => event.kind === 'session_start' && event.serverSessionId === second).length, 1);
+    assert(log.events.some(event => event.kind === 'pointer_start' && event.sessionId === session && event.serverSessionId === first));
+    assert(log.events.some(event => event.kind === 'pointer_interrupted' && event.serverSessionId === first));
+    // 이전 기록은 보관하지만 새 서버 주문은 별도 로컬 세션에 연결됩니다.
     await click('product:americano');
     await click('cart-add');
     await page.locator('dialog[open]').waitFor({ state: 'hidden' });
     await click('review-open');
     await click('simulate-payment');
+    await page.locator('.order-number').waitFor();
+    await page.evaluate(() => document.querySelector('.kiosk').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 124, clientX: 1, clientY: 1 })));
     await click('new-order');
-    await page.waitForFunction(previous => window.kioskTouchLogDraft.read().sessionId !== previous, session);
+    await page.waitForFunction(id => window.kioskTouchLogDraft.read().serverSessionId === id, third);
     log = await read();
     assert.notEqual(log.sessionId, session);
     assert.equal(log.events.filter(event => event.kind === 'screen_enter' && event.sessionId === log.sessionId).length, 1);
     assert(log.events.some(event => event.kind === 'session_end' && event.sessionId === session));
+    assert.equal(log.events.find(event => event.kind === 'session_start' && event.serverSessionId === third).data.server_session_id, third);
+    assert(log.events.some(event => event.kind === 'pointer_interrupted' && event.serverSessionId === second));
+    for (const local of new Set(log.events.map(event => event.sessionId))) {
+      assert.equal(new Set(log.events.filter(event => event.sessionId === local).map(event => event.serverSessionId)).size, 1);
+    }
     // 터치 제스처를 브라우저에 전달하여 기본 스크롤과 pointercancel을 확인합니다.
     await page.evaluate(() => window.scrollTo(0, 0));
     const cdp = await context.newCDPSession(page);
@@ -167,6 +181,7 @@ test('개발 확인 창은 수집을 오염시키지 않고 표시 정지·재�
     const responses = await installOrderResponses(page, bootstrap('log-tools'));
     await page.goto(url);
     await page.waitForFunction(() => window.kioskTouchLogDraft);
+    await page.waitForFunction(() => window.kioskTouchLogDraft.read().serverSessionId === 'log-tools');
     const read = () => page.evaluate(() => window.kioskTouchLogDraft.read());
     const originalIds = (await read()).events.map(event => event.id);
     await page.getByRole('button', { name: '터치 로그 보기', exact: true }).click();
