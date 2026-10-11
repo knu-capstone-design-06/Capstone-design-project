@@ -226,3 +226,56 @@ test('재확인 실패 뒤에만 대기 요청을 버리고 새 주문을 시작
   assert.equal(controller.getSnapshot().order, null);
   assert.equal(requests.length, 2, '이전 요청을 새 세션에서 다시 실행하지 않음');
 });
+
+test('불완전한 주문 성공 응답은 Cart와 정확한 요청을 유지하고 유효한 재확인 후에만 완료한다', async () => {
+  const invalid = [null, [], { session_id: 'session-1' }];
+  for (const field of Object.keys(order)) {
+    const missing = structuredClone(order);
+    delete missing[field];
+    invalid.push(missing);
+  }
+  for (const patch of [
+    { order_id: '' }, { order_number: 42 }, { status: 'paid' }, { currency: 'USD' }, { items: [] },
+    { total_quantity: 1.5 }, { total_amount: -1 }, { total_amount: 100 }, { created_at: 'yesterday' },
+    { created_at: '2026-10-09' }, { items: [{ ...order.items[0], quantity: 21 }] },
+    { items: [{ ...order.items[0], temperature: 'warm' }] },
+    { items: [{ ...order.items[0], line_amount: '7000' }] },
+  ]) invalid.push({ ...structuredClone(order), ...patch });
+  for (const field of Object.keys(order.items[0])) {
+    const broken = structuredClone(order);
+    delete broken.items[0][field];
+    invalid.push(broken);
+  }
+  for (const response of invalid) {
+    const requests = [];
+    const controller = fixture({ getCart: async () => populatedCart(), createOrder: async (...args) => {
+      requests.push(structuredClone(args));
+      return requests.length === 1 ? response : structuredClone(order);
+    } });
+    await controller.initialize();
+    assert.equal(await controller.checkout(), false, JSON.stringify(response));
+    assert.equal(controller.getSnapshot().status, 'uncertain');
+    assert.equal(controller.getSnapshot().order, null);
+    assert.deepEqual(controller.getSnapshot().cart, populatedCart());
+    assert.equal(await controller.checkout(), false);
+    assert.equal(await controller.retry(), true);
+    assert.deepEqual(requests[0], requests[1]);
+    assert.equal(controller.getSnapshot().order.order_number, 'A042');
+    assert.equal(controller.getSnapshot().cart, null);
+  }
+});
+
+test('Cart 조회가 실패해도 받은 서버 세션을 기록하고 재연결은 새 세션으로 시도한다', async () => {
+  let carts = 0;
+  const controller = fixture({ getCart: async session => {
+    if (++carts === 1) throw new ApiError(503, { detail: '연결 대기' });
+    return emptyCart(session);
+  } });
+  await controller.initialize();
+  assert.equal(controller.getSnapshot().status, 'disconnected');
+  assert.equal(controller.getSnapshot().session.session_id, 'session-1');
+  assert.equal(controller.getSnapshot().cart, null);
+  assert.equal(await controller.initialize(), true);
+  assert.equal(controller.getSnapshot().session.session_id, 'session-2');
+  assert.equal(controller.getSnapshot().status, 'ready');
+});

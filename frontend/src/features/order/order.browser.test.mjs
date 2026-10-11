@@ -40,6 +40,88 @@ async function noOverflow(page) {
   assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
 }
 
+test('불완전한 주문 성공 응답은 완료 화면을 열지 않고 같은 요청 재확인으로 복구한다', async () => {
+  const browser = await chromium.launch(launchOptions);
+  try {
+    const session = 'session-malformed-order', cart = cartResponse(session, 1, [iced()]);
+    const incomplete = orderResponse(cart);
+    delete incomplete.order_number;
+    const { page, fixture, errors } = await open(browser, [
+      ...bootstrap(session), mutation(session, '/cart/items', cart),
+      mutation(session, '/orders', incomplete, { status: 201 }),
+      mutation(session, '/orders', orderResponse(cart), { status: 201 }),
+    ]);
+    await ready(page);
+    await add(page);
+    await click(page, 'review-open');
+    await click(page, 'simulate-payment');
+    await page.locator('[data-log-target="order-result-retry"]').waitFor();
+    assert.equal(await page.locator('.order-number').count(), 0);
+    assert.match(await page.locator('.total').innerText(), /3,500원/);
+    assert(await page.locator('[data-log-target="simulate-payment"]').isDisabled());
+    await click(page, 'order-result-retry');
+    await page.locator('.order-number').waitFor();
+    assert.equal(await page.locator('.order-number').innerText(), 'DEMO-042');
+    const orders = fixture.requests.filter(request => request.path.endsWith('/orders'));
+    assert.deepEqual(orders[0], orders[1]);
+    fixture.verify();
+    assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
+test('명시적으로 켠 개발 샘플은 서버 없이 17개 메뉴·주문·새 이용·새로고침을 제공한다', { skip: !process.env.ORDER_SAMPLE_BROWSER_URL }, async () => {
+  const browser = await chromium.launch(launchOptions);
+  try {
+    for (const large of [false, true]) {
+      const page = await browser.newPage({ viewport: { width: 1080, height: 1920 }, hasTouch: true });
+      const errors = [], backendRequests = [];
+      page.on('pageerror', error => errors.push(error.message));
+      page.on('request', request => { if (request.url().includes('/backend/')) backendRequests.push(request.url()); });
+      await page.goto(process.env.ORDER_SAMPLE_BROWSER_URL);
+      await ready(page);
+      assert.match(await page.locator('.sample-badge').innerText(), /개발용 샘플/);
+      assert.equal(await page.locator('.product').count(), 17);
+      await page.waitForFunction(() => window.kioskTouchLogDraft?.read().serverSessionId?.startsWith('sample-session-'));
+      const first = await page.evaluate(() => window.kioskTouchLogDraft.read().serverSessionId);
+      if (large) {
+        await click(page, 'support-toggle'); await click(page, 'support:largeText'); await click(page, 'support:largeButton'); await click(page, 'support-toggle');
+      }
+      await add(page);
+      await add(page, 'sandwich');
+      assert.match(await page.locator('.total').innerText(), /9,000원/);
+      await noOverflow(page);
+      await screenshot(page, `sample-menu-${large ? 'large' : 'default'}`);
+      await click(page, 'review-open'); await click(page, 'simulate-payment');
+      await page.locator('.order-number').waitFor();
+      assert.match(await page.locator('.order-number').innerText(), /^DEV-SAMPLE-/);
+      await click(page, 'new-order'); await ready(page);
+      await page.waitForFunction(id => window.kioskTouchLogDraft.read().serverSessionId !== id, first);
+      assert.equal(await page.locator('.cart-row').count(), 0);
+      await add(page);
+      await page.reload(); await ready(page);
+      assert.equal(await page.locator('.cart-row').count(), 0);
+      if (large) assert.equal(await page.locator('.kiosk.large-text.large-button').count(), 1);
+      assert.deepEqual(backendRequests, []);
+      assert.deepEqual(errors, []);
+      await page.close();
+    }
+  } finally { await browser.close(); }
+});
+
+test('개발 샘플 설정으로 빌드해도 프로덕션에서는 서버 API를 사용한다', { skip: !process.env.ORDER_PRODUCTION_URL }, async () => {
+  const browser = await chromium.launch(launchOptions);
+  try {
+    const page = await browser.newPage();
+    const fixture = await installOrderResponses(page, [{ method: 'GET', path: '/api/v1/products', status: 404, body: { detail: 'Not Found' } }]);
+    await page.goto(process.env.ORDER_PRODUCTION_URL);
+    await page.locator('[data-log-target="order-connect-retry"]').waitFor();
+    assert.equal(await page.locator('.product').count(), 0);
+    assert.doesNotMatch(await page.locator('.sample-badge').innerText(), /개발용/);
+    assert.equal(await page.locator('.touch-log-tools').count(), 0);
+    fixture.verify();
+  } finally { await browser.close(); }
+});
+
 test('1080×1920: API 응답으로 상품·옵션·수량·삭제·완료·새 이용과 접근성 설정 표시', async () => {
   const browser = await chromium.launch(launchOptions);
   try {

@@ -1,5 +1,6 @@
 import { ApiError } from '../../shared/api/index.ts';
 import type { createBackendApi, Cart, CartItemCreateRequest, Order, OrderApiError, Product, SessionCreateResponse } from '../../shared/api/index.ts';
+import { readOrderResponse } from './orderResponse.ts';
 
 type Api = ReturnType<typeof createBackendApi>;
 export type OrderSnapshot = {
@@ -119,7 +120,8 @@ export class OrderController {
     this.retryTimer = null;
     this.set({ status: 'saving', message: '', retryAt: 0, canAbandonPending: false });
     try {
-      const result = await pending.run();
+      const response = await pending.run();
+      const result = pending.kind === 'order' ? readOrderResponse(response) : response;
       if (this.state.session?.session_id !== pending.sessionId) return false;
       if (result.session_id !== pending.sessionId) throw new Error('세션 응답 불일치');
       this.pending = null;
