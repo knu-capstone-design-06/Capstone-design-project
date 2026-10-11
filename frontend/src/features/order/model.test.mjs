@@ -192,3 +192,37 @@ test('상품·장바구니 항목 없음 404는 현재 세션과 장바구니를
     assert.equal(await controller.startNewOrder(), false);
   }
 });
+
+test('재확인 실패 뒤에만 대기 요청을 버리고 새 주문을 시작할 수 있다', async () => {
+  const requests = [];
+  let failRetry;
+  const controller = fixture({ getCart: async session => session === 'session-1' ? populatedCart() : emptyCart(session),
+    createOrder: (...args) => {
+      requests.push(structuredClone(args));
+      return requests.length === 1 ? Promise.reject(new TypeError('response lost'))
+        : new Promise((resolve, reject) => { failRetry = reject; });
+    } });
+  await controller.initialize();
+  assert.equal(await controller.checkout(), false);
+  assert.equal(controller.getSnapshot().canAbandonPending, false);
+  assert.equal(controller.abandonPending(), false);
+  const retry = controller.retry();
+  assert.equal(controller.getSnapshot().status, 'saving');
+  assert.equal(controller.abandonPending(), false, '처리 중인 요청은 버리지 않음');
+  assert.equal(await controller.startNewOrder(), false);
+  failRetry(new ApiError(503, { detail: '처리 결과를 확인할 수 없습니다.' }, 0.02));
+  assert.equal(await retry, false);
+  assert.deepEqual(requests[0], requests[1], '재확인은 같은 키·버전·본문');
+  assert.equal(controller.getSnapshot().canAbandonPending, true);
+  assert.equal(controller.getSnapshot().cart.total_amount, 7000);
+  assert.equal(controller.abandonPending(), true);
+  assert.equal(controller.getSnapshot().status, 'ended');
+  assert.equal(controller.getSnapshot().retryAt, 0);
+  assert.equal(controller.getSnapshot().canAbandonPending, false);
+  assert.equal(await controller.retry(), false);
+  assert.equal(await controller.startNewOrder(), true);
+  assert.equal(controller.getSnapshot().session.session_id, 'session-2');
+  assert.equal(controller.getSnapshot().cart.total_quantity, 0);
+  assert.equal(controller.getSnapshot().order, null);
+  assert.equal(requests.length, 2, '이전 요청을 새 세션에서 다시 실행하지 않음');
+});

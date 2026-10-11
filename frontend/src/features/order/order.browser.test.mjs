@@ -169,6 +169,86 @@ test('버전 충돌 응답의 최신 Cart를 표시하고 재조작에는 최신
   } finally { await browser.close(); }
 });
 
+test('재확인 실패 뒤 처음부터 다시 주문하고 새 연결 실패에서도 복구한다', async () => {
+  const browser = await chromium.launch({ channel: 'msedge', headless: true });
+  try {
+    for (const large of [false, true]) {
+      const first = `session-abandon-${large}`, second = `session-restart-${large}`;
+      const cart = cartResponse(first, 1, [iced()]);
+      const { page, errors, fixture } = await open(browser, [
+        ...bootstrap(first),
+        mutation(first, '/cart/items', cart),
+        mutation(first, '/orders', null, { fail: true }),
+        mutation(first, '/orders', { detail: '서비스를 사용할 수 없습니다.' }, { status: 503, headers: { 'Retry-After': '30' } }),
+        { method: 'GET', path: '/api/v1/products', body: productsResponse },
+        { method: 'POST', path: '/api/v1/sessions', fail: true },
+        ...bootstrap(second),
+      ]);
+      await ready(page);
+      if (large) {
+        await click(page, 'support-toggle');
+        await click(page, 'support:largeText');
+        await click(page, 'support:largeButton');
+        await click(page, 'support-toggle');
+      }
+      await add(page);
+      await click(page, 'review-open');
+      await click(page, 'simulate-payment');
+      await page.locator('[data-log-target="order-result-retry"]').waitFor();
+      assert.equal(await page.locator('[data-log-target="order-pending-restart"]').count(), 0);
+      await click(page, 'order-result-retry');
+      await page.locator('[data-log-target="order-pending-restart"]').waitFor();
+      assert(await page.locator('[data-log-target="order-result-retry"]').isDisabled());
+      assert.match(await page.locator('.order-feedback').innerText(), /자동으로 취소되지는/);
+      await noOverflow(page);
+      const button = await page.locator('[data-log-target="order-pending-restart"]').boundingBox();
+      assert(button && button.x >= 0 && button.x + button.width <= 1080);
+      await screenshot(page, `order-retry-recovery-${large ? 'large' : 'default'}`);
+      await click(page, 'order-pending-restart');
+      await page.locator('[data-log-target="order-connect-retry"]').waitFor();
+      await click(page, 'order-connect-retry');
+      await ready(page);
+      assert.equal(await page.locator('.cart-row').count(), 0);
+      assert.equal(await page.locator('.order-number').count(), 0);
+      assert.equal(await page.locator('[data-log-target="order-result-retry"]').count(), 0);
+      const orders = fixture.requests.filter(request => request.path.endsWith('/orders'));
+      assert.deepEqual(orders[0], orders[1]);
+      assert.equal(fixture.requests.filter(request => request.path === '/api/v1/sessions').length, 3);
+      fixture.verify();
+      assert.deepEqual(errors, []);
+      await page.close();
+    }
+  } finally { await browser.close(); }
+});
+
+test('상품 담기 재확인 실패 뒤 옵션 창을 닫고 새 주문을 시작한다', async () => {
+  const browser = await chromium.launch({ channel: 'msedge', headless: true });
+  try {
+    const first = 'session-modal-abandon', second = 'session-modal-restart';
+    const { page, errors, fixture } = await open(browser, [
+      ...bootstrap(first),
+      mutation(first, '/cart/items', null, { fail: true }),
+      mutation(first, '/cart/items', { detail: '처리 결과 확인 실패' }, { status: 503 }),
+      ...bootstrap(second),
+    ]);
+    await ready(page);
+    await click(page, 'product:americano');
+    await click(page, 'cart-add');
+    await page.locator('dialog [data-log-target="order-result-retry"]').waitFor();
+    await click(page, 'order-result-retry');
+    await page.locator('dialog [data-log-target="order-pending-restart"]').waitFor();
+    await click(page, 'order-pending-restart');
+    await ready(page);
+    assert.equal(await page.locator('dialog[open]').count(), 0);
+    assert.equal(await page.locator('.cart-row').count(), 0);
+    const adds = fixture.requests.filter(request => request.path.endsWith('/cart/items'));
+    assert.deepEqual(adds[0], adds[1]);
+    assert.equal(fixture.requests.filter(request => request.path.endsWith('/orders')).length, 0);
+    fixture.verify();
+    assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
 test('변경 요청의 코드 없는 404·410 뒤 새 이용을 시작할 수 있다', async () => {
   const browser = await chromium.launch({ channel: 'msedge', headless: true });
   try {

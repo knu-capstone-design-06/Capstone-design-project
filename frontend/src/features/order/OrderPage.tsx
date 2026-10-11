@@ -57,9 +57,20 @@ export function OrderPage() {
       setScreen('menu'); setOrderNumber(''); setCategory('all');
     }
   }
+  async function restartAfterUncertain() {
+    if (!controller.abandonPending()) return;
+    setScreen('menu'); setOrderNumber(''); setCategory('all');
+    await startNewOrder();
+  }
   const feedback = <>{busy && <p className="order-progress" role="status">{state.status === 'loading' ? '주문을 준비하고 있습니다.' : '요청을 처리하고 있습니다.'}</p>}
     {state.message && <div className="order-feedback" role="alert"><p>{state.message}</p>
-      {state.status === 'uncertain' && <button data-log-target="order-result-retry" disabled={Date.now() < state.retryAt} onClick={() => void retry()}>결과 다시 확인</button>}
+      {state.status === 'uncertain' && <>
+        {state.canAbandonPending && <p>이전 주문이 처리됐는지 확인하지 못했어요. 처음부터 다시 주문해도 이전 주문이 자동으로 취소되지는 않아요.</p>}
+        <div className="order-feedback-actions">
+          <button data-log-target="order-result-retry" disabled={Date.now() < state.retryAt} onClick={() => void retry()}>결과 다시 확인</button>
+          {state.canAbandonPending && <button data-log-target="order-pending-restart" onClick={() => void restartAfterUncertain()}>처음부터 다시 주문</button>}
+        </div>
+      </>}
       {state.status === 'disconnected' && <button data-log-target="order-connect-retry" onClick={() => screen === 'complete' ? void startNewOrder() : void controller.initialize()}>다시 연결</button>}
       {state.status === 'ended' && <button data-log-target="order-session-restart" onClick={() => void startNewOrder()}>새 이용 시작</button>}
     </div>}</>;

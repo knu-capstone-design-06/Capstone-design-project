@@ -11,13 +11,14 @@ export type OrderSnapshot = {
   message: string;
   notice: string;
   retryAt: number;
+  canAbandonPending: boolean;
 };
 type Pending = { sessionId: string; kind: 'cart' | 'order'; notice: string; run: () => Promise<Cart | Order> };
 
 /** Keeps one confirmed server snapshot and one exact request for a manual retry. */
 export class OrderController {
   private api: Api;
-  private state: OrderSnapshot = { products: [], session: null, cart: null, order: null, status: 'idle', message: '', notice: '', retryAt: 0 };
+  private state: OrderSnapshot = { products: [], session: null, cart: null, order: null, status: 'idle', message: '', notice: '', retryAt: 0, canAbandonPending: false };
   private listeners = new Set<() => void>();
   private initializing: Promise<boolean> | null = null;
   private pending: Pending | null = null;
@@ -39,7 +40,7 @@ export class OrderController {
   }
 
   private async connect(): Promise<boolean> {
-    this.set({ status: 'loading', session: null, cart: null, order: null, message: '', notice: '', retryAt: 0 });
+    this.set({ status: 'loading', session: null, cart: null, order: null, message: '', notice: '', retryAt: 0, canAbandonPending: false });
     let stage: 'products' | 'session' | 'cart' = 'products';
     try {
       const products = await this.api.getProducts();
@@ -92,7 +93,17 @@ export class OrderController {
 
   retry(): Promise<boolean> {
     if (!this.pending || this.state.status !== 'uncertain' || Date.now() < this.state.retryAt) return Promise.resolve(false);
-    return this.execute(this.pending);
+    return this.execute(this.pending, true);
+  }
+
+  abandonPending(): boolean {
+    if (!this.pending || this.state.status !== 'uncertain' || !this.state.canAbandonPending) return false;
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.retryTimer = null;
+    this.pending = null;
+    this.set({ status: 'ended', canAbandonPending: false, retryAt: 0,
+      message: '이전 주문이 처리됐는지 확인하지 못했어요. 처음부터 다시 주문할 수 있어요.' });
+    return true;
   }
 
   clearNotice() { this.set({ notice: '' }); }
@@ -102,9 +113,10 @@ export class OrderController {
     return !this.state.cart || cart.version >= this.state.cart.version ? cart : this.state.cart;
   }
 
-  private async execute(pending: Pending): Promise<boolean> {
+  private async execute(pending: Pending, isRetry = false): Promise<boolean> {
     if (this.retryTimer) clearTimeout(this.retryTimer);
-    this.set({ status: 'saving', message: '', retryAt: 0 });
+    this.retryTimer = null;
+    this.set({ status: 'saving', message: '', retryAt: 0, canAbandonPending: false });
     try {
       const result = await pending.run();
       if (this.state.session?.session_id !== pending.sessionId) return false;
@@ -125,7 +137,8 @@ export class OrderController {
       if (uncertain) {
         const seconds = apiError?.retryAfterSeconds ?? 0;
         const retryAt = Date.now() + seconds * 1000;
-        this.set({ status: 'uncertain', retryAt, message: '요청 결과를 아직 확인하지 못했습니다. 잠시 후 결과를 다시 확인해 주세요.' });
+        this.set({ status: 'uncertain', retryAt, canAbandonPending: isRetry,
+          message: '요청 결과를 아직 확인하지 못했습니다. 잠시 후 결과를 다시 확인해 주세요.' });
         if (seconds > 0) this.retryTimer = setTimeout(() => {
           if (this.pending === pending && this.state.status === 'uncertain') this.set({ retryAt: 0 });
         }, seconds * 1000);

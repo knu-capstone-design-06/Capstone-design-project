@@ -80,6 +80,7 @@ ul { list-style: none; margin: 0; padding: 0; }
 .order-feedback { margin-bottom: 24px; padding: 16px 18px; border: 1px solid #d5b58d; border-radius: 12px; background: #fff5e7; }
 .order-feedback p { margin: 0 0 12px; line-height: 1.6; }
 .order-feedback p:last-child { margin-bottom: 0; }
+.order-feedback-actions { display: flex; flex-wrap: wrap; gap: 12px; }
 .review-card { padding: 28px; background: white; border-radius: 18px; border: 1px solid #e1e5da; }
 .review-card h2 { font-size: 1.15em; }
 .review-card .cart-row { display: flex; gap: 24px; align-items: center; justify-content: space-between; }
