@@ -72,9 +72,9 @@ out, events = assess(rows, t_end, params, landmarker_num_faces=1)  # 창 = [t_en
 
 ### 규칙 3개 (결정 목록 §3)
 
-1. `looking_back_with_people_behind`(뒤에 사람이 있어 서두르는 듯함): `people_behind` 1개 이상과 `look_back` `look_back_min_count`개 이상. `touch_miss`는 보조 근거라 사건 수에만 더합니다. 지나가는 사람만 있거나 뒤돌아봄이 없으면 빠집니다.
-2. `consulting_companion`(일행과 상의하는 듯함): `companion_present`, 그쪽으로 돈 `yaw_sweep_offscreen`, `mouth_moving`, `dwell_no_touch`(창 안 터치 없음), 몸 제자리(어깨 가운데가 움직인 범위가 `body_still_max` 이하). 입 움직임 열이 없거나 smoothing이 꺼졌거나 얼굴 보임 비율이 `face_visible_min` 미만이면 그 단서만 빼고 나머지로 판단하고, `quality_ok`를 false로 둡니다.
-3. `looking_around`(무언가를 찾는 듯함): 화면 밖 고개 돌림(`yaw_sweep_offscreen`과 `look_back`) `sweep_min_count`개 이상, `dwell_no_touch`(창 안 터치 없음), 몸 제자리, 뒤에 선 사람 없음. 메뉴를 읽는 작은 yaw는 `offscreen_yaw_deg` 안에 머물러 사건이 되지 않습니다.
+1. `looking_back_with_people_behind`(뒤에 사람이 있어 서두르는 듯함): 창 안에 `people_behind`가 1개 이상, `look_back`이 `look_back_min_count`개 이상 있어야 합니다. `touch_miss`는 보조 근거라 사건 수에만 더합니다. 지나가는 사람만 있거나 뒤돌아봄이 없으면 빠집니다.
+2. `consulting_companion`(일행과 상의하는 듯함): `companion_present`, 그쪽으로 돈 `yaw_sweep_offscreen`, `mouth_moving`, `dwell_no_touch`가 모두 있어야 합니다. 창 안에 터치가 없고 몸이 제자리여야 합니다(어깨 가운데가 움직인 범위가 `body_still_max` 이하). 입 움직임 열이 없거나 smoothing이 꺼졌거나 얼굴 보임 비율이 `face_visible_min` 미만이면 그 단서만 빼고 나머지로 판단하고, `quality_ok`를 false로 둡니다.
+3. `looking_around`(무언가를 찾는 듯함): 화면 밖 고개 돌림(`yaw_sweep_offscreen`과 `look_back`)이 `sweep_min_count`개 이상이고 `dwell_no_touch`가 있어야 합니다. 창 안에 터치가 없고, 몸이 제자리이고, 뒤에 선 사람이 없어야 합니다. 메뉴를 읽는 작은 yaw는 `offscreen_yaw_deg` 안에 머물러 사건이 되지 않습니다.
 
 ### 사건 9종
 
@@ -129,8 +129,16 @@ out, events = assess(rows, t_end, params, landmarker_num_faces=1)  # 창 = [t_en
 
 검사 규칙 두 개는 `check_output`이 코드로 확인합니다. `assess`가 낸 출력이 규칙을 어기면 오류가 납니다.
 
-1. 근거 연결: `evidence`의 모든 항목은 이 창의 사건 ID를 가리킵니다. 그 사건은 창 안에 있고, 항목의 관찰 이름과 값은 그 사건의 관찰과 같습니다. 표시 문구도 이름마다 정해 둔 문구와 같아야 합니다.
-2. 모름: 근거 사건이 `min_events`개보다 적거나, 꼭 필요한 단서를 잴 수 없으면 `unknown`입니다. 입력 열이 없거나, 얼굴이 필요한 단서인데 얼굴 보임 비율이 `face_visible_min` 미만인 경우입니다. `none`은 모든 태그가 측정된 단서로 빠졌을 때만 냅니다. 그래서 선택 열이 하나도 없는 지금의 `observations.csv`만 넣으면 출력은 늘 `unknown`입니다. 몸 추적 비율이 `track_conf_min` 미만이면 센서 실패로 보고 규칙을 읽지 않고 `unknown`을 냅니다. 얼굴이 사라지는 것은 뒤돌아봄의 단서이므로, 얼굴 보임 비율이 낮아도 뒤돌아봄 태그는 막지 않습니다. 두 태그가 함께 맞으면 근거 사건이 많은 쪽이 `name`이 되고 다른 쪽은 `alternatives`에 들어갑니다. 사건 수가 같으면 `unknown`입니다.
+1. 근거 연결: `evidence`의 모든 항목은 이 창의 사건 ID를 가리킵니다. 그 사건은 창 안에 있고, 항목의 관찰 이름과 값은 그 사건의 관찰과 같습니다.
+2. 모름: 아래 경우에 `unknown`을 냅니다.
+   - 근거 사건이 `min_events`개보다 적을 때
+   - 꼭 필요한 단서를 잴 수 없을 때: 입력 열이 없거나, 얼굴이 필요한 단서인데 얼굴 보임 비율이 `face_visible_min` 미만일 때
+   - 몸 추적 비율이 `track_conf_min` 미만일 때(센서 실패로 보고 규칙을 읽지 않음)
+   - 두 태그가 함께 맞고 근거 사건 수가 같을 때. 수가 다르면 많은 쪽이 `name`이 되고 다른 쪽은 `alternatives`에 들어갑니다
+
+   얼굴이 사라지는 것은 뒤돌아봄의 단서이므로, 얼굴 보임 비율이 낮아도 뒤돌아봄 태그는 막지 않습니다. `none`은 모든 태그가 측정된 단서로 빠졌을 때만 냅니다. 그래서 선택 열이 하나도 없는 지금의 `observations.csv`만 넣으면 출력은 늘 `unknown`입니다.
+
+`check_output`은 표시 문구가 이름마다 정해 둔 문구와 같은지도 확인합니다(자유 문장 없음).
 
 상태 수명: 창은 `t_end`와 함께 밀립니다. 창 안 사건이 `min_events`개 이상이면 상태가 시작되고, 사건이 창 밖으로 나가거나(`window_s` = 만료 창) 반대 근거(터치, 뒤에 선 사람, 몸 이동)가 창에 들어오면 풀립니다.
 
