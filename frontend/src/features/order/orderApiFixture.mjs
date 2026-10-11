@@ -50,8 +50,8 @@ export async function installOrderResponses(page, steps) {
       assert.equal(actual.method, expected.method);
       assert.equal(actual.path, expected.path);
       if (expected.fail) return await route.abort('failed');
-      await route.fulfill({ status: expected.status ?? 200, contentType: 'application/json',
-        headers: expected.headers, body: JSON.stringify(expected.body) });
+      await route.fulfill({ status: expected.status ?? 200, contentType: expected.contentType ?? 'application/json',
+        headers: expected.headers, body: expected.rawBody ?? JSON.stringify(expected.body) });
     } catch (error) {
       errors.push(error.message);
       await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ detail: '테스트 응답 불일치' }) });

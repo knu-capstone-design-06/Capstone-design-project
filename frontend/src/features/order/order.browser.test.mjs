@@ -40,6 +40,105 @@ async function noOverflow(page) {
   assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
 }
 
+async function bottomAction(page, target) {
+  const button = page.locator(`[data-log-target="${target}"]`);
+  const bounds = await button.boundingBox(), viewport = page.viewportSize();
+  assert(bounds && viewport);
+  assert(bounds.y >= viewport.height * .75, '주요 버튼은 화면 하단에 배치');
+  assert(bounds.x >= 0 && bounds.x + bounds.width <= viewport.width);
+  assert(bounds.y + bounds.height <= viewport.height);
+  assert(await button.evaluate(element => {
+    const rect = element.getBoundingClientRect();
+    return element.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2));
+  }), '하단 주문 버튼이 다른 요소에 가려지지 않음');
+}
+
+test('세로·가로 화면과 독립 접근성 설정에서 전체 주문·설정 유지·수동 초기화', async t => {
+  const browser = await chromium.launch(launchOptions);
+  try {
+    for (const viewport of [{ width: 1080, height: 1920 }, { width: 1920, height: 1080 }, { width: 1365, height: 768 }]) {
+      for (const settings of [[], ['largeText'], ['largeButton'], ['largeText', 'largeButton']]) {
+        const label = `${viewport.width}x${viewport.height}-${settings.join('-') || 'default'}`;
+        await t.test(label, async () => {
+          const first = `matrix-${label}`, second = `${first}-new`;
+          const cart = cartResponse(first, 6, [iced(2), food]);
+          const { page, errors, fixture } = await open(browser, [
+            ...bootstrap(first),
+            mutation(first, '/cart/items', cartResponse(first, 1, [iced(2)])),
+            mutation(first, '/cart/items', cartResponse(first, 2, [iced(2), hot])),
+            mutation(first, '/cart/items', cartResponse(first, 3, [iced(2), hot, food])),
+            mutation(first, '/cart/items/item-iced', cartResponse(first, 4, [iced(3), hot, food]), { method: 'PATCH' }),
+            mutation(first, '/cart/items/item-iced', cartResponse(first, 5, [iced(2), hot, food]), { method: 'PATCH' }),
+            mutation(first, '/cart/items/item-hot?expected_version=5', cart, { method: 'DELETE' }),
+            mutation(first, '/orders', orderResponse(cart), { status: 201 }),
+            ...bootstrap(second),
+          ]);
+          await page.setViewportSize(viewport); await ready(page);
+          await click(page, 'support-toggle');
+          for (const setting of settings) await click(page, `support:${setting}`);
+          await click(page, 'support:stepGuide'); await click(page, 'support-toggle');
+          assert.equal(await page.locator('.guide p').count(), 2);
+          await click(page, 'product:americano');
+          await click(page, 'options-increase'); await click(page, 'cart-add');
+          await page.locator('dialog[open]').waitFor({ state: 'hidden' });
+          await add(page, 'americano', '핫'); await add(page, 'sandwich');
+          await click(page, 'cart:americano:아이스:increase');
+          await page.waitForFunction(() => document.querySelector('.total')?.innerText.includes('19,500원'));
+          await click(page, 'cart:americano:아이스:decrease');
+          await page.waitForFunction(() => document.querySelector('.total')?.innerText.includes('16,000원'));
+          await click(page, 'cart:americano:핫:remove');
+          await page.waitForFunction(() => document.querySelector('.total')?.innerText.includes('12,500원'));
+          await noOverflow(page); await bottomAction(page, 'review-open');
+          if (settings.includes('largeText')) assert.equal(await page.locator('.product-info strong').first().evaluate(element => getComputedStyle(element).fontSize), '21px');
+          if (settings.includes('largeButton')) assert((await page.locator('[data-log-target="review-open"]').boundingBox()).height >= 88);
+          await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+          await bottomAction(page, 'review-open');
+          const lastProduct = await page.locator('.product').last().boundingBox();
+          const actions = await page.locator('.order-actions').boundingBox();
+          assert(lastProduct.y + lastProduct.height <= actions.y, '목록 끝도 하단 주문 영역 위로 스크롤 가능');
+          await screenshot(page, `matrix-menu-${label}`);
+          await click(page, 'review-open'); await noOverflow(page); await bottomAction(page, 'simulate-payment');
+          await click(page, 'review-back'); await bottomAction(page, 'review-open');
+          await click(page, 'review-open'); await screenshot(page, `matrix-review-${label}`);
+          await click(page, 'simulate-payment'); await page.locator('.order-number').waitFor();
+          await noOverflow(page); await bottomAction(page, 'new-order');
+          await screenshot(page, `matrix-complete-${label}`);
+          await click(page, 'new-order'); await ready(page);
+          assert.equal(await page.locator('.cart-row').count(), 0);
+          for (const setting of ['largeText', 'largeButton']) {
+            const className = setting === 'largeText' ? 'large-text' : 'large-button';
+            assert.equal(await page.locator(`.kiosk.${className}`).count(), Number(settings.includes(setting)), '새 주문에서도 설정 유지');
+          }
+          await click(page, 'support-toggle'); await click(page, 'support-reset');
+          assert.equal(await page.locator('.support-options [aria-pressed="true"]').count(), 0, '기본 화면은 사용자가 명시적으로 초기화');
+          assert.equal(await page.locator('.guide').count(), 0);
+          fixture.verify(); assert.deepEqual(errors, []); await page.close();
+        });
+      }
+    }
+  } finally { await browser.close(); }
+});
+
+test('HTML 409 오류의 Retry-After 동안 주문 재확인을 막고 동일 요청으로 복구', async () => {
+  const browser = await chromium.launch(launchOptions);
+  try {
+    const session = 'session-html-retry', cart = cartResponse(session, 1, [iced()]);
+    const { page, errors, fixture } = await open(browser, [
+      ...bootstrap(session), mutation(session, '/cart/items', cart),
+      mutation(session, '/orders', null, { status: 409, rawBody: '<html>Please wait</html>', contentType: 'text/html', headers: { 'Retry-After': '1' } }),
+      mutation(session, '/orders', orderResponse(cart), { status: 201 }),
+    ]);
+    await ready(page); await add(page); await click(page, 'review-open'); await click(page, 'simulate-payment');
+    const retry = page.locator('[data-log-target="order-result-retry"]');
+    await retry.waitFor(); assert(await retry.isDisabled());
+    assert.doesNotMatch(await page.locator('.order-feedback').innerText(), /Please wait|API|409/);
+    assert.match(await page.locator('.total').innerText(), /3,500원/);
+    await retry.click(); await page.locator('.order-number').waitFor();
+    const orders = fixture.requests.filter(request => request.path.endsWith('/orders'));
+    assert.deepEqual(orders[0], orders[1]); fixture.verify(); assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
 test('불완전한 주문 성공 응답은 완료 화면을 열지 않고 같은 요청 재확인으로 복구한다', async () => {
   const browser = await chromium.launch(launchOptions);
   try {
@@ -205,7 +304,7 @@ test('응답 유실에는 로컬 확정 표시 없이 같은 키·버전·본문
     await ready(page);
     await click(page, 'product:americano');
     await click(page, 'cart-add');
-    await page.getByRole('button', { name: '결과 다시 확인', exact: true }).waitFor();
+    await page.getByRole('button', { name: '주문 반영 확인', exact: true }).waitFor();
     assert.equal(await page.locator('.cart-row').count(), 0, '성공 응답 전 로컬 확정 표시 없음');
     await click(page, 'order-result-retry');
     await page.locator('dialog[open]').waitFor({ state: 'hidden' });
@@ -213,7 +312,7 @@ test('응답 유실에는 로컬 확정 표시 없이 같은 키·버전·본문
     assert.deepEqual(adds[0], adds[1]);
     await click(page, 'review-open');
     await click(page, 'simulate-payment');
-    await page.getByRole('button', { name: '결과 다시 확인', exact: true }).waitFor();
+    await page.getByRole('button', { name: '주문 반영 확인', exact: true }).waitFor();
     assert.equal(await page.locator('.order-number').count(), 0);
     assert(await page.locator('[data-log-target="simulate-payment"]').isDisabled());
     await click(page, 'order-result-retry');
@@ -283,7 +382,7 @@ test('재확인 실패 뒤 처음부터 다시 주문하고 새 연결 실패에
       await click(page, 'order-result-retry');
       await page.locator('[data-log-target="order-pending-restart"]').waitFor();
       assert(await page.locator('[data-log-target="order-result-retry"]').isDisabled());
-      assert.match(await page.locator('.order-feedback').innerText(), /자동으로 취소되지는/);
+      assert.match(await page.locator('.order-feedback').innerText(), /자동으로 취소되지/);
       await noOverflow(page);
       const button = await page.locator('[data-log-target="order-pending-restart"]').boundingBox();
       assert(button && button.x >= 0 && button.x + button.width <= 1080);

@@ -1,6 +1,7 @@
 import { ApiError } from '../../shared/api/index.ts';
 import type { createBackendApi, Cart, CartItemCreateRequest, Order, OrderApiError, Product, SessionCreateResponse } from '../../shared/api/index.ts';
 import { readOrderResponse } from './orderResponse.ts';
+import { orderCopy, orderErrorCopy } from './copy.ts';
 
 type Api = ReturnType<typeof createBackendApi>;
 export type OrderSnapshot = {
@@ -56,8 +57,7 @@ export class OrderController {
     } catch (error) {
       const unavailable = error instanceof ApiError && error.status === 404 && stage !== 'session';
       this.set({ status: 'disconnected', message: unavailable
-        ? '주문 서비스 연결이 아직 준비되지 않았습니다. 잠시 후 다시 연결해 주세요.'
-        : '주문을 시작하지 못했습니다. 연결을 확인하고 다시 시도해 주세요.' });
+        ? orderCopy.unavailable : orderCopy.connectionFailed });
       return false;
     }
   }
@@ -71,13 +71,13 @@ export class OrderController {
 
   addItem(input: Omit<CartItemCreateRequest, 'expected_version'>): Promise<boolean> {
     const payload = { ...input };
-    return this.write('cart', (session, cart, key) => this.api.addCartItem(session, { ...payload, expected_version: cart.version }, key), '메뉴를 담았습니다.');
+    return this.write('cart', (session, cart, key) => this.api.addCartItem(session, { ...payload, expected_version: cart.version }, key), orderCopy.added);
   }
   updateQuantity(itemId: string, quantity: number): Promise<boolean> {
-    return this.write('cart', (session, cart, key) => this.api.updateCartItem(session, itemId, { quantity, expected_version: cart.version }, key), '수량을 변경했습니다.');
+    return this.write('cart', (session, cart, key) => this.api.updateCartItem(session, itemId, { quantity, expected_version: cart.version }, key), orderCopy.quantityChanged);
   }
   removeItem(itemId: string): Promise<boolean> {
-    return this.write('cart', (session, cart, key) => this.api.deleteCartItem(session, itemId, cart.version, key), '메뉴를 삭제했습니다.');
+    return this.write('cart', (session, cart, key) => this.api.deleteCartItem(session, itemId, cart.version, key), orderCopy.removed);
   }
   checkout(): Promise<boolean> {
     if (!this.state.cart?.items.length) return Promise.resolve(false);
@@ -104,7 +104,7 @@ export class OrderController {
     this.retryTimer = null;
     this.pending = null;
     this.set({ status: 'ended', canAbandonPending: false, retryAt: 0,
-      message: '이전 주문이 처리됐는지 확인하지 못했어요. 처음부터 다시 주문할 수 있어요.' });
+      message: orderCopy.abandoned });
     return true;
   }
 
@@ -141,7 +141,7 @@ export class OrderController {
         const seconds = apiError?.retryAfterSeconds ?? 0;
         const retryAt = Date.now() + seconds * 1000;
         this.set({ status: 'uncertain', retryAt, canAbandonPending: isRetry,
-          message: '요청 결과를 아직 확인하지 못했습니다. 잠시 후 결과를 다시 확인해 주세요.' });
+          message: orderCopy.uncertain });
         if (seconds > 0) this.retryTimer = setTimeout(() => {
           if (this.pending === pending && this.state.status === 'uncertain') this.set({ retryAt: 0 });
         }, seconds * 1000);
@@ -152,7 +152,7 @@ export class OrderController {
           || ['session_not_found', 'session_expired'].includes(code)
           || (apiError.status === 404 && !['product_not_found', 'cart_item_not_found'].includes(code));
         this.set({ status: ended ? 'ended' : 'ready', cart: this.acceptCart(body?.cart ?? null),
-          message: apiError.message, retryAt: 0 });
+          message: orderErrorCopy(code, ended), retryAt: 0 });
       }
       return false;
     }
