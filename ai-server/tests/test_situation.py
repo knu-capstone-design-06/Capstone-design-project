@@ -232,6 +232,16 @@ class EventTests(unittest.TestCase):
         events = detect_events(put(rows_of(face(20)), 0, 19, people_behind_count=2.0), P, landmarker_num_faces=1)
         self.assertEqual([e["obs"]["people_behind_count"] for e in events if e["kind"] == "people_behind"], [2])
 
+    def test_detect_events_ignores_rows_after_the_window(self):
+        """Item 4 (r3): the same window gives the same events from the whole log and from the log cut at its end
+        (here a dwell and a person behind go on after the window)."""
+        rows = rows_of(face(5), look_back(), face(5), look_back(), face(30))
+        put(rows, 0, len(rows) - 1, people_behind_count=1)
+        window = (0.5, 3.0)
+        cut = [r for r in rows if r["t_s"] <= window[1]]
+        self.assertEqual(detect_events(rows, P, landmarker_num_faces=1, window=window),
+                         detect_events(cut, P, landmarker_num_faces=1, window=window))
+
     def test_yaw_toward_the_companion_needs_no_return(self):
         """Item 1: the main user keeps looking toward the companion's side to the end: one yaw_toward_companion,
         and no sweep (a sweep needs the return)."""
@@ -294,6 +304,15 @@ class LookingBackWithPeopleBehindTests(unittest.TestCase):
         rows = rows_of(face(5), [(1, {"yaw_deg": 50.0}), (5, {**LOST, "pose_vis_shoulders": NAN})], face(10))
         out, _ = run(put(rows, 0, 20, people_behind_count=1))
         self.assertEqual(out["name"], UNKNOWN)
+
+    def test_a_turn_broken_by_face_and_body_loss_is_unknown(self):
+        """Item 2 (r3): after a turn starts, face and body are both lost for longer than gap_s, while the window's
+        body tracking still meets track_conf_min. Whether it was a look-back cannot be told: unknown, not none."""
+        rows = put(rows_of(face(5), [(1, {"yaw_deg": 50.0}), (5, GONE)], face(20)), 0, 30, people_behind_count=1)
+        out, _ = run(rows)
+        self.assertGreaterEqual(out["quality"]["track_conf"], P.track_conf_min)
+        self.assertEqual(out["name"], UNKNOWN)
+        self.assertEqual([a["name"] for a in out["alternatives"]], [BEHIND])
 
     def test_people_behind_without_look_backs(self):
         rows = put(put(rows_of(face(30)), 0, 29, people_behind_count=1), 15, 15, tap_count=1)
@@ -383,6 +402,20 @@ class ConsultingCompanionTests(unittest.TestCase):
                         landmarker_num_faces=1)
         self.assertEqual(out["name"], COMPANION)
         self.assertIn("yaw_toward_companion@65", ids(out))
+
+    def test_the_companion_side_must_be_known_on_the_turn_frames(self):
+        """Item 1 (r3): the companion's side is known only at the first frame (face_cx missing afterwards); the user
+        then turns away from where the companion was. Without the side at those frames, 'no yaw toward the companion'
+        is not concluded: unknown, not none. A yaw toward the companion seen where the side is known still counts."""
+        rows = put(rows_of(face(5), sweep(-1), face(10), extra={**OPTIONAL, "companion_box": RIGHT_BOX}), 1, 18,
+                   face_cx=NAN)
+        out, _ = run(put(rows, 11, 16, mouth_motion=0.3))
+        self.assertEqual(out["name"], UNKNOWN)
+        self.assertEqual(out["alternatives"][0]["name"], COMPANION)
+        seen = put(rows_of(face(5), sweep(+1), face(10), extra={**OPTIONAL, "companion_box": RIGHT_BOX}), 9, 18,
+                   face_cx=NAN)                                         # the side is known up to the turn's end
+        out, _ = run(put(seen, 11, 16, mouth_motion=0.3))
+        self.assertEqual(out["name"], COMPANION)
 
     def test_no_companion(self):
         out, _ = run(put(companion_window(sweep(+1)), 0, 18, companion_box=None))
@@ -481,6 +514,15 @@ class LookingAroundTests(unittest.TestCase):
         out, _ = run(put(rows, 3, 5, shoulder_cx=NAN, shoulder_cy=NAN))
         self.assertEqual(out["name"], NONE)
 
+    def test_a_movement_on_one_axis_counts_with_the_other_axis_missing(self):
+        """Item 3 (r3): shoulder_cx drifts beyond body_still_max while shoulder_cy is missing on every row: the
+        movement seen on x rules the tag out (none); with x still and y missing, stillness is not concluded."""
+        moving = around_window()
+        for i, row in enumerate(moving):
+            row.update(shoulder_cx=0.4 + 0.01 * i, shoulder_cy=NAN)
+        self.assertEqual(run(moving)[0]["name"], NONE)
+        self.assertEqual(run(put(around_window(), 0, 22, shoulder_cy=NAN))[0]["name"], UNKNOWN)
+
     def test_stillness_needs_every_body_frame_observed(self):
         """The shoulders are missing on three body frames and still on the rest: 'still' is not concluded."""
         out, _ = run(put(around_window(), 3, 5, shoulder_cx=NAN, shoulder_cy=NAN))
@@ -529,8 +571,10 @@ class UnknownAndAlternativesTests(unittest.TestCase):
         """Today's observations.csv has none of the optional columns: no tag can be ruled in or out, so the output is
         'unknown' - never 'none' - and only a tag with supporting events is listed as an alternative."""
         drop = tuple(OPTIONAL) + ("shoulder_cx", "shoulder_cy")
-        out, _ = run(rows_of(face(30), extra={}, drop=drop))
+        out, _ = run(rows_of([(30, {"yaw_deg": 2.0})], extra={}, drop=drop))      # reading the screen, small yaw
         self.assertEqual((out["name"], out["alternatives"]), (UNKNOWN, []))
+        out, _ = run(rows_of(face(30), extra={}, drop=drop))     # yaw exactly 0 throughout: toward no side at all
+        self.assertEqual(out["name"], NONE)
         out, _ = run(rows_of(face(5), sweep(+1), face(5), sweep(-1), face(5), extra={}, drop=drop))
         self.assertEqual(out["name"], UNKNOWN)
         self.assertEqual([(a["name"], a["confidence"]) for a in out["alternatives"]], [(AROUND, UNKNOWN)])
@@ -559,12 +603,15 @@ class UnknownAndAlternativesTests(unittest.TestCase):
 class WindowTests(unittest.TestCase):
     """The window slides with t_end (params P with a shorter window_s: test values, see the module docstring)."""
 
-    def test_state_is_kept_while_its_events_overlap_the_window_and_expires_after(self):
+    def test_state_is_kept_while_its_events_lie_inside_the_window_and_expires_after(self):
+        """Item 7 (r3): a turn counts while all its rows lie inside the window; a state that goes on (the person
+        behind) gives its part inside the window."""
         rows = put(rows_of(face(5), look_back(), face(5), look_back(), face(55)), 0, 30, people_behind_count=1)
         params = dataclasses.replace(P, window_s=3.0)
-        outs = {t: assess(rows, t, params, landmarker_num_faces=1)[0] for t in (3.0, 4.0, 5.0)}
-        self.assertEqual([outs[t]["name"] for t in (3.0, 4.0, 5.0)], [BEHIND, BEHIND, NONE])
-        self.assertIn("look_back@5", ids(outs[4.0]))     # 0.5-1.3 s still overlaps [1.0, 4.0]; gone at [2.0, 5.0]
+        outs = {t: assess(rows, t, params, landmarker_num_faces=1)[0] for t in (3.0, 3.4, 4.0)}
+        self.assertEqual([outs[t]["name"] for t in (3.0, 3.4, 4.0)], [BEHIND, BEHIND, NONE])
+        self.assertIn("look_back@5", ids(outs[3.4]))     # rows 0.5-1.3 s inside [0.4, 3.4]; not all in [1.0, 4.0]
+        self.assertIn("people_behind@4", ids(outs[3.4]))     # the part from 0.4 s, the window start
 
     def test_a_touch_counts_in_the_window_its_row_belongs_to(self):
         """Item 5 (r2): a row's counts belong to the interval that ends at its time, and the row to the window its
@@ -597,12 +644,35 @@ class CheckRuleTests(unittest.TestCase):
         evidence = [dict(self.out["evidence"][0], event_id="look_back@999")] + self.out["evidence"][1:]
         self.assertTrue(any("no event of this window" in p for p in self.changed(evidence=evidence)))
 
-    def test_evidence_time_must_lie_inside_the_window(self):
-        """Item 9 (r2): an event is evidence when its time (its end) lies inside the window; t is that time."""
-        self.assertTrue(any("outside the window" in p for p in self.changed(window_s=[2.7, 3.0])))
-        self.assertEqual(self.changed(window_s=[1.0, 3.0]), [])          # ends 1.3, 2.6, 3.0: all inside
+    def test_evidence_rows_must_lie_inside_the_window(self):
+        """Item 7 (r3): an event is evidence only when all its observation rows lie inside the window (dec section 3
+        '전부 같은 창 안'); t is the event's end."""
+        problems = self.changed(window_s=[1.0, 3.0])                    # look_back@5 has rows from 0.5 s
+        self.assertTrue(any("look_back@5 has rows outside the window" in p for p in problems))
+        self.assertEqual(self.changed(window_s=[0.0, 3.0]), [])
         evidence = [dict(item, t=0.5) if item["event_id"] == "look_back@5" else item for item in self.out["evidence"]]
-        self.assertTrue(any("is not the time (end)" in p for p in self.changed(evidence=evidence)))
+        self.assertTrue(any("is not the end" in p for p in self.changed(evidence=evidence)))
+
+    def test_a_malformed_window_or_quality_gives_problems_not_errors(self):
+        """Item 5 (r3): window_s must be [start, end] with finite start <= end, and quality must carry both ratios in
+        [0, 1]; a malformed output gives problems instead of an exception. An empty window (no frames) is 'unknown'
+        with empty ratios."""
+        for window in ([3.0], [3.0, 1.0], [NAN, 3.0], "w", None):
+            self.assertTrue(any("window_s" in p for p in self.changed(window_s=window)), msg=repr(window))
+        for quality in ({"track_conf": 1.0}, {"face_visible_ratio": 0.7, "track_conf": NAN},
+                        {"face_visible_ratio": 1.5, "track_conf": 1.0}, "q"):
+            self.assertTrue(any("quality" in p for p in self.changed(quality=quality)), msg=repr(quality))
+        empty, _ = assess(rows_of(face(5)), -5.0, P, landmarker_num_faces=1)
+        self.assertEqual((empty["name"], empty["quality"]), (UNKNOWN, {"face_visible_ratio": None, "track_conf": None}))
+
+    def test_a_definite_alternative_needs_the_tracking_floor(self):
+        """Item 6 (r3): a sensor-failure output (track_conf below the floor) may not carry an alternative with a
+        definite confidence."""
+        out, events = run(companion_window(sweep(+1), face(3), sweep(+1)))
+        failed = {**out, "name": UNKNOWN, "display_text": "", "evidence": [], "confidence": UNKNOWN,
+                  "quality": {**out["quality"], "track_conf": 0.1}}
+        problems = check_output(failed, events, P)
+        self.assertTrue(any(p.startswith(f"alternative {AROUND}") and "track_conf" in p for p in problems))
 
     def test_evidence_must_repeat_an_observation_of_the_event(self):
         evidence = [dict(self.out["evidence"][0], value=7)] + self.out["evidence"][1:]

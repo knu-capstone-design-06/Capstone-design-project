@@ -16,8 +16,8 @@ Output for one window (sem section 4: dec section 3's output line plus quality, 
      alternatives: [{name, display_text, evidence, confidence}], source: "rules_v1"}
   name          a tag; "unknown" = cannot tell; "none" = an observed cue rules every tag out
   display_text  the fixed text of the name (DISPLAY_TEXT), never free text; "" for unknown and none
-  evidence      one item per observation of each supporting event; t = the event's time = its end (s), which lies
-                inside the window (sem section 4, rule 1: '시간 범위(창 안)')
+  evidence      one item per observation of each supporting event, whose observation rows all lie inside the window
+                (dec section 3: '전부 같은 창 안'; sem section 4, rule 1: '시간 범위(창 안)'); t = the event's end (s)
   confidence    rule satisfaction, not a probability (nothing is calibrated against labels yet): events = number of
                 supporting events, quality_ok = no cue of the rule was left out as missing
   alternatives  the other tags that no measured cue ruled out and that have supporting events, most events first;
@@ -28,21 +28,24 @@ How a window is decided. From sem section 4: fewer than min_events supporting ev
 mouth motion, the yaw toward a companion, off-screen sweeps - become missing); body tracking below track_conf_min =
 sensor failure -> "unknown"; two satisfied tags -> the one with more supporting events is the name and the other an
 alternative; a tie -> "unknown" with both as alternatives (sem section 4 lists this tie row as [설계 제안] itself);
-state lifetime: the window slides with t_end, a state starts with min_events events whose time lies in it, holds while
-they do and ends when they fall before the window (window_s is the expiry window) or counter-evidence enters it (a
-touch, a person standing behind, the body moving). Added in this code, [설계 제안] (not in sem section 4):
+state lifetime: the window slides with t_end, a state starts with min_events events inside it, holds while they are
+and ends when a row of theirs falls before the window (window_s is the expiry window; a state that goes on keeps its
+part inside the window) or counter-evidence enters it (a touch, a person standing behind, the body moving). Added in
+this code, [설계 제안] (not in sem section 4):
 - three-valued logic: a cue that cannot be checked is None, not False; it decides only when nothing rules the tag out,
   so "none" needs every tag ruled out by an observed cue and missing optional columns keep the output "unknown"
-- observed evidence first: a touch, a person behind, a mouth movement or a body movement seen in the window counts
-  even where its column is partly missing; that one is absent needs the column (or the frames that should carry it)
-  observed throughout, otherwise the cue is missing
+- observed evidence first: a touch, a person behind, a mouth movement, a yaw toward the companion or a body movement
+  seen in the window counts even where its column is partly missing; that one is absent needs the column (or the
+  frames that should carry it) observed throughout - for the turns, no turn broken by a stretch that hides the head;
+  for the yaw toward the companion, the companion's side known on every face frame with a yaw - otherwise the cue is
+  missing
 - missing mouth motion is left out and the tag is judged on the rest (sem section 3 says so; quality_ok says false)
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .events import Cues, PilotParams, observe_window
+from .events import Cues, PilotParams, is_number, is_ratio, observe_window
 
 SOURCE = "rules_v1"
 UNKNOWN, NONE = "unknown", "none"
@@ -54,6 +57,7 @@ DISPLAY_TEXT = {                                   # dec section 3 table, '표�
     NONE: "",
 }
 OUTPUT_KEYS = ("name", "display_text", "window_s", "evidence", "quality", "confidence", "alternatives", "source")
+QUALITY_KEYS = ("face_visible_ratio", "track_conf")
 EVIDENCE_KEYS = ("event_id", "obs", "value", "t")
 
 
@@ -108,13 +112,14 @@ def looking_back_with_people_behind(c: Cues, p: PilotParams) -> Verdict:
     Combines: a person standing behind (people_behind, staying stay_min_s: '멈춰 선 사람만') + repeated look_backs
     (look_back_min_count or more). Auxiliary: touch_miss events add support and are never required. Excluded:
     passers-by only (they leave before stay_min_s, so there is no people_behind event); people behind without
-    look-backs. No look-back is concluded only when every face frame had a yaw and every frame with the face lost
-    and the body seen had a shoulder value; otherwise the cue is missing. Not built: touches getting faster and
+    look-backs. No look-back is concluded only when every face frame had a yaw, every frame with the face lost and
+    the body seen had a shoulder value, and no turn in the window was broken by a stretch hiding the head (face and
+    body lost together, or a gap in the record); otherwise the cue is missing. Not built: touches getting faster and
     expression change (no input yet)."""
     behind = c.of("people_behind")
     looks = c.of("look_back")
     status = _all(_found(behind, "people_behind_count" in c.measured),
-                  _at_least(looks, p.look_back_min_count, c.yaw_ok and c.shoulders_ok))
+                  _at_least(looks, p.look_back_min_count, c.yaw_ok and c.shoulders_ok and not c.turns_unresolved))
     return Verdict(status, behind + looks + c.of("touch_miss"))
 
 
@@ -127,7 +132,8 @@ def consulting_companion(c: Cues, p: PilotParams) -> Verdict:
     Face Landmarker that does not smooth (num_faces of 2 or more) - events.detect_events then makes no mouth_moving,
     so jitter is not counted as mouth motion. A mouth movement seen counts; no movement needs a mouth value on every
     face frame. Otherwise (no values, no smoothing, face_visible_ratio below face_visible_min) mouth motion is left
-    out and the tag is judged on the rest (sem section 3)."""
+    out and the tag is judged on the rest (sem section 3). A yaw toward the companion seen counts; none needs the
+    companion's side known on every face frame with a yaw, otherwise that cue is missing."""
     companions = c.of("companion_present")
     toward = c.of("yaw_toward_companion") if c.face_ok else []
     mouth = c.of("mouth_moving") if c.mouth_usable else []
@@ -139,7 +145,7 @@ def consulting_companion(c: Cues, p: PilotParams) -> Verdict:
         mouth_seen, skipped = True, ("mouth_moving",)             # missing: left out, judged on the rest
     dwell = c.of("dwell_no_touch")
     status = _all(_found(companions, "companion_box" in c.measured),
-                  _found(toward, c.face_ok and c.yaw_ok and c.companion_located),
+                  _found(toward, c.face_ok and c.yaw_ok and not c.companion_side_unknown),
                   mouth_seen,
                   _dwell_without_touch(c, dwell),
                   c.body_still)
@@ -157,7 +163,8 @@ def looking_around(c: Cues, p: PilotParams) -> Verdict:
     turns = c.of("look_back") + (c.of("yaw_sweep_offscreen") if c.face_ok else [])
     behind = c.of("people_behind")
     nobody_behind = False if behind else (True if "people_behind_count" in c.measured else None)
-    status = _all(_at_least(turns, p.sweep_min_count, c.face_ok and c.yaw_ok and c.shoulders_ok),
+    status = _all(_at_least(turns, p.sweep_min_count,
+                            c.face_ok and c.yaw_ok and c.shoulders_ok and not c.turns_unresolved),
                   _no_touch(c), c.body_still, nobody_behind)
     return Verdict(status, turns + c.of("dwell_no_touch"))
 
@@ -238,15 +245,27 @@ def assess(rows: list, t_end: float, params: PilotParams, *, landmarker_num_face
 
 
 # --- check rules ------------------------------------------------------------------------------------------------
+def _window(value):
+    """(t0, t1) when value is [start, end] with finite numbers and start <= end, else None."""
+    try:
+        t0, t1 = value
+    except (TypeError, ValueError):
+        return None
+    return (t0, t1) if is_number(t0) and is_number(t1) and t0 <= t1 else None
+
+
 def _check_entry(entry: dict, by_id: dict, t0: float, t1: float, params: PilotParams) -> tuple:
     """(problems, event ids) of the output or of one alternative: display text, evidence, the min_events floor."""
     name = entry.get("name")
     problems = []
     if entry.get("display_text") != DISPLAY_TEXT.get(name):
         problems.append(f"{name}: display_text {entry.get('display_text')!r} is not the fixed text of the name")
+    evidence = entry.get("evidence", [])
+    if not isinstance(evidence, list):
+        return problems + [f"{name}: evidence {evidence!r} is not a list"], set()
     ids = set()
-    for item in entry.get("evidence", []):
-        if set(item) != set(EVIDENCE_KEYS):
+    for item in evidence:
+        if not isinstance(item, dict) or set(item) != set(EVIDENCE_KEYS):
             problems.append(f"{name}: evidence item {item!r} does not have the keys {EVIDENCE_KEYS}")
             continue
         event = by_id.get(item["event_id"])
@@ -254,13 +273,12 @@ def _check_entry(entry: dict, by_id: dict, t0: float, t1: float, params: PilotPa
             problems.append(f"{name}: evidence names no event of this window: {item['event_id']!r}")
             continue
         ids.add(item["event_id"])
-        if not t0 <= event["t_end"] <= t1:
-            problems.append(f"{name}: event {item['event_id']} has its time {event['t_end']} outside the window "
-                            f"{t0}..{t1}")
+        if not (t0 <= event["t_start"] and event["t_end"] <= t1):
+            problems.append(f"{name}: event {item['event_id']} has rows outside the window {t0}..{t1}")
         if item["obs"] not in event["obs"] or event["obs"][item["obs"]] != item["value"]:
             problems.append(f"{name}: {item['obs']}={item['value']!r} is not an observation of {item['event_id']}")
         if item["t"] != event["t_end"]:
-            problems.append(f"{name}: t {item['t']!r} is not the time (end) of {item['event_id']}")
+            problems.append(f"{name}: t {item['t']!r} is not the end of {item['event_id']}")
     confidence = entry.get("confidence")
     if isinstance(confidence, dict):
         count = confidence.get("events")
@@ -276,37 +294,60 @@ def _check_entry(entry: dict, by_id: dict, t0: float, t1: float, params: PilotPa
 
 
 def check_output(out: dict, events: list, params: PilotParams) -> list:
-    """Problems of one output against the events of its window; [] = it passes. The check rules as code:
-    - rule 1, evidence linked to events (sem section 4): every evidence item names an event of this window whose time
-      (its end) lies inside window_s, and repeats one of that event's observations (obs, value) at that time t;
+    """Problems of one output against the events of its window; [] = it passes (a malformed output gives problems,
+    not an exception). The check rules as code:
+    - form: window_s is [start, end] with finite start <= end; quality has face_visible_ratio and track_conf, each a
+      ratio in [0, 1] - or empty (None) only for "unknown" without alternatives, when the window has no frames;
+    - rule 1, evidence linked to events (sem section 4; dec section 3 '전부 같은 창 안'): every evidence item names an
+      event of this window whose rows all lie inside window_s, and repeats one of its observations (obs, value) at
+      its end t;
     - display text: the fixed text of the name (DISPLAY_TEXT), never free text;
     - rule 2, 'unknown' (sem section 4): name "unknown" if and only if confidence "unknown"; the name and every
-      alternative with a {events, quality_ok} confidence have at least min_events supporting events; a named tag
-      comes from a window that met track_conf_min; "unknown" and "none" carry no evidence of their own, "none" no
-      alternatives, and every alternative at least one event of this window."""
+      alternative with a {events, quality_ok} confidence have at least min_events supporting events and come from a
+      window that met track_conf_min; "unknown" and "none" carry no evidence of their own, "none" no alternatives,
+      and every alternative at least one event of this window."""
+    if not isinstance(out, dict):
+        return [f"output {out!r} is not a dict"]
     missing = [k for k in OUTPUT_KEYS if k not in out]
     if missing:
         return [f"missing keys {missing}"]
     problems = [] if out["source"] == SOURCE else [f"source {out['source']!r} is not {SOURCE!r}"]
-    name, confidence = out["name"], out["confidence"]
+    name, confidence, alternatives = out["name"], out["confidence"], out["alternatives"]
     if name not in DISPLAY_TEXT:
         return problems + [f"name {name!r} is not a tag, {UNKNOWN!r} or {NONE!r}"]
-    t0, t1 = out["window_s"]
+    window = _window(out["window_s"])
+    if window is None:
+        return problems + [f"window_s {out['window_s']!r} is not [start, end] with finite start <= end"]
+    if not isinstance(alternatives, list) or not all(isinstance(a, dict) for a in alternatives):
+        return problems + [f"alternatives {alternatives!r} is not a list of entries"]
+    quality = out["quality"] if isinstance(out["quality"], dict) else {}
+    if not isinstance(out["quality"], dict):
+        problems.append(f"quality {out['quality']!r} is not {{face_visible_ratio, track_conf}}")
+    for key in QUALITY_KEYS:
+        if key not in quality:
+            problems.append(f"quality.{key} is missing")
+        elif quality[key] is None:
+            if name != UNKNOWN or alternatives:
+                problems.append(f"quality.{key} is empty, but the output reads a rule")
+        elif not is_ratio(quality[key]):
+            problems.append(f"quality.{key} {quality[key]!r} is not a ratio from 0 to 1")
+    track = quality.get("track_conf")
+    track_ok = is_number(track) and track >= params.track_conf_min
+    t0, t1 = window
     by_id = {e["event_id"]: e for e in events}
     own_problems, _ = _check_entry(out, by_id, t0, t1, params)
     problems += own_problems
     if (name == UNKNOWN) != (confidence == UNKNOWN):
         problems.append(f"name {name!r} with confidence {confidence!r}: 'unknown' goes only with 'unknown'")
     if name in RULES:
-        track = out["quality"].get("track_conf")
-        if track is None or track < params.track_conf_min:
+        if not track_ok:
             problems.append(f"{name}: track_conf {track!r} below track_conf_min")
     elif out["evidence"]:
         problems.append(f"{name!r} carries evidence of its own")
-    if name == NONE and out["alternatives"]:
+    if name == NONE and alternatives:
         problems.append("'none' has alternatives")
     seen = set()
-    for alt in out["alternatives"]:
+    for alt in alternatives:
         alt_name = alt.get("name")
         if alt_name not in RULES or alt_name == name or alt_name in seen:
             problems.append(f"alternative {alt_name!r} is not another tag")
@@ -316,4 +357,7 @@ def check_output(out: dict, events: list, params: PilotParams) -> list:
         problems += alt_problems
         if not alt_ids:
             problems.append(f"alternative {alt_name}: no evidence event of this window")
+        if isinstance(alt.get("confidence"), dict) and not track_ok:
+            problems.append(f"alternative {alt_name}: a definite confidence, but track_conf {track!r} is below "
+                            f"track_conf_min")
     return problems
