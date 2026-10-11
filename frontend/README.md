@@ -6,9 +6,9 @@
 
 OpenAPI 0.3.0에 상품 조회, 장바구니 조회·추가·수량 변경·삭제, 모의 주문 확정의 신규 6개 API를 팀 검토용 초안으로 추가했습니다. 요청·응답의 기준 형식은 [OpenAPI](../contract/frontend-backend.openapi.yaml), 설계 이유와 미정 정책은 [주문 API 검토 문서](../docs/Product-Cart-Order-API-Draft.md)를 확인합니다. 신규 operation의 `x-contract-status: draft`는 팀 검토 대기 상태입니다.
 
-주문 operation의 `x-frontend-status: prepared`는 프론트 준비, `x-backend-status: pending`은 서버 구현 대기를 뜻합니다. 기존 연결 API의 구현 상태는 명세에 적힌 최신 원격 main 기준이며 실제 주문 연결 완료를 뜻하지 않습니다. 원격 main ff79f1a는 사용자 요청으로 현재 브랜치에 병합했습니다.
+주문 operation의 `x-frontend-status: prepared`는 프론트 준비, `x-backend-status: pending`은 서버 구현 대기를 뜻합니다. 기존 네 연결 API는 백엔드에 구현돼 있으며 상품·장바구니·주문 API는 구현 대기입니다.
 
-프론트의 상품·Cart·Order 타입·API 호출·화면 처리를 준비했습니다. 서버 API 연결 완료는 아니며 백엔드 구현과 팀 합의 대기입니다. 이전에 프론트 작업 중 추가한 백엔드 코드·설정은 제거했습니다. 공용 OpenAPI는 후속 사용자 요청에 따라 0.3.0 검토 초안으로 갱신했습니다. 성공 응답 후 수량·금액을 확정 표시하고, 네트워크 오류·응답 유실은 같은 키·본문의 ‘처리 결과 확인’으로 재시도합니다. 처리 중에는 변경 버튼을 막습니다. 변경 요청에는 `expected_version`과 `Idempotency-Key`가 필요하며 DELETE의 버전은 쿼리로 전달합니다. 버전 충돌은 최신 장바구니를 표시하고 재확인하며, 신규 오류는 `code`, `detail`, `cart`로 구분합니다.
+프론트의 상품·Cart·Order 타입·API 호출·화면 처리를 준비했습니다. 성공 응답 후 수량·금액을 확정 표시하고, 네트워크 오류·응답 유실은 같은 키·본문의 ‘주문 반영 확인’으로 재시도합니다. 처리 중에는 변경 버튼을 막습니다. 변경 요청에는 `expected_version`과 `Idempotency-Key`가 필요하며 DELETE의 버전은 쿼리로 전달합니다. 버전 충돌은 최신 장바구니를 표시하고 재확인하며, 신규 오류는 `code`, `detail`, `cart`로 구분합니다. 서버 정책과 초안의 최종 확정은 담당자 리뷰와 팀 합의가 필요합니다.
 
 아래 예시는 기존 연결 API 호출의 사용법입니다.
 
@@ -20,7 +20,7 @@ const api = createBackendApi('/backend');
 await api.getBackendHealth();
 await api.getConnectivity();
 const session = await api.createSession();
-// 최신 원격 main에는 특징 전송도 구현돼 있으나 주문 화면에서는 호출하지 않습니다.
+// 기존 특징 전송 API는 주문 화면에서는 아직 호출하지 않습니다.
 const result = await api.sendFeatureWindow(session.session_id, {
   screen_id: 'menu_list',
   window_start: '2026-10-01T10:00:00Z',
@@ -37,7 +37,7 @@ const result = await api.sendFeatureWindow(session.session_id, {
 
 호출자는 `ai_available: false` 또는 `preset: none`이면 화면을 유지하고, `requires_confirmation: true`이면 사용자 수락 후 지원을 적용해야 합니다. 세션이나 화면이 바뀐 뒤 도착한 이전 응답은 적용하지 않아야 합니다. 각 메서드의 마지막 인자로 `AbortSignal`을 전달해 요청을 취소할 수 있습니다.
 
-기존 네 API의 HTTP 오류는 `ApiError.status`와 `ApiError.body`로 확인합니다. 404는 `detail` 문자열을 메시지로 사용합니다. 기존 특징 API의 422 응답 본문은 명세에 정의되지 않아 원문을 보존합니다. 신규 주문 API의 422는 별도로 `OrderApiError`에 정의했습니다. 네트워크 오류와 요청 취소는 그대로 전달하며 자동 재시도하지 않습니다. 세션·주문 요청은 15초 타임아웃을 사용하고 `ApiError.retryAfterSeconds`로 서버 재시도 간격을 전달합니다. 반환 타입은 기존 명세를 표현하며 응답에 대한 런타임 스키마 검증은 제공하지 않습니다.
+기존 네 API의 HTTP 오류는 `ApiError.status`와 `ApiError.body`로 확인합니다. 기존 특징 API의 422 응답 본문은 명세에 정의되지 않아 원문을 보존합니다. 신규 주문 API의 422는 별도로 `OrderApiError`에 정의했습니다. 네트워크 오류와 요청 취소는 그대로 전달하며 자동 재시도하지 않습니다. 세션·주문 요청은 15초 타임아웃을 사용하고 `ApiError.retryAfterSeconds`로 서버 재시도 간격을 전달합니다. JSON과 HTML·일반 텍스트 오류 모두 숫자 초 단위의 유효한 Retry-After를 보존합니다. API 클라이언트는 응답 전체의 런타임 스키마 검증을 제공하지 않으며 주문 기능에서 완료 응답의 필수 필드·항목·금액·시각을 별도로 검증합니다. 고객 화면에는 서버 내부 오류 상세 대신 상황별 안내를 표시합니다.
 
 검증(Node.js 22.18 이상, 추가 의존성 없음):
 
@@ -45,9 +45,9 @@ const result = await api.sendFeatureWindow(session.session_id, {
 node --test frontend/src/shared/api/client.test.mjs
 ```
 
-## 샘플 주문 화면 실행
+## 상품·장바구니·주문 화면 실행
 
-React·Vite·TypeScript로 샘플 주문 화면을 실행할 수 있습니다. Node.js 22.18 이상에서 `frontend/`로 이동한 뒤 실행합니다.
+React·Vite·TypeScript 주문 화면은 기본 API 모드와 명시적인 개발 샘플 모드를 제공합니다. Node.js 22.18 이상에서 `frontend/`로 이동한 뒤 실행합니다.
 
 ```sh
 pnpm install
@@ -56,7 +56,7 @@ pnpm dev
 
 `pnpm build`로 TypeScript 검사와 배포 빌드를, `pnpm test`로 API 및 주문 상태 테스트를 실행합니다. 의존성 버전은 `pnpm-lock.yaml`에 기록합니다.
 
-상품 선택·서버 Cart 표시·주문 확인·서버 응답의 모의 주문번호 표시와 수동 접근성 설정 코드를 준비했습니다. 실제 주문에는 상품·Cart·Order API를 구현한 백엔드가 필요하며 최신 main에는 아직 해당 API가 없습니다. 미구현 API의 404에는 연결 대기를 표시하고 로컬 상품·주문으로 대체하지 않습니다. 새로고침은 새 세션·빈 장바구니로 시작하며 접근성 설정만 유지합니다. 상세 동작과 수동 확인 절차는 [`src/features/order/README.md`](src/features/order/README.md)에 있습니다. 실제 결제, 주기적인 특징 전송, 음성 및 자동 지원 판단은 연결하지 않았습니다. 완료 화면 복원·서버 재시작 후 보관·정밀 만료·동적 가격 변경은 후순위입니다. API 모듈의 `.ts` 확장자 import를 위해 `noEmit`과 `allowImportingTsExtensions`를 설정했습니다.
+상품 선택·서버 Cart 표시·주문 확인·서버 응답의 샘플 주문번호 표시와 수동 접근성 설정을 제공합니다. 기본 API 모드에는 상품·Cart·Order API를 구현한 백엔드가 필요합니다. 미구현 API의 404에는 연결 대기를 표시하고 로컬 상품·주문으로 대체하지 않습니다. 새 주문·새로고침은 새 세션·빈 장바구니로 시작하며 접근성 설정만 유지합니다. 주문 확인·샘플 주문 완료·새 주문 버튼은 화면 하단에 고정합니다. 상세 동작과 수동 확인 절차는 [`src/features/order/README.md`](src/features/order/README.md)에 있습니다. 실제 결제, 주기적인 특징 전송, 음성 및 자동 지원 판단은 연결하지 않았습니다. 완료 화면 복원·서버 재시작 후 보관·정밀 만료·동적 가격 변경은 후순위입니다.
 
 ## 백엔드 없이 프론트 화면 검증
 
@@ -83,10 +83,16 @@ pnpm dev
 2. 개발 PC에서는 F12 → `Ctrl+Shift+M` → Responsive에서 가로 1080, 세로 1920을 설정합니다. F12 도구를 단순히 옆에 열어 둔 화면 대신 지정한 기기 화면 크기로 확인합니다.
 3. 상품 목록·분류, 옵션 창, 장바구니, 주문 확인·완료의 잘림·겹침·가로 넘침과 필요한 세로 스크롤을 확인합니다. 스크롤 후에도 주요 조작에 접근할 수 있어야 합니다.
 4. 큰 글씨·큰 버튼을 각각 켜고 함께 적용한 상태도 확인합니다. 옵션 선택·수량 조절·담기·주문 확인 버튼을 실제로 조작합니다.
-5. 터치 입력 좌표·대상 경계와 스크롤 기록은 이 배치에서 확인합니다. 개발용 로그 창은 주문 배치를 가릴 수 있으므로 창을 접은 상태에서도 확인합니다.
+5. 하단 주문 확인·샘플 주문 완료·새 주문 버튼의 위치와 겹침을 확인합니다. 목록 끝이 하단 고정 영역 위까지 스크롤돼야 합니다. 개발용 로그 버튼은 주문 영역 위에 두며 펼친 창과 접은 창에서 모두 확인합니다. 터치 좌표·대상 경계와 스크롤 기록도 이 배치에서 확인합니다.
 6. 실제 장비에서는 Windows 해상도·방향·배율을 다시 확인하고, 브라우저 확대율 100%·F11 전체 화면에서 최종 검증합니다. 폰트·스크롤바·브라우저 차이를 확인하고 실제 화면의 스크린샷과 결과를 PR에 첨부합니다.
 
 화면 크기는 물리적인 인치 수와 별개입니다. 배치가 예상과 다르면 브라우저 콘솔의 `window.innerWidth`, `window.innerHeight`, `window.devicePixelRatio`로 실제 뷰포트·배율 정보를 확인해 검증 결과에 남깁니다. 실제 장비의 화면 설정이 달라지면 변경 내용을 공유하고 이 기준도 갱신합니다.
+
+### 새 주문의 화면 설정과 스크린샷
+
+2026-10-11 프론트 담당자 검토 방향으로 새 주문·수동 재시작·새로고침에도 화면 설정을 유지합니다. ‘화면 도움 → 기본 화면’으로 사용자가 직접 초기화합니다. 다음 이용자에게 자동 초기화할지 여부와 공용 단말의 설정 보관 정책은 팀 합의 대기이며 서버 세션 정책과 구분합니다.
+
+UI 검증 이미지는 `docs/screenshots/<기능>/`에 필요한 대표 화면만 보관하고 PR 본문에 첨부합니다. 모든 자동 검사 결과는 저장소에 넣지 않습니다. [주문 화면 스크린샷 기준](../docs/screenshots/order-api/README.md)에서 크기·모드·검증 범위와 실제 장비 확인 여부를 기록합니다. 이는 프론트 담당자의 현재 운영 방향이며 팀 전체의 영구 보관 정책 합의를 뜻하지 않습니다.
 
 ## Docker 실행과 백엔드 연결
 

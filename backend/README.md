@@ -56,7 +56,7 @@ API 문서: http://127.0.0.1:8000/docs
 
 ## Docker Compose
 
-현재 `main`의 루트 Compose에는 백엔드와 AI 서버가 포함돼 있습니다. Docker 엔진을 실행한 뒤 저장소 루트에서 시작합니다. 세 서비스 통합 구성은 [PR #24](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/24)에서 검토 중입니다.
+루트 Compose는 프론트엔드·백엔드·AI 서버를 실행합니다. Docker 엔진을 실행한 뒤 저장소 루트에서 시작합니다.
 
 ```powershell
 docker compose up --build
@@ -64,7 +64,7 @@ docker compose up --build
 
 백엔드는 `http://127.0.0.1:8000`, AI 서버는 Docker 내부의 `http://ai-server:8001`을 사용합니다. Compose에는 `env_file`이 없고 이미지에도 `.env`가 없으므로, 로컬 직접 실행과 달리 `backend/.env`는 읽지 않습니다. 필요한 값은 실행 환경에서 컨테이너에 주입합니다.
 
-기존 두 서버 실행·통신 검증 기록은 [PR #14](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/14)를 참고합니다. 2026-10-07에는 별도 백엔드 테스트 컨테이너에서 실행 중인 AI 서버와 새 연결 API를 실제 호출해 확인했습니다. 주문 화면의 실제 API 연동은 후속 작업입니다.
+연결 API의 기존 실행·통신 검증은 [PR #26](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/26)를 참고합니다. 상품·장바구니·주문 API의 실제 연동 검증은 백엔드 구현 후 수행합니다.
 
 ## Backend → AI 내부 연동
 
@@ -134,7 +134,7 @@ POST CORS를 확인합니다.
 | POST /api/v1/sessions | 201, session_id와 UTC started_at |
 | POST /api/v1/sessions/{session_id}/features | 200, AI 점수 또는 판단 없는 응답 |
 
-2026-10-07 사용자와 확인한 연결 검증 범위입니다. 세션은 단일 프로세스 메모리에만 보관하며 재시작하면 초기화됩니다.
+세션은 단일 프로세스 메모리에만 보관하며 재시작하면 초기화됩니다.
 세션 만료·정리·영속 저장은 아직 없으므로 장기 운영 또는 여러 worker/인스턴스에 사용하지 않습니다.
 터치 원시 로그의 통계 계산과 비전 추출은 구현하지 않고 계약에 정의된 특징만 전달합니다.
 AI 측정 불가는 ai_available=true, states=null입니다. 통신 오류·타임아웃·잘못된 AI 응답은
@@ -157,16 +157,16 @@ $body = @{
 Invoke-RestMethod -Method Post "$base/api/v1/sessions/$($session.session_id)/features" -ContentType 'application/json' -Body $body
 ```
 
-프론트엔드의 API 호출·화면 반영 코드는 이번 변경에 포함하지 않습니다.
+프론트 호출·화면 반영 상태는 [프론트엔드 README](../frontend/README.md)를 확인합니다.
 
 ## 참고
 
 - [FastAPI 설정](https://fastapi.tiangolo.com/advanced/settings/)
 - [FastAPI CORS](https://fastapi.tiangolo.com/tutorial/cors/)
 
-## 프론트 주문 연동 준비 메모 (2026-10-10)
+## 프론트 주문 연동 준비와 담당자 검토
 
-원격 main `ff79f1a` / PR #26을 읽어 상태·AI 연결 확인, 임시 세션 생성, 특징 전송 구현을 확인했습니다. 이후 사용자 요청으로 해당 main을 현재 프론트 브랜치에 병합했습니다. 위 실행·검증 안내는 병합된 백엔드 구현을 기준으로 합니다. 백엔드 업무 코드를 별도로 수정하지 않았습니다.
+기존 상태·AI 연결 확인, 임시 세션 생성, 특징 전송 API를 사용합니다. 상품·장바구니·주문은 백엔드 담당자가 기존 세션에 연결해 구현할 범위입니다.
 
 프론트는 [상품·장바구니·주문 초안](../docs/Product-Cart-Order-API-Draft.md)에 맞춰 API 호출·응답 표시·수동 재시도를 준비했습니다. 상품·장바구니·주문 서버 API는 아직 구현 대기입니다. 프론트용 테스트 응답이 실제 서버 구현을 대신하지 않습니다.
 
@@ -179,5 +179,5 @@ Invoke-RestMethod -Method Post "$base/api/v1/sessions/$($session.session_id)/fea
 - 한 세션 1주문·새 주문 새 세션, 서버 주문번호의 형식·범위
 - 공개 주소의 세션 접근·인증·쿠키 및 배포 정책
 
-복원·장기 보관·정밀 만료·동적 가격 변경은 첫 시연 후순위 방향입니다. 사용자와 검토한 방향이며 팀 전체 합의는 아직 확인되지 않았습니다. 세부 정책은 담당자가 결정·구현하고 계약에는 합의 후 반영합니다.
+복원·장기 보관·정밀 만료·동적 가격 변경은 첫 시연 후순위 방향입니다. 프론트 담당자와 검토한 방향이며 팀 전체 합의는 아직 확인되지 않았습니다. 2026-10-11 PR 33에서 기존 공용 API와 문서의 검토 범위를 공유하며 백엔드·AI·비전 담당자의 리뷰가 필요합니다. 세부 서버 정책은 담당자가 결정·구현하고 계약에는 합의 후 반영합니다.
 
