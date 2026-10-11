@@ -20,9 +20,9 @@
 
 README는 터치 통계 계산을 백엔드 책임으로 설명하지만, 현재 계약은 프론트엔드 계산으로 명시합니다. 담당 위치를 합의하고 관련 문서를 맞춘 뒤 해당 부분을 구현합니다.
 
-## 2. 이번 대화에서 정한 작업 방향
+## 2. 프론트 담당자와 정한 작업 방향
 
-아래는 프론트엔드 담당 사용자와 2026-10-05 대화에서 정한 방향입니다. 팀 전체의 계약 합의와 구분합니다.
+아래는 프론트엔드 담당자와 2026-10-05에 정한 방향입니다. 팀 전체의 계약 합의와 구분합니다.
 
 | 항목 | 작업 방향 |
 |---|---|
@@ -108,7 +108,7 @@ README는 터치 통계 계산을 백엔드 책임으로 설명하지만, 현재
 
 1. 회의 기록에 결정 근거와 참여자를 남기고 이 문서의 합의 결과를 갱신합니다.
 2. 인터페이스 관련 결정은 `contract/`에 반영하고 영향받는 담당자의 리뷰를 받습니다.
-3. 기존 공용 문서·코드 수정이 필요하면 사용자에게 대상과 변경 내용을 먼저 제안합니다.
+3. 기존 공용 문서·코드 수정이 필요하면 담당자에게 대상과 변경 내용을 먼저 제안합니다.
 4. 로컬 수집 → 서버 전송·저장 → 통계 계산 → Jev 입력·지원 전후 평가 순서로 작업 범위를 나눕니다. 각 단계는 필요한 기준을 합의한 뒤 검증·커밋합니다.
 
 검토 항목에 대한 팀 합의 완료와 코드 초안 검증은 별개입니다. 원시 수집 초안의 검증 결과가 통계 계산이나 Jev 판단의 검증을 의미하지 않습니다.
@@ -126,6 +126,7 @@ README는 터치 통계 계산을 백엔드 책임으로 설명하지만, 현재
 | [`touchLog.ts`](../frontend/src/features/order/touchLog.ts) | 로컬 세션·버퍼·기록 복사·거리 계산·저장 실패 상태 |
 | [`useTouchLog.ts`](../frontend/src/features/order/useTouchLog.ts) | DOM 입력·스크롤 관측과 화면·옵션·분류·설정 기록, 개발 확인 API |
 | [`OrderPage.tsx`](../frontend/src/features/order/OrderPage.tsx) | 훅 연결, 버튼·링크의 `data-log-target` 식별자, 새 주문 세션 분리 |
+| [`TouchLogPanel.tsx`](../frontend/src/features/order/TouchLogPanel.tsx) | 개발용 로그 확인 창: 최근 기록 20개 표시, JSON 내보내기 |
 | [`touchLog.test.mjs`](../frontend/src/features/order/touchLog.test.mjs) | 거리·복원·세션 분리·저장 실패·기록 복사·버퍼 제한 검증 |
 | [`touchLog.browser.test.mjs`](../frontend/src/features/order/touchLog.browser.test.mjs) | 실제 브라우저 주문 흐름·StrictMode·터치 스크롤 검증 |
 
@@ -176,9 +177,9 @@ window.kioskTouchLogDraft.exportJson(); // 현재 버퍼 JSON 다운로드
 node --test frontend/src/features/order/touchLog.test.mjs
 ```
 
-검증 결과: `frontend/`에서 `pnpm build` 통과, 기존 `pnpm test` 8개와 새 단위 테스트 5개 통과. 브라우저 통합 테스트 1개 통과: StrictMode 초기 기록 중복 방지, 누름·종료 각각 1회 기록, 모달 뒤 대상 제외, 옵션·설정 이벤트, 화면 방문 변경, 새로고침 세션 유지, 새 주문 세션 분리, 실제 터치 이동에 따른 `pointercancel` 및 스크롤 관측.
+2026-10-05 검증 결과: `frontend/`에서 `pnpm build` 통과, 당시 `pnpm test` 8개와 새 단위 테스트 5개 통과. 브라우저 통합 테스트 1개 통과: StrictMode 초기 기록 중복 방지, 누름·종료 각각 1회 기록, 모달 뒤 대상 제외, 옵션·설정 이벤트, 화면 방문 변경, 새로고침 세션 유지, 새 주문 세션 분리, 실제 터치 이동에 따른 `pointercancel` 및 스크롤 관측. 2026-10-11 이후의 테스트 수는 8장에 있습니다.
 
-브라우저 테스트에는 실행 중인 Vite와 별도로 제공된 Playwright가 필요합니다. 서비스 의존성은 추가하지 않았습니다. 이번 검증은 번들 Playwright와 설치된 Edge의 headless 모드로 수행했습니다. Playwright 모듈 경로를 `PLAYWRIGHT_MODULE` 환경변수에 ESM import 가능한 경로로 지정하고 아래 파일을 실행합니다. URL은 기본 `http://127.0.0.1:5173`이며 `TOUCH_LOG_BROWSER_URL`로 변경할 수 있습니다.
+브라우저 테스트에는 실행 중인 Vite와 별도로 제공된 Playwright가 필요합니다. 서비스 의존성은 추가하지 않았습니다. 2026-10-05 검증은 번들 Playwright와 설치된 Edge의 headless 모드로 수행했습니다. Playwright 모듈 경로를 `PLAYWRIGHT_MODULE` 환경변수에 ESM import 가능한 경로로 지정하고 아래 파일을 실행합니다. URL은 기본 `http://127.0.0.1:5173`이며 `TOUCH_LOG_BROWSER_URL`로 변경할 수 있습니다.
 
 ```sh
 node --test frontend/src/features/order/touchLog.browser.test.mjs
