@@ -58,7 +58,7 @@ docker compose up --build
 python -m unittest discover -s tests -v
 ```
 
-명세 예시 요청·응답, vision 생략/null, 판단 불가, 세션 ID 유지, 점수 범위, 잘못된 요청 거절, 명세와 같은 operationId를 확인합니다. 비전 모듈 테스트(`tests/test_vision.py`)는 비전 패키지와 모델 파일이 있을 때만 돌고 없으면 건너뜁니다(모듈 README).
+명세 예시 요청·응답, vision 생략/null, 판단 불가, 세션 ID 유지, 점수 범위, 잘못된 요청 거절, 명세와 같은 operationId를 확인합니다. 비전 모듈 테스트(`tests/test_vision.py`)는 관측값·보조 함수·시각 파일 테스트를 numpy·OpenCV만으로 돌리고, 추론 테스트는 MediaPipe와 모델 파일이 있을 때만 돌며 없으면 건너뜁니다(모듈 README).
 
 ## 구조
 
