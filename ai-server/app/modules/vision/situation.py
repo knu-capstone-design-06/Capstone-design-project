@@ -2,12 +2,13 @@
 state-layer output of sem section 4 and its check rules. Plain Python: no numpy, OpenCV or MediaPipe.
 
 Layers: 입력 sources.py -> 추론 inference.py -> 관측값 features.py -> 사건 events.py -> 상황 this file -> 전달 (contract/,
-not built yet). Source shorthands (dec, sem, research/33): events.py.
+not built yet). Source shorthands (dec, sem, research/33): events.py; the README quotes dec section 3 and sem
+section 4.
 
-State (2026-10-11): the three tags are implemented as rules. Every value they compare against is a PilotParams field
-([파일럿], no defaults; set from the team's self-recording) and this file holds no number - a test checks that. The tag
-vocabulary and how this output reaches the other services (contract/) go to the team meeting of 2026-10-14; run.py
-does not call this layer yet.
+State (2026-10-12): the three tags are implemented as rules. Every value they compare against is a PilotParams field
+([파일럿], no defaults; set from the team's self-recording) and this file holds no number - a test checks that. The
+runner (run.py), the endpoints and the support choice do not call this layer yet; the tag vocabulary and how this
+output reaches the other services (contract/) go to the team meeting of 2026-10-14.
 
 Output for one window (sem section 4: dec section 3's output line plus quality, confidence, alternatives, event ids):
     {name, display_text, window_s: [t0, t1], evidence: [{event_id, obs, value, t}],
@@ -15,22 +16,23 @@ Output for one window (sem section 4: dec section 3's output line plus quality, 
      alternatives: [{name, display_text, evidence, confidence}], source: "rules_v1"}
   name          a tag; "unknown" = cannot tell; "none" = a measured cue rules every tag out
   display_text  the fixed text of the name (DISPLAY_TEXT), never free text; "" for unknown and none
-  evidence      one item per observation of each supporting event; t = the event's start (s)
+  evidence      one item per observation of each supporting event that overlaps the window; t = the event's start (s)
   confidence    rule satisfaction, not a probability (nothing is calibrated against labels yet): events = number of
                 supporting events, quality_ok = no cue of the rule was left out as missing
-  alternatives  the other tags that no measured cue ruled out and that have supporting events, most events first
+  alternatives  the other tags that no measured cue ruled out and that have supporting events, most events first;
+                one with fewer than min_events supporting events has confidence "unknown"
 
-How a window is decided (sem section 4):
-- a cue that cannot be measured is None, not False (three-valued AND): it decides only when nothing rules the tag out.
-  So "none" needs every tag ruled out by a measured cue; with the optional columns missing the output stays "unknown"
-- the body tracker lost the person (track_conf below track_conf_min) -> sensor failure -> "unknown". A face turned away
-  is not that: face loss is the look_back cue, and only the cues that need the face become missing
-- missing mouth motion is left out and the tag is judged on the rest (sem section 3); quality_ok then says false
-- a satisfied tag with fewer than min_events supporting events -> "unknown"; two satisfied tags -> the one with more
-  supporting events is the name and the other an alternative; a tie -> "unknown" with both as alternatives
-- state lifetime: the window slides with t_end. A state starts with min_events events in the window, holds while they
-  stay in it and ends when they leave it (window_s is the expiry window) or when counter-evidence enters it (a touch,
-  a person standing behind, the body moving)
+How a window is decided. From sem section 4: fewer than min_events supporting events -> "unknown"; quality per cue
+(a face turned away is not a sensor failure: face loss is the look_back cue, and only the cues that need the face -
+mouth motion, the yaw toward a companion, off-screen sweeps - become missing); body tracking below track_conf_min =
+sensor failure -> "unknown"; two satisfied tags -> the one with more supporting events is the name and the other an
+alternative; state lifetime: the window slides with t_end, a state starts with min_events events overlapping it, holds
+while they do and ends when they end before the window (window_s is the expiry window) or counter-evidence enters it
+(a touch, a person standing behind, the body moving). Added in this code, [설계 제안] (not in sem section 4):
+- three-valued logic: a cue that cannot be measured is None, not False; it decides only when nothing rules the tag
+  out, so "none" needs every tag ruled out by a measured cue and missing optional columns keep the output "unknown"
+- missing mouth motion is left out and the tag is judged on the rest (sem section 3 says so; quality_ok says false)
+- a tie between satisfied tags -> "unknown" with both as alternatives
 """
 from __future__ import annotations
 
@@ -168,6 +170,7 @@ def _strong(v: Verdict, p: PilotParams) -> bool:
 
 
 def _entry(name: str, v: Verdict, p: PilotParams) -> dict:
+    """An alternative: below min_events (or not satisfied) its confidence is "unknown", as for the name."""
     confidence = {"events": len(v.support), "quality_ok": not v.skipped} if _strong(v, p) else UNKNOWN
     return {"name": name, "display_text": DISPLAY_TEXT[name], "evidence": _evidence(v.support),
             "confidence": confidence}
@@ -183,7 +186,7 @@ def _decide(c: Cues, verdicts: dict, p: PilotParams) -> tuple:
     if strong:
         leader, *rest = strong
         tied = [n for n in rest if len(verdicts[n].support) == len(verdicts[leader].support)]
-        name = UNKNOWN if tied else leader
+        name = UNKNOWN if tied else leader                    # tie -> unknown: [설계 제안], not in sem section 4
     else:
         name = UNKNOWN if open_tags else NONE
     return name, [n for n in open_tags if n != name and verdicts[n].support]   # no evidence, no alternative
@@ -191,13 +194,12 @@ def _decide(c: Cues, verdicts: dict, p: PilotParams) -> tuple:
 
 def assess(rows: list, t_end: float, params: PilotParams, *, landmarker_num_faces: int) -> tuple:
     """(output, events) for the window [t_end - window_s, t_end] of the observation rows (features.COLUMNS plus the
-    optional columns of events.py). The evidence ids point into the returned events. The output passes check_output,
-    or this raises ValueError.
+    optional columns of events.py). Events come from all rows up to t_end and are kept when they overlap the window;
+    the evidence ids point into the returned events. The output passes check_output, or this raises ValueError.
 
     landmarker_num_faces = the num_faces setting of the Face Landmarker behind the rows (app/inference/vision.py: 1)."""
-    t0 = t_end - params.window_s
-    window = [r for r in rows if t0 <= float(r["t_s"]) <= t_end]
-    cues = observe_window(window, params, landmarker_num_faces=landmarker_num_faces)
+    window = (t_end - params.window_s, t_end)
+    cues = observe_window(rows, window, params, landmarker_num_faces=landmarker_num_faces)
     verdicts = {name: rule(cues, params) for name, rule in RULES.items()}
     name, alternatives = _decide(cues, verdicts, params)
     chosen = verdicts.get(name)
@@ -205,7 +207,7 @@ def assess(rows: list, t_end: float, params: PilotParams, *, landmarker_num_face
     out = {
         "name": name,
         "display_text": DISPLAY_TEXT[name],
-        "window_s": [t0, t_end],
+        "window_s": list(window),
         "evidence": _evidence(support),
         "quality": {"face_visible_ratio": cues.face_visible_ratio, "track_conf": cues.track_conf},
         "confidence": (UNKNOWN if name == UNKNOWN
@@ -220,8 +222,8 @@ def assess(rows: list, t_end: float, params: PilotParams, *, landmarker_num_face
 
 
 # --- check rules ------------------------------------------------------------------------------------------------
-def _check_entry(entry: dict, by_id: dict, t0: float, t1: float) -> list:
-    """Display text and evidence of the output or of one alternative."""
+def _check_entry(entry: dict, by_id: dict, t0: float, t1: float, params: PilotParams) -> list:
+    """Display text, evidence and the min_events floor of the output or of one alternative."""
     name = entry.get("name")
     problems = []
     if entry.get("display_text") != DISPLAY_TEXT.get(name):
@@ -236,16 +238,19 @@ def _check_entry(entry: dict, by_id: dict, t0: float, t1: float) -> list:
             problems.append(f"{name}: evidence names no event of this window: {item['event_id']!r}")
             continue
         ids.add(item["event_id"])
-        if not (t0 <= event["t_start"] and event["t_end"] <= t1):
-            problems.append(f"{name}: event {item['event_id']} lies outside the window {t0}..{t1}")
+        if not (event["t_end"] >= t0 and event["t_start"] <= t1):
+            problems.append(f"{name}: event {item['event_id']} does not overlap the window {t0}..{t1}")
         if item["obs"] not in event["obs"] or event["obs"][item["obs"]] != item["value"]:
             problems.append(f"{name}: {item['obs']}={item['value']!r} is not an observation of {item['event_id']}")
         if item["t"] != event["t_start"]:
             problems.append(f"{name}: t {item['t']!r} is not the start of {item['event_id']}")
     confidence = entry.get("confidence")
     if isinstance(confidence, dict):
-        if confidence.get("events") != len(ids):
-            problems.append(f"{name}: confidence events {confidence.get('events')!r} != {len(ids)} evidence events")
+        count = confidence.get("events")
+        if count != len(ids):
+            problems.append(f"{name}: confidence events {count!r} != {len(ids)} evidence events")
+        elif name in RULES and count < params.min_events:
+            problems.append(f"{name}: {count} events, fewer than min_events, but confidence is not 'unknown'")
         if not isinstance(confidence.get("quality_ok"), bool):
             problems.append(f"{name}: quality_ok is not true or false")
     elif confidence != UNKNOWN:
@@ -255,12 +260,13 @@ def _check_entry(entry: dict, by_id: dict, t0: float, t1: float) -> list:
 
 def check_output(out: dict, events: list, params: PilotParams) -> list:
     """Problems of one output against the events of its window; [] = it passes. The check rules as code:
-    - rule 1, evidence linked to events (sem section 4): every evidence item names an event of this window that lies
-      inside window_s and repeats one of that event's observations (obs, value) at the event's start t;
+    - rule 1, evidence linked to events (sem section 4): every evidence item names an event of this window that
+      overlaps window_s and repeats one of that event's observations (obs, value) at the event's start t;
     - display text: the fixed text of the name (DISPLAY_TEXT), never free text;
-    - rule 2, 'unknown' (sem section 4): name "unknown" if and only if confidence "unknown"; a named tag has at least
-      min_events supporting events and a window that met track_conf_min; "unknown" and "none" carry no evidence of
-      their own, and "none" no alternatives."""
+    - rule 2, 'unknown' (sem section 4): name "unknown" if and only if confidence "unknown"; the name and every
+      alternative with a {events, quality_ok} confidence have at least min_events supporting events; a named tag
+      comes from a window that met track_conf_min; "unknown" and "none" carry no evidence of their own, and "none" no
+      alternatives."""
     missing = [k for k in OUTPUT_KEYS if k not in out]
     if missing:
         return [f"missing keys {missing}"]
@@ -270,13 +276,10 @@ def check_output(out: dict, events: list, params: PilotParams) -> list:
         return problems + [f"name {name!r} is not a tag, {UNKNOWN!r} or {NONE!r}"]
     t0, t1 = out["window_s"]
     by_id = {e["event_id"]: e for e in events}
-    problems += _check_entry(out, by_id, t0, t1)
+    problems += _check_entry(out, by_id, t0, t1, params)
     if (name == UNKNOWN) != (confidence == UNKNOWN):
         problems.append(f"name {name!r} with confidence {confidence!r}: 'unknown' goes only with 'unknown'")
     if name in RULES:
-        count = confidence.get("events") if isinstance(confidence, dict) else None
-        if isinstance(count, int) and count < params.min_events:   # a non-number is reported by _check_entry
-            problems.append(f"{name}: {count} events, fewer than min_events")
         track = out["quality"].get("track_conf")
         if track is None or track < params.track_conf_min:
             problems.append(f"{name}: track_conf {track!r} below track_conf_min")
@@ -291,5 +294,5 @@ def check_output(out: dict, events: list, params: PilotParams) -> list:
             problems.append(f"alternative {alt_name!r} is not another tag")
             continue
         seen.add(alt_name)
-        problems += _check_entry(alt, by_id, t0, t1)
+        problems += _check_entry(alt, by_id, t0, t1, params)
     return problems

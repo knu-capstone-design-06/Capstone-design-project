@@ -1,4 +1,4 @@
-"""사건 (events) layer: the observation rows of one window -> events, the cues the situation rules combine.
+"""사건 (events) layer: observation rows -> events, the cues the situation rules combine.
 
 Layers: 관측값 features.py -> 사건 this file -> 상황 situation.py. Plain Python: no numpy, OpenCV or MediaPipe.
 
@@ -6,16 +6,19 @@ An event is one thing that happened, with the observations that show it:
     {event_id, kind, t_start, t_end, obs: {name: value}, source_frames}
 Observations with one cause make ONE event (sem section 4, '근거 중복'): a head turn whose yaw grows, whose face
 points are then lost while the shoulders stay, and which comes back is one look_back - not a yaw event plus a
-face-loss event. event_id = '<kind>@<frame_idx of the event's first frame>', unique within a window. source_frames =
-the frames whose observations the event used (a bridged drop-out is not one of them).
+face-loss event. event_id = '<kind>@<frame_idx of the event's first frame>'. source_frames = the frames whose
+observations the event used.
+
+Events are found on every row given (for a window: all rows up to its end), so a turn whose facing frame lies just
+before the window keeps its onset; a window then takes the events that overlap it (detect_events(window=...)).
 
 Every window, count, angle and floor is a pilot value ([파일럿]): PilotParams has no defaults and this file sets
 none (dec section 3: '모든 창 길이 · 횟수 · 각도는 [파일럿]', set from the distribution in the team's self-recording).
 
-Input: one dict per frame in time order.
+Input: one dict per frame.
 - columns features.py writes: frame_idx, t_s, face_state, body_state, yaw_deg, face_cx, pose_vis_shoulders
-- optional columns that no code in this repository writes yet. An event kind that needs one is looked for only when
-  every row of the window carries it (measured_columns); otherwise the cue is missing, not absent:
+- optional columns that no code in this repository writes yet. Events are found wherever a column has values; the
+  absence of a cue is concluded only when the window's rows measure it (measured_columns), otherwise it is missing:
     people_behind_count       persons standing behind the main user (smaller box, behind), counted per frame by a
                               person / head detector (H1, not built); a number in every row
     companion_box             (x0, y0, x1, y1) as fractions of width / height: a second box of similar size beside
@@ -31,7 +34,7 @@ Input: one dict per frame in time order.
     first_input_delay_ms      on the frame of the first input of a screen: time from entering the screen (not in
                               the contract); blank on the other frames
 
-Source shorthands (notes kept in the project workspace, not in this repository):
+Source shorthands (notes kept in the project workspace, not in this repository; the README quotes the parts used):
   dec section 3 = the vision owner's decision list 2026-10-10, section 3: the rule table of the three situation
                   tags (00_planning/decisions/decisions_2026-10-10.md)
   sem section N = semantic-layer design note v1.1, 2026-10-11 (00_planning/design/semantic_layer_v1_2026-10-11.md)
@@ -52,9 +55,9 @@ SMOOTHED_NUM_FACES = 1   # the Face Landmarker smooths only with num_faces=1 [D1
 
 KINDS = ("look_back", "yaw_sweep_offscreen", "people_behind", "companion_present", "yaw_toward_companion",
          "mouth_moving", "dwell_no_touch", "touch_miss", "back_navigation_loop", "first_input_delayed")
-COUNT_COLUMNS = ("people_behind_count", "tap_count", "miss_tap_count", "back_count")     # a number in every row
-VALUE_COLUMNS = ("companion_box", "mouth_motion", "shoulder_cx", "shoulder_cy",          # the key in every row,
-                 "first_input_delay_ms")                                                 # blank where not seen
+COUNT_COLUMNS = ("people_behind_count", "tap_count", "miss_tap_count", "back_count")   # measured: a number in every row
+KEY_COLUMNS = ("companion_box", "first_input_delay_ms")    # measured: the key in every row (None / blank = nothing)
+VALUE_COLUMNS = ("mouth_motion", "shoulder_cx", "shoulder_cy")   # measured: the key in every row and a value in one
 COUNT_FIELDS = ("look_back_min_count", "sweep_min_count", "back_loop_min_count", "min_events")
 
 
@@ -67,9 +70,10 @@ class PilotParams:
     The four counts must be whole numbers of at least 1: a count of 0 would let a rule pass without the observation
     the decision table names (or name a tag without evidence); the rules also check that the cue is there at all.
     """
-    window_s: float               # state window (s); also the expiry window: an event older than this drops out
-    gap_s: float                  # flagged frames at most this far apart stay one event across unflagged frames
-                                  # (doc 28 section 3: '잠깐 끊김을 거르는 시간 창')
+    window_s: float               # state window (s); also the expiry window: an event that ended before it drops out
+    gap_s: float                  # longest time between two observations that still belong to one event (doc 28
+                                  # section 3: '잠깐 끊김을 거르는 시간 창'); also between adjacent rows, so it has to
+                                  # be at least the normal frame interval. A longer gap ends the event
     offscreen_yaw_deg: float      # |yaw| from which the face points off the screen: head turns start and end here,
                                   # and 'toward the companion' needs the face beyond it on the companion's side.
                                   # Smaller yaw = reading the menu (dec section 3, looking_around exclusion)
@@ -147,12 +151,16 @@ def _box(row: dict):
 
 
 def measured_columns(rows: list) -> frozenset:
-    """The optional columns measured over these rows: every row carries the column (a count needs a number)."""
+    """The optional columns these rows measure, so that the absence of their cue can be concluded: counts need a
+    number in every row; companion_box and first_input_delay_ms the key in every row; mouth_motion and the shoulder
+    columns the key in every row and at least one value (all blank = not measured)."""
     if not rows:
         return frozenset()
-    counts = {c for c in COUNT_COLUMNS if all(_num(r, c) is not None for r in rows)}
-    values = {c for c in VALUE_COLUMNS if all(c in r for r in rows)}
-    return frozenset(counts | values)
+    measured = {c for c in COUNT_COLUMNS if all(_num(r, c) is not None for r in rows)}
+    measured |= {c for c in KEY_COLUMNS if all(c in r for r in rows)}
+    measured |= {c for c in VALUE_COLUMNS
+                 if all(c in r for r in rows) and any(_num(r, c) is not None for r in rows)}
+    return frozenset(measured)
 
 
 def _event(kind: str, rows: list, frames: list, obs: dict) -> dict:
@@ -162,15 +170,16 @@ def _event(kind: str, rows: list, frames: list, obs: dict) -> dict:
 
 
 def _runs(rows: list, flags: list, gap_s: float, breaks: list | None = None) -> list:
-    """Indices of the flagged frames grouped into runs. Adjacent flagged frames join; two flagged frames with
-    unflagged frames between them join when they are at most gap_s apart and no break frame lies between."""
+    """Indices of the flagged frames grouped into runs. A flagged frame joins the run of the previous flagged frame
+    when their times (t_s) are at most gap_s apart and no break frame lies between - adjacent rows included, so a
+    long gap in the record ends the run."""
     runs, current, broken = [], None, False
     for i, flag in enumerate(flags):
         if breaks is not None and breaks[i]:
             broken = True
         if not flag:
             continue
-        if current and (current[-1] == i - 1 or (not broken and _t(rows[i]) - _t(rows[current[-1]]) <= gap_s)):
+        if current and not broken and _t(rows[i]) - _t(rows[current[-1]]) <= gap_s:
             current.append(i)
         else:
             if current:
@@ -214,14 +223,15 @@ def _head_turns(rows: list, p: PilotParams) -> list:
     """One event per head turn: it starts when the visible face passes the off-screen yaw right after facing the
     screen and ends when the face is back inside it. A turn with face-lost frames is a look_back (research/33:
     'yaw가 커지다 얼굴 점이 사라지고 어깨 점은 남음 -> 얼굴이 돌아오면 1회'); a turn with the face seen throughout is a
-    yaw_sweep_offscreen. A turn that does not come back inside the window, or loses all tracking for longer than
-    gap_s, gives no event; so does a face that disappears without first turning (an occlusion, not a turn)."""
+    yaw_sweep_offscreen. Two tracked frames more than gap_s apart (time, adjacent rows too) break the turn: no
+    event. A turn that has not come back yet gives no event; nor does a face that disappears without first turning
+    (an occlusion, not a turn)."""
     classes = [_turn_class(r, p) for r in rows]
     events, turn, last = [], None, None
     for i, c in enumerate(classes):
         if c == UNTRACKED:
             continue
-        joined = last is not None and (last == i - 1 or _t(rows[i]) - _t(rows[last]) <= p.gap_s)
+        joined = last is not None and _t(rows[i]) - _t(rows[last]) <= p.gap_s
         if turn is not None and not joined:
             turn = None                                      # tracking gone too long: no return seen
         if turn is None:
@@ -281,71 +291,69 @@ def _companion_events(rows: list, p: PilotParams) -> list:
     return companions + _run_events("yaw_toward_companion", rows, toward, p.gap_s, None, toward_obs)
 
 
-# --- all events of a window ----------------------------------------------------------------------------------------
-def detect_events(rows: list, params: PilotParams, *, landmarker_num_faces: int) -> list:
-    """Events of these rows (one window, in time order), sorted by start time.
+# --- all events -----------------------------------------------------------------------------------------------------
+def detect_events(rows: list, params: PilotParams, *, landmarker_num_faces: int, window: tuple | None = None) -> list:
+    """Events of these rows, sorted by start time. With window = (t0, t1): only the events that overlap it, and
+    back_navigation_loop counts the rows inside it (without a window: all rows).
 
     landmarker_num_faces = the num_faces setting of the Face Landmarker that produced the face columns. With more
     than one face it does not smooth [D1], so mouth_motion is not turned into events (dec section 3,
     consulting_companion exclusion: jitter is not counted as mouth motion)."""
     p = params
-    measured = measured_columns(rows)
-    events = _head_turns(rows, p)
+    rows = sorted(rows, key=_t)
+    events = _head_turns(rows, p) + _companion_events(rows, p)
 
-    if "people_behind_count" in measured:
-        counts = [_num(r, "people_behind_count") for r in rows]
-        events += _run_events("people_behind", rows, [c > 0 for c in counts], p.gap_s, p.stay_min_s,
-                              lambda run, s: {"people_behind_count": _count(max(counts[i] for i in run)),
-                                              "stay_s": s})
+    counts = [_num(r, "people_behind_count") for r in rows]
+    events += _run_events("people_behind", rows, [c is not None and c > 0 for c in counts], p.gap_s, p.stay_min_s,
+                          lambda run, s: {"people_behind_count": _count(max(counts[i] for i in run)),
+                                          "stay_s": s})
 
-    if "companion_box" in measured:
-        events += _companion_events(rows, p)
-
-    if "mouth_motion" in measured and landmarker_num_faces == SMOOTHED_NUM_FACES:
+    if landmarker_num_faces == SMOOTHED_NUM_FACES:
         motion = [_num(r, "mouth_motion") if _face(r) else None for r in rows]
         events += _run_events("mouth_moving", rows, [m is not None and m >= p.mouth_motion_min for m in motion],
                               p.gap_s, None,
                               lambda run, s: {"mouth_motion": max(motion[i] for i in run), "moving_s": s})
 
-    if "tap_count" in measured:
-        taps = [_num(r, "tap_count") > 0 for r in rows]
-        present = [_face(r) or _body(r) for r in rows]
-        events += _run_events("dwell_no_touch", rows, [pr and not tap for pr, tap in zip(present, taps)],
-                              p.gap_s, p.dwell_min_s, lambda run, s: {"no_touch_s": s}, breaks=taps)
+    taps = [_num(r, "tap_count") for r in rows]
+    present = [_face(r) or _body(r) for r in rows]
+    events += _run_events("dwell_no_touch", rows, [pr and t == 0 for pr, t in zip(present, taps)], p.gap_s,
+                          p.dwell_min_s, lambda run, s: {"no_touch_s": s},
+                          breaks=[t is not None and t > 0 for t in taps])
 
-    if "miss_tap_count" in measured:
-        misses = [_num(r, "miss_tap_count") for r in rows]
-        events += _run_events("touch_miss", rows, [m > 0 for m in misses], p.gap_s, None,
-                              lambda run, s: {"miss_tap_count": _count(sum(misses[i] for i in run))})
+    misses = [_num(r, "miss_tap_count") for r in rows]
+    events += _run_events("touch_miss", rows, [m is not None and m > 0 for m in misses], p.gap_s, None,
+                          lambda run, s: {"miss_tap_count": _count(sum(misses[i] for i in run))})
 
-    if "back_count" in measured:
-        backs = [i for i, r in enumerate(rows) if _num(r, "back_count") > 0]
-        total = sum(_num(rows[i], "back_count") for i in backs)
-        if backs and total >= p.back_loop_min_count:
-            events.append(_event("back_navigation_loop", rows, backs, {"back_count": _count(total)}))
+    for i, r in enumerate(rows):
+        delay = _num(r, "first_input_delay_ms")
+        if delay is not None and delay >= p.first_input_delay_min_ms:
+            events.append(_event("first_input_delayed", rows, [i], {"first_input_delay_ms": delay}))
 
-    if "first_input_delay_ms" in measured:
-        for i, r in enumerate(rows):
-            delay = _num(r, "first_input_delay_ms")
-            if delay is not None and delay >= p.first_input_delay_min_ms:
-                events.append(_event("first_input_delayed", rows, [i], {"first_input_delay_ms": delay}))
+    t0, t1 = window if window is not None else (-math.inf, math.inf)
+    backs = [i for i, r in enumerate(rows) if t0 <= _t(r) <= t1 and (_num(r, "back_count") or 0) > 0]
+    total = sum(_num(rows[i], "back_count") for i in backs)
+    if backs and total >= p.back_loop_min_count:
+        events.append(_event("back_navigation_loop", rows, backs, {"back_count": _count(total)}))
 
+    if window is not None:
+        events = [e for e in events if e["t_end"] >= t0 and e["t_start"] <= t1]
     return sorted(events, key=lambda e: (e["t_start"], e["kind"]))
 
 
 # --- what the rules read for one window --------------------------------------------------------------------------
 @dataclass(frozen=True)
 class Cues:
-    """The events of one window and its window-level checks - everything the situation rules read."""
+    """The events that overlap one window and its window-level checks - everything the situation rules read."""
     events: list
-    face_visible_ratio: float | None   # frames with the face seen / frames (None: no frames)
+    face_visible_ratio: float | None   # frames with the face seen / frames in the window (None: no frames)
     track_conf: float | None           # frames with the body tracked / frames: MediaPipe gave a pose, i.e. its own
                                        # confidence passed its pass mark (library default) (None: no frames)
-    measured: frozenset                # optional columns carried by every row (measured_columns)
+    measured: frozenset                # optional columns the window measures (measured_columns)
     face_ok: bool                      # face_visible_ratio >= face_visible_min: the cues that need the face count
     mouth_usable: bool                 # mouth_motion measured, smoothed landmarker [D1], face_ok
     any_tap: bool | None               # a touch in the window (None: no touch log)
-    body_still: bool | None            # shoulder midpoint spread <= body_still_max (None: not measurable)
+    body_still: bool | None            # shoulder midpoint spread <= body_still_max (None: fewer than two
+                                       # shoulder observations - stillness cannot be told from one)
 
     def of(self, *kinds: str) -> list:
         return [e for e in self.events if e["kind"] in kinds]
@@ -354,25 +362,29 @@ class Cues:
 def _body_still(rows: list, p: PilotParams):
     points = [(_num(r, "shoulder_cx"), _num(r, "shoulder_cy")) for r in rows if _body(r)]
     points = [(x, y) for x, y in points if x is not None and y is not None]
-    if not points:
+    if len(points) < 2:
         return None
     xs, ys = zip(*points)
     return max(max(xs) - min(xs), max(ys) - min(ys)) <= p.body_still_max
 
 
-def observe_window(rows: list, params: PilotParams, *, landmarker_num_faces: int) -> Cues:
-    """Events and window-level checks of the rows of one window."""
-    rows = sorted(rows, key=_t)
-    n = len(rows)
-    measured = measured_columns(rows)
-    face_ratio = sum(map(_face, rows)) / n if n else None
+def observe_window(rows: list, window: tuple, params: PilotParams, *, landmarker_num_faces: int) -> Cues:
+    """Events and window-level checks for window = (t0, t1). The events are found on all rows up to t1 (nothing
+    after the window end is used, so a replay gives what the kiosk would have given) and kept when they overlap the
+    window; the checks read the rows inside the window."""
+    t0, t1 = window
+    rows = sorted((r for r in rows if _t(r) <= t1), key=_t)
+    inside = [r for r in rows if _t(r) >= t0]
+    n = len(inside)
+    measured = measured_columns(inside)
+    face_ratio = sum(map(_face, inside)) / n if n else None
     face_ok = face_ratio is not None and face_ratio >= params.face_visible_min
     return Cues(
-        events=detect_events(rows, params, landmarker_num_faces=landmarker_num_faces),
+        events=detect_events(rows, params, landmarker_num_faces=landmarker_num_faces, window=window),
         face_visible_ratio=face_ratio,
-        track_conf=sum(map(_body, rows)) / n if n else None,
+        track_conf=sum(map(_body, inside)) / n if n else None,
         measured=measured,
         face_ok=face_ok,
         mouth_usable="mouth_motion" in measured and landmarker_num_faces == SMOOTHED_NUM_FACES and face_ok,
-        any_tap=any(_num(r, "tap_count") > 0 for r in rows) if "tap_count" in measured else None,
-        body_still=_body_still(rows, params) if {"shoulder_cx", "shoulder_cy"} <= measured else None)
+        any_tap=any(_num(r, "tap_count") > 0 for r in inside) if "tap_count" in measured else None,
+        body_still=_body_still(inside, params) if {"shoulder_cx", "shoulder_cy"} <= measured else None)

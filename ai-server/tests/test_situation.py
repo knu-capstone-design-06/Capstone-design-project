@@ -197,13 +197,30 @@ class EventTests(unittest.TestCase):
         self.assertEqual(events["back_navigation_loop"]["source_frames"], [12, 30])
         self.assertEqual(events["first_input_delayed"]["obs"], {"first_input_delay_ms": 3500.0})
 
-    def test_optional_columns_are_cues_only_when_every_row_has_them(self):
+    def test_a_column_missing_in_some_rows_is_not_measured(self):
+        """people_behind_count missing in one row: the window does not measure it, so its absence would not be
+        concluded; the person seen behind is still an observed event."""
         rows = put(rows_of(face(30), extra={}), 0, 29, people_behind_count=1)
         rows[10].pop("people_behind_count")
-        cues = observe_window(rows, P, landmarker_num_faces=1)
+        cues = observe_window(rows, (0.0, rows[-1]["t_s"]), P, landmarker_num_faces=1)
         self.assertNotIn("people_behind_count", cues.measured)
-        self.assertNotIn("people_behind", kinds(cues.events))
+        self.assertIn("people_behind", kinds(cues.events))
         self.assertIsNone(cues.any_tap)                                     # no touch log: unknown, not 'no touch'
+
+    def test_a_long_time_gap_ends_events_even_between_adjacent_rows(self):
+        """Item 4: adjacent rows more than gap_s apart (a gap in the record) end the dwell, the presence and a turn."""
+        rows = put(rows_of(face(40)), 0, 39, people_behind_count=1)
+        for row in rows[20:]:
+            row["t_s"] = round(row["t_s"] + 3.0, 6)                         # rows 19 -> 20: 0.1 s becomes 3.1 s
+        events = detect_events(rows, P, landmarker_num_faces=1)
+        self.assertEqual([e["event_id"] for e in events if e["kind"] == "dwell_no_touch"],
+                         ["dwell_no_touch@0", "dwell_no_touch@20"])
+        self.assertEqual([e["event_id"] for e in events if e["kind"] == "people_behind"],
+                         ["people_behind@0", "people_behind@20"])
+        turn = rows_of(face(5), [(1, {"yaw_deg": 50.0}), (3, LOST)], face(5))
+        for row in turn[7:]:
+            row["t_s"] = round(row["t_s"] + 3.0, 6)                         # the gap falls inside the turn
+        self.assertNotIn("look_back", kinds(detect_events(turn, P, landmarker_num_faces=1)))
 
     def test_yaw_toward_the_companion_needs_no_return(self):
         """Item 1: the main user keeps looking toward the companion's side to the end: one yaw_toward_companion,
@@ -292,6 +309,11 @@ class ConsultingCompanionTests(unittest.TestCase):
         out, _ = run(companion_window(sweep(+1), mouth=0.0))
         self.assertEqual(out["name"], NONE)
 
+    def test_all_blank_mouth_values_are_left_out(self):
+        """Item 5: mouth_motion is there but blank in every row: not measured, so left out (quality_ok false)."""
+        out, _ = run(put(companion_window(sweep(+1)), 0, 18, mouth_motion=NAN))
+        self.assertEqual(out["name"], COMPANION)
+        self.assertEqual(out["confidence"], {"events": 3, "quality_ok": False})
 
     def test_no_companion(self):
         out, _ = run(put(companion_window(sweep(+1)), 0, 18, companion_box=None))
@@ -374,6 +396,13 @@ class LookingAroundTests(unittest.TestCase):
         self.assertNotIn("dwell_no_touch", kinds(events))
         self.assertEqual((out["name"], out["confidence"]), (AROUND, {"events": 2, "quality_ok": True}))
 
+    def test_one_shoulder_observation_is_not_stillness(self):
+        """Item 5: a single shoulder position cannot show the body still: body_still is unknown, so is the tag."""
+        rows = put(around_window(), 1, 22, shoulder_cx=NAN, shoulder_cy=NAN)
+        out, _ = run(rows)
+        self.assertEqual(out["name"], UNKNOWN)
+        self.assertEqual([a["name"] for a in out["alternatives"]], [AROUND])
+
 
 class UnknownAndAlternativesTests(unittest.TestCase):
     """'unknown', alternatives and ties (params P: test values, see the module docstring)."""
@@ -416,11 +445,35 @@ class UnknownAndAlternativesTests(unittest.TestCase):
                          [(AROUND, {"events": 3, "quality_ok": True})])
         self.assertEqual(check_output(out, events, P), [])
 
+    def test_an_alternative_below_min_events_is_unknown(self):
+        """Item 6: the same min_events floor as the name: looking_around has 3 events, k = 4."""
+        out, _ = run(companion_window(sweep(+1), face(3), sweep(+1)), params=dataclasses.replace(P, min_events=4))
+        self.assertEqual(out["name"], COMPANION)
+        self.assertEqual([(a["name"], a["confidence"]) for a in out["alternatives"]], [(AROUND, UNKNOWN)])
+
     def test_a_tie_is_unknown_with_both_alternatives(self):
         out, _ = run(companion_window(sweep(+1), face(3), sweep(-1), face(3), sweep(-1)))
         self.assertEqual(out["name"], UNKNOWN)
         self.assertEqual([(a["name"], a["confidence"]["events"]) for a in out["alternatives"]],
                          [(COMPANION, 4), (AROUND, 4)])
+
+
+class WindowTests(unittest.TestCase):
+    """The window slides with t_end (params P with a shorter window_s: test values, see the module docstring)."""
+
+    def test_state_is_kept_while_its_events_overlap_the_window_and_expires_after(self):
+        rows = put(rows_of(face(5), look_back(), face(5), look_back(), face(55)), 0, 30, people_behind_count=1)
+        params = dataclasses.replace(P, window_s=3.0)
+        outs = {t: assess(rows, t, params, landmarker_num_faces=1)[0] for t in (3.0, 4.0, 5.0)}
+        self.assertEqual([outs[t]["name"] for t in (3.0, 4.0, 5.0)], [BEHIND, BEHIND, NONE])
+        self.assertIn("look_back@5", ids(outs[4.0]))     # 0.5-1.3 s still overlaps [1.0, 4.0]; gone at [2.0, 5.0]
+
+    def test_a_turn_keeps_its_facing_frame_from_before_the_window(self):
+        """Item 7: the facing frame before the first turn (0.4 s) lies just before the window [0.45, 3.0]."""
+        rows = put(rows_of(face(5), look_back(), face(5), look_back(), face(5)), 0, 30, people_behind_count=1)
+        out, _ = assess(rows, 3.0, dataclasses.replace(P, window_s=2.55), landmarker_num_faces=1)
+        self.assertEqual(out["name"], BEHIND)
+        self.assertIn("look_back@5", ids(out))
 
 
 class CheckRuleTests(unittest.TestCase):
@@ -438,8 +491,9 @@ class CheckRuleTests(unittest.TestCase):
         evidence = [dict(self.out["evidence"][0], event_id="look_back@999")] + self.out["evidence"][1:]
         self.assertTrue(any("no event of this window" in p for p in self.changed(evidence=evidence)))
 
-    def test_evidence_event_must_lie_inside_the_window(self):
-        self.assertTrue(any("outside the window" in p for p in self.changed(window_s=[1.0, 3.0])))
+    def test_evidence_event_must_overlap_the_window(self):
+        self.assertTrue(any("does not overlap the window" in p for p in self.changed(window_s=[2.7, 3.0])))
+        self.assertEqual(self.changed(window_s=[1.0, 3.0]), [])          # overlapping events are fine
 
     def test_evidence_must_repeat_an_observation_of_the_event(self):
         evidence = [dict(self.out["evidence"][0], value=7)] + self.out["evidence"][1:]
@@ -456,6 +510,13 @@ class CheckRuleTests(unittest.TestCase):
         self.assertTrue(any("fewer than min_events" in p for p in
                             check_output(self.out, self.events, dataclasses.replace(P, min_events=4))))
         self.assertTrue(any("evidence events" in p for p in self.changed(confidence={**few, "events": 2})))
+
+    def test_alternatives_need_min_events_too(self):
+        """Item 6: an alternative whose {events, quality_ok} confidence is below min_events breaks rule 2."""
+        out, events = run(companion_window(sweep(+1), face(3), sweep(+1)))
+        self.assertEqual(out["alternatives"][0]["confidence"], {"events": 3, "quality_ok": True})
+        problems = check_output(out, events, dataclasses.replace(P, min_events=4))
+        self.assertTrue(any(p.startswith(AROUND) and "fewer than min_events" in p for p in problems))
 
 
 if __name__ == "__main__":
