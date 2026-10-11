@@ -169,6 +169,32 @@ test('버전 충돌 응답의 최신 Cart를 표시하고 재조작에는 최신
   } finally { await browser.close(); }
 });
 
+test('변경 요청의 코드 없는 404·410 뒤 새 이용을 시작할 수 있다', async () => {
+  const browser = await chromium.launch({ channel: 'msedge', headless: true });
+  try {
+    for (const status of [404, 410]) {
+      const first = `session-ended-${status}`, second = `session-new-${status}`;
+      const { page, errors, fixture } = await open(browser, [
+        ...bootstrap(first),
+        mutation(first, '/cart/items', { detail: 'session not found' }, { status }),
+        ...bootstrap(second),
+      ]);
+      await ready(page);
+      await click(page, 'product:americano');
+      await click(page, 'cart-add');
+      await page.locator('[data-log-target="order-session-restart"]').waitFor();
+      await click(page, 'order-session-restart');
+      await ready(page);
+      assert.equal(await page.locator('.cart-row').count(), 0);
+      assert.equal(await page.locator('dialog[open]').count(), 0);
+      assert.equal(fixture.requests.filter(request => request.path === '/api/v1/sessions').length, 2);
+      fixture.verify();
+      assert.deepEqual(errors, []);
+      await page.close();
+    }
+  } finally { await browser.close(); }
+});
+
 test('주문 API가 없는 서버에서는 연결 대기를 표시하고 임의의 상품·주문을 만들지 않음', async () => {
   const browser = await chromium.launch({ channel: 'msedge', headless: true });
   try {

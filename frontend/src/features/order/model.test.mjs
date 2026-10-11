@@ -166,3 +166,29 @@ test('세션 소실은 새 이용 시작을 안내하고 로컬 Cart로 복구�
   assert.equal(await controller.startNewOrder(), true);
   assert.equal(controller.getSnapshot().cart.total_quantity, 0);
 });
+
+test('코드 없는 404·410과 접근 오류 뒤에는 새 서버 세션으로 시작할 수 있다', async () => {
+  for (const status of [404, 410, 401, 403]) {
+    const controller = fixture({ getCart: async session => session === 'session-1' ? populatedCart() : emptyCart(session),
+      updateCartItem: async () => { throw new ApiError(status, { detail: 'session not found' }); } });
+    await controller.initialize();
+    assert.equal(await controller.updateQuantity('item-1', 3), false);
+    assert.equal(controller.getSnapshot().status, 'ended', `HTTP ${status}`);
+    assert.equal(await controller.startNewOrder(), true);
+    assert.equal(controller.getSnapshot().session.session_id, 'session-2');
+    assert.equal(controller.getSnapshot().cart.total_quantity, 0);
+  }
+});
+
+test('상품·장바구니 항목 없음 404는 현재 세션과 장바구니를 유지한다', async () => {
+  for (const code of ['product_not_found', 'cart_item_not_found']) {
+    const controller = fixture({ getCart: async () => populatedCart(),
+      updateCartItem: async () => { throw new ApiError(404, { code, detail: '항목을 찾을 수 없습니다.', cart: null }); } });
+    await controller.initialize();
+    await controller.updateQuantity('item-1', 3);
+    assert.equal(controller.getSnapshot().status, 'ready', code);
+    assert.equal(controller.getSnapshot().session.session_id, 'session-1');
+    assert.equal(controller.getSnapshot().cart.total_quantity, 2);
+    assert.equal(await controller.startNewOrder(), false);
+  }
+});

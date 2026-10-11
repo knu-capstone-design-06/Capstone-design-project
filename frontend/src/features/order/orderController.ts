@@ -131,7 +131,10 @@ export class OrderController {
         }, seconds * 1000);
       } else if (apiError) {
         this.pending = null;
-        const ended = apiError.status === 401 || apiError.status === 403 || ['session_not_found', 'session_expired'].includes(body?.code ?? '');
+        const code = body?.code ?? '';
+        const ended = apiError.status === 401 || apiError.status === 403 || apiError.status === 410
+          || ['session_not_found', 'session_expired'].includes(code)
+          || (apiError.status === 404 && !['product_not_found', 'cart_item_not_found'].includes(code));
         this.set({ status: ended ? 'ended' : 'ready', cart: this.acceptCart(body?.cart ?? null),
           message: apiError.message, retryAt: 0 });
       }
