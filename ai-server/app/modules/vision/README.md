@@ -125,12 +125,12 @@ out, events = assess(rows, t_end, params, landmarker_num_faces=1)  # 창 = [t_en
 - `evidence`: 근거 사건의 관찰을 한 줄씩 펼친 목록입니다. `event_id`는 `사건 종류@첫 프레임 번호`이고, `t`는 사건이 시작한 시각(초)입니다. 위의 `look_back@5` 관찰 넷은 고개를 한 번 돌린 사건 하나에서 나왔습니다.
 - `quality`: `face_visible_ratio`는 창 안에서 얼굴이 보인 프레임 비율이고, `track_conf`는 몸 점이 잡힌 프레임 비율입니다(MediaPipe가 자체 기준을 넘겨 몸 점을 낸 프레임).
 - `confidence`: 확률이 아닙니다. 라벨로 보정하기 전이라 근거 사건 수(`events`)와, 결측이라 뺀 단서가 없는지(`quality_ok`)만 적습니다.
-- `alternatives`: 측정된 단서로 빠지지 않은 다른 태그입니다. 근거 사건이 많은 순서이고, 항목마다 `name` · `display_text` · `evidence` · `confidence`가 있습니다.
+- `alternatives`: 측정된 단서로 빠지지 않았고 근거 사건이 있는 다른 태그입니다. 근거 사건이 많은 순서이고, 항목마다 `name` · `display_text` · `evidence` · `confidence`가 있습니다.
 
 검사 규칙 두 개는 `check_output`이 코드로 확인합니다. `assess`가 낸 출력이 규칙을 어기면 오류가 납니다.
 
 1. 근거 연결: `evidence`의 모든 항목은 이 창의 사건 ID를 가리킵니다. 그 사건은 창 안에 있고, 항목의 관찰 이름과 값은 그 사건의 관찰과 같습니다. 표시 문구도 이름마다 정해 둔 문구와 같아야 합니다.
-2. 모름: 근거 사건이 `min_events`개보다 적거나, 꼭 필요한 단서를 잴 수 없으면 `unknown`입니다. 입력 열이 없거나, 얼굴이 필요한 단서인데 얼굴 보임 비율이 `face_visible_min` 미만인 경우입니다. 몸 추적 비율이 `track_conf_min` 미만이면 센서 실패로 보고 규칙을 읽지 않고 `unknown`을 냅니다. 얼굴이 사라지는 것은 뒤돌아봄의 단서이므로, 얼굴 보임 비율이 낮아도 뒤돌아봄 태그는 막지 않습니다. 두 태그가 함께 맞으면 근거 사건이 많은 쪽이 `name`이 되고 다른 쪽은 `alternatives`에 들어갑니다. 사건 수가 같으면 `unknown`입니다.
+2. 모름: 근거 사건이 `min_events`개보다 적거나, 꼭 필요한 단서를 잴 수 없으면 `unknown`입니다. 입력 열이 없거나, 얼굴이 필요한 단서인데 얼굴 보임 비율이 `face_visible_min` 미만인 경우입니다. `none`은 모든 태그가 측정된 단서로 빠졌을 때만 냅니다. 그래서 선택 열이 하나도 없는 지금의 `observations.csv`만 넣으면 출력은 늘 `unknown`입니다. 몸 추적 비율이 `track_conf_min` 미만이면 센서 실패로 보고 규칙을 읽지 않고 `unknown`을 냅니다. 얼굴이 사라지는 것은 뒤돌아봄의 단서이므로, 얼굴 보임 비율이 낮아도 뒤돌아봄 태그는 막지 않습니다. 두 태그가 함께 맞으면 근거 사건이 많은 쪽이 `name`이 되고 다른 쪽은 `alternatives`에 들어갑니다. 사건 수가 같으면 `unknown`입니다.
 
 상태 수명: 창은 `t_end`와 함께 밀립니다. 창 안 사건이 `min_events`개 이상이면 상태가 시작되고, 사건이 창 밖으로 나가거나(`window_s` = 만료 창) 반대 근거(터치, 뒤에 선 사람, 몸 이동)가 창에 들어오면 풀립니다.
 

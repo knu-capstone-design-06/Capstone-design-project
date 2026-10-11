@@ -18,10 +18,11 @@ Output for one window (sem section 4: dec section 3's output line plus quality, 
   evidence      one item per observation of each supporting event; t = the event's start (s)
   confidence    rule satisfaction, not a probability (nothing is calibrated against labels yet): events = number of
                 supporting events, quality_ok = no cue of the rule was left out as missing
-  alternatives  the other tags that no measured cue ruled out, most supporting events first
+  alternatives  the other tags that no measured cue ruled out and that have supporting events, most events first
 
 How a window is decided (sem section 4):
-- a cue that cannot be measured is None, not False (three-valued AND): it decides only when nothing rules the tag out
+- a cue that cannot be measured is None, not False (three-valued AND): it decides only when nothing rules the tag out.
+  So "none" needs every tag ruled out by a measured cue; with the optional columns missing the output stays "unknown"
 - the body tracker lost the person (track_conf below track_conf_min) -> sensor failure -> "unknown". A face turned away
   is not that: face loss is the look_back cue, and only the cues that need the face become missing
 - missing mouth motion is left out and the tag is judged on the rest (sem section 3); quality_ok then says false
@@ -179,7 +180,7 @@ def _decide(c: Cues, verdicts: dict, p: PilotParams) -> tuple:
         name = UNKNOWN if tied else leader
     else:
         name = UNKNOWN if open_tags else NONE
-    return name, [n for n in open_tags if n != name]
+    return name, [n for n in open_tags if n != name and verdicts[n].support]   # no evidence, no alternative
 
 
 def assess(rows: list, t_end: float, params: PilotParams, *, landmarker_num_faces: int) -> tuple:

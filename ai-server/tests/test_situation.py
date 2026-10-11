@@ -338,6 +338,16 @@ class UnknownAndAlternativesTests(unittest.TestCase):
         self.assertEqual(out["name"], UNKNOWN)
         self.assertEqual([a["name"] for a in out["alternatives"]], [AROUND])
 
+    def test_features_columns_only_give_unknown_and_evidence_only_alternatives(self):
+        """Today's observations.csv has none of the optional columns: no tag can be ruled in or out, so the output is
+        'unknown' - never 'none' - and only a tag with supporting events is listed as an alternative."""
+        drop = tuple(OPTIONAL) + ("shoulder_cx", "shoulder_cy")
+        out, _ = run(rows_of(face(30), extra={}, drop=drop))
+        self.assertEqual((out["name"], out["alternatives"]), (UNKNOWN, []))
+        out, _ = run(rows_of(face(5), sweep(+1), face(5), sweep(-1), face(5), extra={}, drop=drop))
+        self.assertEqual(out["name"], UNKNOWN)
+        self.assertEqual([(a["name"], a["confidence"]) for a in out["alternatives"]], [(AROUND, UNKNOWN)])
+
     def test_two_tags_the_one_with_more_events_wins(self):
         out, events = run(companion_window(sweep(+1), face(3), sweep(+1)))
         self.assertEqual(out["name"], COMPANION)
