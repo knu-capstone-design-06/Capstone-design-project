@@ -4,14 +4,16 @@ import type { Product, ProductCategory, Temperature } from '../../shared/api/ind
 import { categoryLabels, initialSettings, MAX_QUANTITY, money, productIcon, readSettings, settingsStorageKey, temperatureLabel } from './model.ts';
 import type { Settings } from './model.ts';
 import { OrderController } from './orderController.ts';
+import { createSampleOrderApi } from './sampleOrderApi.ts';
 import { useTouchLog } from './useTouchLog.ts';
 import { TouchLogPanel } from './TouchLogPanel.tsx';
 import './order.css';
 
 const supportLabels: Record<keyof Settings, string> = { largeText: '큰 글씨', largeButton: '큰 버튼', simpleScreen: '간편 화면', stepGuide: '단계별 안내' };
+const sampleMode = import.meta.env.DEV && import.meta.env.VITE_ORDER_SAMPLE === 'true';
 
 export function OrderPage() {
-  const [controller] = useState(() => new OrderController(backendApi));
+  const [controller] = useState(() => new OrderController(sampleMode ? createSampleOrderApi() : backendApi));
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const [settings, setSettings] = useState(() => {
     try { return readSettings(localStorage.getItem(settingsStorageKey) ?? localStorage.getItem('kiosk-sample-order-v1')); }
@@ -84,7 +86,7 @@ export function OrderPage() {
   </li>);
 
   return <><div ref={touchLog.root} className={`kiosk ${settings.largeText ? 'large-text' : ''} ${settings.largeButton ? 'large-button' : ''} ${settings.simpleScreen ? 'simple-screen' : ''}`}>
-    <header className="header"><a data-log-target="menu-home" className="brand" href="#" onClick={event => { event.preventDefault(); if (screen !== 'complete') setScreen('menu'); }}>온기<span>ONGI COFFEE</span></a><span className="sample-badge">샘플 주문 · 실제 결제 없음</span><button data-log-target="support-toggle" className="support-trigger" aria-expanded={supportOpen} aria-controls="support-panel" onClick={() => setSupportOpen(!supportOpen)}>화면 도움 {supportOpen ? '닫기' : '열기'}</button></header>
+    <header className="header"><a data-log-target="menu-home" className="brand" href="#" onClick={event => { event.preventDefault(); if (screen !== 'complete') setScreen('menu'); }}>온기<span>ONGI COFFEE</span></a><span className="sample-badge">{sampleMode ? '개발용 샘플' : '샘플 주문'} · 실제 결제 없음</span><button data-log-target="support-toggle" className="support-trigger" aria-expanded={supportOpen} aria-controls="support-panel" onClick={() => setSupportOpen(!supportOpen)}>화면 도움 {supportOpen ? '닫기' : '열기'}</button></header>
     {supportOpen && <section id="support-panel" className="support-panel" aria-label="화면 도움 설정"><div><h2>편한 화면으로 주문하세요</h2><p>설정을 바꿔도 담은 메뉴는 그대로 유지됩니다.</p></div><div className="support-options">{(Object.keys(supportLabels) as (keyof Settings)[]).map(key => <button data-log-target={`support:${key}`} key={key} aria-pressed={settings[key]} onClick={() => setSettings(current => ({ ...current, [key]: !current[key] }))}>{settings[key] ? '✓ ' : ''}{supportLabels[key]}</button>)}<button data-log-target="support-reset" onClick={() => setSettings({ ...initialSettings })}>기본 화면</button></div></section>}
     <main>
       {!selected && feedback}
