@@ -122,7 +122,7 @@ python -m unittest discover -s app/modules -p 'test_*.py' -v
 새 모듈 테스트는 세션 생성·격리, 입력 검증, AI 점수 검증, 연결 장애와 측정 불가의 구분,
 POST CORS를 확인합니다.
 
-## 연결 API (contract 0.3.0, 0.1.0 형식 유지)
+## 연결 API (0.1.0 형식 유지)
 
 | 요청 | 결과 |
 | --- | --- |

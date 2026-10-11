@@ -177,7 +177,7 @@ window.kioskTouchLogDraft.exportJson(); // 현재 버퍼 JSON 다운로드
 node --test frontend/src/features/order/touchLog.test.mjs
 ```
 
-2026-10-05 검증 결과: `frontend/`에서 `pnpm build` 통과, 당시 `pnpm test` 8개와 새 단위 테스트 5개 통과. 브라우저 통합 테스트 1개 통과: StrictMode 초기 기록 중복 방지, 누름·종료 각각 1회 기록, 모달 뒤 대상 제외, 옵션·설정 이벤트, 화면 방문 변경, 새로고침 세션 유지, 새 주문 세션 분리, 실제 터치 이동에 따른 `pointercancel` 및 스크롤 관측. 2026-10-11 이후의 테스트 수는 8장에 있습니다.
+2026-10-05 검증 결과: `frontend/`에서 `pnpm build` 통과, 당시 `pnpm test` 8개와 새 단위 테스트 5개 통과. 브라우저 통합 테스트 1개 통과: StrictMode 초기 기록 중복 방지, 누름·종료 각각 1회 기록, 모달 뒤 대상 제외, 옵션·설정 이벤트, 화면 방문 변경, 새로고침 세션 유지, 새 주문 세션 분리, 실제 터치 이동에 따른 `pointercancel` 및 스크롤 관측.
 
 브라우저 테스트에는 실행 중인 Vite와 별도로 제공된 Playwright가 필요합니다. 서비스 의존성은 추가하지 않았습니다. 2026-10-05 검증은 번들 Playwright와 설치된 Edge의 headless 모드로 수행했습니다. Playwright 모듈 경로를 `PLAYWRIGHT_MODULE` 환경변수에 ESM import 가능한 경로로 지정하고 아래 파일을 실행합니다. URL은 기본 `http://127.0.0.1:5173`이며 `TOUCH_LOG_BROWSER_URL`로 변경할 수 있습니다.
 
