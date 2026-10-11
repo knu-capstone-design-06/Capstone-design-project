@@ -76,12 +76,18 @@ def _found(events: list, measurable: bool):
 
 
 def _at_least(events: list, count: int, measurable: bool):
-    if len(events) >= count:
+    """The cue is there (at least one event, whatever the count field says) and reaches count."""
+    if events and len(events) >= count:
         return True
     return False if measurable else None
 
 
-def _no_touch(c: Cues, dwell: list):
+def _no_touch(c: Cues):
+    """'터치 없음': no touch anywhere in the window (None: no touch log)."""
+    return None if c.any_tap is None else not c.any_tap
+
+
+def _dwell_without_touch(c: Cues, dwell: list):
     """'안 누르고 머묾': a dwell_no_touch event and no touch anywhere in the window (None: no touch log)."""
     if c.any_tap is None:
         return None
@@ -92,10 +98,10 @@ def _no_touch(c: Cues, dwell: list):
 def looking_back_with_people_behind(c: Cues, p: PilotParams) -> Verdict:
     """뒤에 사람이 있어 서두르는 듯함 (dec section 3, row 1).
 
-    Combines: a person standing behind (people_behind, staying stay_min_s) + repeated look_backs (look_back_min_count
-    or more). Auxiliary: touch_miss events add support and are never required. Excluded: passers-by only (they leave
-    before stay_min_s, so there is no people_behind event); people behind without look-backs. Not built: touches
-    getting faster and expression change (no input yet)."""
+    Combines: a person standing behind (people_behind, staying stay_min_s: '멈춰 선 사람만') + repeated look_backs
+    (look_back_min_count or more). Auxiliary: touch_miss events add support and are never required. Excluded:
+    passers-by only (they leave before stay_min_s, so there is no people_behind event); people behind without
+    look-backs. Not built: touches getting faster and expression change (no input yet)."""
     behind = c.of("people_behind")
     looks = c.of("look_back")
     status = _all(_found(behind, "people_behind_count" in c.measured),
@@ -106,37 +112,37 @@ def looking_back_with_people_behind(c: Cues, p: PilotParams) -> Verdict:
 def consulting_companion(c: Cues, p: PilotParams) -> Verdict:
     """일행과 상의하는 듯함 (dec section 3, row 2).
 
-    Combines: a companion (companion_present: a second box of similar size beside, staying stay_min_s) + the main user
-    turning toward the companion's side (yaw_sweep_offscreen with the face seen; research/33 3-3) + mouth moving
-    (mouth_moving) + dwell without touching + body still. Excluded: a Face Landmarker that does not smooth
-    (num_faces of 2 or more) - events.detect_events then makes no mouth_moving, so jitter is not counted as mouth
-    motion. Missing mouth motion (no blendshape column, no smoothing, face_visible_ratio below face_visible_min) is
-    left out and the tag is judged on the rest (sem section 3)."""
+    Combines: a companion (companion_present: a second box of similar size beside) + the main user's yaw toward the
+    companion's side (yaw_toward_companion; the face is needed) + mouth moving (mouth_moving) + dwell without
+    touching ('안 누르고 머묾': a dwell_no_touch event and no touch in the window) + body still. Excluded: a Face
+    Landmarker that does not smooth (num_faces of 2 or more) - events.detect_events then makes no mouth_moving, so
+    jitter is not counted as mouth motion. Missing mouth motion (no values, no smoothing, face_visible_ratio below
+    face_visible_min) is left out and the tag is judged on the rest (sem section 3)."""
     companions = c.of("companion_present")
     sides = {e["obs"]["side"] for e in companions} - {None}
-    turns = [e for e in c.of("yaw_sweep_offscreen") if e["obs"]["side"] in sides]
+    toward = c.of("yaw_toward_companion") if c.face_ok else []
     mouth = c.of("mouth_moving") if c.mouth_usable else []
     dwell = c.of("dwell_no_touch")
     status = _all(_found(companions, "companion_box" in c.measured),
-                  _found(turns, c.face_ok and bool(sides)),
+                  _found(toward, c.face_ok and bool(sides)),
                   _found(mouth, True) if c.mouth_usable else True,
-                  _no_touch(c, dwell),
+                  _dwell_without_touch(c, dwell),
                   c.body_still)
-    return Verdict(status, companions + turns + mouth + dwell, () if c.mouth_usable else ("mouth_moving",))
+    return Verdict(status, companions + toward + mouth + dwell, () if c.mouth_usable else ("mouth_moving",))
 
 
 def looking_around(c: Cues, p: PilotParams) -> Verdict:
     """무언가를 찾는 듯함 (dec section 3, row 3).
 
-    Combines: large off-screen head turns, sweep_min_count or more (yaw_sweep_offscreen, and look_back - a turn far
-    enough to lose the face is counted by 'face lost + body remains', dec section 3 note) + dwell without touching +
-    body still + nobody standing behind (no people_behind event). Excluded: the small yaw of reading the menu (it
-    stays inside offscreen_yaw_deg, so it makes no turn event)."""
-    turns = c.of("yaw_sweep_offscreen", "look_back")
-    dwell = c.of("dwell_no_touch")
+    Combines: large off-screen head turns, sweep_min_count or more (look_back, and yaw_sweep_offscreen when the face
+    is seen enough - a turn far enough to lose the face is counted by 'face lost + body remains', dec section 3
+    note) + no touch in the window + body still + nobody standing behind (no people_behind event). dwell_no_touch
+    events add support and are not required. Excluded: the small yaw of reading the menu (it stays inside
+    offscreen_yaw_deg, so it makes no turn event)."""
+    turns = c.of("look_back") + (c.of("yaw_sweep_offscreen") if c.face_ok else [])
     nobody_behind = not c.of("people_behind") if "people_behind_count" in c.measured else None
-    status = _all(_at_least(turns, p.sweep_min_count, c.face_ok), _no_touch(c, dwell), c.body_still, nobody_behind)
-    return Verdict(status, turns + dwell)
+    status = _all(_at_least(turns, p.sweep_min_count, c.face_ok), _no_touch(c), c.body_still, nobody_behind)
+    return Verdict(status, turns + c.of("dwell_no_touch"))
 
 
 RULES = {

@@ -107,9 +107,11 @@ class PilotParamsTests(unittest.TestCase):
             self.assertIs(f.default, dataclasses.MISSING, f.name)
             self.assertIs(f.default_factory, dataclasses.MISSING, f.name)
 
-    def test_values_must_be_finite_non_negative_and_counts_whole(self):
+    def test_values_must_be_finite_non_negative_and_counts_at_least_one(self):
+        """A count of 0 would let a rule pass without the observation it names: every count field must be >= 1."""
         for bad in ({"window_s": -1.0}, {"gap_s": NAN}, {"min_events": 2.5}, {"sweep_min_count": True},
-                    {"offscreen_yaw_deg": None}):
+                    {"offscreen_yaw_deg": None}, {"look_back_min_count": 0}, {"sweep_min_count": 0},
+                    {"back_loop_min_count": 0}, {"min_events": 0}):
             with self.assertRaises(ValueError, msg=repr(bad)):
                 dataclasses.replace(P, **bad)
 
@@ -203,6 +205,15 @@ class EventTests(unittest.TestCase):
         self.assertNotIn("people_behind", kinds(cues.events))
         self.assertIsNone(cues.any_tap)                                     # no touch log: unknown, not 'no touch'
 
+    def test_yaw_toward_the_companion_needs_no_return(self):
+        """Item 1: the main user keeps looking toward the companion's side to the end: one yaw_toward_companion,
+        and no sweep (a sweep needs the return)."""
+        rows = rows_of(face(5), [(15, {"yaw_deg": 45.0})], extra={**OPTIONAL, "companion_box": RIGHT_BOX})
+        events = detect_events(rows, P, landmarker_num_faces=1)
+        toward = [e for e in events if e["kind"] == "yaw_toward_companion"]
+        self.assertEqual([(e["event_id"], e["obs"]["side"]) for e in toward], [("yaw_toward_companion@5", "right")])
+        self.assertNotIn("yaw_sweep_offscreen", kinds(events))
+
 
 class LookingBackWithPeopleBehindTests(unittest.TestCase):
     """Tag 1 (params P: test values, see the module docstring)."""
@@ -256,7 +267,7 @@ class ConsultingCompanionTests(unittest.TestCase):
         self.assertEqual(out["name"], COMPANION)
         self.assertEqual(out["display_text"], "일행과 상의하는 듯함")
         self.assertEqual([k.split("@")[0] for k in ids(out)],
-                         ["companion_present", "dwell_no_touch", "mouth_moving", "yaw_sweep_offscreen"])
+                         ["companion_present", "dwell_no_touch", "mouth_moving", "yaw_toward_companion"])
         self.assertEqual(out["confidence"], {"events": 4, "quality_ok": True})
         self.assertEqual(check_output(out, events, P), [])
 
@@ -280,6 +291,47 @@ class ConsultingCompanionTests(unittest.TestCase):
     def test_mouth_seen_but_still(self):
         out, _ = run(companion_window(sweep(+1), mouth=0.0))
         self.assertEqual(out["name"], NONE)
+
+
+    def test_no_companion(self):
+        out, _ = run(put(companion_window(sweep(+1)), 0, 18, companion_box=None))
+        self.assertEqual(out["name"], NONE)
+
+    def test_a_touch_in_the_window(self):
+        out, _ = run(put(companion_window(sweep(+1)), 3, 3, tap_count=1))
+        self.assertEqual(out["name"], NONE)
+
+    def test_body_moving(self):
+        rows = companion_window(sweep(+1))
+        for i, row in enumerate(rows):
+            row["shoulder_cx"] = 0.4 + 0.01 * i                            # drifts 0.18 across the window
+        out, _ = run(rows)
+        self.assertEqual(out["name"], NONE)
+
+    def test_low_face_quality_is_unknown(self):
+        """The yaw toward the companion needs the face: with the face seen in under face_visible_min of the frames
+        it is missing, so the tag is unknown - an alternative without the yaw cue - not consulting or none."""
+        rows = rows_of(face(5), sweep(+1), face(10), [(15, LOST)], extra={**OPTIONAL, "companion_box": RIGHT_BOX})
+        out, _ = run(put(rows, 11, 16, mouth_motion=0.3))
+        self.assertLess(out["quality"]["face_visible_ratio"], P.face_visible_min)
+        self.assertEqual(out["name"], UNKNOWN)
+        alternative = out["alternatives"][0]
+        self.assertEqual((alternative["name"], alternative["confidence"]), (COMPANION, UNKNOWN))
+        self.assertNotIn("yaw_toward_companion", [i["event_id"].split("@")[0] for i in alternative["evidence"]])
+
+    def test_keeps_looking_at_the_companion(self):
+        """Item 1: no return to the screen inside the window - the yaw toward the companion still counts."""
+        rows = rows_of(face(5), [(15, {"yaw_deg": 45.0})], extra={**OPTIONAL, "companion_box": RIGHT_BOX})
+        out, _ = run(put(rows, 8, 13, mouth_motion=0.3))
+        self.assertEqual(out["name"], COMPANION)
+        self.assertIn("yaw_toward_companion@5", ids(out))
+
+    def test_a_short_companion_presence_counts(self):
+        """Item 1: the companion box is there for 0.4 s, under stay_min_s - the decision table asks no stay of it."""
+        rows = put(rows_of(face(6), [(3, {"yaw_deg": 45.0})], face(11)), 5, 9, companion_box=RIGHT_BOX)
+        out, _ = run(put(rows, 6, 8, mouth_motion=0.3))
+        self.assertEqual(out["name"], COMPANION)
+        self.assertIn("companion_present@5", ids(out))
 
 
 class LookingAroundTests(unittest.TestCase):
@@ -313,6 +365,14 @@ class LookingAroundTests(unittest.TestCase):
             row["shoulder_cx"] = 0.4 + 0.01 * i                            # drifts 0.22 across the window
         out, _ = run(rows)
         self.assertEqual(out["name"], NONE)
+
+    def test_no_dwell_event_is_needed(self):
+        """Item 2: '터치 없음' is no touch in the window; a dwell event only adds support (here dwell_min_s is longer
+        than the record, so there is none)."""
+        params = dataclasses.replace(P, dwell_min_s=10.0, min_events=2)
+        out, events = run(around_window(), params=params)
+        self.assertNotIn("dwell_no_touch", kinds(events))
+        self.assertEqual((out["name"], out["confidence"]), (AROUND, {"events": 2, "quality_ok": True}))
 
 
 class UnknownAndAlternativesTests(unittest.TestCase):

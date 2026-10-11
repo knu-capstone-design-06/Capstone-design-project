@@ -50,8 +50,8 @@ YAW_POSITIVE_SIDE, YAW_NEGATIVE_SIDE = "right", "left"   # README 'CSV 열': yaw
                                                          # geometry, fixed by a test; not checked on a real head turn)
 SMOOTHED_NUM_FACES = 1   # the Face Landmarker smooths only with num_faces=1 [D1]; app/inference/vision.py runs 1
 
-KINDS = ("look_back", "yaw_sweep_offscreen", "people_behind", "companion_present", "mouth_moving",
-         "dwell_no_touch", "touch_miss", "back_navigation_loop", "first_input_delayed")
+KINDS = ("look_back", "yaw_sweep_offscreen", "people_behind", "companion_present", "yaw_toward_companion",
+         "mouth_moving", "dwell_no_touch", "touch_miss", "back_navigation_loop", "first_input_delayed")
 COUNT_COLUMNS = ("people_behind_count", "tap_count", "miss_tap_count", "back_count")     # a number in every row
 VALUE_COLUMNS = ("companion_box", "mouth_motion", "shoulder_cx", "shoulder_cy",          # the key in every row,
                  "first_input_delay_ms")                                                 # blank where not seen
@@ -64,16 +64,20 @@ class PilotParams:
 
     No standard or measured data gives any of them (dec section 3), so they come from the distribution in the team's
     self-recording (decision 20-1) and every caller sets each one. Tests use values made for their synthetic frames.
+    The four counts must be whole numbers of at least 1: a count of 0 would let a rule pass without the observation
+    the decision table names (or name a tag without evidence); the rules also check that the cue is there at all.
     """
     window_s: float               # state window (s); also the expiry window: an event older than this drops out
     gap_s: float                  # flagged frames at most this far apart stay one event across unflagged frames
                                   # (doc 28 section 3: '잠깐 끊김을 거르는 시간 창')
-    offscreen_yaw_deg: float      # |yaw| from which the face points off the screen; a head turn starts and ends here.
+    offscreen_yaw_deg: float      # |yaw| from which the face points off the screen: head turns start and end here,
+                                  # and 'toward the companion' needs the face beyond it on the companion's side.
                                   # Smaller yaw = reading the menu (dec section 3, looking_around exclusion)
     shoulder_vis_min: float       # shoulder visibility from which the shoulders 'stay' while the face points are lost
     look_back_min_count: int      # look_backs in a window for 'repeated' (looking_back_with_people_behind)
     sweep_min_count: int          # off-screen head turns in a window (looking_around)
-    stay_min_s: float             # a person behind or beside counts after staying this long; shorter = passing by
+    stay_min_s: float             # a person behind counts after staying this long; shorter = passing by
+                                  # (dec section 3: '멈춰 선 사람만')
     dwell_min_s: float            # a stretch without touches for 'dwell without touching'
     mouth_motion_min: float       # mouth_motion from which a frame counts as mouth moving
     body_still_max: float         # largest spread of the shoulder midpoint (fraction of width or height): 'body still'
@@ -89,8 +93,9 @@ class PilotParams:
             if (isinstance(value, bool) or not isinstance(value, numbers.Real) or not math.isfinite(value)
                     or value < 0):
                 raise ValueError(f"PilotParams.{f.name} must be a finite number >= 0, got {value!r}")
-            if f.name in COUNT_FIELDS and not isinstance(value, numbers.Integral):
-                raise ValueError(f"PilotParams.{f.name} is a count and must be an integer, got {value!r}")
+            if f.name in COUNT_FIELDS and (not isinstance(value, numbers.Integral) or value < 1):
+                raise ValueError(f"PilotParams.{f.name} is a count of events and must be a whole number >= 1, "
+                                 f"got {value!r}")
 
 
 def _num(row: dict, key: str):
@@ -245,6 +250,37 @@ def _turn_event(rows: list, classes: list, frames: list) -> dict:
     return _event("yaw_sweep_offscreen", rows, frames, obs)
 
 
+# --- companion: present, and the main user's yaw toward it ---------------------------------------------------------
+def _companion_events(rows: list, p: PilotParams) -> list:
+    """companion_present: the frames with a companion box (no minimum stay: the decision table asks none), with
+    the box's side of the main user's face. yaw_toward_companion: the face seen beyond offscreen_yaw_deg on the side
+    of a companion present at that time, held over frames at most gap_s apart (dec section 3: '주 사용자 yaw가 일행
+    쪽'; beyond the screen's yaw, because a small yaw on that side is reading the menu). The same frames can also
+    be a yaw_sweep_offscreen; that event is looking_around's cue, this one consulting_companion's."""
+    boxes = [_box(r) for r in rows]
+
+    def companion_obs(run, s):
+        cx = statistics.median((boxes[i][0] + boxes[i][2]) / 2 for i in run)
+        user = [x for x in (_num(rows[i], "face_cx") for i in run if _face(rows[i])) if x is not None]
+        user_cx = statistics.median(user) if user else None      # the main user's face during the same frames
+        side = (None if user_cx is None or cx == user_cx
+                else YAW_POSITIVE_SIDE if cx > user_cx else YAW_NEGATIVE_SIDE)   # image side, as for yaw
+        return {"companion_cx": cx, "side": side, "present_s": s}
+
+    companions = _run_events("companion_present", rows, [b is not None for b in boxes], p.gap_s, None, companion_obs)
+    spans = [(e["t_start"], e["t_end"], e["obs"]["side"]) for e in companions if e["obs"]["side"] is not None]
+    yaws = [_num(r, "yaw_deg") if _face(r) else None for r in rows]
+    toward = [y is not None and abs(y) >= p.offscreen_yaw_deg
+              and any(t0 <= _t(r) <= t1 and _side(y) == side for t0, t1, side in spans)
+              for r, y in zip(rows, yaws)]
+
+    def toward_obs(run, s):
+        yaw = max((yaws[i] for i in run), key=abs)
+        return {"yaw_deg": yaw, "side": _side(yaw), "toward_s": s}
+
+    return companions + _run_events("yaw_toward_companion", rows, toward, p.gap_s, None, toward_obs)
+
+
 # --- all events of a window ----------------------------------------------------------------------------------------
 def detect_events(rows: list, params: PilotParams, *, landmarker_num_faces: int) -> list:
     """Events of these rows (one window, in time order), sorted by start time.
@@ -263,18 +299,7 @@ def detect_events(rows: list, params: PilotParams, *, landmarker_num_faces: int)
                                               "stay_s": s})
 
     if "companion_box" in measured:
-        boxes = [_box(r) for r in rows]
-        face_x = [x for x in (_num(r, "face_cx") for r in rows if _face(r)) if x is not None]
-        user_cx = statistics.median(face_x) if face_x else None      # the main user's face position in the window
-
-        def companion_obs(run, s):
-            cx = statistics.median((boxes[i][0] + boxes[i][2]) / 2 for i in run)
-            side = (None if user_cx is None or cx == user_cx
-                    else YAW_POSITIVE_SIDE if cx > user_cx else YAW_NEGATIVE_SIDE)   # image side, as for yaw
-            return {"companion_cx": cx, "side": side, "stay_s": s}
-
-        events += _run_events("companion_present", rows, [b is not None for b in boxes], p.gap_s, p.stay_min_s,
-                              companion_obs)
+        events += _companion_events(rows, p)
 
     if "mouth_motion" in measured and landmarker_num_faces == SMOOTHED_NUM_FACES:
         motion = [_num(r, "mouth_motion") if _face(r) else None for r in rows]
