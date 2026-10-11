@@ -14,7 +14,7 @@ Output for one window (sem section 4: dec section 3's output line plus quality, 
     {name, display_text, window_s: [t0, t1], evidence: [{event_id, obs, value, t}],
      quality: {face_visible_ratio, track_conf}, confidence: "unknown" | {events, quality_ok},
      alternatives: [{name, display_text, evidence, confidence}], source: "rules_v1"}
-  name          a tag; "unknown" = cannot tell; "none" = a measured cue rules every tag out
+  name          a tag; "unknown" = cannot tell; "none" = an observed cue rules every tag out
   display_text  the fixed text of the name (DISPLAY_TEXT), never free text; "" for unknown and none
   evidence      one item per observation of each supporting event; t = the event's time = its end (s), which lies
                 inside the window (sem section 4, rule 1: '시간 범위(창 안)')
@@ -60,7 +60,7 @@ EVIDENCE_KEYS = ("event_id", "obs", "value", "t")
 @dataclass(frozen=True)
 class Verdict:
     """One rule on one window."""
-    status: bool | None   # True = every condition holds; False = a measured cue rules the tag out; None = cannot tell
+    status: bool | None   # True = every condition holds; False = an observed cue rules the tag out; None = cannot tell
     support: list         # the events behind the tag (its evidence), auxiliary ones included
     skipped: tuple = ()   # cues left out as missing; the tag was judged on the rest
 
