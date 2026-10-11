@@ -60,7 +60,7 @@ pnpm dev
 
 ## 백엔드 없이 프론트 화면 검증
 
-브라우저 테스트는 `src/features/order/orderApiFixture.mjs`의 고정된 HTTP 응답을 주입합니다. 실제 앱에는 테스트 응답을 연결하지 않습니다. Vite와 외부 Playwright만 있으면 백엔드 서버 없이 주문 화면·오류·재시도를 확인할 수 있습니다. 서버 저장·인증·멱등성을 검증하는 통합 테스트와 구분합니다. [상세 검증 방법](src/features/order/README.md)을 참고합니다.
+브라우저 테스트는 `src/features/order/orderApiFixture.mjs`의 고정된 HTTP 응답을 주입합니다. 실제 앱에는 이 테스트 응답을 연결하지 않습니다. Vite와 외부 Playwright만 있으면 백엔드 서버 없이 주문 화면·오류·재시도를 확인할 수 있습니다. 개발 서버에 `VITE_ORDER_SAMPLE=true`를 명시하면 기존 17개 상품으로 시연할 수 있습니다. 기본 API 모드는 서버 오류를 샘플로 대체하지 않으며 프로덕션에서는 샘플 설정을 무시합니다. 서버 저장·인증·멱등성을 검증하는 통합 테스트와 구분합니다. [샘플 실행·상세 검증 방법](src/features/order/README.md)을 참고합니다.
 
 ## 키오스크 화면 개발 및 검증 기준
 
