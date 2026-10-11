@@ -67,3 +67,4 @@ python -m unittest discover -s tests -v
 | `app/main.py` | 앱 생성, `/health`, 라우터 등록 |
 | `app/modules/analyze/` | `/v1/analyze` 엔드포인트와 요청·응답 모델 |
 | `app/inference/` | 모델 로딩·추론 (지금은 자리 표시) |
+| `app/modules/vision/` | 비전 관측 뼈대(MediaPipe, 서버 미연결). 실행·테스트는 [모듈 README](app/modules/vision/README.md) |
