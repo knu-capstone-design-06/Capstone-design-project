@@ -66,6 +66,24 @@ test('네트워크 오류와 취소를 호출자에게 전달하며 자동 재�
   }
 });
 
+test('HTML·일반 텍스트 오류도 Retry-After를 보존하고 잘못된 간격은 무시한다', async () => {
+  for (const status of [409, 429, 503]) {
+    for (const [header, seconds] of [['2', 2], [null, null], ['', null], ['invalid', null], ['-1', null]]) {
+      const body = status === 503 ? '<html>Service Unavailable</html>' : 'Please wait';
+      const api = createBackendApi('', async () => new Response(body, {
+        status, headers: header === null ? {} : { 'Retry-After': header },
+      }));
+      await assert.rejects(api.createOrder('session-1', { expected_version: 1 }, 'key'), error => {
+        assert(error instanceof ApiError);
+        assert.equal(error.status, status);
+        assert.equal(error.body, body);
+        assert.equal(error.retryAfterSeconds, seconds);
+        return true;
+      });
+    }
+  }
+});
+
 test('빈 세션 ID를 서버로 보내지 않는다', () => {
   const api = createBackendApi('', async () => { assert.fail('호출되면 안 됨'); });
   assert.throws(() => api.sendFeatureWindow(' ', {}), /세션 ID/);

@@ -37,18 +37,19 @@ export function createBackendApi(baseUrl: string, fetcher: typeof fetch = fetch)
 
   async function request<T>(path: string, init: RequestInit): Promise<T> {
     const response = await fetcher(`${base}${path}`, init);
+    const header = response.headers.get('Retry-After');
+    const seconds = header === null || !header.trim() ? NaN : Number(header);
+    const retryAfterSeconds = Number.isFinite(seconds) && seconds >= 0 ? seconds : null;
     const text = await response.text();
     let body: unknown;
     try {
       body = text ? JSON.parse(text) : null;
     } catch {
-      if (!response.ok) throw new ApiError(response.status, text);
+      if (!response.ok) throw new ApiError(response.status, text, retryAfterSeconds);
       throw new Error('서버가 올바른 JSON 응답을 반환하지 않았습니다.');
     }
     if (!response.ok) {
-      const header = response.headers.get('Retry-After');
-      const seconds = header === null ? NaN : Number(header);
-      throw new ApiError(response.status, body, Number.isFinite(seconds) && seconds >= 0 ? seconds : null);
+      throw new ApiError(response.status, body, retryAfterSeconds);
     }
     return body as T;
   }
