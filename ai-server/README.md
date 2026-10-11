@@ -40,13 +40,13 @@ backend를 호스트에서 직접 실행해 연결할 때는 backend의 `AI_SERV
 
 ## Docker
 
-Docker 엔진을 실행한 뒤 저장소 루트에서 백엔드와 함께 실행합니다.
+Docker 엔진을 실행한 뒤 저장소 루트에서 프론트엔드·백엔드와 함께 실행합니다.
 
 ```powershell
 docker compose up --build
 ```
 
-루트 Compose에는 backend와 ai-server가 포함돼 있습니다. AI 서버의 호스트 포트를 공개하지 않으며 backend가 `http://ai-server:8001`로 호출합니다. 호스트 브라우저에서 `localhost:8001`로 접근하는 구성은 아닙니다.
+루트 Compose에는 frontend·backend·ai-server 세 서비스가 있습니다. AI 서버의 호스트 포트를 공개하지 않으며 backend가 `http://ai-server:8001`로 호출합니다. 호스트 브라우저에서 `localhost:8001`로 접근하는 구성은 아닙니다.
 
 기존 두 서버 실행·통신 검증 기록은 [PR #14](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/14)를 참고합니다. 2026-10-07 문서 정리에서는 Docker 테스트를 재실행하지 않았습니다.
 
@@ -58,7 +58,7 @@ docker compose up --build
 python -m unittest discover -s tests -v
 ```
 
-명세 예시 요청·응답, vision 생략/null, 판단 불가, 세션 ID 유지, 점수 범위, 잘못된 요청 거절, 명세와 같은 operationId를 확인합니다.
+명세 예시 요청·응답, vision 생략/null, 판단 불가, 세션 ID 유지, 점수 범위, 잘못된 요청 거절, 명세와 같은 operationId를 확인합니다. 비전 모듈 테스트(`tests/test_vision.py`)는 비전 패키지와 모델 파일이 있을 때만 돌고 없으면 건너뜁니다(모듈 README).
 
 ## 구조
 
@@ -66,5 +66,5 @@ python -m unittest discover -s tests -v
 | --- | --- |
 | `app/main.py` | 앱 생성, `/health`, 라우터 등록 |
 | `app/modules/analyze/` | `/v1/analyze` 엔드포인트와 요청·응답 모델 |
-| `app/inference/` | 모델 로딩·추론 (지금은 자리 표시) |
+| `app/inference/` | 모델 로딩·추론: `placeholder.py`(판단 자리 표시) · `vision.py`(MediaPipe 3종 불러오기 · 프레임 추론, 비전 모듈이 사용) |
 | `app/modules/vision/` | 비전 관측 뼈대(MediaPipe, 서버 미연결). 실행·테스트는 [모듈 README](app/modules/vision/README.md) |
