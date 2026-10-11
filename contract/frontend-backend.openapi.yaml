@@ -335,7 +335,7 @@ components:
       "name": "session_id"
       "in": "path"
       "required": true
-      "description": "기존 POST /api/v1/sessions가 반환하는 서버 세션 ID. 최신 원격 main의 임시 세션을 Cart·Order에도 사용할 것을 제안합니다. 만료·접근·인증·보관 정책은 미정입니다."
+      "description": "기존 POST /api/v1/sessions가 반환하는 서버 세션 ID. 같은 세션을 Cart·Order에도 사용할 것을 제안합니다. 만료·접근·인증·보관 정책은 미정입니다."
       "schema":
         "type": "string"
         "minLength": 1
