@@ -225,10 +225,17 @@ class EventTests(unittest.TestCase):
 
     def test_counts_must_be_whole_numbers_of_at_least_zero(self):
         """Item 6 (r2): the contract's TouchFeatures counts are integer, minimum 0: other values are errors, not
-        missing values; a whole number written as a float is fine."""
-        for bad in (-1, 1.5, "two", True):
-            with self.assertRaises(ValueError, msg=repr(bad)):
-                detect_events(put(rows_of(face(5)), 2, 2, tap_count=bad), P, landmarker_num_faces=1)
+        missing values. Only CSV's decimal integer strings are also accepted."""
+        for key in ("tap_count", "miss_tap_count", "back_count"):
+            for bad in (-1, "-1", 1.0, 1.5, "1.0", "two", True):
+                with self.subTest(key=key, bad=bad), self.assertRaises(ValueError):
+                    detect_events(put(rows_of(face(5)), 2, 2, **{key: bad}), P, landmarker_num_faces=1)
+            for good in (0, 2, "2"):
+                with self.subTest(key=key, good=good):
+                    detect_events(put(rows_of(face(5)), 2, 2, **{key: good}), P, landmarker_num_faces=1)
+        huge = 2**53 + 1
+        events = detect_events(put(rows_of(face(5)), 2, 2, miss_tap_count=huge), P, landmarker_num_faces=1)
+        self.assertEqual([e["obs"]["miss_tap_count"] for e in events if e["kind"] == "touch_miss"], [huge])
         events = detect_events(put(rows_of(face(20)), 0, 19, people_behind_count=2.0), P, landmarker_num_faces=1)
         self.assertEqual([e["obs"]["people_behind_count"] for e in events if e["kind"] == "people_behind"], [2])
 

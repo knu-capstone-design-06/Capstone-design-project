@@ -138,10 +138,18 @@ def _num(row: dict, key: str):
 
 def _count_value(row: dict, key: str):
     """A count column of the row: None when blank (no key, None, "", NaN); otherwise it must be a whole number >= 0,
-    as the contract's TouchFeatures counts are (integer, minimum 0) - anything else is an error."""
+    as the contract's TouchFeatures counts are (integer, minimum 0) - anything else is an error. Touch counts accept
+    ASCII decimal strings from CSV rows, but not float values or float-formatted strings."""
     value = row.get(key)
     if value is None or value == "" or (isinstance(value, float) and math.isnan(value)):
         return None
+    if key in ("tap_count", "miss_tap_count", "back_count"):
+        if isinstance(value, bool) or not (
+            isinstance(value, numbers.Integral)
+            or (isinstance(value, str) and value.isascii() and value.isdigit())
+        ) or int(value) < 0:
+            raise ValueError(f"{key} of frame {row.get('frame_idx')!r} is not a whole number >= 0: {value!r}")
+        return int(value)
     number = _num(row, key)
     if number is None or number < 0 or not number.is_integer():
         raise ValueError(f"{key} of frame {row.get('frame_idx')!r} is not a whole number >= 0: {value!r}")
