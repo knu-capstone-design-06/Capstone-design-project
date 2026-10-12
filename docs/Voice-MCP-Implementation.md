@@ -12,9 +12,9 @@
 - **음성 기능은 독립 API입니다.** 인식된 텍스트로 요청을 접수하는 데까지만 맡습니다. 음성 모드를 언제 켜고 끌지, 화면을 어떻게 바꿀지는 부르는 쪽(프론트, 지원 결정)이 정합니다.
 - **MCP는 backend를 제어합니다.** 브라우저를 직접 조작하지 않습니다. 상태의 기준은 backend 하나입니다.
 - **터치·음성·MCP가 같은 backend 서비스를 씁니다.** 장바구니 검증, `expected_version`, `Idempotency-Key` 규칙은 [`Product-Cart-Order-API-Draft.md`](Product-Cart-Order-API-Draft.md) 7장을 그대로 따릅니다.
-- **STT(음성 → 텍스트)는 프론트의 Chrome 내장 Web Speech API를 기본으로 합니다.** 실시간으로 인식되고 말 끝을 자동으로 감지하며 비용이 없습니다. Whisper는 Chrome 인식을 쓸 수 없을 때의 예비 경로입니다(3.1 참고).
+- **STT(음성 → 텍스트)는 프론트의 Chrome 내장 Web Speech API를 기본으로 합니다.** 실시간으로 인식되고 말 끝을 자동으로 감지하며 비용이 없습니다. 서버 STT(Whisper)는 사용하지 않습니다. Chrome 인식을 쓸 수 없으면 터치로 주문합니다.
 - **인식이 조금 틀려도 OpenAI가 맥락으로 해석합니다.** 인식 후보와 신뢰도, 메뉴 목록(MCP 도구)을 함께 주고, 애매하면 확인 질문을 돌려줍니다.
-- **외부 AI API(OpenAI, 예비 Whisper)는 backend가 호출합니다.** 프론트는 backend와만 통신합니다.
+- **외부 AI API(OpenAI)는 backend가 호출합니다.** 프론트는 backend와만 통신합니다.
 - **AI가 실패해도 터치 주문은 계속 동작해야 합니다.**
 
 ## 2. 전체 흐름
@@ -54,16 +54,14 @@ MCP 방식에서는 상태 변경이 프론트의 요청에서 시작하지 않�
 
 | 메서드 | 경로 | 입력 | 출력 |
 |---|---|---|---|
-| POST | `/api/v1/sessions/{session_id}/voice/requests` | `{ text, alternatives[], screen_id, stt_source }` + `Idempotency-Key` | `202 { request_id }` |
-| GET | `/api/v1/sessions/{session_id}/voice/requests/{request_id}` | — | `{ status, reply_text, actions, error }` |
-| POST | `/api/v1/voice/transcriptions` | [예비] multipart 녹음 파일 | `{ text, language, duration_ms }` |
+| POST | `/api/v1/sessions/{session_id}/voice/requests` | `{ text, alternatives[], screen_id }` + `Idempotency-Key` | `202 { request_id }` |
+| GET | `/api/v1/sessions/{session_id}/voice/requests/{request_id}` | — | `{ status, reply_text, tool_calls, actions, error }` |
 
-- `voice/requests`는 접수만 하고 바로 응답합니다. backend가 OpenAI API와 MCP 도구로 처리하고, 결과는 SSE 이벤트(3.4)와 상태 조회로 전달합니다.
+- `voice/requests`는 접수만 하고 바로 응답합니다. backend가 OpenAI API로 이용자(세션)별 최근 대화 맥락과 함께 해석해 MCP 장바구니 도구의 입력(`tool_calls`)을 만들고, 상태 조회로 전달합니다. 음성 API는 도구를 실행하지 않습니다.
+- 확실하면 `completed`, 애매하면 이해한 내용을 `needs_confirmation`으로 짧게 확인받고(예: "아이스 아메리카노 2잔 담을까요?"), 정할 수 없으면 `needs_clarification`으로 묻습니다. 대답은 같은 세션의 다음 음성 요청으로 받습니다. 확인 UI와 적용 시점은 부르는 쪽이 정합니다.
 - `alternatives`는 Chrome 인식 후보와 신뢰도입니다(`maxAlternatives`). OpenAI 해석 시 맥락으로 함께 씁니다.
-- `stt_source`(`chrome`/`whisper`)를 기록해 두면 두 STT의 인식률을 비교할 수 있습니다.
 - 상태 조회는 SSE가 준비되기 전이나 연결이 끊겼을 때 음성 기능을 확인하는 용도입니다.
-- `transcriptions`(Whisper)는 선택 구현입니다. 상태를 바꾸지 않습니다.
-- 실패하면 `{ code, detail }`을 반환합니다. 예: `request_in_progress`, `ai_unavailable`, `stt_unavailable`
+- 실패하면 `{ code, detail }`을 반환합니다. 예: `request_in_progress`, `ai_unavailable`
 - 프롬프트·지침은 파일로 관리하고, 실험에 쓴 버전을 기록합니다.
 
 ### 3.2 MCP 서버·도구 (Decision AI + Back-end)
@@ -128,7 +126,7 @@ MCP 서버는 외부 AI의 도구 호출을 backend 호출로 바꿔 주는 역�
 
 - Chrome `SpeechRecognition`(ko-KR)으로 인식, 말하는 중 부분 텍스트와 최종 인식 문장 표시
 - 인식 후보·신뢰도와 함께 `voice/requests` 호출, 듣는 중·처리 중 상태 표시
-- Chrome 인식을 쓸 수 없으면 MediaRecorder 녹음 → `transcriptions`(예비)
+- Chrome 인식을 쓸 수 없으면 음성 버튼을 숨기거나 비활성화하고 터치 주문으로 안내
 - 음성 모드 진입·종료 UI(모드 전환 방식은 프론트가 정함)
 - `EventSource` 구독, 재연결 후 장바구니 재조회
 - 이벤트에 따라 화면 이동·프리셋 적용·확인 창 표시
@@ -138,7 +136,7 @@ MCP 서버는 외부 AI의 도구 호출을 backend 호출로 바꿔 주는 역�
 
 1. backend 서비스 계층: 장바구니 초안 합의 후 구현 (3.3)
 2. 알림 채널과 확인 응답 API (3.4, 3.5)
-3. 음성 API: 요청 접수·상태 조회 → (선택) 예비 Whisper 변환 (3.1)
+3. 음성 API: 요청 접수·상태 조회 (3.1)
 4. MCP 도구 (3.2)
 5. 프론트 연동 (3.6)
 6. 통합 시나리오 확인 (6장)
@@ -151,7 +149,7 @@ MCP 서버는 외부 AI의 도구 호출을 backend 호출로 바꿔 주는 역�
 - [ ] 음성 처리 중 터치 허용 여부
 - [ ] STT 변경 공유: 수행계획서는 Whisper 기준이므로 Chrome 내장 인식으로 바꾸는 것을 멘토·팀과 공유하고 보고서에 반영
 - [ ] Chrome 인식은 음성을 Google 서버로 보냄: 실험 참가자 동의 안내에 포함할지
-- [ ] 제한값: 텍스트 500자, 후보 5개, 세션당 처리 중 요청 1개, 예비 녹음 30초·1MB
+- [ ] 제한값: 텍스트 500자, 후보 5개, 세션당 처리 중 요청 1개
 - [ ] MCP 서버 위치: backend 내부 모듈 / 별도 서비스
 - [ ] 외부 AI와 MCP 연결 방식, 도구 호출 횟수·처리 시간 상한
 - [ ] 외부 API 월 비용 상한과 사용량 알림
