@@ -5,17 +5,27 @@ The URL may include a proxy prefix such as /backend.
 """
 
 import argparse
+from http.client import HTTPException
 import json
 import math
 import sys
 from datetime import datetime, timedelta, timezone
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
 class SmokeError(Exception):
     pass
+
+
+class _NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, request, response, code, message, headers, new_url):
+        return None
+
+
+def _open(request: Request, timeout: float):
+    return build_opener(_NoRedirect()).open(request, timeout=timeout)
 
 
 def _base_url(value: str) -> str:
@@ -42,8 +52,9 @@ def _base_url(value: str) -> str:
 
 def _request_json(
     base: str, path: str, expected_status: int, timeout: float,
-    payload: dict | None = None,
+    payload: dict | None = None, *, display_path: str | None = None,
 ) -> dict:
+    label = display_path or path
     body = json.dumps(payload).encode("utf-8") if payload is not None else None
     request = Request(
         base + path,
@@ -52,21 +63,21 @@ def _request_json(
         method="POST" if body is not None else "GET",
     )
     try:
-        with urlopen(request, timeout=timeout) as response:
+        with _open(request, timeout=timeout) as response:
             status = response.status
             raw = response.read()
     except HTTPError as exc:
-        raise SmokeError(f"{path}: HTTP {exc.code}") from exc
-    except (URLError, TimeoutError, OSError) as exc:
-        raise SmokeError(f"{path}: connection failed ({type(exc).__name__})") from exc
+        raise SmokeError(f"{label}: HTTP {exc.code}") from exc
+    except (URLError, TimeoutError, OSError, HTTPException) as exc:
+        raise SmokeError(f"{label}: connection failed ({type(exc).__name__})") from exc
     if status != expected_status:
-        raise SmokeError(f"{path}: expected HTTP {expected_status}, got {status}")
+        raise SmokeError(f"{label}: expected HTTP {expected_status}, got {status}")
     try:
         result = json.loads(raw)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise SmokeError(f"{path}: response is not JSON") from exc
+        raise SmokeError(f"{label}: response is not JSON") from exc
     if not isinstance(result, dict):
-        raise SmokeError(f"{path}: response must be a JSON object")
+        raise SmokeError(f"{label}: response must be a JSON object")
     return result
 
 
@@ -103,7 +114,8 @@ def run(base_url: str, timeout: float) -> None:
         },
     }
     result = _request_json(
-        base, f"/api/v1/sessions/{quote(session_id, safe='')}/features", 200, timeout, window
+        base, f"/api/v1/sessions/{quote(session_id, safe='')}/features", 200, timeout, window,
+        display_path="/api/v1/sessions/{session_id}/features",
     )
     if result.get("session_id") != session_id or result.get("ai_available") is not True:
         raise SmokeError("feature request did not return an available AI result")
