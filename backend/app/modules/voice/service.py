@@ -67,6 +67,15 @@ class VoiceService:
         self._repository.update(request_id, "processing")
         try:
             menu = self._menu_provider()
+            if not menu:
+                # Nothing can be ordered, so do not spend an OpenAI call on it.
+                self._repository.update(
+                    request_id, "failed", FALLBACK_REPLY,
+                    error=VoiceErrorResponse(
+                        code="ai_unavailable", detail="판매 메뉴가 연결되지 않아 음성 해석을 하지 않았습니다.",
+                    ),
+                )
+                return
             history = self._repository.history(session_id)
             result = await self._interpreter.interpret(request, menu, history)
             if result is not None and not matches_menu(result, menu):

@@ -287,21 +287,36 @@ class RetentionTests(unittest.TestCase):
         self.assertIsNone(self.repository.get("s1", record.request_id))
 
 
-class StubWiringTests(unittest.TestCase):
-    def test_app_without_key_uses_stub_question(self):
+class DefaultWiringTests(unittest.TestCase):
+    def request_status(self, client):
+        session_id = client.post("/api/v1/sessions").json()["session_id"]
+        base = f"/api/v1/sessions/{session_id}/voice/requests"
+        request_id = client.post(
+            base, json=BODY, headers={"Idempotency-Key": str(uuid4())}
+        ).json()["request_id"]
+        return client.get(f"{base}/{request_id}").json()
+
+    def test_empty_menu_skips_the_interpreter(self):
+        interpreter = FakeInterpreter()
+        with patch("app.main.build_voice_interpreter", return_value=interpreter):
+            app = create_app(Settings(_env_file=None, openai_api_key=None))
+            with TestClient(app) as client:
+                body = self.request_status(client)
+        self.assertEqual(interpreter.calls, 0)
+        self.assertEqual(body["status"], "failed")
+        self.assertEqual(body["error"]["code"], "ai_unavailable")
+        self.assertIn("메뉴", body["error"]["detail"])
+
+    @patch("app.main.empty_menu", return_value=MENU)
+    def test_app_without_key_uses_stub_question(self, _menu):
         app = create_app(Settings(_env_file=None, openai_api_key=None))
         with TestClient(app) as client:
             self.assertIsInstance(
                 client.app.state.voice_service._interpreter, StubVoiceInterpreter
             )
-            session_id = client.post("/api/v1/sessions").json()["session_id"]
-            base = f"/api/v1/sessions/{session_id}/voice/requests"
-            request_id = client.post(
-                base, json=BODY, headers={"Idempotency-Key": str(uuid4())}
-            ).json()["request_id"]
-            body = client.get(f"{base}/{request_id}").json()
-            self.assertEqual(body["status"], "needs_clarification")
-            self.assertEqual(body["tool_calls"], [])
+            body = self.request_status(client)
+        self.assertEqual(body["status"], "needs_clarification")
+        self.assertEqual(body["tool_calls"], [])
 
 
 def openai_response(content):
