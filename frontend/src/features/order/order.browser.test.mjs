@@ -150,11 +150,15 @@ test('불완전한 주문 성공 응답은 완료 화면을 열지 않고 같은
       mutation(session, '/orders', incomplete, { status: 201 }),
       mutation(session, '/orders', orderResponse(cart), { status: 201 }),
     ]);
+    const diagnostics = [];
+    page.on('console', message => { if (message.type() === 'warning') diagnostics.push(message.text()); });
     await ready(page);
     await add(page);
     await click(page, 'review-open');
     await click(page, 'simulate-payment');
     await page.locator('[data-log-target="order-result-retry"]').waitFor();
+    assert(diagnostics.some(message => message.includes('order_number')));
+    assert.doesNotMatch(await page.locator('.order-feedback').innerText(), /order_number/);
     assert.equal(await page.locator('.order-number').count(), 0);
     assert.match(await page.locator('.total').innerText(), /3,500원/);
     assert(await page.locator('[data-log-target="simulate-payment"]').isDisabled());
@@ -420,6 +424,8 @@ test('상품 담기 재확인 실패 뒤 옵션 창을 닫고 새 주문을 시�
     await page.locator('dialog [data-log-target="order-result-retry"]').waitFor();
     await click(page, 'order-result-retry');
     await page.locator('dialog [data-log-target="order-pending-restart"]').waitFor();
+    assert.match(await page.locator('dialog .order-feedback').innerText(), /새 장바구니/);
+    assert.doesNotMatch(await page.locator('dialog .order-feedback').innerText(), /주문은 자동으로 취소/);
     await click(page, 'order-pending-restart');
     await ready(page);
     assert.equal(await page.locator('dialog[open]').count(), 0);
@@ -471,5 +477,54 @@ test('주문 API가 없는 서버에서는 연결 대기를 표시하고 임의�
     assert(await page.locator('[data-log-target="review-open"]').isDisabled());
     fixture.verify();
     assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
+test('긴 주문 내역 아래에서 실패해도 안내와 재확인 버튼을 화면 안에 표시한다', async t => {
+  const browser = await chromium.launch(launchOptions);
+  try {
+    for (const viewport of [{ width: 1080, height: 1920 }, { width: 1365, height: 768 }, { width: 1920, height: 1080 }]) {
+      for (const large of [false, true]) {
+        await t.test(`${viewport.width}x${viewport.height}-${large ? 'large' : 'default'}`, async () => {
+          const session = `long-error-${viewport.width}-${large}`;
+          const products = Array.from({ length: 17 }, (_, index) => {
+            const source = productsResponse.products[index % productsResponse.products.length];
+            return { ...source, product_id: `long-${index}` };
+          });
+          const items = products.map((product, index) => ({ item_id: `long-item-${index}`, product_id: product.product_id,
+            name: product.name, temperature: product.temperatures[0] ?? null, quantity: 1,
+            unit_price: product.unit_price, line_amount: product.unit_price }));
+          const cart = cartResponse(session, 1, items);
+          const steps = bootstrap(session); steps[0].body = { ...productsResponse, products }; steps[2].body = cart;
+          const { page, errors, fixture } = await open(browser, [...steps,
+            mutation(session, '/orders', { code: 'service_unavailable', detail: '서버 내부 오류' }, { status: 503 })]);
+          await page.setViewportSize(viewport);
+          await page.waitForFunction(() => !document.querySelector('[data-log-target="review-open"]').disabled);
+          if (large) {
+            await click(page, 'support-toggle');
+            await click(page, 'support:largeText'); await click(page, 'support:largeButton');
+            await click(page, 'support-toggle');
+          }
+          await click(page, 'review-open');
+          await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+          assert(await page.evaluate(() => window.scrollY > 0));
+          await click(page, 'simulate-payment');
+          await page.locator('.order-feedback').waitFor();
+          const feedback = await page.locator('.order-feedback').boundingBox();
+          const retry = await page.locator('[data-log-target="order-result-retry"]').boundingBox();
+          const bar = await page.locator('.order-actions').boundingBox();
+          assert(feedback.y >= 0 && feedback.y + feedback.height <= bar.y);
+          assert(retry.y >= 0 && retry.y + retry.height <= bar.y);
+          assert(await page.locator('[data-log-target="order-result-retry"]').evaluate(element => {
+            const bounds = element.getBoundingClientRect();
+            return element.contains(document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2));
+          }));
+          assert.doesNotMatch(await page.locator('.order-feedback').innerText(), /서버 내부 오류/);
+          if (viewport.width === 1365 && large) await screenshot(page, 'review-error-visible');
+          fixture.verify(); assert.deepEqual(errors, []);
+          await page.close();
+        });
+      }
+    }
   } finally { await browser.close(); }
 });

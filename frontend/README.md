@@ -54,7 +54,7 @@ pnpm install
 pnpm dev
 ```
 
-`pnpm build`로 TypeScript 검사와 배포 빌드를, `pnpm test`로 API 및 주문 상태 테스트를 실행합니다. 의존성 버전은 `pnpm-lock.yaml`에 기록합니다.
+`pnpm build`로 TypeScript 검사와 배포 빌드를, `pnpm test`로 API·주문 상태·터치 로그·개발 샘플의 네 단위 테스트 파일을 실행합니다. 의존성 버전은 `pnpm-lock.yaml`에 기록합니다.
 
 상품 선택·서버 Cart 표시·주문 확인·서버 응답의 샘플 주문번호 표시와 수동 접근성 설정을 제공합니다. 기본 API 모드에는 상품·Cart·Order API를 구현한 백엔드가 필요합니다. 미구현 API의 404에는 연결 대기를 표시하고 로컬 상품·주문으로 대체하지 않습니다. 새 주문·새로고침은 새 세션·빈 장바구니로 시작하며 접근성 설정만 유지합니다. 주문 확인·샘플 주문 완료·새 주문 버튼은 화면 하단에 고정합니다. 상세 동작과 수동 확인 절차는 [`src/features/order/README.md`](src/features/order/README.md)에 있습니다. 실제 결제, 주기적인 특징 전송, 음성 및 자동 지원 판단은 연결하지 않았습니다. 완료 화면 복원·서버 재시작 후 보관·정밀 만료·동적 가격 변경은 후순위입니다.
 

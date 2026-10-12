@@ -57,7 +57,8 @@ paths:
       description: |
         요청 본문 없이 기존 session_id·started_at 응답을 사용합니다.
         기존 modules/sessions/ 구현을 기준으로 장바구니·주문 연결을 검토합니다.
-        프론트는 첫 시연의 새로고침·새 주문 시작에 새 세션을 요청합니다.
+        프론트는 새로고침·새 주문·주문 재시작·결과 재확인 실패 후 처음부터 다시 시작할 때 새 세션을 요청합니다.
+        Cart 조회 실패 후 재연결도 새 세션을 요청하며 기존 세션을 재사용하거나 자동 종료하지 않습니다.
         한 세션의 완료 제어·만료·복원·접근 및 인증 정책은 팀 합의가 필요합니다.
       responses:
         "201":
@@ -180,7 +181,7 @@ paths:
       "tags": ["cart"]
       "summary": "상품 추가 또는 동일 상품·온도 수량 합산"
       "operationId": "addCartItem"
-      "description": "백엔드가 상품·옵션·판매 가능 여부·수량을 검증하고 같은 상품·온도는 합산하는 제안입니다. 합산 20개 초과 시 409 quantity_limit_exceeded로 변경 전체 거절을 제안하며 최종 한도·방식은 팀 검토 대상입니다. 허용되지 않은 옵션은 422 invalid_option, 필수 필드 누락·타입 오류는 422 invalid_request입니다. 서버 버전 확인·변경·결과 및 멱등성 기록의 원자적 처리는 백엔드 구현 범위입니다. 프론트는 성공 응답 후 전체 Cart를 표시합니다."
+      "description": "백엔드가 상품·옵션·판매 가능 여부·수량을 검증하고 같은 상품·온도는 합산하는 제안입니다. 합산 20개 초과 시 409 quantity_limit_exceeded로 변경 전체 거절을 제안하며 최종 한도·방식은 팀 검토 대상입니다. 허용되지 않은 온도, 온도 선택이 필요한 음료의 temperature=null, 푸드의 온도 지정은 422 invalid_option 제안입니다. temperature 필드 자체의 누락·타입 오류는 422 invalid_request입니다. 서버 버전 확인·변경·결과 및 멱등성 기록의 원자적 처리는 백엔드 구현 범위입니다. 프론트는 성공 응답 후 전체 Cart를 표시합니다."
       "parameters": [{"$ref":"#/components/parameters/OrderIdempotencyKey"}]
       "requestBody":
         "required": true
@@ -291,7 +292,7 @@ paths:
       "tags": ["orders"]
       "summary": "서버 장바구니를 모의 주문으로 확정"
       "operationId": "createSimulatedOrder"
-      "description": "상품·가격을 요청에 다시 넣지 않고 서버 Cart를 기준으로 확정합니다. 서버의 상품·옵션·판매 가능 여부·버전 검증, 주문 스냅샷 저장·번호 발급·Cart 비우기·버전 증가·중복 방지 기록은 백엔드 구현 범위입니다. 프론트는 성공 응답의 주문번호를 그대로 표시하며 성공 전에 Cart를 비우지 않습니다. 한 세션 1주문·새 주문 새 세션은 사용자 검토 방향이며 서버의 완료 제어는 팀 합의 대기입니다. 첫 시연은 고정 가격을 제안하고, 동적 가격 변경 시 전체 Cart 가격·금액 갱신·버전 증가·재확인은 후순위 검토 방향입니다. 실제 결제·재고 차감·완료 화면 복원은 이번 구현 범위에서 제외합니다."
+      "description": "상품·가격을 요청에 다시 넣지 않고 서버 Cart를 기준으로 확정합니다. 서버의 상품·옵션·판매 가능 여부·버전 검증, 주문 스냅샷 저장·번호 발급·Cart 비우기·버전 증가·중복 방지 기록은 백엔드 구현 범위입니다. 프론트는 성공 응답의 주문번호를 그대로 표시하며 성공 전에 Cart를 비우지 않습니다. 한 세션 1주문·새 주문 새 세션은 프론트 담당자 검토 방향이며 서버의 완료 제어는 팀 합의 대기입니다. 첫 시연은 고정 가격을 제안하고, 동적 가격 변경 시 전체 Cart 가격·금액 갱신·버전 증가·재확인은 후순위 검토 방향입니다. 실제 결제·재고 차감·완료 화면 복원은 이번 구현 범위에서 제외합니다."
       "parameters": [{"$ref":"#/components/parameters/OrderIdempotencyKey"}]
       "requestBody":
         "required": true
@@ -448,7 +449,7 @@ components:
                 "detail": "같은 중복 방지 키에 다른 요청을 사용할 수 없습니다."
                 "cart": null
     "OrderInvalidRequest":
-      "description": "필수 필드·헤더·타입·수량 오류 또는 허용되지 않은 옵션. 신규 API의 검증 오류도 이 형식을 사용합니다."
+      "description": "필수 필드·헤더·타입·수량 오류는 invalid_request, 상품에 허용되지 않은 온도(온도 필수 음료의 null 또는 푸드의 온도 지정 포함)는 invalid_option 제안입니다. 신규 API의 검증 오류도 이 형식을 사용합니다."
       "content":
         "application/json":
           "schema":

@@ -3,6 +3,7 @@ import test from 'node:test';
 import { categoryLabels, initialSettings, money, readSettings, temperatureLabel } from './model.ts';
 import { ApiError } from '../../shared/api/client.ts';
 import { OrderController } from './orderController.ts';
+import { OrderResponseError, readOrderResponse } from './orderResponse.ts';
 
 test('API 값과 화면 표시를 구분하고 푸드 온도는 null로 다룬다', () => {
   assert.equal(categoryLabels.coffee, '커피');
@@ -30,7 +31,7 @@ const populatedCart = (version = 1) => ({ ...emptyCart(), version,
   total_quantity: 2, total_amount: 7000 });
 const order = { order_id: 'order-1', order_number: 'A042', session_id: 'session-1', status: 'simulated', currency: 'KRW',
   items: populatedCart().items, total_quantity: 2, total_amount: 7000, created_at: '2026-10-09T00:01:00Z' };
-function fixture(overrides = {}) {
+function fixture(overrides = {}, onInvalidOrder) {
   let sessions = 0;
   const api = {
     getProducts: async () => ({ currency: 'KRW', products: [] }),
@@ -38,7 +39,7 @@ function fixture(overrides = {}) {
     getCart: async session => emptyCart(session),
     ...overrides,
   };
-  return new OrderController(api);
+  return new OrderController(api, onInvalidOrder);
 }
 
 test('초기화 중 중복 호출은 상품·세션 요청을 한 번만 실행한다', async () => {
@@ -214,6 +215,7 @@ test('재확인 실패 뒤에만 대기 요청을 버리고 새 주문을 시작
   assert.equal(await retry, false);
   assert.deepEqual(requests[0], requests[1], '재확인은 같은 키·버전·본문');
   assert.equal(controller.getSnapshot().canAbandonPending, true);
+  assert.match(controller.getSnapshot().abandonWarning, /이전 샘플 주문은 자동으로 취소되지/);
   assert.equal(controller.getSnapshot().cart.total_amount, 7000);
   assert.equal(controller.abandonPending(), true);
   assert.equal(controller.getSnapshot().status, 'ended');
@@ -248,13 +250,16 @@ test('불완전한 주문 성공 응답은 Cart와 정확한 요청을 유지하
   }
   for (const response of invalid) {
     const requests = [];
+    const diagnostics = [];
     const controller = fixture({ getCart: async () => populatedCart(), createOrder: async (...args) => {
       requests.push(structuredClone(args));
       return requests.length === 1 ? response : structuredClone(order);
-    } });
+    } }, fields => diagnostics.push([...fields]));
     await controller.initialize();
     assert.equal(await controller.checkout(), false, JSON.stringify(response));
     assert.equal(controller.getSnapshot().status, 'uncertain');
+    assert.equal(diagnostics.length, 1);
+    assert(diagnostics[0].length > 0);
     assert.equal(controller.getSnapshot().order, null);
     assert.deepEqual(controller.getSnapshot().cart, populatedCart());
     assert.equal(await controller.checkout(), false);
@@ -263,6 +268,35 @@ test('불완전한 주문 성공 응답은 Cart와 정확한 요청을 유지하
     assert.equal(controller.getSnapshot().order.order_number, 'A042');
     assert.equal(controller.getSnapshot().cart, null);
   }
+});
+
+test('주문 응답 진단은 잘못된 필드 경로만 제공하고 응답 값은 보관하지 않는다', () => {
+  const broken = structuredClone(order);
+  broken.items[0].temperature = 'private-value';
+  broken.total_amount = 99;
+  assert.throws(() => readOrderResponse(broken), error => {
+    assert(error instanceof OrderResponseError);
+    assert.deepEqual(error.fields, ['items[0].temperature']);
+    assert.equal('body' in error, false);
+    assert(!JSON.stringify(error).includes('private-value'));
+    return true;
+  });
+  assert.throws(() => readOrderResponse({ ...order, total_amount: 99 }), error => {
+    assert.deepEqual(error.fields, ['total_amount']);
+    return true;
+  });
+});
+
+test('장바구니 변경 재확인과 새 시작은 주문 취소 안내를 표시하지 않는다', async () => {
+  const controller = fixture({ addCartItem: async () => { throw new TypeError('response lost'); } });
+  await controller.initialize();
+  await controller.addItem({ product_id: 'americano', temperature: 'iced', quantity: 1 });
+  await controller.retry();
+  assert.match(controller.getSnapshot().message, /메뉴 변경/);
+  assert.match(controller.getSnapshot().abandonWarning, /새 장바구니/);
+  assert.doesNotMatch(controller.getSnapshot().abandonWarning, /주문은 자동으로 취소/);
+  assert(controller.abandonPending());
+  assert.match(controller.getSnapshot().message, /이전 메뉴 변경/);
 });
 
 test('Cart 조회가 실패해도 받은 서버 세션을 기록하고 재연결은 새 세션으로 시도한다', async () => {

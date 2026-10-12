@@ -219,3 +219,90 @@ test('개발 확인 창은 수집을 오염시키지 않고 표시 정지·재�
     }
   } finally { await browser.close(); }
 });
+
+test('하단 주문 바의 완전·부분 가림을 제외하고 주문 버튼과 옵션 창 입력은 유지한다', async t => {
+  const browser = await chromium.launch(launchOptions);
+  try {
+    for (const viewport of [{ width: 1080, height: 1920 }, { width: 1365, height: 768 }, { width: 1920, height: 1080 }]) {
+      for (const settings of [[], ['largeText'], ['largeButton'], ['largeText', 'largeButton']]) {
+        const label = `${viewport.width}x${viewport.height}-${settings.join('-') || 'default'}`;
+        await t.test(label, async () => {
+          const page = await browser.newPage({ viewport, hasTouch: true });
+          const session = `occlusion-${label}`;
+          const steps = bootstrap(session); steps[2].body = cartResponse(session, 1, [iced()]);
+          const responses = await installOrderResponses(page, steps);
+          await page.goto(url);
+          await page.waitForFunction(() => document.querySelector('[data-log-target="product:americano"]')?.disabled === false);
+          const click = id => page.locator(`[data-log-target="${id}"]`).click();
+          if (settings.length) {
+            await click('support-toggle');
+            for (const setting of settings) await click(`support:${setting}`);
+            await click('support-toggle');
+          }
+          const point = await page.evaluate(() => {
+            const bar = document.querySelector('.order-actions').getBoundingClientRect();
+            document.querySelectorAll('.kiosk button, .kiosk a').forEach(element => {
+              if (element.closest('.order-actions')) return;
+              element.dataset.occlusionDisabled = element.getAttribute('aria-disabled') ?? '';
+              element.setAttribute('aria-disabled', 'true');
+            });
+            for (const [id, top] of [['occluded-full', bar.top + 4], ['occluded-partial', bar.top - 24]]) {
+              const button = document.createElement('button');
+              button.dataset.logTarget = id;
+              button.textContent = id;
+              button.style.cssText = `position:fixed;left:4px;top:${top}px;width:60px;height:80px;min-height:0;padding:0;z-index:0`;
+              document.querySelector('.kiosk').append(button);
+            }
+            const x = 12, y = bar.top + 12;
+            const hit = document.elementFromPoint(x, y);
+            if (!hit.closest('.order-actions') || hit.closest('button,a[href]')) throw new Error('주문 바의 버튼 밖 위치');
+            return { x, y };
+          });
+          const latest = () => page.evaluate(() => window.kioskTouchLogDraft.read().events.filter(event => event.kind === 'pointer_start').at(-1));
+          await page.mouse.click(point.x, point.y);
+          const partial = (await latest()).data;
+          assert.equal(partial.target, null);
+          assert.equal(partial.nearestCandidates.length, 1);
+          assert.equal(partial.nearestCandidates[0].id, 'occluded-partial');
+          assert.equal(partial.nearestCandidates[0].visibleRect.height, 24);
+          assert.equal(partial.nearestCandidates[0].distance, 12);
+          await page.locator('[data-log-target="occluded-partial"]').evaluate(element => element.remove());
+          await page.mouse.click(point.x, point.y);
+          assert((await latest()).data.nearestCandidates.every(candidate => candidate.id !== 'occluded-full'));
+          await page.evaluate(() => {
+            document.querySelector('[data-log-target="occluded-full"]').remove();
+            document.querySelectorAll('[data-occlusion-disabled]').forEach(element => {
+              if (element.dataset.occlusionDisabled) element.setAttribute('aria-disabled', element.dataset.occlusionDisabled);
+              else element.removeAttribute('aria-disabled');
+              delete element.dataset.occlusionDisabled;
+            });
+          });
+          await click('review-open');
+          assert.equal((await latest()).data.target.id, 'review-open');
+          await click('review-back');
+          await click('product:americano');
+          const dialogPoint = await page.evaluate(() => {
+            const dialog = document.querySelector('dialog[open]');
+            dialog.style.cssText = 'position:fixed;inset:0;margin:auto;width:80vw;height:95vh;max-height:none;max-width:none';
+            const bounds = dialog.getBoundingClientRect();
+            const bar = document.querySelector('.order-actions').getBoundingClientRect();
+            dialog.querySelectorAll('button').forEach(button => button.setAttribute('aria-disabled', 'true'));
+            const button = document.createElement('button');
+            button.dataset.logTarget = 'dialog-above-bar';
+            button.textContent = '옵션 창 후보';
+            button.style.cssText = `position:fixed;left:${bounds.left + 20}px;top:${bar.top + 8}px;width:80px;height:20px;min-height:0;padding:0`;
+            dialog.append(button);
+            return { x: bounds.left + 120, y: bar.top + 15 };
+          });
+          await page.mouse.click(dialogPoint.x, dialogPoint.y);
+          const modal = (await latest()).data;
+          assert.equal(modal.target, null);
+          assert.equal(modal.nearestCandidates[0].id, 'dialog-above-bar');
+          assert.equal(modal.nearestCandidates[0].distance, 20);
+          responses.verify();
+          await page.close();
+        });
+      }
+    }
+  } finally { await browser.close(); }
+});

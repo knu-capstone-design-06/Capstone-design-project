@@ -58,6 +58,7 @@ export function createTouchLog(storage: StoragePort | null, id = () => crypto.ra
       saved.sessionId = id(); saved.serverSessionId = serverSessionId; saved.startedAt = now(); persist();
     },
     read() { return structuredClone(saved); },
+    getServerSessionId() { return saved.serverSessionId; },
     getWarning() { return warning; },
   };
 }

@@ -24,6 +24,7 @@ test('보관 버퍼를 복원하고 새 서버 세션의 ID를 분리하며 이�
   const now = () => timestamp;
   const first = createTouchLog(storage, id, now);
   first.newSession('server-1');
+  assert.equal(first.getServerSessionId(), 'server-1');
   const firstSession = first.read().sessionId;
   timestamp = 1100;
   first.record(context(), 'pointer_start', { start: { x: 1, y: 2 } });
@@ -32,6 +33,7 @@ test('보관 버퍼를 복원하고 새 서버 세션의 ID를 분리하며 이�
   assert.equal(restored.read().sessionId, firstSession);
   assert.equal(restored.read().events[0].elapsedMs, 100);
   restored.newSession('server-2');
+  assert.equal(restored.getServerSessionId(), 'server-2');
   restored.record(context(), 'session_start', { server_session_id: 'server-2' });
   const result = restored.read();
   assert.notEqual(result.sessionId, firstSession);
@@ -51,6 +53,7 @@ test('서버 ID가 없는 이전 초안 로그는 서버 세션을 추측하지 
   const recorder = createTouchLog(storage);
   assert.equal(recorder.resumed, true);
   assert.equal(recorder.read().serverSessionId, null);
+  assert.equal(recorder.getServerSessionId(), null);
   assert.equal(recorder.read().events[0].serverSessionId, null);
 });
 

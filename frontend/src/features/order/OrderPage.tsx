@@ -14,7 +14,9 @@ const supportLabels: Record<keyof Settings, string> = { largeText: '큰 글씨',
 const sampleMode = import.meta.env.DEV && import.meta.env.VITE_ORDER_SAMPLE === 'true';
 
 export function OrderPage() {
-  const [controller] = useState(() => new OrderController(sampleMode ? createSampleOrderApi() : backendApi));
+  const [controller] = useState(() => new OrderController(sampleMode ? createSampleOrderApi() : backendApi, fields => {
+    if (import.meta.env.DEV) console.warn('주문 응답 검증 실패 필드:', fields);
+  }));
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const [settings, setSettings] = useState(() => {
     try { return readSettings(localStorage.getItem(settingsStorageKey) ?? localStorage.getItem('kiosk-sample-order-v1')); }
@@ -29,6 +31,7 @@ export function OrderPage() {
   const [storageWarning, setStorageWarning] = useState(false);
   const [orderNumber, setOrderNumber] = useState('');
   const heading = useRef<HTMLHeadingElement>(null);
+  const feedbackRef = useRef<HTMLDivElement>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const opener = useRef<HTMLButtonElement | null>(null);
   const touchLog = useTouchLog(screen, category === 'all' ? '전체' : categoryLabels[category], selected?.product_id ?? null, settings, state.session?.session_id ?? null);
@@ -36,6 +39,9 @@ export function OrderPage() {
   useEffect(() => { try { localStorage.setItem(settingsStorageKey, JSON.stringify(settings)); } catch { setStorageWarning(true); } }, [settings]);
   useEffect(() => { heading.current?.focus(); }, [screen]);
   useEffect(() => { if (selected) dialog.current?.showModal(); else if (dialog.current?.open) dialog.current.close(); }, [selected]);
+  useEffect(() => {
+    if (state.message) feedbackRef.current?.scrollIntoView({ block: 'center', behavior: 'instant' });
+  }, [state.message, selected]);
   useEffect(() => {
     if (state.order) { setOrderNumber(state.order.order_number); setScreen('complete'); }
   }, [state.order]);
@@ -71,9 +77,9 @@ export function OrderPage() {
     await startNewOrder();
   }
   const feedback = <>{busy && <p className="order-progress" role="status">{state.status === 'loading' ? orderCopy.preparing : orderCopy.saving}</p>}
-    {state.message && <div className="order-feedback" role="alert"><p>{state.message}</p>
+    {state.message && <div ref={feedbackRef} className="order-feedback" role="alert"><p>{state.message}</p>
       {state.status === 'uncertain' && <>
-        {state.canAbandonPending && <p>{orderCopy.abandonWarning}</p>}
+        {state.canAbandonPending && <p>{state.abandonWarning}</p>}
         <div className="order-feedback-actions">
           <button data-log-target="order-result-retry" disabled={Date.now() < state.retryAt} onClick={() => void retry()}>주문 반영 확인</button>
           {state.canAbandonPending && <button data-log-target="order-pending-restart" onClick={() => void restartAfterUncertain()}>처음부터 다시 주문</button>}

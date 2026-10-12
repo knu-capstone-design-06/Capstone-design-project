@@ -15,7 +15,7 @@ function rectOf(element: HTMLElement): Rect {
   return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
 }
 // 뷰포트와 스크롤·클리핑 컨테이너에서 실제로 남아 있는 사각 영역입니다.
-function visibleRectOf(element: HTMLElement): Rect | null {
+function visibleRectOf(element: HTMLElement, orderActions: { element: HTMLElement; top: number } | null): Rect | null {
   if (!element.getClientRects().length || getComputedStyle(element).visibility !== 'visible') return null;
   const bounds = element.getBoundingClientRect();
   let left = Math.max(0, bounds.left);
@@ -33,6 +33,9 @@ function visibleRectOf(element: HTMLElement): Rect | null {
     if (clipX) { left = Math.max(left, innerLeft); right = Math.min(right, innerLeft + parent.clientWidth); }
     if (clipY) { top = Math.max(top, innerTop); bottom = Math.min(bottom, innerTop + parent.clientHeight); }
   }
+  // 전체 폭의 하단 주문 바 뒤에 있는 부분은 주변 후보의 보이는 영역에서 뺍니다.
+  // 주문 바 내부 버튼과 top layer의 옵션 창에는 적용하지 않습니다.
+  if (orderActions && !orderActions.element.contains(element)) bottom = Math.min(bottom, orderActions.top);
   return right > left && bottom > top ? { x: left, y: top, width: right - left, height: bottom - top } : null;
 }
 function targetInfo(element: HTMLElement) {
@@ -85,10 +88,13 @@ export function useTouchLog(screen: string, category: string, productId: string 
       const element = (event.target as Element).closest<HTMLElement>(selector);
       const target = element && scope.contains(element) ? targetInfo(element) : null;
       const start = point(event);
+      const bar = scope === root.current ? root.current.querySelector<HTMLElement>('.order-actions') : null;
+      const orderActions = bar && bar.getClientRects().length && getComputedStyle(bar).visibility === 'visible'
+        ? { element: bar, top: bar.getBoundingClientRect().top } : null;
       const candidates = target ? [] : [...scope.querySelectorAll<HTMLElement>(selector)]
         .filter(candidate => !candidate.matches(':disabled, [aria-disabled="true"]'))
         .map(candidate => {
-          const visibleRect = visibleRectOf(candidate);
+          const visibleRect = visibleRectOf(candidate, orderActions);
           return visibleRect ? { ...targetInfo(candidate), visibleRect, distance: distanceToRect(start, visibleRect) } : null;
         })
         .filter(candidate => candidate !== null);
@@ -181,7 +187,7 @@ export function useTouchLog(screen: string, category: string, productId: string 
     const recorder = tracker.current;
     const prior = previous.current;
     if (!recorder || !prior) return;
-    if (recorder.read().serverSessionId !== serverSessionId) {
+    if (recorder.getServerSessionId() !== serverSessionId) {
       interruptGestures.current();
       recorder.record(context.current, 'screen_leave', { reason: 'server_session_change' });
       recorder.record(context.current, 'session_end', { reason: 'server_session_change' });

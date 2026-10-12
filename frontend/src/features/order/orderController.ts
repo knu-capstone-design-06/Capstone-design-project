@@ -1,7 +1,7 @@
 import { ApiError } from '../../shared/api/index.ts';
 import type { createBackendApi, Cart, CartItemCreateRequest, Order, OrderApiError, Product, SessionCreateResponse } from '../../shared/api/index.ts';
-import { readOrderResponse } from './orderResponse.ts';
-import { orderCopy, orderErrorCopy } from './copy.ts';
+import { OrderResponseError, readOrderResponse } from './orderResponse.ts';
+import { orderCopy, orderErrorCopy, pendingCopy } from './copy.ts';
 
 type Api = ReturnType<typeof createBackendApi>;
 export type OrderSnapshot = {
@@ -14,19 +14,23 @@ export type OrderSnapshot = {
   notice: string;
   retryAt: number;
   canAbandonPending: boolean;
+  abandonWarning: string;
 };
 type Pending = { sessionId: string; kind: 'cart' | 'order'; notice: string; run: () => Promise<Cart | Order> };
 
 /** Keeps one confirmed server snapshot and one exact request for a manual retry. */
 export class OrderController {
   private api: Api;
-  private state: OrderSnapshot = { products: [], session: null, cart: null, order: null, status: 'idle', message: '', notice: '', retryAt: 0, canAbandonPending: false };
+  private readonly onInvalidOrder: (fields: readonly string[]) => void;
+  private state: OrderSnapshot = { products: [], session: null, cart: null, order: null, status: 'idle', message: '', notice: '', retryAt: 0, canAbandonPending: false, abandonWarning: '' };
   private listeners = new Set<() => void>();
   private initializing: Promise<boolean> | null = null;
   private pending: Pending | null = null;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(api: Api) { this.api = api; }
+  constructor(api: Api, onInvalidOrder: (fields: readonly string[]) => void = () => {}) {
+    this.api = api; this.onInvalidOrder = onInvalidOrder;
+  }
   getSnapshot = () => this.state;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   private set(patch: Partial<OrderSnapshot>) {
@@ -42,7 +46,7 @@ export class OrderController {
   }
 
   private async connect(): Promise<boolean> {
-    this.set({ status: 'loading', session: null, cart: null, order: null, message: '', notice: '', retryAt: 0, canAbandonPending: false });
+    this.set({ status: 'loading', session: null, cart: null, order: null, message: '', notice: '', retryAt: 0, canAbandonPending: false, abandonWarning: '' });
     let stage: 'products' | 'session' | 'cart' = 'products';
     try {
       const products = await this.api.getProducts();
@@ -100,11 +104,12 @@ export class OrderController {
 
   abandonPending(): boolean {
     if (!this.pending || this.state.status !== 'uncertain' || !this.state.canAbandonPending) return false;
+    const copy = pendingCopy[this.pending.kind];
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.retryTimer = null;
     this.pending = null;
-    this.set({ status: 'ended', canAbandonPending: false, retryAt: 0,
-      message: orderCopy.abandoned });
+    this.set({ status: 'ended', canAbandonPending: false, retryAt: 0, abandonWarning: '',
+      message: copy.abandoned });
     return true;
   }
 
@@ -118,12 +123,14 @@ export class OrderController {
   private async execute(pending: Pending, isRetry = false): Promise<boolean> {
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.retryTimer = null;
-    this.set({ status: 'saving', message: '', retryAt: 0, canAbandonPending: false });
+    this.set({ status: 'saving', message: '', retryAt: 0, canAbandonPending: false, abandonWarning: '' });
     try {
       const response = await pending.run();
       const result = pending.kind === 'order' ? readOrderResponse(response) : response;
       if (this.state.session?.session_id !== pending.sessionId) return false;
-      if (result.session_id !== pending.sessionId) throw new Error('세션 응답 불일치');
+      if (result.session_id !== pending.sessionId) {
+        throw pending.kind === 'order' ? new OrderResponseError(['session_id']) : new Error('세션 응답 불일치');
+      }
       this.pending = null;
       this.set(pending.kind === 'order'
         ? { order: result as Order, cart: null, status: 'ready', notice: '' }
@@ -131,6 +138,7 @@ export class OrderController {
       return true;
     } catch (error) {
       if (this.state.session?.session_id !== pending.sessionId) return false;
+      if (error instanceof OrderResponseError) this.onInvalidOrder(error.fields);
       const apiError = error instanceof ApiError ? error : null;
       const body = apiError && typeof apiError.body === 'object' && apiError.body !== null
         ? apiError.body as Partial<OrderApiError> : null;
@@ -141,7 +149,7 @@ export class OrderController {
         const seconds = apiError?.retryAfterSeconds ?? 0;
         const retryAt = Date.now() + seconds * 1000;
         this.set({ status: 'uncertain', retryAt, canAbandonPending: isRetry,
-          message: orderCopy.uncertain });
+          message: pendingCopy[pending.kind].uncertain, abandonWarning: pendingCopy[pending.kind].abandonWarning });
         if (seconds > 0) this.retryTimer = setTimeout(() => {
           if (this.pending === pending && this.state.status === 'uncertain') this.set({ retryAt: 0 });
         }, seconds * 1000);

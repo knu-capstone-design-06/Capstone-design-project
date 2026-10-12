@@ -14,9 +14,8 @@ PR 리뷰에서 배치와 고객 안내를 확인할 수 있도록 대표 UI 화
 | bottom-actions-complete-large.png | 주문 완료·큰 글씨 + 큰 버튼 | 1080×1920 |
 | bottom-actions-review-landscape.png | 주문 확인·큰 글씨 + 큰 버튼 | 1365×768 |
 | bottom-actions-sample-large.png | 개발 샘플 메뉴·큰 글씨 + 큰 버튼 | 1080×1920 |
+| review-error-visible.png | 긴 주문 내역에서 실패 후 안내·재확인 버튼 표시 · 큰 글씨 + 큰 버튼 | 1365×768 |
+
+`review-error-visible.png`는 2026-10-12 Edge headless에서 고정 API 응답의 17개 항목으로 촬영했습니다. 목록 아래에서 실패해도 안내와 복구 버튼이 하단 주문 바에 가려지지 않는 화면입니다. 하단 영역·문구 변경 전의 이전 자료 6장은 정리했습니다.
 
 하단 버튼의 가림·가로 넘침·목록 끝 스크롤과 설정별 전체 주문 흐름은 브라우저 테스트로 확인합니다. 촬영 환경·검증 범위가 바뀌면 이 표와 PR을 함께 갱신합니다. 자동 실행의 나머지 이미지는 `ORDER_SCREENSHOT_DIR`로 지정한 저장소 밖의 작업 경로에 둡니다.
-
-## 이전 자료
-
-기존 `menu-default`, `review-large`, `retry-recovery-*`, `sample-menu-*` 이미지는 하단 주문 영역·문구 변경 전의 검증 기록입니다. 현재 화면을 나타내는 자료로 사용하지 않습니다.
