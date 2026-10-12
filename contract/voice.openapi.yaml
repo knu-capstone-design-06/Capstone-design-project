@@ -14,7 +14,9 @@ info:
     처리 원칙
     - 음성 요청(voice/requests)은 접수만 하고 바로 응답합니다. backend가 OpenAI API로 맥락을 해석해
       MCP 장바구니 도구의 입력(tool_calls)으로 바꿉니다. 이 API는 도구를 실행하지 않습니다.
-      MCP 도구가 tool_calls를 실행해 장바구니를 바꾸고, 그 결과는 알림 채널(SSE, 별도 명세)로 전달합니다.
+      MCP 도구가 tool_calls를 실행해 장바구니를 바꾸고, 그 결과는 알림 채널로 전달합니다(알림 채널은
+      docs/Voice-MCP-Implementation.md 3.4가 SSE를 제안했고 README 기술 스택 표는 'SSE 또는 WebSocket'으로 적혀 있으며,
+      채널과 명세는 팀 회의에서 정합니다).
     - tool_calls는 손님에게 보이는 문장이 아닙니다. 손님에게 보이는 문장은 확인·질문·실패 안내(reply_text)뿐이며,
       화면에서 한눈에 읽히도록 해요체 한 문장(최대 60자)으로 짧게 씁니다.
     - 이용자 맥락: 세션마다 최근 10턴(발화와 해석 결과)을 함께 넘겨 "그거", "하나 더" 같은 말을 해석합니다.
@@ -263,7 +265,7 @@ components:
         actions:
           type: array
           description: |
-            이 요청으로 발생한 알림 이벤트 종류 (알림 채널 명세의 event 이름).
+            이 요청으로 발생한 알림 이벤트 종류 (docs/Voice-MCP-Implementation.md 3.4의 event 이름).
             이 API는 도구를 실행하지 않으므로 현재는 항상 빈 배열입니다.
           items:
             type: string
