@@ -176,7 +176,10 @@ MCP 서버는 외부 AI의 도구 호출을 backend 호출로 바꿔 주는 역�
 - OpenAI가 세션별 최근 10턴 대화 맥락과 메뉴 목록으로 발화를 해석해 MCP 장바구니 도구 입력(`tool_calls`)을 만듭니다.
   - 확실하면 `completed`, 애매하면 `needs_confirmation`(제안 + 짧은 확인 문장), 정할 수 없으면 `needs_clarification`(질문).
   - 메뉴에 없는 상품·품절 상품 담기·허용되지 않은 온도는 서버가 거르고 실패로 처리합니다.
-- `OPENAI_API_KEY`가 없으면 OpenAI를 호출하지 않고 개발용 응답을 돌려줍니다. 실제 키로는 아직 확인하지 않았습니다.
+- `OPENAI_API_KEY`가 없으면 OpenAI를 호출하지 않고 개발용 응답을 돌려줍니다. 판매 메뉴가 연결되지 않았을 때도 OpenAI를 호출하지 않고 `failed`(`ai_unavailable`)로 알립니다. 실제 키로는 아직 확인하지 않았습니다.
+- 키 설정: `backend/`에서 직접 실행하면 `backend/.env`, Docker Compose로 실행하면 셸 환경변수나 루트 `.env`(커밋하지 않음)의 `OPENAI_API_KEY`를 씁니다.
+- 브라우저 frontend는 nginx 프록시(`/backend/`)로만 호출합니다. backend CORS가 `Idempotency-Key`를 허용하지 않아 다른 출처에서 직접 호출할 수 없습니다.
+- 요청 기록·`Idempotency-Key`는 접수 후 1시간, 대화 맥락은 마지막 발화 후 1시간 보관합니다(제안값, `repository.py`의 `RETENTION`).
 - 음성 API는 도구를 **실행하지 않습니다.** 장바구니는 아직 바뀌지 않고 `actions`는 항상 빈 배열입니다.
 
 방식: 일반적인 MCP처럼 AI가 도구를 하나씩 호출하며 반복하지 않고, OpenAI 한 번 호출로 실행할 도구 목록을 정한 뒤 검증해서 MCP가 차례로 실행합니다. 도구 입력 형식은 MCP 도구와 같게 맞춰 두었으므로 나중에 반복 호출 방식으로 바꿔도 도구 정의는 그대로 씁니다.
@@ -191,7 +194,7 @@ MCP 서버는 외부 AI의 도구 호출을 backend 호출로 바꿔 주는 역�
 | 4 | `tool_calls` 실행부(MCP 도구): 상품+온도로 `item_id` 조회, `expected_version` 채움, 요청별 `Idempotency-Key` 생성, 말한 순서대로 실행 | Decision AI + Back-end | 1 |
 | 5 | 실행 결과를 `actions`(`cart_updated` 등)와 SSE 알림으로 전달 | Back-end + Front-end | 4, 3.4 |
 | 6 | 프론트: Chrome 인식 → 음성 요청 → 상태 조회, `reply_text` 표시, 확인 UI(버튼은 프론트가 정함) | Front-end | — |
-| 7 | 실행 환경: `docker-compose.yml`에서 backend로 `OPENAI_API_KEY` 전달, CORS에 `Idempotency-Key` 헤더 허용(공용 설정, 합의 필요) | Back-end·infra | — |
+| 7 | 실행 환경: 직접 호출(다른 출처)을 지원한다면 CORS에 `Idempotency-Key` 헤더와 필요한 메서드 허용(공용 설정, 합의 필요). Compose의 키 전달은 반영함 | Back-end·infra | — |
 | 8 | 실제 키로 프롬프트 검증, 실험에 쓴 프롬프트 버전(`interpret_v1`)·모델 기록 | Decision AI | 2 |
 
 ### 7.3 결정이 필요한 항목
@@ -200,5 +203,5 @@ MCP 서버는 외부 AI의 도구 호출을 backend 호출로 바꿔 주는 역�
 - [ ] **확인 버튼으로 수락**: `needs_confirmation`의 제안을 버튼으로 수락하면 그 `tool_calls`를 바로 실행할지, "네" 발화와 같은 경로로 보낼지
 - [ ] **중간 실패**: 도구 여러 개 중 일부가 실패하면(버전 충돌·수량 초과) 앞서 실행한 것을 되돌릴지, 재조회 후 재시도 횟수
 - [ ] **MCP 서버 위치·방식**: backend 내부 모듈 / 별도 서비스, MCP SDK 의존성 추가 여부
-- [ ] **대화 기록 보관**: 세션별 최근 10턴(제안값), 인식 문장을 세션 동안 서버 메모리에 보관하는 것을 실험 동의 안내에 넣을지
+- [ ] **대화 기록 보관**: 세션별 최근 10턴·1시간 보관(제안값), 인식 문장을 서버 메모리에 보관하는 것을 실험 동의 안내에 넣을지. 세션 종료 API가 생기면 그때 바로 지울지
 - [ ] **확인 문장 길이**: 최대 60자(제안값)
