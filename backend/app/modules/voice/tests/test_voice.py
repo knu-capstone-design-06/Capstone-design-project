@@ -1,6 +1,7 @@
 import asyncio
 import json
 import unittest
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -11,7 +12,7 @@ from app.common.config.settings import Settings
 from app.infrastructure.external.openai_client import OpenAiClient
 from app.main import create_app
 from app.modules.voice.interpreter import OpenAiVoiceInterpreter, StubVoiceInterpreter
-from app.modules.voice.repository import HISTORY_TURNS
+from app.modules.voice.repository import HISTORY_TURNS, VoiceRepository
 from app.modules.voice.schemas import (
     MenuItem, VoiceInterpretation, VoiceRequestCreate, VoiceTurn,
 )
@@ -250,6 +251,40 @@ class VoiceApiTests(unittest.TestCase):
     def test_null_confidence_is_allowed(self):
         body = {**BODY, "alternatives": [{"text": "라떼", "confidence": None}]}
         self.assertEqual(self.post(body=body).status_code, 202)
+
+
+class RetentionTests(unittest.TestCase):
+    def setUp(self):
+        self.now = datetime(2026, 10, 12, 10, 0, tzinfo=timezone.utc)
+        self.repository = VoiceRepository(retention=timedelta(hours=1), clock=lambda: self.now)
+
+    def accept(self, session_id="s1", key=None):
+        return self.repository.accept(session_id, key or uuid4(), "fingerprint")
+
+    def test_old_requests_keys_and_idle_context_are_dropped(self):
+        key = uuid4()
+        record, _ = self.accept(key=key)
+        self.repository.update(record.request_id, "completed",
+                               tool_calls=interpretation(ADD_AMERICANO).tool_calls)
+        self.repository.append_turn("s1", VoiceTurn(
+            request=VoiceRequestCreate.model_validate(BODY), result=interpretation(ADD_AMERICANO)))
+
+        self.now += timedelta(minutes=59)
+        self.assertEqual(self.accept(key=key)[1], False)  # still a replay within retention
+        self.assertEqual(len(self.repository.history("s1")), 1)
+
+        self.now += timedelta(minutes=2)
+        self.accept(session_id="s2")  # any request triggers cleanup
+        self.assertIsNone(self.repository.get("s1", record.request_id))
+        self.assertEqual(self.repository.history("s1"), [])
+        self.assertEqual(self.accept(key=key)[1], True)  # the old key starts a new request
+
+    def test_update_after_cleanup_is_ignored(self):
+        record, _ = self.accept()
+        self.now += timedelta(hours=2)
+        self.accept(session_id="s2")
+        self.repository.update(record.request_id, "completed")  # must not raise
+        self.assertIsNone(self.repository.get("s1", record.request_id))
 
 
 class StubWiringTests(unittest.TestCase):
