@@ -15,7 +15,7 @@ function rectOf(element: HTMLElement): Rect {
   return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
 }
 // 뷰포트와 스크롤·클리핑 컨테이너에서 실제로 남아 있는 사각 영역입니다.
-function visibleRectOf(element: HTMLElement): Rect | null {
+function visibleRectOf(element: HTMLElement, orderActions: { element: HTMLElement; top: number } | null): Rect | null {
   if (!element.getClientRects().length || getComputedStyle(element).visibility !== 'visible') return null;
   const bounds = element.getBoundingClientRect();
   let left = Math.max(0, bounds.left);
@@ -33,6 +33,9 @@ function visibleRectOf(element: HTMLElement): Rect | null {
     if (clipX) { left = Math.max(left, innerLeft); right = Math.min(right, innerLeft + parent.clientWidth); }
     if (clipY) { top = Math.max(top, innerTop); bottom = Math.min(bottom, innerTop + parent.clientHeight); }
   }
+  // 전체 폭의 하단 주문 바 뒤에 있는 부분은 주변 후보의 보이는 영역에서 뺍니다.
+  // 주문 바 내부 버튼과 top layer의 옵션 창에는 적용하지 않습니다.
+  if (orderActions && !orderActions.element.contains(element)) bottom = Math.min(bottom, orderActions.top);
   return right > left && bottom > top ? { x: left, y: top, width: right - left, height: bottom - top } : null;
 }
 function targetInfo(element: HTMLElement) {
@@ -44,11 +47,12 @@ function targetInfo(element: HTMLElement) {
   };
 }
 
-export function useTouchLog(screen: string, category: string, productId: string | null, settings: Settings) {
+export function useTouchLog(screen: string, category: string, productId: string | null, settings: Settings, serverSessionId: string | null) {
   const root = useRef<HTMLDivElement>(null);
   const tracker = useRef<ReturnType<typeof createTouchLog> | null>(null);
   const context = useRef<LogContext>({ screen, visitId: '', settings });
   const previous = useRef<{ screen: string; category: string; productId: string | null; settings: Settings } | null>(null);
+  const interruptGestures = useRef<() => void>(() => {});
 
   // effect에서 초기화하고 StrictMode 재설정에서도 세션·방문을 유지합니다.
   useEffect(() => {
@@ -56,14 +60,24 @@ export function useTouchLog(screen: string, category: string, productId: string 
       let storage: Storage | null = null;
       try { storage = sessionStorage; } catch { /* 메모리에만 기록 */ }
       tracker.current = createTouchLog(storage);
+      if (tracker.current.resumed) {
+        const last = tracker.current.read().events.at(-1);
+        tracker.current.record(last ?? { screen, visitId: '', settings }, 'session_end', { reason: 'page_reload' });
+        tracker.current.newSession();
+      }
       context.current = { screen, visitId: crypto.randomUUID(), settings: { ...settings } };
-      tracker.current.record(context.current, tracker.current.resumed ? 'session_resume' : 'session_start');
+      tracker.current.record(context.current, 'session_start', { reason: 'page_load', server_session_id: null });
       tracker.current.record(context.current, 'screen_enter');
       previous.current = { screen, category, productId, settings: { ...settings } };
     }
     const recorder = tracker.current;
     const gestures = new Map<number, Gesture>();
     const cancelled = new Map<number, Gesture>();
+    const interrupt = () => {
+      for (const gesture of gestures.values()) recorder.record(gesture.context, 'pointer_interrupted', { inputId: gesture.id, lastObserved: gesture.last });
+      gestures.clear(); cancelled.clear();
+    };
+    interruptGestures.current = interrupt;
     const record = (kind: string, data: unknown) => recorder.record(context.current, kind, data);
     const point = (event: PointerEvent) => ({ x: event.clientX, y: event.clientY });
     function down(event: PointerEvent) {
@@ -74,10 +88,13 @@ export function useTouchLog(screen: string, category: string, productId: string 
       const element = (event.target as Element).closest<HTMLElement>(selector);
       const target = element && scope.contains(element) ? targetInfo(element) : null;
       const start = point(event);
+      const bar = scope === root.current ? root.current.querySelector<HTMLElement>('.order-actions') : null;
+      const orderActions = bar && bar.getClientRects().length && getComputedStyle(bar).visibility === 'visible'
+        ? { element: bar, top: bar.getBoundingClientRect().top } : null;
       const candidates = target ? [] : [...scope.querySelectorAll<HTMLElement>(selector)]
         .filter(candidate => !candidate.matches(':disabled, [aria-disabled="true"]'))
         .map(candidate => {
-          const visibleRect = visibleRectOf(candidate);
+          const visibleRect = visibleRectOf(candidate, orderActions);
           return visibleRect ? { ...targetInfo(candidate), visibleRect, distance: distanceToRect(start, visibleRect) } : null;
         })
         .filter(candidate => candidate !== null);
@@ -127,8 +144,7 @@ export function useTouchLog(screen: string, category: string, productId: string 
     root.current?.querySelectorAll('*').forEach(element => positions.set(element, { x: element.scrollLeft, y: element.scrollTop }));
     function touchEnd(event: TouchEvent) { if (!event.touches.length) cancelled.clear(); }
     function pageHide() {
-      for (const gesture of gestures.values()) recorder.record(gesture.context, 'pointer_interrupted', { inputId: gesture.id, lastObserved: gesture.last });
-      gestures.clear(); cancelled.clear();
+      interrupt();
       record('screen_leave', { reason: 'pagehide' });
       record('session_suspend', { reason: 'pagehide' });
     }
@@ -163,6 +179,7 @@ export function useTouchLog(screen: string, category: string, productId: string 
       document.removeEventListener('touchend', touchEnd); document.removeEventListener('touchcancel', touchEnd);
       window.removeEventListener('pagehide', pageHide); window.removeEventListener('pageshow', pageShow);
       if (window.kioskTouchLogDraft === inspector) delete window.kioskTouchLogDraft;
+      if (interruptGestures.current === interrupt) interruptGestures.current = () => {};
     };
   }, []);
 
@@ -170,6 +187,16 @@ export function useTouchLog(screen: string, category: string, productId: string 
     const recorder = tracker.current;
     const prior = previous.current;
     if (!recorder || !prior) return;
+    if (recorder.getServerSessionId() !== serverSessionId) {
+      interruptGestures.current();
+      recorder.record(context.current, 'screen_leave', { reason: 'server_session_change' });
+      recorder.record(context.current, 'session_end', { reason: 'server_session_change' });
+      recorder.newSession(serverSessionId);
+      context.current = { screen, visitId: crypto.randomUUID(), settings: { ...settings } };
+      recorder.record(context.current, 'session_start', { reason: 'server_session_change', server_session_id: serverSessionId });
+      recorder.record(context.current, 'screen_enter');
+      prior.screen = screen;
+    }
     if (prior.screen !== screen) {
       recorder.record(context.current, 'screen_leave', { to: screen });
       context.current = { screen, visitId: crypto.randomUUID(), settings: { ...settings } };
@@ -185,18 +212,7 @@ export function useTouchLog(screen: string, category: string, productId: string 
     }
     context.current.settings = { ...settings };
     previous.current = { screen, category, productId, settings: { ...settings } };
-  }, [screen, category, productId, settings]);
+  }, [screen, category, productId, settings, serverSessionId]);
 
-  function startNewSession() {
-    const recorder = tracker.current;
-    if (!recorder) return;
-    recorder.record(context.current, 'screen_leave', { reason: 'new_order' });
-    recorder.record(context.current, 'session_end', { reason: 'new_order' });
-    recorder.newSession();
-    context.current = { screen: 'menu', visitId: crypto.randomUUID(), settings: structuredClone(context.current.settings) };
-    recorder.record(context.current, 'session_start', { reason: 'new_order' });
-    recorder.record(context.current, 'screen_enter', { from: 'complete' });
-    if (previous.current) previous.current.screen = 'menu';
-  }
-  return { root, startNewSession };
+  return { root };
 }

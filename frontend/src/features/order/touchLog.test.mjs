@@ -16,13 +16,15 @@ test('버튼 내부·변·모서리까지 실제 거리만 계산하며 임계�
   assert.equal(distanceToRect({ x: 113, y: 64 }, rect), 5);
 });
 
-test('새로고침 복원은 세션을 유지하고 새 주문은 분리하며 이전 로그를 유지한다', () => {
+test('보관 버퍼를 복원하고 새 서버 세션의 ID를 분리하며 이전 로그를 유지한다', () => {
   const storage = memoryStorage();
   let nextId = 0;
   let timestamp = 1000;
   const id = () => `id-${++nextId}`;
   const now = () => timestamp;
   const first = createTouchLog(storage, id, now);
+  first.newSession('server-1');
+  assert.equal(first.getServerSessionId(), 'server-1');
   const firstSession = first.read().sessionId;
   timestamp = 1100;
   first.record(context(), 'pointer_start', { start: { x: 1, y: 2 } });
@@ -30,12 +32,29 @@ test('새로고침 복원은 세션을 유지하고 새 주문은 분리하며 �
   assert.equal(restored.resumed, true);
   assert.equal(restored.read().sessionId, firstSession);
   assert.equal(restored.read().events[0].elapsedMs, 100);
-  restored.newSession();
-  restored.record(context(), 'session_start');
+  restored.newSession('server-2');
+  assert.equal(restored.getServerSessionId(), 'server-2');
+  restored.record(context(), 'session_start', { server_session_id: 'server-2' });
   const result = restored.read();
   assert.notEqual(result.sessionId, firstSession);
   assert.equal(result.events[0].sessionId, firstSession);
   assert.equal(result.events[1].sessionId, result.sessionId);
+  assert.equal(result.events[0].serverSessionId, 'server-1');
+  assert.equal(result.events[1].serverSessionId, 'server-2');
+  assert.equal(result.serverSessionId, 'server-2');
+  const again = createTouchLog(storage, id, now).read();
+  assert.equal(again.serverSessionId, 'server-2');
+});
+
+test('서버 ID가 없는 이전 초안 로그는 서버 세션을 추측하지 않고 null로 복원한다', () => {
+  const storage = memoryStorage();
+  storage.setItem(touchLogKey, JSON.stringify({ version: 1, sessionId: 'old-local', startedAt: 0,
+    events: [{ id: 'old-event', sessionId: 'old-local', kind: 'pointer_start' }] }));
+  const recorder = createTouchLog(storage);
+  assert.equal(recorder.resumed, true);
+  assert.equal(recorder.read().serverSessionId, null);
+  assert.equal(recorder.getServerSessionId(), null);
+  assert.equal(recorder.read().events[0].serverSessionId, null);
 });
 
 test('설정과 읽기 결과 변경이 저장된 과거 로그를 바꾸지 않는다', () => {
