@@ -8,14 +8,14 @@
 
 처음 읽는 분께: ① 프로젝트가 무엇인지는 이 문서의 '프로젝트 목표'와 '시스템 아키텍처', ② 지금 어디까지 됐는지는 '현재 구현 상태' 표(날짜·담당·문서 링크), ③ 다음 날짜는 '일정', ④ 낯선 말은 '용어'를 보세요. 부분별 세부 상태는 각 폴더의 README이고, 팀 검토 문서는 `docs/*-Review.md`·`docs/*-Implementation.md`, 인터페이스 형식과 합의 상태는 `contract/`에서 확인합니다(음성 명세와 신규 주문 API는 팀 검토용 초안).
 
-## 현재 구현 상태 (2026-10-11 기준)
+## 현재 구현 상태 (2026-10-12 기준)
 
 | 부분 | 담당(GitHub) | 상태 | 자세한 문서 |
 |---|---|---|---|
-| 프론트엔드 | dudwlghkd | 샘플 상품·장바구니·모의 주문 화면, 수동 접근성 설정, 로컬 터치 기록을 구현했습니다(PR #17 · #19). 서버 주문 API는 아직 연결하지 않았습니다(주문 흐름 보완 PR #33 검토 중) | `frontend/README.md` |
+| 프론트엔드 | dudwlghkd | 샘플 상품·장바구니·모의 주문 화면, 수동 접근성 설정, 로컬 터치 기록을 구현했습니다(PR #17 · #19). 서버 주문 API 응답을 처리하는 프론트 흐름을 준비했습니다(PR #33, 2026-10-12 병합). 서버 쪽 상품·장바구니·주문 API는 구현 대기입니다 | `frontend/README.md` |
 | 백엔드·DB | bb-cloud-create | 연결 확인·임시 세션·특징 전송 API를 구현했습니다(메모리 세션). 상품·장바구니·주문 API는 구현 대기입니다. Supabase 첫 마이그레이션을 적용했습니다(2026-10-07) | `backend/README.md`, `db/README.md` |
-| AI 서버·음성·Jev | jiwon-L-ee | `/v1/analyze`는 명세 예시 값을 돌려주는 자리 표시입니다. 음성·MCP는 제안 문서 단계이고 Jev는 아직 연동하지 않았습니다 | `ai-server/README.md`, `docs/Voice-MCP-Implementation.md` |
-| 컴퓨터 비전 | wdragon92 | 관측 뼈대를 병합했습니다(PR #32, 2026-10-10). 판단 규칙과 서버 연결은 없습니다. 학교 GPU 서버에 학습 환경을 구성했습니다 | `ai-server/app/modules/vision/README.md` |
+| AI 서버·음성·Jev | jiwon-L-ee | `/v1/analyze`는 명세 예시 값을 돌려주는 자리 표시입니다. 음성·MCP는 제안 단계이고, backend의 음성 해석 API(대화 맥락 해석 → MCP 장바구니 도구 입력 생성)는 PR #36에서 검토 중입니다. Jev는 아직 연동하지 않았습니다 | `ai-server/README.md`, `docs/Voice-MCP-Implementation.md` |
+| 컴퓨터 비전 | wdragon92 | 관측 뼈대를 병합했습니다(PR #32, 2026-10-10). 상황 태그 3개의 규칙과 출력 형식은 PR #35에서 검토 중이고, 서버 연결은 없습니다. 학교 GPU 서버에 학습 환경을 구성했습니다 | `ai-server/app/modules/vision/README.md` |
 | 인프라 | bb-cloud-create | EC2 템플릿을 검증했습니다(PR #31). 스택은 비용 승인 전이라 만들지 않았습니다 | `infra/aws/README.md` |
 
 상태어: 구현됨 / 준비됨(서버 미연결) / 자리 표시 / 제안(팀 검토 전) / 보류 / 미정. 이 표에서는 이 여섯 말을 이 뜻으로만 씁니다.
@@ -206,8 +206,8 @@ Jev에는 다음 정보를 전달합니다.
 | 얼굴·자세 특징 | MediaPipe 0.10.33 | 비전 모듈 추론 3종(Face Landmarker·Face Detector·Pose Landmarker lite) 구현. 판정 규칙·서버 연결은 없음 |
 | 객체 탐지 | YOLOX-Nano(Apache-2.0, 후보) | 머리 탐지기를 학교 GPU 서버에서 학습 중(2026-10-11). 저장소에는 없음. 보조기구 탐지는 보류 |
 | 비전 모델 학습 | PyTorch | 학교 GPU 서버에 학습 환경 구성. 학습 코드의 저장 위치는 팀에서 정하고 가중치는 Git에 올리지 않음(AGENTS.md). 내보낸 모델의 CPU(ONNX) 실행 검증은 후속 작업 |
-| 음성 녹음 | Web MediaRecorder API | 계획 |
-| STT | OpenAI Whisper | 계획. `docs/Voice-MCP-Implementation.md`는 Chrome 내장 인식 기본·Whisper 예비를 제안(멘토·팀 공유 전) |
+| 음성 녹음 | Web MediaRecorder API | 계획. 현재 제안은 Chrome 인식만 쓰고 녹음 파일을 서버로 보내지 않는 방향(PR #36, 멘토·팀 공유 전) |
+| STT | OpenAI Whisper | 계획(수행계획서 기준). `docs/Voice-MCP-Implementation.md`는 Chrome 내장 인식(Web Speech API)을 제안하며, PR #36에서 Whisper 예비 경로를 빼는 안을 검토 중(멘토·팀 공유 전) |
 | 음성 의도 해석 | LLM API | 모델 미정 |
 | TTS | 미정 | 기술 선정 예정 |
 | 지원 선택 | Jev API, 규칙 기반 선택기 | 비교 평가 |
@@ -337,7 +337,7 @@ Capstone-design/
 
 - [`contract/frontend-backend.openapi.yaml`](contract/frontend-backend.openapi.yaml): 프론트엔드 ↔ 백엔드 0.3.0. 기존 네 API 형식 유지 및 상품·장바구니·모의 주문 API 초안 추가
 - [`contract/backend-ai.openapi.yaml`](contract/backend-ai.openapi.yaml): 백엔드 ↔ AI 서버
-- [`contract/voice.openapi.yaml`](contract/voice.openapi.yaml): 프론트엔드 ↔ 백엔드 음성 요청 0.1.0. 팀 검토 전 제안
+- [`contract/voice.openapi.yaml`](contract/voice.openapi.yaml): 프론트엔드 ↔ 백엔드 음성 요청. 팀 검토 전 제안(판 번호는 파일의 `info.version`)
 
 신규 주문 API 6개는 `x-contract-status: draft`로 표시한 팀 검토용 명세입니다. 설계 이유·미정 정책은 [`docs/Product-Cart-Order-API-Draft.md`](docs/Product-Cart-Order-API-Draft.md)에 기록합니다. 명세 반영은 서버 구현이나 실제 주문·결제 연결 완료를 의미하지 않습니다. 프론트 호출 함수·타입·화면은 초안에 맞춰 준비했으며 `x-frontend-status: prepared`, 서버 주문 API는 `x-backend-status: pending`으로 구분합니다. 팀 검토 후 백엔드 라우터·서비스·저장소와 상품 데이터를 구현하고 실제 요청·응답으로 프론트를 검증합니다. 구체적인 담당자·일정은 팀에서 정하고 PR에 기록합니다.
 
