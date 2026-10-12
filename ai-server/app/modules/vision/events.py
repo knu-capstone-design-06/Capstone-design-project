@@ -13,7 +13,7 @@ Windows (dec section 3: '전부 같은 창 안'; sem section 4, rule 1: '시간 
 window only when all of its observation rows lie inside it. Head turns are found on every row up to the window end -
 the rows before the window are detection context only, so a turn whose facing frame lies just before the window keeps
 its onset - and a turn counts when its rows (onset to return) are all inside. The other events (a person behind, a
-companion, the yaw toward it, mouth motion, dwell, misses, back navigations, first-input delay) are found on the rows
+companion, the yaw toward it, mouth motion, dwell, misses) are found on the rows
 inside the window, so a state that began earlier gives its part inside the window, and its length conditions
 (stay_min_s, dwell_min_s) are judged on that part. Nothing after the window end is used, so a replay gives what the
 kiosk would have given. Finding every event again for each window is for offline replay; a live runner needs an
@@ -35,16 +35,15 @@ Input: one dict per frame.
                               change after the person's baseline); blank where the face is not seen
     shoulder_cx, shoulder_cy  midpoint of pose points 11 and 12 as fractions of width / height; blank where the body
                               is not seen
-    tap_count, miss_tap_count, back_count
-                              touches, touches outside a button and back navigations in the interval that ends at
-                              the row's time (since the previous row): the names and meanings of TouchFeatures in
+    tap_count, miss_tap_count touches and touches outside a button in the interval that ends at the row's time
+                              (since the previous row): the names and meanings of TouchFeatures in
                               contract/frontend-backend.openapi.yaml (integer, minimum 0), counted per frame interval
-                              instead of per window; a row belongs to a window when its time does, so a touch in the
-                              last interval before the window start can be counted inside it (raw touch times would
-                              remove this)
-    first_input_delay_ms      on the frame of the first input of a screen: time from entering the screen (not in
-                              the contract); blank on the other frames
+                              instead of the API's 1-3 s window (how the two aggregations map is a contract matter);
+                              a row belongs to a window when its time does, so a touch in the last interval before
+                              the window start can be counted inside it (raw touch times would remove this)
   A count column with a value that is not a whole number >= 0 is an error (the contract's type), not a missing value.
+  The two touch columns take whole numbers or digit strings only (the contract's integer); people_behind_count also
+  takes an integral float.
 
 Source shorthands (notes kept in the project workspace, not in this repository; the README quotes the parts used):
   dec section 3 = the vision owner's decision list 2026-10-10, section 3: the rule table of the three situation
@@ -67,10 +66,13 @@ YAW_POSITIVE_SIDE, YAW_NEGATIVE_SIDE = "right", "left"   # README 'CSV 열': yaw
 SMOOTHED_NUM_FACES = 1   # the Face Landmarker smooths only with num_faces=1 [D1]; app/inference/vision.py runs 1
 
 KINDS = ("look_back", "yaw_sweep_offscreen", "people_behind", "companion_present", "yaw_toward_companion",
-         "mouth_moving", "dwell_no_touch", "touch_miss", "back_navigation_loop", "first_input_delayed")
-COUNT_COLUMNS = ("people_behind_count", "tap_count", "miss_tap_count", "back_count")   # measured: a count in every row
-KEY_COLUMNS = ("companion_box", "first_input_delay_ms")    # measured: the key in every row (None / blank = nothing)
-COUNT_FIELDS = ("look_back_min_count", "sweep_min_count", "back_loop_min_count", "min_events")
+         "mouth_moving", "dwell_no_touch", "touch_miss")
+COUNT_COLUMNS = ("people_behind_count", "tap_count", "miss_tap_count")   # measured: a count in every row
+TOUCH_COLUMNS = ("tap_count", "miss_tap_count")   # TouchFeatures integers: whole numbers or digit strings only
+KEY_COLUMNS = ("companion_box",)    # measured: the key in every row (None / blank = nothing)
+COUNT_FIELDS = ("look_back_min_count", "sweep_min_count", "min_events")
+RATIO_FIELDS = ("shoulder_vis_min", "face_visible_min", "track_conf_min")   # compared with shares / visibility in 0..1
+POSITIVE_FIELDS = ("window_s", "gap_s")    # 0 makes an empty window or splits every event into single frames
 
 
 @dataclass(frozen=True)
@@ -79,8 +81,9 @@ class PilotParams:
 
     No standard or measured data gives any of them (dec section 3), so they come from the distribution in the team's
     self-recording (decision 20-1) and every caller sets each one. Tests use values made for their synthetic frames.
-    The four counts must be whole numbers of at least 1: a count of 0 would let a rule pass without the observation
+    The three counts must be whole numbers of at least 1: a count of 0 would let a rule pass without the observation
     the decision table names (or name a tag without evidence); the rules also check that the cue is there at all.
+    The three floors compared with a share of frames must be at most 1, and the two lengths of time above 0.
     """
     window_s: float               # state window (s); also the expiry window: an event with a row before the window
                                   # is no longer evidence
@@ -98,8 +101,6 @@ class PilotParams:
     mouth_motion_min: float       # mouth_motion from which a frame counts as mouth moving
     body_still_max: float         # largest spread of the shoulder midpoint on either axis (fraction of width or
                                   # height): 'body still'
-    back_loop_min_count: int      # back navigations in a window for back_navigation_loop
-    first_input_delay_min_ms: float   # first-input delay for first_input_delayed
     min_events: int               # k: a tag with fewer supporting events is 'unknown' (sem section 4, check rule 2)
     face_visible_min: float       # face-visible ratio below which the cues that need the face are missing
     track_conf_min: float         # body-tracked ratio below which the window counts as a sensor failure ('unknown')
@@ -112,6 +113,11 @@ class PilotParams:
             if f.name in COUNT_FIELDS and (not isinstance(value, numbers.Integral) or value < 1):
                 raise ValueError(f"PilotParams.{f.name} is a count of events and must be a whole number >= 1, "
                                  f"got {value!r}")
+            if f.name in RATIO_FIELDS and value > 1:
+                raise ValueError(f"PilotParams.{f.name} is compared with a ratio from 0 to 1 and must be at most 1, "
+                                 f"got {value!r}")
+            if f.name in POSITIVE_FIELDS and value == 0:
+                raise ValueError(f"PilotParams.{f.name} is a length of time and must be greater than 0, got {value!r}")
 
 
 def is_number(value) -> bool:
@@ -138,12 +144,13 @@ def _num(row: dict, key: str):
 
 def _count_value(row: dict, key: str):
     """A count column of the row: None when blank (no key, None, "", NaN); otherwise it must be a whole number >= 0,
-    as the contract's TouchFeatures counts are (integer, minimum 0) - anything else is an error. Touch counts accept
-    ASCII decimal strings from CSV rows, but not float values or float-formatted strings."""
+    as the contract's TouchFeatures counts are (integer, minimum 0) - anything else is an error. The touch columns
+    take only an integer or a digit string (a CSV cell), not 1.0 or "1.0" (the contract's strict integer, as the
+    backend validates it); people_behind_count also takes an integral float."""
     value = row.get(key)
     if value is None or value == "" or (isinstance(value, float) and math.isnan(value)):
         return None
-    if key in ("tap_count", "miss_tap_count", "back_count"):
+    if key in TOUCH_COLUMNS:
         if isinstance(value, bool) or not (
             isinstance(value, numbers.Integral)
             or (isinstance(value, str) and value.isascii() and value.isdigit())
@@ -188,8 +195,8 @@ def _box(row: dict):
 
 
 def measured_columns(rows: list) -> frozenset:
-    """The optional columns every one of these rows carries: counts need a count in every row; companion_box and
-    first_input_delay_ms the key in every row. Only then can the absence of their cue be concluded."""
+    """The optional columns every one of these rows carries: counts need a count in every row; companion_box the
+    key in every row. Only then can the absence of their cue be concluded."""
     if not rows:
         return frozenset()
     measured = {c for c in COUNT_COLUMNS if all(_count_value(r, c) is not None for r in rows)}
@@ -401,16 +408,6 @@ def detect_events(rows: list, params: PilotParams, *, landmarker_num_faces: int,
     misses = [_count_value(r, "miss_tap_count") for r in inside]
     events += _run_events("touch_miss", inside, [m is not None and m > 0 for m in misses], p.gap_s, None,
                           lambda run, s: {"miss_tap_count": sum(misses[i] for i in run)})
-
-    for i, r in enumerate(inside):
-        delay = _num(r, "first_input_delay_ms")
-        if delay is not None and delay >= p.first_input_delay_min_ms:
-            events.append(_event("first_input_delayed", inside, [i], {"first_input_delay_ms": delay}))
-
-    backs = [i for i, r in enumerate(inside) if (_count_value(r, "back_count") or 0) > 0]
-    total = sum(_count_value(inside[i], "back_count") for i in backs)
-    if backs and total >= p.back_loop_min_count:
-        events.append(_event("back_navigation_loop", inside, backs, {"back_count": total}))
 
     return sorted(events, key=lambda e: (e["t_start"], e["kind"]))
 

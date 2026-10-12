@@ -25,14 +25,14 @@ SITUATION_PY = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__fi
 # test values for the synthetic frames below (see the module docstring), not pilot proposals
 P = PilotParams(window_s=20.0, gap_s=0.25, offscreen_yaw_deg=30.0, shoulder_vis_min=0.5, look_back_min_count=2,
                 sweep_min_count=2, stay_min_s=1.0, dwell_min_s=1.0, mouth_motion_min=0.2, body_still_max=0.05,
-                back_loop_min_count=2, first_input_delay_min_ms=3000.0, min_events=3, face_visible_min=0.6,
+                min_events=3, face_visible_min=0.6,
                 track_conf_min=0.6)
 
 BEHIND, COMPANION, AROUND = "looking_back_with_people_behind", "consulting_companion", "looking_around"
 BASE = {"face_state": SEEN, "body_state": SEEN, "yaw_deg": 0.0, "face_cx": 0.5, "pose_vis_shoulders": 0.9,
         "shoulder_cx": 0.5, "shoulder_cy": 0.7}
 OPTIONAL = {"people_behind_count": 0, "companion_box": None, "mouth_motion": 0.0, "tap_count": 0,
-            "miss_tap_count": 0, "back_count": 0, "first_input_delay_ms": NAN}
+            "miss_tap_count": 0}
 LOST = {"face_state": NOT_SEEN, "yaw_deg": NAN, "face_cx": NAN}                  # face lost, shoulders stay
 GONE = {**LOST, "body_state": NOT_SEEN, "pose_vis_shoulders": NAN, "shoulder_cx": NAN, "shoulder_cy": NAN}
 RIGHT_BOX = (0.75, 0.25, 0.95, 0.95)        # companion box right of the user's face (face_cx 0.5)
@@ -109,10 +109,13 @@ class PilotParamsTests(unittest.TestCase):
             self.assertIs(f.default_factory, dataclasses.MISSING, f.name)
 
     def test_values_must_be_finite_non_negative_and_counts_at_least_one(self):
-        """A count of 0 would let a rule pass without the observation it names: every count field must be >= 1."""
+        """A count of 0 would let a rule pass without the observation it names: every count field must be >= 1.
+        A floor compared with a share of frames above 1 (a percentage by mistake) and a zero window or gap are
+        errors too: they would make every window unknown or split every event into single frames."""
         for bad in ({"window_s": -1.0}, {"gap_s": NAN}, {"min_events": 2.5}, {"sweep_min_count": True},
                     {"offscreen_yaw_deg": None}, {"look_back_min_count": 0}, {"sweep_min_count": 0},
-                    {"back_loop_min_count": 0}, {"min_events": 0}):
+                    {"min_events": 0}, {"face_visible_min": 1.5},
+                    {"track_conf_min": 60.0}, {"shoulder_vis_min": 1.01}, {"window_s": 0.0}, {"gap_s": 0}):
             with self.assertRaises(ValueError, msg=repr(bad)):
                 dataclasses.replace(P, **bad)
 
@@ -186,17 +189,14 @@ class EventTests(unittest.TestCase):
         self.assertEqual([e["event_id"] for e in dwell], ["dwell_no_touch@0", "dwell_no_touch@21"])
 
     def test_touch_log_events(self):
+        """Misses make a touch_miss event; columns no rule reads (back_count, first_input_delay_ms) make none."""
         rows = rows_of(face(50))
         put(rows, 10, 10, tap_count=1, miss_tap_count=1)
         put(rows, 12, 12, tap_count=1, back_count=1)
-        put(rows, 30, 30, tap_count=1, back_count=1)
         put(rows, 40, 40, tap_count=1, first_input_delay_ms=3500.0)
-        put(rows, 45, 45, first_input_delay_ms=900.0)
         events = {e["kind"]: e for e in detect_events(rows, P, landmarker_num_faces=1)}
         self.assertEqual(events["touch_miss"]["obs"], {"miss_tap_count": 1})
-        self.assertEqual(events["back_navigation_loop"]["obs"], {"back_count": 2})
-        self.assertEqual(events["back_navigation_loop"]["source_frames"], [12, 30])
-        self.assertEqual(events["first_input_delayed"]["obs"], {"first_input_delay_ms": 3500.0})
+        self.assertFalse({"back_navigation_loop", "first_input_delayed"} & set(events))
 
     def test_a_column_missing_in_some_rows_is_not_measured(self):
         """people_behind_count missing in one row: the window does not measure it, so its absence would not be
@@ -224,15 +224,20 @@ class EventTests(unittest.TestCase):
         self.assertNotIn("look_back", kinds(detect_events(turn, P, landmarker_num_faces=1)))
 
     def test_counts_must_be_whole_numbers_of_at_least_zero(self):
-        """Item 6 (r2): the contract's TouchFeatures counts are integer, minimum 0: other values are errors, not
-        missing values. Only CSV's decimal integer strings are also accepted."""
-        for key in ("tap_count", "miss_tap_count", "back_count"):
-            for bad in (-1, "-1", 1.0, 1.5, "1.0", "two", True):
+        """Item 6 (r2) and the backend review: the contract's TouchFeatures counts are integer, minimum 0. The two
+        touch columns take a whole number or a digit string (a CSV cell), not a float, a float string, a bool or a
+        negative; other values are errors, not missing values. people_behind_count (not in the contract) also takes a
+        whole number written as a float."""
+        for key in ("tap_count", "miss_tap_count"):
+            for bad in (-1, "-1", 1.0, 1.5, "1.0", " 1", "two", True):
                 with self.subTest(key=key, bad=bad), self.assertRaises(ValueError):
                     detect_events(put(rows_of(face(5)), 2, 2, **{key: bad}), P, landmarker_num_faces=1)
             for good in (0, 2, "2"):
                 with self.subTest(key=key, good=good):
                     detect_events(put(rows_of(face(5)), 2, 2, **{key: good}), P, landmarker_num_faces=1)
+        rows = put(rows_of(face(5)), 2, 2, tap_count="3", miss_tap_count="1")
+        misses = [e for e in detect_events(rows, P, landmarker_num_faces=1) if e["kind"] == "touch_miss"]
+        self.assertEqual([e["obs"] for e in misses], [{"miss_tap_count": 1}])
         huge = 2**53 + 1
         events = detect_events(put(rows_of(face(5)), 2, 2, miss_tap_count=huge), P, landmarker_num_faces=1)
         self.assertEqual([e["obs"]["miss_tap_count"] for e in events if e["kind"] == "touch_miss"], [huge])
