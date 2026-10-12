@@ -8,6 +8,10 @@ from pydantic import BaseModel
 
 from app.common.config.settings import Settings, get_settings
 from app.infrastructure.external.ai_client import AiServerClient
+from app.modules.connectivity.router import router as connectivity_router
+from app.modules.sessions.repository import SessionRepository
+from app.modules.sessions.router import router as sessions_router
+from app.modules.sessions.service import SessionService
 
 
 class HealthResponse(BaseModel):
@@ -29,10 +33,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             app.state.ai_server_client = AiServerClient(
                 http, settings.ai_server_timeout_seconds
             )
+            app.state.session_service = SessionService(SessionRepository())
             try:
                 yield
             finally:
                 del app.state.ai_server_client
+                del app.state.session_service
 
     application = FastAPI(
         title=settings.app_name,
@@ -46,7 +52,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_credentials=False,
-        allow_methods=["GET"],
+        allow_methods=["GET", "POST"],
         allow_headers=["Content-Type"],
     )
 
@@ -55,6 +61,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         """Process liveness only; does not verify DB or AI connectivity."""
         return HealthResponse()
 
+    application.include_router(connectivity_router)
+    application.include_router(sessions_router)
     return application
 
 

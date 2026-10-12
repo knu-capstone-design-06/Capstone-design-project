@@ -1,4 +1,4 @@
-/** contract/frontend-backend.openapi.yaml (0.1.0) */
+/** contract/frontend-backend.openapi.yaml (0.3.0; order operations remain a team-review draft) */
 export interface HealthResponse {
   status: 'ok';
   service: 'backend';
@@ -74,4 +74,80 @@ export interface FeatureWindowResponse {
 
 export interface ErrorResponse {
   detail: string;
+}
+
+export type ProductCategory = 'coffee' | 'drink' | 'food';
+export type Temperature = 'iced' | 'hot' | null;
+
+export interface Product {
+  product_id: string;
+  name: string;
+  category: ProductCategory;
+  description: string;
+  unit_price: number;
+  available: boolean;
+  temperatures: Exclude<Temperature, null>[];
+}
+
+export interface ProductList {
+  currency: 'KRW';
+  products: Product[];
+}
+
+export interface CartItem {
+  item_id: string;
+  product_id: string;
+  name: string;
+  temperature: Temperature;
+  quantity: number;
+  unit_price: number;
+  line_amount: number;
+}
+
+export interface Cart {
+  session_id: string;
+  version: number;
+  currency: 'KRW';
+  items: CartItem[];
+  total_quantity: number;
+  total_amount: number;
+  updated_at: string;
+}
+
+export interface CartItemCreateRequest {
+  product_id: string;
+  temperature: Temperature;
+  quantity: number;
+  expected_version: number;
+}
+
+export interface CartItemQuantityUpdateRequest {
+  quantity: number;
+  expected_version: number;
+}
+
+export interface OrderCreateRequest {
+  expected_version: number;
+}
+
+export interface Order {
+  order_id: string;
+  order_number: string;
+  session_id: string;
+  status: 'simulated';
+  currency: 'KRW';
+  items: CartItem[];
+  total_quantity: number;
+  total_amount: number;
+  created_at: string;
+}
+
+export interface OrderApiError {
+  code: 'session_not_found' | 'product_not_found' | 'cart_item_not_found'
+    | 'session_expired' | 'cart_version_conflict'
+    | 'product_unavailable' | 'price_changed' | 'quantity_limit_exceeded'
+    | 'empty_cart' | 'idempotency_key_reused'
+    | 'invalid_request' | 'invalid_option' | 'service_unavailable';
+  detail: string;
+  cart: Cart | null;
 }
