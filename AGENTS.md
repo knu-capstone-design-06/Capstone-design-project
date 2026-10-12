@@ -8,7 +8,7 @@
 ## 1. 기본 원칙
 
 - 하나의 PR은 하나의 목적만 다룹니다.
-- 다른 이름의 브랜치를 만들지 않고 `docs/Convention.md`의 작업 브랜치에서 작업합니다. 역할 브랜치는 `feat/frontend`, `feat/backend`, `feat/vision`, `feat/ai`이고, 공용 브랜치 `feat/infra`, `feat/db`, `feat/docs`는 필요할 때 이 이름으로 만들어 씁니다.
+- 다른 이름의 브랜치를 만들지 않고 `docs/Convention.md`의 작업 브랜치에서 작업합니다. 역할 브랜치는 `feat/frontend`, `feat/backend`, `feat/vision`, `feat/ai`이고, 공용 브랜치 `feat/infra`, `feat/db`, `feat/docs`는 필요할 때 이 이름으로 만들어 씁니다. 서버 연결 확인용 임시 브랜치 `test`는 `docs/Convention.md` 2장을 따릅니다.
 - `main`에 직접 push하지 않습니다. 반드시 PR로 병합합니다.
 - 공유 브랜치(`main`, 공용 브랜치, 다른 사람의 역할 브랜치)에 force-push, rebase, 기록 수정을 하지 않습니다.
 - 자기 역할 브랜치의 기록을 고쳐 force-push할 때는 `--force-with-lease`를 쓰고, 그 브랜치를 받아간 팀원에게 알립니다.
@@ -44,7 +44,7 @@
 |---|---|---|
 | 프론트엔드 | frontend | `frontend/` |
 | 백엔드 | backend | `backend/`, `db/` |
-| 컴퓨터 비전 | vision | 저장 위치는 팀에서 확정 예정 |
+| 컴퓨터 비전 | vision | `ai-server/app/modules/vision/`, `ai-server/app/inference/vision.py`(관측 뼈대). 학습 코드의 저장 위치는 팀에서 확정 예정 |
 | AI | ai | `ai-server/` |
 | 문서 | docs | `docs/` |
 
@@ -61,6 +61,7 @@
 - `src/features/<feature>/`: 기능별 코드(`api/`, `components/`, `hook/`, `types/`, `utils/`, `pages/`)를 둡니다. 외부에는 `index.ts`로 공개할 것만 내보냅니다.
 - `src/shared/`: 두 개 이상의 기능에서 실제로 쓰는 코드만 둡니다. 한 기능에서만 쓰는 코드는 그 기능 폴더에 둡니다.
 - 기능끼리는 서로의 내부 파일을 직접 import하지 않고 `index.ts`를 통해 사용합니다.
+- 프론트엔드는 backend와만 통신합니다. ai-server와 외부 AI API를 직접 호출하지 않습니다.
 
 ### backend (FastAPI)
 
@@ -116,4 +117,4 @@ AI 에이전트는 위 규칙을 모두 따르고, 추가로 다음을 지킵니
 - 상품·장바구니·주문 또는 음성 주문 연동 작업 전에는 [`docs/Product-Cart-Order-API-Draft.md`](docs/Product-Cart-Order-API-Draft.md)를 확인합니다.
 - 해당 문서는 검토용 초안이며 확정 명세가 아닙니다. 구현 기준은 합의 후 반영된 `contract/`입니다.
 - 터치·상호작용 로그 작업 전에는 [`docs/Touch-Log-Review.md`](docs/Touch-Log-Review.md)를 확인합니다. 로컬 수집 범위, 화면 방문·세션 처리 방향, 원시 기록 후보, 집계 통계 10개와 팀 검토 항목·결정 이력을 정리한 문서입니다.
-- 터치 로그 검토 문서의 사용자와 정한 작업 방향은 팀 전체의 계약 합의와 구분합니다. 반복 입력 기준, 버튼 주변 거리, `dwell_ms` 의미 등 미정 항목은 추측해서 구현하지 않습니다. 인터페이스 구현 기준은 팀 합의 후 반영된 `contract/`입니다.
+- 터치 로그 검토 문서의 프론트 담당자와 정한 작업 방향은 팀 전체의 계약 합의와 구분합니다. 반복 입력 기준, 버튼 주변 거리, `dwell_ms` 의미 등 미정 항목은 추측해서 구현하지 않습니다. 인터페이스 구현 기준은 팀 합의 후 반영된 `contract/`입니다.
