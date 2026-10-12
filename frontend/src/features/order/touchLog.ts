@@ -5,11 +5,11 @@ export type Point = { x: number; y: number };
 export type Rect = { x: number; y: number; width: number; height: number };
 export type LogContext = { screen: string; visitId: string; settings: unknown };
 export type LogEvent = LogContext & {
-  id: string; sessionId: string; occurredAt: string; elapsedMs: number;
+  id: string; sessionId: string; serverSessionId: string | null; occurredAt: string; elapsedMs: number;
   kind: string; data: unknown;
 };
 type StoragePort = Pick<Storage, 'getItem' | 'setItem'>;
-export type SavedLog = { version: 1; sessionId: string; startedAt: number; events: LogEvent[] };
+export type SavedLog = { version: 1; sessionId: string; serverSessionId: string | null; startedAt: number; events: LogEvent[] };
 
 export function distanceToRect(point: Point, rect: Rect) {
   return Math.hypot(
@@ -20,7 +20,7 @@ export function distanceToRect(point: Point, rect: Rect) {
 
 export function createTouchLog(storage: StoragePort | null, id = () => crypto.randomUUID(), now = () => Date.now()) {
   let warning: string | null = null;
-  let saved: SavedLog = { version: 1, sessionId: id(), startedAt: now(), events: [] };
+  let saved: SavedLog = { version: 1, sessionId: id(), serverSessionId: null, startedAt: now(), events: [] };
   let resumed = false;
   try {
     const raw = storage?.getItem(touchLogKey);
@@ -29,7 +29,8 @@ export function createTouchLog(storage: StoragePort | null, id = () => crypto.ra
       if (value.version !== 1 || typeof value.sessionId !== 'string' || !Number.isFinite(value.startedAt)
         || !Array.isArray(value.events) || !value.events.every(event => event && typeof event.id === 'string'
           && typeof event.sessionId === 'string' && typeof event.kind === 'string')) throw new Error('invalid log');
-      saved = { ...value, events: value.events.slice(-logLimit) };
+      saved = { ...value, serverSessionId: value.serverSessionId ?? null,
+        events: value.events.slice(-logLimit).map(event => ({ ...event, serverSessionId: event.serverSessionId ?? null })) };
       resumed = true;
     }
   } catch { warning = '저장된 로그를 복원하지 못해 새 로컬 세션을 시작했습니다.'; }
@@ -41,7 +42,7 @@ export function createTouchLog(storage: StoragePort | null, id = () => crypto.ra
   function record(context: LogContext, kind: string, data: unknown = null) {
     const timestamp = now();
     const event: LogEvent = {
-      ...context, id: id(), sessionId: saved.sessionId,
+      ...context, id: id(), sessionId: saved.sessionId, serverSessionId: saved.serverSessionId,
       occurredAt: new Date(timestamp).toISOString(), elapsedMs: Math.max(0, timestamp - saved.startedAt), kind, data,
     };
     // 설정·이벤트 객체의 후속 변경으로 이전 기록이 변하지 않게 복사합니다.
@@ -53,8 +54,11 @@ export function createTouchLog(storage: StoragePort | null, id = () => crypto.ra
   return {
     resumed,
     record,
-    newSession() { saved.sessionId = id(); saved.startedAt = now(); persist(); },
+    newSession(serverSessionId: string | null = null) {
+      saved.sessionId = id(); saved.serverSessionId = serverSessionId; saved.startedAt = now(); persist();
+    },
     read() { return structuredClone(saved); },
+    getServerSessionId() { return saved.serverSessionId; },
     getWarning() { return warning; },
   };
 }

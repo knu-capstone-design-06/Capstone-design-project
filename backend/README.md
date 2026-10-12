@@ -2,6 +2,10 @@
 
 Python 3.12 기반 FastAPI 백엔드입니다. 상태 확인, AI 연결 확인, 임시 세션 생성과 특징 전송 API를 제공합니다. DB·주문·인증은 아직 연결하지 않았으며, `/health` 성공이 DB나 AI 연결의 성공을 뜻하지 않습니다.
 
+## 프론트 주문 연동 상태
+
+상품·장바구니·모의 주문 서버 API는 구현 대기입니다. 프론트가 기대하는 형식과 함께 확인할 작업은 [프론트 주문 연동 준비와 담당자 검토](#프론트-주문-연동-준비와-담당자-검토)에 있습니다.
+
 ## 로컬 실행 (PowerShell)
 
 저장소 루트에서 Python 3.12를 사용해 실행합니다.
@@ -26,13 +30,13 @@ API 문서: http://127.0.0.1:8000/docs
 
 ## 주문 API 명세 반영 상태
 
-[프론트엔드 ↔ 백엔드 OpenAPI](../contract/frontend-backend.openapi.yaml)는 0.2.0이며 기존 0.1.0의 네 API 형식을 유지합니다. 상품 조회, 세션 장바구니 조회·추가·수량 변경·삭제, 모의 주문 확정의 신규 6개 API를 `x-contract-status: draft`로 추가했습니다. 이 명세 수정에서는 백엔드 라우터·서비스·DB를 구현하지 않았습니다. 실행 중인 FastAPI `/docs`는 실제 라우터에서 생성되므로 저장소 YAML 수정만으로 신규 경로가 표시되지는 않습니다.
+[프론트엔드 ↔ 백엔드 OpenAPI](../contract/frontend-backend.openapi.yaml)는 0.3.0이며 기존 0.1.0의 네 API 형식을 유지합니다. 상품 조회, 세션 장바구니 조회·추가·수량 변경·삭제, 모의 주문 확정의 신규 6개 API를 `x-contract-status: draft`로 추가했습니다. 이 명세 수정에서는 백엔드 라우터·서비스·DB를 구현하지 않았습니다. 실행 중인 FastAPI `/docs`는 실제 라우터에서 생성되므로 저장소 YAML 수정만으로 신규 경로가 표시되지는 않습니다.
 
 설계 이유·미정 정책은 [주문 API 검토 문서](../docs/Product-Cart-Order-API-Draft.md)를 확인합니다. 팀 검토 후 상품·옵션·가격 검증, 서버 장바구니, 모의 주문 스냅샷을 구현하고 프론트 타입·호출 함수·화면과 샘플 데이터를 함께 맞춥니다. 장바구니 버전 확인·변경과 멱등성 성공 응답 저장, 주문 생성·장바구니 비우기는 각각 원자적 처리가 필요합니다. 신규 API 검증 오류는 `OrderApiError` 형식으로 반환하되 기존 API 오류 형식은 유지합니다.
 
-세션 수명·접근 정책, 멱등성 키 보관·처리 중·실패 응답 정책, 가격 갱신 시 버전 처리, 주문번호·주문 조회·영속 보관은 팀 검토 항목입니다. 모의 주문에는 실제 결제·재고 차감을 포함하지 않습니다.
+첫 시연 전에 상품 데이터·수량 한도·Cart 버전 충돌·동일 키 재시도·처리 중 응답·주문번호·공개 환경의 세션 접근 정책을 검토합니다. 완료 화면 복원·재시작 후 유지·장기 보관·정밀 만료·동적 가격 변경은 사용자 검토 방향에 따라 후순위로 두며 팀 전체 합의는 별도로 기록합니다. 모의 주문에는 실제 결제·재고 차감을 포함하지 않습니다.
 
-브라우저에서 백엔드를 다른 출처로 직접 호출하는 구현을 추가할 때는 POST·PATCH·DELETE와 `Idempotency-Key` 헤더의 CORS 허용도 함께 검토합니다. 같은 출처의 `/backend/` 프록시를 통한 호출과 구분하며, 이번 명세 수정에서는 현재 CORS 설정을 바꾸지 않습니다.
+브라우저에서 백엔드를 다른 출처로 직접 호출하는 구현을 추가할 때는 POST·PATCH·DELETE와 `Idempotency-Key` 헤더의 CORS 허용도 함께 검토합니다. 같은 출처의 `/backend/` 프록시를 통한 호출과 구분하며, 다른 출처에서 `Retry-After`를 읽으려면 응답 헤더 노출(`expose_headers=["Retry-After"]`)도 필요합니다. 현재 CORS 설정은 주문 API의 다른 출처 호출을 지원하지 않으며 설정 변경은 백엔드 담당자의 검토 대상입니다.
 
 ## 환경변수
 
@@ -52,7 +56,7 @@ API 문서: http://127.0.0.1:8000/docs
 
 ## Docker Compose
 
-현재 `main`의 루트 Compose에는 백엔드와 AI 서버가 포함돼 있습니다. Docker 엔진을 실행한 뒤 저장소 루트에서 시작합니다. 세 서비스 통합 구성은 [PR #24](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/24)에서 검토 중입니다.
+루트 Compose는 프론트엔드·백엔드·AI 서버를 실행합니다. Docker 엔진을 실행한 뒤 저장소 루트에서 시작합니다.
 
 ```powershell
 docker compose up --build
@@ -60,7 +64,7 @@ docker compose up --build
 
 백엔드는 `http://127.0.0.1:8000`, AI 서버는 Docker 내부의 `http://ai-server:8001`을 사용합니다. Compose에는 `env_file`이 없고 이미지에도 `.env`가 없으므로, 로컬 직접 실행과 달리 `backend/.env`는 읽지 않습니다. 필요한 값은 실행 환경에서 컨테이너에 주입합니다.
 
-기존 두 서버 실행·통신 검증 기록은 [PR #14](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/14)를 참고합니다. 2026-10-07에는 별도 백엔드 테스트 컨테이너에서 실행 중인 AI 서버와 새 연결 API를 실제 호출해 확인했습니다. 주문 화면의 실제 API 연동은 후속 작업입니다.
+연결 API의 기존 실행·통신 검증은 [PR #26](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/26)를 참고합니다. 상품·장바구니·주문 API의 실제 연동 검증은 백엔드 구현 후 수행합니다.
 
 ## Backend → AI 내부 연동
 
@@ -97,7 +101,7 @@ async def analyze_window(ai: AiServerClient, window: AnalyzeRequest):
 - 호출자의 취소는 상위로 전달합니다. 로그에는 오류 종류만 기록합니다.
 - 시간 필드는 시간대가 있는 날짜·시간이어야 하며 종료 시각이 시작 시각보다 뒤여야 합니다.
 - `TouchFeatures`, `VisionFeatures`, `StateScores`의 현재 형식은
-  `contract/frontend-backend.openapi.yaml`(0.2.0, 기존 0.1.0 형식 유지)에 정의돼 있습니다. 다만 비전
+  `contract/frontend-backend.openapi.yaml`(0.3.0, 기존 0.1.0 형식 유지)에 정의돼 있습니다. 다만 비전
   세부 특징과 터치 통계 계산 기준에는 팀 검토 항목이 남아 있습니다.
   연결 API는 `modules/sessions/schemas.py`에서 입력 필드와 반환 점수 5개·범위·타입을 검증합니다.
   내부 전송 클라이언트의 `JsonObject`는 그대로 유지하므로 직접 사용하는 다른 호출자는 별도의 의미 검증이 필요합니다.
@@ -130,7 +134,7 @@ POST CORS를 확인합니다.
 | POST /api/v1/sessions | 201, session_id와 UTC started_at |
 | POST /api/v1/sessions/{session_id}/features | 200, AI 점수 또는 판단 없는 응답 |
 
-2026-10-07 사용자와 확인한 연결 검증 범위입니다. 세션은 단일 프로세스 메모리에만 보관하며 재시작하면 초기화됩니다.
+세션은 단일 프로세스 메모리에만 보관하며 재시작하면 초기화됩니다.
 세션 만료·정리·영속 저장은 아직 없으므로 장기 운영 또는 여러 worker/인스턴스에 사용하지 않습니다.
 터치 원시 로그의 통계 계산과 비전 추출은 구현하지 않고 계약에 정의된 특징만 전달합니다.
 AI 측정 불가는 ai_available=true, states=null입니다. 통신 오류·타임아웃·잘못된 AI 응답은
@@ -153,9 +157,27 @@ $body = @{
 Invoke-RestMethod -Method Post "$base/api/v1/sessions/$($session.session_id)/features" -ContentType 'application/json' -Body $body
 ```
 
-프론트엔드의 API 호출·화면 반영 코드는 이번 변경에 포함하지 않습니다.
+프론트 호출·화면 반영 상태는 [프론트엔드 README](../frontend/README.md)를 확인합니다.
 
 ## 참고
 
 - [FastAPI 설정](https://fastapi.tiangolo.com/advanced/settings/)
 - [FastAPI CORS](https://fastapi.tiangolo.com/tutorial/cors/)
+
+## 프론트 주문 연동 준비와 담당자 검토
+
+기존 상태·AI 연결 확인, 임시 세션 생성, 특징 전송 API를 사용합니다. 상품·장바구니·주문은 백엔드 담당자가 기존 세션에 연결해 구현할 범위입니다.
+
+프론트는 [상품·장바구니·주문 초안](../docs/Product-Cart-Order-API-Draft.md)에 맞춰 API 호출·응답 표시·수동 재시도를 준비했습니다. 상품·장바구니·주문 서버 API는 아직 구현 대기입니다. 프론트용 테스트 응답이 실제 서버 구현을 대신하지 않습니다.
+
+백엔드 담당자와 확인할 작업:
+- 프론트 요청 타임아웃은 15초입니다. 최종 시간과 시간 초과 후 처리 중 응답·재시도 정책은 백엔드 담당자와 합의할 항목입니다.
+- 기존 `modules/sessions/`의 세션 ID를 사용해 상품 조회·Cart 조회/변경·모의 주문 연결
+- 서버 상품 ID·coffee/drink/food·iced/hot/푸드 null과 샘플 데이터 공급
+- 항목별 수량 한도, 서버 가격·옵션·판매 가능 여부·금액 계산 검증
+- expected_version 충돌의 최신 Cart, 동일 키·동일 요청 재시도, 처리 중 오류·간격·실패 결과 보관 정책
+- 한 세션 1주문·새 주문 새 세션, 서버 주문번호의 형식·범위
+- 공개 주소의 세션 접근·인증·쿠키 및 배포 정책
+
+복원·장기 보관·정밀 만료·동적 가격 변경은 첫 시연 후순위 방향입니다. 프론트 담당자와 검토한 방향이며 팀 전체 합의는 아직 확인되지 않았습니다. 세부 서버 정책은 담당자가 결정·구현하고 계약에는 합의 후 반영합니다.
+
