@@ -6,14 +6,18 @@
 
 | 구성요소 | 운영 배포 위치 | 역할 |
 | --- | --- | --- |
-| `frontend/` | AWS Amplify Hosting | React/Vite 빌드 결과물(`dist/`) 제공, 브라우저의 HTTPS 진입점 |
+| `frontend/` | AWS Amplify Hosting (검토안 A) | React/Vite 빌드 결과물(`dist/`) 제공, 브라우저의 HTTPS 진입점. 키오스크 PC 로컬 제공안과 비교 필요 |
 | `backend/` | 서울 리전 AWS EC2의 backend 컨테이너 | 세션·주문 API, AI 결과 검증, DB 및 외부 API 호출 |
-| `ai-server/` | backend와 동일한 EC2의 별도 컨테이너 | 백엔드가 요청하는 내부 추론 API. 비전 프레임 처리를 이 컨테이너에서 실행할지는 미정 |
+| `ai-server/` | backend와 동일한 EC2의 별도 컨테이너 | 백엔드가 요청하는 내부 추론 API. 비전 담당자는 프레임 처리를 키오스크 PC에서 실행하고 이 컨테이너에는 포함하지 않는 안을 제안함(팀 합의 전) |
 | DB | 서울 리전 Supabase PostgreSQL | 백엔드가 관리하는 영속 데이터 |
 
 루트 [`docker-compose.yml`](../docker-compose.yml)의 세 서비스 구성은 **로컬 통합 개발용**으로 유지합니다. 운영에서는 프론트엔드 컨테이너를 배포하지 않고 Amplify가 정적 파일을 제공합니다. 기존 [EC2 템플릿](aws/ec2-baseline.yaml)은 backend·ai-server용 호스트 준비 단계이며, 앱 배포·도메인·HTTPS를 아직 구성하지 않습니다.
 
 비전 프레임을 키오스크 PC에서 처리해 관측값만 보낼지, 서버로 프레임을 보낼지는 2026-10-14 회의에서 결정할 항목입니다. 서버 처리안을 택하면 전송 대역폭·키오스크 브라우저의 카메라 권한·EC2 CPU 및 메모리 요구량이 달라집니다. 현재 ai-server 이미지에는 비전 의존성과 모델 파일이 없으므로 이 표만으로 비전 처리 위치를 확정하지 않습니다.
+
+비전 담당자는 **G10 키오스크 PC의 로컬 프로세스에서 프레임을 처리하고 관측값만 브라우저의 `vision` 입력으로 전달**하는 안을 제안했습니다. 원본 영상의 외부 전송을 피할 수 있고 EC2의 비전 처리 부하도 줄일 수 있지만, 로컬 프로세스와 브라우저의 전달 방식 및 권한은 아직 검증·합의되지 않았습니다. 이 안이면 ai-server에는 비전 패키지·모델을 넣지 않고 G10에서 CPU·메모리를 실측합니다.
+
+특히 Amplify의 공개 HTTPS 페이지가 같은 PC의 `localhost` 비전 프로그램에 요청하는 경로는 브라우저의 Local Network Access 권한 영향을 받습니다. 비전 담당자의 Edge headless 시험에서는 `fetch`와 WebSocket 연결이 요청 전에 차단됐고, 로컬 출처 페이지에서는 통과했습니다. 이는 **실제 G10 키오스크 브라우저의 권한·정책 검증을 대신하지 않습니다.** [Chrome의 Local Network Access 안내](https://developer.chrome.com/blog/local-network-access)에 따르면 공개 출처에서 loopback으로 보내는 요청은 권한 대상입니다. 10월 14일에는 (A) Amplify 유지 시 키오스크 권한·관리 정책과 로컬 연결을 실기기에서 검증할지, (B) 프론트 화면을 G10의 로컬 출처에서 제공할지, (C) 비전 프로그램이 백엔드로 직접 전달하도록 계약을 바꿀지를 함께 결정합니다. 브라우저 보안 검사를 끄는 설정을 배포 전제로 삼지 않습니다.
 
 ## HTTP 통신 경로
 
@@ -39,6 +43,7 @@ flowchart LR
 
 - 프론트엔드 API 기본 경로는 `/backend/`입니다. 로컬 Vite와 프론트엔드 Docker의 Nginx는 각각 자체 프록시를 사용합니다. Amplify 배포 시에는 **Amplify의 재작성 규칙을 별도로 설정**해야 합니다. [프론트엔드 실행 안내](../frontend/README.md), [Nginx 설정](../frontend/nginx.conf.template), [Vite 설정](../frontend/vite.config.ts)
 - 현재 backend의 세션·특징 전송 API는 준비돼 있지만 상품·장바구니·주문 API와 DB 연결은 대기 중입니다. 이 배포 구조 결정만으로 해당 기능이 완료되지는 않습니다. [백엔드 안내](../backend/README.md)
+- 비전 관측값은 G10에서 계산해 브라우저가 기존 `vision` 필드로 전달하는 안이 제안됐으나, 로컬 브라우저 통신과 프론트 제공 위치는 2026-10-14 팀 결정 전까지 미정입니다. 직접 백엔드 전송안은 현재 계약과 달라 별도 합의가 필요합니다.
 - 기존 `/health`는 프로세스 상태만 나타내고, 백엔드→AI 서버 연결은 이미 `GET /api/v1/connectivity`로 확인할 수 있습니다. 배포 후에는 프론트엔드 → 백엔드, 백엔드 → AI 서버, 백엔드 → DB를 각각 확인합니다.
 - 실시간 전달(WebSocket 또는 SSE)이 최종 요구사항이면 Amplify 프록시를 통한 동작을 별도 검증하고, 지원되지 않는 경로는 HTTPS API의 직접 호출과 출처 허용 정책을 팀에서 결정합니다. 직접 호출 시에는 backend `CORS_ORIGINS`에 Amplify 도메인을 넣고 필요한 메서드(PATCH·DELETE)와 `Idempotency-Key` 헤더를 허용해야 합니다. 현재 `main`의 CORS는 GET·POST와 `Content-Type`만 허용합니다. 현재 HTTP API의 경로 확정과 실시간 통신 방식 결정은 분리합니다.
 
@@ -52,6 +57,7 @@ flowchart LR
 4. SPA 화면 경로 재작성 규칙보다 `/backend/*` 프록시 규칙을 우선 적용할 수 있는지.
 5. 실제 키오스크 브라우저에서 HTTPS 카메라·마이크 권한과 음성 기능을 사용할 수 있는지. Chrome Web Speech API 사용 시 학교 네트워크에서 브라우저의 외부 음성 인식 연결이 가능한지도 확인해 주세요. 프레임을 서버로 보내는 안이면 카메라 권한과 대역폭도 확인해야 합니다. WebSocket/SSE가 첫 배포에 꼭 필요한지도 알려 주세요.
 6. 운영 빌드에서 개발 샘플 모드가 꺼지고, 현재 로컬 프록시 설정에만 의존하는 코드가 없는지.
+7. G10의 로컬 비전 프로그램을 쓸 경우 Amplify HTTPS 화면에서 localhost 연결 권한을 실기기에서 안정적으로 유지할 수 있는지, 아니면 화면의 로컬 제공이 필요한지.
 
 ## 다른 담당자 리뷰 요청 및 배포 전 조건
 
