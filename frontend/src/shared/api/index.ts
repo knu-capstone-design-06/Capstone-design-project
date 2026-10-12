@@ -1,6 +1,17 @@
 export { ApiError, createBackendApi } from './client.ts';
 export { backendApi } from './backend.ts';
 export type {
+  Cart,
+  CartItem,
+  CartItemCreateRequest,
+  CartItemQuantityUpdateRequest,
+  Order,
+  OrderApiError,
+  OrderCreateRequest,
+  Product,
+  ProductCategory,
+  ProductList,
+  Temperature,
   ConnectivityResponse,
   ErrorResponse,
   FeatureWindowRequest,

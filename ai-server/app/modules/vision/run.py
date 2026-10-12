@@ -17,8 +17,9 @@ their source rate. meta.json keeps both rates (fps_nominal, fps_effective) and o
 and letterboxed when resized; q, closing the window or Ctrl+C stops early, and the frames processed so far are saved.
 The run folder is written the same with or without --show.
 
-Layers (README.md): sources.py (입력) -> inference.py (추론) -> features.py (관측값) -> situation.py (상황, a
-placeholder, not called yet) -> outputs here; 전달 to other services is not built yet.
+Layers (README.md): sources.py (입력) -> inference.py (추론) -> features.py (관측값) -> events.py (사건) ->
+situation.py (상황: rules implemented, not called by this runner) -> outputs here; 전달 to other services is not
+built yet.
 
 Writes into the run folder: observations.csv, overlay.mp4, contact_sheet.png, plot_observations.png,
 plot_quality_timing.png, timing.csv, meta.json (+ manifest.json for synthetic input) and run.log (start and end of
