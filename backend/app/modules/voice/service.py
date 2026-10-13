@@ -16,11 +16,6 @@ logger = logging.getLogger(__name__)
 FALLBACK_REPLY = "지금은 음성 주문이 어려워요. 화면을 눌러 주문해 주세요."
 
 
-def empty_menu() -> list[MenuItem]:
-    """No products to sell: requests fail without calling the interpreter."""
-    return []
-
-
 def menu_from_products(products: Iterable[object]) -> list[MenuItem]:
     """Keep only the product fields the interpreter needs (e.g. the ordering catalog)."""
     fields = MenuItem.model_fields.keys()
