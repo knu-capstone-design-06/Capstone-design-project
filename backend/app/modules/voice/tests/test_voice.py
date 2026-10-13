@@ -297,6 +297,19 @@ class RetentionTests(unittest.TestCase):
         self.assertIsNone(self.repository.get("s1", record.request_id))
 
 
+class MenuFromProductsTests(unittest.TestCase):
+    def test_ordering_catalog_becomes_interpreter_menu(self):
+        from app.modules.ordering.catalog import PRODUCTS
+        from app.modules.voice.service import menu_from_products
+
+        menu = menu_from_products(PRODUCTS)
+        self.assertEqual(len(menu), len(PRODUCTS))
+        americano = next(item for item in menu if item.product_id == "americano")
+        self.assertEqual(americano, MENU[0])
+        sandwich = next(item for item in menu if item.product_id == "sandwich")
+        self.assertEqual(sandwich.temperatures, [])
+
+
 class DefaultWiringTests(unittest.TestCase):
     def request_status(self, client):
         session_id = client.post("/api/v1/sessions").json()["session_id"]
