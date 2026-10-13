@@ -199,7 +199,7 @@ frontend 음성 입력 (`frontend/src/features/voice/`, 화면 요소 없음)
 
 | # | 작업 | 담당 | 선행 |
 |---|---|---|---|
-| 1 | 상품 조회·장바구니 추가·수량 변경·삭제 서비스 (`Product-Cart-Order-API-Draft.md` 기준, `expected_version`·`Idempotency-Key` 포함) | Back-end | 장바구니 초안 합의 |
+| 1 | ~~상품 조회·장바구니 추가·수량 변경·삭제 서비스~~ 완료(PR #40, 메모리 저장, 계약 `draft`) | Back-end | — |
 | 2 | 음성 해석에 실제 메뉴 연결: `backend/app/main.py`의 `menu_provider=empty_menu`를 상품 조회로 교체 | Decision AI | 1 |
 | 3 | (선택) 해석할 때 현재 장바구니도 전달: 터치로 담은 상품까지 "하나 더", "라떼 빼 줘"를 정확히 해석 | Decision AI | 1 |
 | 4 | `tool_calls` 실행부(MCP 도구): 상품+온도로 `item_id` 조회, `expected_version` 채움, 요청별 `Idempotency-Key` 생성, 말한 순서대로 실행 | Decision AI + Back-end | 1 |
