@@ -125,6 +125,7 @@ MCP 서버는 외부 AI의 도구 호출을 backend 호출로 바꿔 주는 역�
 ### 3.6 프론트 연동 (Front-end)
 
 - Chrome `SpeechRecognition`(ko-KR)으로 인식, 말하는 중 부분 텍스트와 최종 인식 문장 표시
+  - 음성 입력 기능은 `frontend/src/features/voice/`에 있습니다(AI 담당, 화면 요소 없음). 아래 7.1 참고
 - 인식 후보·신뢰도와 함께 `voice/requests` 호출, 듣는 중·처리 중 상태 표시
 - Chrome 인식을 쓸 수 없으면 음성 버튼을 숨기거나 비활성화하고 터치 주문으로 안내
 - 음성 모드 진입·종료 UI(모드 전환 방식은 프론트가 정함)
@@ -168,11 +169,11 @@ MCP 서버는 외부 AI의 도구 호출을 backend 호출로 바꿔 주는 역�
 
 ## 7. 현재 구현 상태와 MCP 자동 제어까지 남은 작업
 
-- 작성일: 2026-10-12
+- 작성일: 2026-10-12 (수정: 2026-10-13, ignored와 frontend 음성 입력 추가)
 
 ### 7.1 지금 되는 것 (backend `app/modules/voice/`)
 
-- 음성 요청 접수·상태 조회 API(`contract/voice.openapi.yaml` 0.2.0).
+- 음성 요청 접수·상태 조회 API(`contract/voice.openapi.yaml` 0.3.0).
 - OpenAI가 세션별 최근 10턴 대화 맥락과 메뉴 목록으로 발화를 해석해 MCP 장바구니 도구 입력(`tool_calls`)을 만듭니다.
   - 확실하면 `completed`, 애매하면 `needs_confirmation`(제안 + 짧은 확인 문장), 정할 수 없으면 `needs_clarification`(질문).
   - 메뉴에 없는 상품·품절 상품 담기·허용되지 않은 온도는 서버가 거르고 실패로 처리합니다.
@@ -181,6 +182,16 @@ MCP 서버는 외부 AI의 도구 호출을 backend 호출로 바꿔 주는 역�
 - 브라우저 frontend는 nginx 프록시(`/backend/`)로만 호출합니다. backend CORS가 `Idempotency-Key`를 허용하지 않아 다른 출처에서 직접 호출할 수 없습니다.
 - 요청 기록·`Idempotency-Key`는 접수 후 1시간, 대화 맥락은 마지막 발화 후 1시간 보관합니다(제안값, `repository.py`의 `RETENTION`).
 - 음성 API는 도구를 **실행하지 않습니다.** 장바구니는 아직 바뀌지 않고 `actions`는 항상 빈 배열입니다.
+- 키오스크에게 한 말이 아니면(일행과의 대화, 잡담) `ignored`로 답합니다. 문장을 띄우지 않고 대화 맥락에도 넣지 않습니다.
+
+frontend 음성 입력 (`frontend/src/features/voice/`, 화면 요소 없음)
+
+- **음성 모드와 마이크를 나눕니다.** `VoiceController.setEnabled(true)`로 모드를 켜면 바로 한 문장을 듣고, 문장을 받거나 8초 동안 말이 없으면 마이크를 닫습니다. 서버가 처리하는 동안에는 듣지 않습니다.
+  - 계속 듣지 않는 이유: Chrome 인식은 화자를 구분하지 못해 옆 사람 말이 그대로 요청이 되고, 듣는 동안 음성이 Google 서버로 전송됩니다.
+- 결과가 `needs_confirmation`·`needs_clarification`이면 대답을 듣기 위해 마이크를 자동으로 다시 엽니다. `completed`·`ignored`·`failed`면 닫고, 부르는 쪽이 `listen()`으로 다시 열 수 있습니다(예: 마이크 버튼).
+- 공백·한 글자 인식과 신뢰도 0.3 미만 인식은 주변 소리로 보고 보내지 않습니다. Chrome이 신뢰도를 0으로 주면 "모름"(null)으로 보냅니다.
+- 모드를 언제 켤지(판단 모델의 `voice_guide`, 손님의 버튼), 결과로 장바구니를 다시 불러오거나 MCP를 실행하는 일, 문구 표시는 부르는 쪽이 합니다. `onResult` 콜백과 `useVoiceInput` 훅으로 상태를 받습니다.
+- 테스트: `frontend/`에서 `node --test src/features/voice/*.test.mjs` (`package.json`의 `test` 목록에 넣을지는 프론트 담당과 정합니다).
 
 방식: 일반적인 MCP처럼 AI가 도구를 하나씩 호출하며 반복하지 않고, OpenAI 한 번 호출로 실행할 도구 목록을 정한 뒤 검증해서 MCP가 차례로 실행합니다. 도구 입력 형식은 MCP 도구와 같게 맞춰 두었으므로 나중에 반복 호출 방식으로 바꿔도 도구 정의는 그대로 씁니다.
 
@@ -193,7 +204,7 @@ MCP 서버는 외부 AI의 도구 호출을 backend 호출로 바꿔 주는 역�
 | 3 | (선택) 해석할 때 현재 장바구니도 전달: 터치로 담은 상품까지 "하나 더", "라떼 빼 줘"를 정확히 해석 | Decision AI | 1 |
 | 4 | `tool_calls` 실행부(MCP 도구): 상품+온도로 `item_id` 조회, `expected_version` 채움, 요청별 `Idempotency-Key` 생성, 말한 순서대로 실행 | Decision AI + Back-end | 1 |
 | 5 | 실행 결과를 `actions`(`cart_updated` 등)와 SSE 알림으로 전달 | Back-end + Front-end | 4, 3.4 |
-| 6 | 프론트: Chrome 인식 → 음성 요청 → 상태 조회, `reply_text` 표시, 확인 UI(버튼은 프론트가 정함) | Front-end | — |
+| 6 | 프론트 화면 연결: `features/voice`의 `VoiceController`를 주문 화면에 붙이고(세션·`screen_id` 전달), `voice_guide`나 버튼으로 모드 켜기, `reply_text` 표시, 확인 UI. 인식·요청·상태 조회는 구현함 | Front-end | 판단 모델 결과 수신 |
 | 7 | 실행 환경: 직접 호출(다른 출처)을 지원한다면 CORS에 `Idempotency-Key` 헤더와 필요한 메서드 허용(공용 설정, 합의 필요). Compose의 키 전달은 반영함 | Back-end·infra | — |
 | 8 | 실제 키로 프롬프트 검증, 실험에 쓴 프롬프트 버전(`interpret_v1`)·모델 기록 | Decision AI | 2 |
 
@@ -205,3 +216,5 @@ MCP 서버는 외부 AI의 도구 호출을 backend 호출로 바꿔 주는 역�
 - [ ] **MCP 서버 위치·방식**: backend 내부 모듈 / 별도 서비스, MCP SDK 의존성 추가 여부
 - [ ] **대화 기록 보관**: 세션별 최근 10턴·1시간 보관(제안값), 인식 문장을 서버 메모리에 보관하는 것을 실험 동의 안내에 넣을지. 세션 종료 API가 생기면 그때 바로 지울지
 - [ ] **확인 문장 길이**: 최대 60자(제안값)
+- [ ] **마이크 여는 시간·거르는 기준**: 무음 8초, 신뢰도 0.3 미만 버림(제안값, `voiceController.ts`의 `VOICE_SILENCE_MS`·`VOICE_MIN_CONFIDENCE`). 실제 키오스크 소음 환경에서 조정
+- [ ] **`screen_id` 값**: 프론트 화면 상태는 `menu`·`review`·`complete`인데 계약 예시는 `menu_list`. 어느 값을 보낼지
