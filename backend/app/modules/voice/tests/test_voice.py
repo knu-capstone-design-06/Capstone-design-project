@@ -70,7 +70,7 @@ class VoiceApiTests(unittest.TestCase):
     def setUp(self):
         self.interpreter = FakeInterpreter()
         for target, value in (("app.main.build_voice_interpreter", self.interpreter),
-                              ("app.main.empty_menu", MENU)):
+                              ("app.main.menu_from_products", MENU)):
             patcher = patch(target, return_value=value)
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -321,7 +321,7 @@ class DefaultWiringTests(unittest.TestCase):
 
     def test_empty_menu_skips_the_interpreter(self):
         interpreter = FakeInterpreter()
-        with patch("app.main.build_voice_interpreter", return_value=interpreter):
+        with patch("app.main.build_voice_interpreter", return_value=interpreter),                 patch("app.main.PRODUCTS", ()):
             app = create_app(Settings(_env_file=None, openai_api_key=None))
             with TestClient(app) as client:
                 body = self.request_status(client)
@@ -330,8 +330,7 @@ class DefaultWiringTests(unittest.TestCase):
         self.assertEqual(body["error"]["code"], "ai_unavailable")
         self.assertIn("메뉴", body["error"]["detail"])
 
-    @patch("app.main.empty_menu", return_value=MENU)
-    def test_app_without_key_uses_stub_question(self, _menu):
+    def test_app_without_key_uses_stub_question(self):
         app = create_app(Settings(_env_file=None, openai_api_key=None))
         with TestClient(app) as client:
             self.assertIsInstance(
