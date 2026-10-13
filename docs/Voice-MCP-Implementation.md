@@ -191,7 +191,7 @@ frontend 음성 입력 (`frontend/src/features/voice/`, 화면 요소 없음)
 - 결과가 `needs_confirmation`·`needs_clarification`이면 대답을 듣기 위해 마이크를 자동으로 다시 엽니다. `completed`·`ignored`·`failed`면 닫고, 부르는 쪽이 `listen()`으로 다시 열 수 있습니다(예: 마이크 버튼).
 - 공백·한 글자 인식과 신뢰도 0.3 미만 인식은 주변 소리로 보고 보내지 않습니다. Chrome이 신뢰도를 0으로 주면 "모름"(null)으로 보냅니다.
 - 모드를 언제 켤지(판단 모델의 `voice_guide`, 손님의 버튼), 결과로 장바구니를 다시 불러오거나 MCP를 실행하는 일, 문구 표시는 부르는 쪽이 합니다. `onResult` 콜백과 `useVoiceInput` 훅으로 상태를 받습니다.
-- 테스트: `frontend/`에서 `node --test src/features/voice/*.test.mjs` (`package.json`의 `test` 목록에 넣을지는 프론트 담당과 정합니다).
+- 테스트: `frontend/`에서 `npm test`에 포함됩니다(프론트 담당 제안). 음성만 돌릴 때는 `node --test src/features/voice/*.test.mjs`.
 
 방식: 일반적인 MCP처럼 AI가 도구를 하나씩 호출하며 반복하지 않고, OpenAI 한 번 호출로 실행할 도구 목록을 정한 뒤 검증해서 MCP가 차례로 실행합니다. 도구 입력 형식은 MCP 도구와 같게 맞춰 두었으므로 나중에 반복 호출 방식으로 바꿔도 도구 정의는 그대로 씁니다.
 
