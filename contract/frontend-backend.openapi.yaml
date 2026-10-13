@@ -795,7 +795,11 @@ components:
     UIPreset:
       type: string
       enum: [none, large_text, large_button, simple_screen, step_guide, voice_guide]
-      description: none=화면 유지, 큰 글씨, 큰 버튼, 간편 화면, 단계별 안내, 음성 안내
+      description: |
+        none=현재 화면 유지, 큰 글씨, 큰 버튼, 간편 화면, 단계별 안내, 음성 안내.
+        프론트의 수동 낮은 화면(lowScreen)은 로컬 설정이며 이 프리셋이나 API 요청 필드에 포함하지 않습니다.
+        none은 사용자가 켠 낮은 화면을 해제하지 않습니다.
+        음성·AI·MCP에서 낮은 화면을 적용하는 프리셋 값과 적용·복귀 규칙은 팀 합의 후 별도 반영합니다.
 
     SupportDecision:
       type: object
