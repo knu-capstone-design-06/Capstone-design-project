@@ -45,7 +45,7 @@ _OUTPUT_SCHEMA = {
     "properties": {
         "status": {
             "type": "string",
-            "enum": ["completed", "needs_confirmation", "needs_clarification"],
+            "enum": ["completed", "needs_confirmation", "needs_clarification", "ignored"],
         },
         "tool_calls": {
             "type": "array",

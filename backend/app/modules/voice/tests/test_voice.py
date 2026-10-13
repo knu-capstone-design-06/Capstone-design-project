@@ -159,6 +159,16 @@ class VoiceApiTests(unittest.TestCase):
         self.say("다음")
         self.assertEqual([t.request.text for t in self.interpreter.histories[-1]], ["아메리카노"])
 
+    def test_ignored_speech_is_reported_without_reply_or_history(self):
+        self.interpreter.result = VoiceInterpretation(status="ignored", tool_calls=[], reply_text=None)
+        body = self.status(self.say("너 뭐 먹을래?")).json()
+        self.assertEqual(body["status"], "ignored")
+        self.assertEqual((body["reply_text"], body["tool_calls"], body["actions"]), (None, [], []))
+        self.interpreter.result = interpretation(ADD_AMERICANO)
+        self.say("아메리카노")
+        self.say("다음")
+        self.assertEqual([t.request.text for t in self.interpreter.histories[-1]], ["아메리카노"])
+
     def test_tool_calls_on_menu_are_kept_in_order(self):
         valid = [
             call("update_cart_item", "sandwich", None, 3),
@@ -386,6 +396,10 @@ class OpenAiInterpreterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status, "needs_confirmation")
         self.assertEqual(result.reply_text, CONFIRM)
 
+    async def test_ignored_output_is_parsed(self):
+        result = await self.interpret(openai_output(status="ignored", tool_calls=[]))
+        self.assertEqual((result.status, result.tool_calls, result.reply_text), ("ignored", [], None))
+
     async def test_failures_return_none(self):
         async def slow(request):
             await asyncio.sleep(1)
@@ -408,6 +422,8 @@ class OpenAiInterpreterTests(unittest.IsolatedAsyncioTestCase):
             openai_output(status="needs_confirmation", tool_calls=[], reply_text="담을까요?"),
             openai_output(status="needs_confirmation", reply_text="가" * 61),  # too long
             openai_output(status="needs_clarification", tool_calls=[], reply_text="  "),
+            openai_output(status="ignored"),                    # ignored with calls
+            openai_output(status="ignored", tool_calls=[], reply_text="네?"),  # ignored with text
             openai_output(tool_calls=[{**ADD_AMERICANO, "tool": "pay"}]),
             openai_output(tool_calls=[call("add_cart_item", "americano", "iced", 21)]),
             openai_output(tool_calls=[call("update_cart_item", "americano", "iced", 0)]),

@@ -92,7 +92,9 @@ class VoiceService:
                 error=VoiceErrorResponse(code="ai_unavailable", detail="외부 AI를 사용할 수 없습니다."),
             )
             return
-        self._repository.append_turn(session_id, VoiceTurn(request=request, result=result))
+        if result.status != "ignored":
+            # Speech not meant for the kiosk would only confuse later turns.
+            self._repository.append_turn(session_id, VoiceTurn(request=request, result=result))
         # tool_calls are MCP inputs (a proposal when needs_confirmation); nothing has
         # been changed here, so actions stay empty.
         self._repository.update(request_id, result.status, result.reply_text, result.tool_calls)
