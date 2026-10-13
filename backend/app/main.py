@@ -10,6 +10,8 @@ from app.common.config.settings import Settings, get_settings
 from app.infrastructure.external.ai_client import AiServerClient
 from app.infrastructure.external.openai_client import OpenAiClient, create_openai_http
 from app.modules.connectivity.router import router as connectivity_router
+from app.modules.ordering.repository import OrderingRepository
+from app.modules.ordering.router import router as ordering_router
 from app.modules.sessions.repository import SessionRepository
 from app.modules.sessions.router import router as sessions_router
 from app.modules.sessions.service import SessionService
@@ -70,12 +72,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openapi_url="/openapi.json" if settings.docs_enabled else None,
         lifespan=lifespan,
     )
+    application.state.ordering_repository = OrderingRepository()
     application.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_credentials=False,
-        allow_methods=["GET", "POST"],
-        allow_headers=["Content-Type"],
+        allow_methods=["GET", "POST", "PATCH", "DELETE"],
+        allow_headers=["Content-Type", "Idempotency-Key"],
     )
 
     @application.get("/health", response_model=HealthResponse, tags=["health"])
@@ -83,6 +86,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         """Process liveness only; does not verify DB or AI connectivity."""
         return HealthResponse()
 
+    application.include_router(ordering_router)
     application.include_router(connectivity_router)
     application.include_router(sessions_router)
     application.include_router(voice_router)
