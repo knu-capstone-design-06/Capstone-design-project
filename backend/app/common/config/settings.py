@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
     ai_server_url: str = "http://ai-server:8001"
     ai_server_timeout_seconds: float = Field(default=2.0, gt=0, allow_inf_nan=False)
+    # Unset key: voice requests use development stub replies without calling OpenAI.
+    openai_api_key: SecretStr | None = None
+    openai_model: str = "gpt-4o-mini"
+    openai_timeout_seconds: float = Field(default=10.0, gt=0, allow_inf_nan=False)
 
     @field_validator("ai_server_url")
     @classmethod

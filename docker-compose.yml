@@ -17,6 +17,10 @@ services:
       - "127.0.0.1:8000:8000"
     environment:
       AI_SERVER_URL: http://ai-server:8001
+      # Voice interpretation. Set in the shell or the root .env (not committed); empty = development stub.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-}
+      OPENAI_TIMEOUT_SECONDS: ${OPENAI_TIMEOUT_SECONDS:-}
     depends_on:
       ai-server:
         condition: service_healthy
