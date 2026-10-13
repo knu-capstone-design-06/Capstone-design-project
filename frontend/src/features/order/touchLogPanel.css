@@ -22,3 +22,4 @@
 .touch-log-detail summary { cursor: pointer; font-size: 12px; }
 .touch-log-detail pre { margin: 8px 0 0; padding: 10px; border-radius: 8px; background: #f0f3ef; max-height: 200px; overflow: auto; font-size: 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 760px) { .touch-log-tools { bottom: 254px; } .touch-log-panel { max-height: min(620px, calc(100dvh - 314px)); } }
+@media (max-width: 760px) { .kiosk.large-button ~ .touch-log-tools { bottom: 286px; } .kiosk.large-button ~ .touch-log-tools .touch-log-panel { max-height: min(620px, calc(100dvh - 346px)); } }

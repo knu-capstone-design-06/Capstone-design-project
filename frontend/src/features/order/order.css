@@ -61,6 +61,10 @@ ul { list-style: none; margin: 0; padding: 0; }
 .order-actions { position: fixed; bottom: 0; left: 0; right: 0; z-index: 20; height: var(--order-actions-space); background: #fffefb; border-top: 1px solid #cad6ce; box-shadow: 0 -4px 20px #173e3412; }
 .order-actions-inner { max-width: 1600px; height: 100%; margin: auto; padding: 24px 48px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, .65fr); align-items: center; gap: 40px; }
 .order-actions p { margin: 8px 0 0; font-size: .8em; line-height: 1.6; color: #657867; }
+.order-actions-summary { display: flex; align-items: center; gap: 16px; }
+.order-actions-summary .total { flex: 1; min-width: 0; flex-wrap: wrap; }
+.order-actions-summary > p { flex: 1; margin: 0; }
+.screen-height-toggle { flex-shrink: 0; font-size: .875em; padding: 10px 12px; border-color: #759183; white-space: nowrap; }
 .total { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
 .total > span { font-size: .8em; }
 .total strong { font-size: 1.5em; white-space: nowrap; }
@@ -128,6 +132,8 @@ legend { font-weight: 600; margin-bottom: 12px; }
 .large-text .order-confirm { font-size: 22px; font-weight: 800; line-height: 1; }
 .large-button .order-confirm { min-height: 88px; border: 3px solid #0d3026; box-shadow: 0 0 0 4px #d4e2c9, 0 6px 12px #163f3526; }
 .large-button .order-confirm:disabled { box-shadow: none; }
+.large-text .screen-height-toggle { font-size: 18px; }
+.large-button .screen-height-toggle { padding: 12px 16px; }
 .simple-screen .product-art, .simple-screen .description, .simple-screen .product-category { display: none; }
 .simple-screen .product-info { padding: 26px 22px; }
 .simple-screen .product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -139,3 +145,17 @@ legend { font-weight: 600; margin-bottom: 12px; }
 @media (max-width: 760px) { .header { gap: 12px; flex-wrap: wrap; } .brand { margin-right: auto; } .sample-badge { order: 3; width: 100%; text-align: center; } .order-layout { grid-template-columns: 1fr; } .cart { position: static; } .steps { gap: 14px; margin-bottom: 28px; flex-wrap: wrap; } .intro h1 { font-size: 1.7em; } .product-grid { gap: 12px; } .product-art { min-height: 120px; font-size: 3em; } .product-info { padding: 14px; } .categories { flex-wrap: wrap; } .review-card .cart-row { flex-wrap: wrap; } .simple-screen .product-grid { grid-template-columns: 1fr; } .dialog-quantity { flex-wrap: wrap; } }
 @media (max-width: 760px) { .large-button .product-grid { grid-template-columns: 1fr; } }
 @media (max-width: 760px) { .kiosk { --order-actions-space: 210px; } .large-button { --order-actions-space: 240px; } .order-actions-inner { grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 16px 24px; } .order-actions p { margin-top: 4px; } }
+@media (max-width: 760px) { .large-button { --order-actions-space: 272px; } }
+
+/* 1080×1920에서는 하단 60%를 사용합니다. 짧은 창에서는 최소 조작 높이를 확보합니다. */
+.low-screen, .low-screen-banner { --low-screen-height: min(100dvh, max(60dvh, 720px)); }
+.kiosk.low-screen { position: fixed; inset: auto 0 0; height: var(--low-screen-height); display: flex; flex-direction: column; background: #f7f6f2; border-top: 1px solid #d9dfd7; border-radius: 24px 24px 0 0; box-shadow: 0 -8px 32px #173e3410; }
+.low-screen > .header { flex-shrink: 0; border-radius: 24px 24px 0 0; }
+.low-screen > main { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; scroll-padding-block: 24px; scrollbar-gutter: stable; }
+.low-screen > .support-panel { flex-shrink: 0; max-height: min(360px, calc(var(--low-screen-height) - var(--order-actions-space) - 200px)); overflow-y: auto; overscroll-behavior-y: contain; }
+.low-screen > .footer { display: none; }
+.low-screen .options-dialog { position: fixed; inset: auto 16px 24px; margin: 0 auto; max-height: calc(var(--low-screen-height) - 48px); overscroll-behavior-y: contain; scroll-padding-block: 24px; }
+.low-screen-banner { position: fixed; inset: 0 0 auto; height: calc(100dvh - var(--low-screen-height)); display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 16px; overflow: hidden; pointer-events: none; color: #657867; }
+.low-screen-banner strong { color: #163f35; font-size: 36px; letter-spacing: -.06em; }
+.low-screen-banner p { margin: 0; font-size: 18px; }
+@media (max-height: 900px) { .low-screen-banner { display: none; } }

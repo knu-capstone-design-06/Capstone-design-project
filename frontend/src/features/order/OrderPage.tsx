@@ -10,7 +10,7 @@ import { useTouchLog } from './useTouchLog.ts';
 import { TouchLogPanel } from './TouchLogPanel.tsx';
 import './order.css';
 
-const supportLabels: Record<keyof Settings, string> = { largeText: '큰 글씨', largeButton: '큰 버튼', simpleScreen: '간편 화면', stepGuide: '단계별 안내' };
+const supportLabels: Record<keyof Settings, string> = { largeText: '큰 글씨', largeButton: '큰 버튼', simpleScreen: '간편 화면', stepGuide: '단계별 안내', lowScreen: '낮은 화면' };
 const sampleMode = import.meta.env.DEV && import.meta.env.VITE_ORDER_SAMPLE === 'true';
 
 export function OrderPage() {
@@ -58,6 +58,9 @@ export function OrderPage() {
       return { ...current, largeText: enabled, largeButton: enabled };
     });
   }
+  function toggleScreenHeight() {
+    setSettings(current => ({ ...current, lowScreen: !current.lowScreen }));
+  }
   function closeOptions() { setSelected(null); opener.current?.focus(); }
   async function addSelected() {
     if (!selected) return;
@@ -97,7 +100,9 @@ export function OrderPage() {
     </div><button data-log-target={`cart:${item.product_id}:${temperatureLabel(item.temperature)}:remove`} className="text-button" aria-label={`${item.name} ${temperatureLabel(item.temperature)} 삭제`} disabled={writeDisabled} onClick={() => void controller.removeItem(item.item_id)}>삭제</button></div>
   </li>);
 
-  return <><div ref={touchLog.root} className={`kiosk ${settings.largeText ? 'large-text' : ''} ${settings.largeButton ? 'large-button' : ''} ${settings.simpleScreen ? 'simple-screen' : ''}`}>
+  const screenHeightButton = <button data-log-target="screen-height-toggle" className="screen-height-toggle" aria-pressed={settings.lowScreen} onClick={toggleScreenHeight}>{settings.lowScreen ? '기본 높이' : '낮은 화면'}</button>;
+
+  return <>{settings.lowScreen && <div className="low-screen-banner" aria-hidden="true"><strong>온기 카페</strong><p>메뉴와 버튼을 아래로 내렸어요.</p></div>}<div ref={touchLog.root} className={`kiosk ${settings.largeText ? 'large-text' : ''} ${settings.largeButton ? 'large-button' : ''} ${settings.simpleScreen ? 'simple-screen' : ''} ${settings.lowScreen ? 'low-screen' : ''}`}>
     <header className="header"><a data-log-target="menu-home" className="brand" href="#" onClick={event => { event.preventDefault(); if (screen !== 'complete') setScreen('menu'); }}>온기 카페</a><span className="sample-badge">{sampleMode ? '개발용 샘플' : '샘플 주문'} · 실제 결제 없음</span><button data-log-target="support-toggle" className="support-trigger" aria-expanded={supportOpen} aria-controls="support-panel" onClick={() => setSupportOpen(!supportOpen)}>화면 도움 {supportOpen ? '닫기' : '열기'}</button></header>
     {supportOpen && <section id="support-panel" className="support-panel" aria-label="화면 도움 설정"><div><h2>편한 화면으로 주문해 주세요</h2><p>설정을 바꿔도 담은 메뉴는 그대로예요.</p></div><div className="support-options">{(Object.keys(supportLabels) as (keyof Settings)[]).map(key => <button data-log-target={`support:${key}`} key={key} aria-pressed={settings[key]} onClick={() => setSettings(current => ({ ...current, [key]: !current[key] }))}>{settings[key] ? '✓ ' : ''}{supportLabels[key]}</button>)}<button data-log-target="support:combinedEnlargement" aria-pressed={combinedEnlargement} onClick={toggleCombinedEnlargement}>{combinedEnlargement ? '✓ ' : ''}큰 글씨 + 큰 버튼 (테스트)</button><button data-log-target="support-reset" onClick={() => setSettings({ ...initialSettings })}>기본 화면</button></div></section>}
     <main>
@@ -118,7 +123,7 @@ export function OrderPage() {
       </>}
     </main><footer className="footer"><span>온기 카페</span><span>천천히 골라도 괜찮아요.</span></footer>
     <section className="order-actions" aria-label="주문 진행"><div className="order-actions-inner">
-      {screen === 'complete' ? <p>실제 결제 없음 · 샘플 주문이에요.</p> : <div><div className="total"><span>총 주문 금액 · {count}개</span><strong>{money(sum)}</strong></div><p>{screen === 'menu' ? '담은 메뉴를 다음 화면에서 확인할 수 있어요.' : '실제 결제 없이 샘플 주문을 완료해요.'}</p></div>}
+      {screen === 'complete' ? <div className="order-actions-summary"><p>실제 결제 없음 · 샘플 주문이에요.</p>{screenHeightButton}</div> : <div><div className="order-actions-summary"><div className="total"><span>총 주문 금액 · {count}개</span><strong>{money(sum)}</strong></div>{screenHeightButton}</div><p>{screen === 'menu' ? '담은 메뉴를 다음 화면에서 확인할 수 있어요.' : '실제 결제 없이 샘플 주문을 완료해요.'}</p></div>}
       <button data-log-target={screen === 'complete' ? 'new-order' : screen === 'menu' ? 'review-open' : 'simulate-payment'} className="primary order-confirm" disabled={screen === 'complete' ? busy : !count || writeDisabled} onClick={() => screen === 'complete' ? void startNewOrder() : screen === 'menu' ? setScreen('review') : void controller.checkout()}>{screen === 'complete' ? '새 주문 시작' : screen === 'menu' ? '주문 확인' : '샘플 주문 완료'} <span aria-hidden="true">→</span></button>
     </div></section>
     <dialog ref={dialog} className="options-dialog" onCancel={event => { event.preventDefault(); closeOptions(); }} onClick={event => { if (event.target === event.currentTarget) closeOptions(); }} aria-labelledby="option-title">
