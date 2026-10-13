@@ -1,6 +1,6 @@
 import hashlib
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from uuid import UUID
 
 from app.modules.voice.exceptions import VoiceRequestNotFound, VoiceSessionNotFound
@@ -17,8 +17,17 @@ FALLBACK_REPLY = "지금은 음성 주문이 어려워요. 화면을 눌러 주�
 
 
 def empty_menu() -> list[MenuItem]:
-    """Placeholder until the backend product API exists."""
+    """No products to sell: requests fail without calling the interpreter."""
     return []
+
+
+def menu_from_products(products: Iterable[object]) -> list[MenuItem]:
+    """Keep only the product fields the interpreter needs (e.g. the ordering catalog)."""
+    fields = MenuItem.model_fields.keys()
+    return [
+        MenuItem.model_validate({name: getattr(product, name) for name in fields})
+        for product in products
+    ]
 
 
 def matches_menu(result: VoiceInterpretation, menu: list[MenuItem]) -> bool:
