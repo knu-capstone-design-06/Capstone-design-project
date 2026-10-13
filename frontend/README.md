@@ -6,7 +6,7 @@
 
 OpenAPI 0.3.0에 상품 조회, 장바구니 조회·추가·수량 변경·삭제, 모의 주문 확정의 신규 6개 API를 팀 검토용 초안으로 추가했습니다. 요청·응답의 기준 형식은 [OpenAPI](../contract/frontend-backend.openapi.yaml), 설계 이유와 미정 정책은 [주문 API 검토 문서](../docs/Product-Cart-Order-API-Draft.md)를 확인합니다. 신규 operation의 `x-contract-status: draft`는 팀 검토 대기 상태입니다.
 
-주문 operation의 `x-frontend-status: prepared`는 프론트 준비, `x-backend-status: pending`은 서버 구현 대기를 뜻합니다. 기존 네 연결 API는 백엔드에 구현돼 있으며 상품·장바구니·주문 API는 구현 대기입니다.
+주문 operation의 `x-frontend-status: prepared`는 프론트 준비, `x-backend-status: implemented`는 초안 기준 서버 구현 완료를 뜻합니다. 기존 네 연결 API는 백엔드에 구현돼 있으며 상품·장바구니·모의 주문 6개 API는 PR #40에서 초안 기준으로 구현했습니다(메모리 저장). 실제 프론트 통합 검증과 최종 계약·정책 합의는 남아 있습니다.
 
 프론트의 상품·Cart·Order 타입·API 호출·화면 처리를 준비했습니다. 성공 응답 후 수량·금액을 확정 표시하고, 네트워크 오류·응답 유실은 같은 키·본문의 ‘주문 반영 확인’으로 재시도합니다. 처리 중에는 변경 버튼을 막습니다. 변경 요청에는 `expected_version`과 `Idempotency-Key`가 필요하며 DELETE의 버전은 쿼리로 전달합니다. 버전 충돌은 최신 장바구니를 표시하고 재확인하며, 신규 오류는 `code`, `detail`, `cart`로 구분합니다. 서버 정책과 초안의 최종 확정은 담당자 리뷰와 팀 합의가 필요합니다.
 
@@ -121,7 +121,7 @@ import { backendApi } from './src/shared/api/index.ts';
 const health = await backendApi.getBackendHealth();
 ```
 
-백엔드에는 `/health`, 연결 확인, 임시 세션 생성, 특징 전송이 구현돼 있습니다. 상품·장바구니·모의 주문은 아직 구현 전입니다. 공개 환경의 세션 접근·인증·쿠키·CORS 정책은 백엔드 담당자와 합의할 사항입니다. 프론트 작업에서 서버 설정을 변경하지 않습니다.
+백엔드에는 `/health`, 연결 확인, 임시 세션 생성, 특징 전송이 구현돼 있습니다. 상품·장바구니·모의 주문 6개 API도 PR #40에서 초안 기준으로 구현됐으며 실제 프론트 통합 검증은 남아 있습니다. 공개 환경의 세션 접근·인증·쿠키·CORS 정책은 백엔드 담당자와 합의할 사항입니다. 프론트 작업에서 서버 설정을 변경하지 않습니다.
 
 로컬 `pnpm dev`도 `/backend/`를 `http://127.0.0.1:8000`으로 전달합니다. 다른 백엔드에 연결하려면 `BACKEND_URL=http://127.0.0.1:8000 pnpm dev`처럼 실행 환경에서 주소를 전달합니다. Docker에서는 Compose의 frontend `BACKEND_URL` 환경변수로 대상 주소를 설정합니다. 주소는 브라우저에 Docker 서비스 이름을 노출하지 않고 프록시에서 사용합니다.
 

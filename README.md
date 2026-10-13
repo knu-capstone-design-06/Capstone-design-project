@@ -8,12 +8,12 @@
 
 처음 읽는 분께: ① 프로젝트가 무엇인지는 이 문서의 '프로젝트 목표'와 '시스템 아키텍처', ② 지금 어디까지 됐는지는 '현재 구현 상태' 표(날짜·담당·문서 링크), ③ 다음 날짜는 '일정', ④ 낯선 말은 '용어'를 보세요. 부분별 세부 상태는 각 폴더의 README이고, 팀 검토 문서는 `docs/*-Review.md`·`docs/*-Implementation.md`, 인터페이스 형식과 합의 상태는 `contract/`에서 확인합니다(음성 명세와 신규 주문 API는 팀 검토용 초안).
 
-## 현재 구현 상태 (2026-10-12 기준)
+## 현재 구현 상태 (주문 API 상태: 2026-10-14 갱신)
 
 | 부분 | 담당(GitHub) | 상태 | 자세한 문서 |
 |---|---|---|---|
-| 프론트엔드 | dudwlghkd | 샘플 상품·장바구니·모의 주문 화면, 수동 접근성 설정, 로컬 터치 기록을 구현했습니다(PR #17 · #19). 서버 주문 API 응답을 처리하는 프론트 흐름을 준비했습니다(PR #33, 2026-10-12 병합). 서버 쪽 상품·장바구니·주문 API는 구현 대기입니다 | `frontend/README.md` |
-| 백엔드·DB | bb-cloud-create | 연결 확인·임시 세션·특징 전송 API를 구현했습니다(메모리 세션). 상품·장바구니·주문 API는 구현 대기입니다. Supabase 첫 마이그레이션을 적용했습니다(2026-10-07) | `backend/README.md`, `db/README.md` |
+| 프론트엔드 | dudwlghkd | 샘플 상품·장바구니·모의 주문 화면, 수동 접근성 설정, 로컬 터치 기록을 구현했습니다(PR #17 · #19). 서버 주문 API 응답을 처리하는 프론트 흐름을 준비했습니다(PR #33, 2026-10-12 병합). 서버 쪽 상품·장바구니·주문 API는 PR #40에서 초안 기준으로 구현됐으며 실제 프론트 통합 검증은 남아 있습니다 | `frontend/README.md` |
+| 백엔드·DB | bb-cloud-create | 연결 확인·임시 세션·특징 전송 API를 구현했습니다(메모리 세션). 상품·장바구니·모의 주문 6개 API는 PR #40에서 초안 기준으로 구현했습니다(메모리 저장). 실제 프론트 통합 검증과 최종 계약·정책 합의는 남아 있습니다. Supabase 첫 마이그레이션을 적용했습니다(2026-10-07) | `backend/README.md`, `db/README.md` |
 | AI 서버·음성·Jev | jiwon-L-ee | `/v1/analyze`는 명세 예시 값을 돌려주는 자리 표시입니다. 음성·MCP는 제안 단계이고, backend의 음성 해석 API(대화 맥락 해석 → MCP 장바구니 도구 입력 생성)는 PR #36에서 검토 중입니다. Jev는 아직 연동하지 않았습니다 | `ai-server/README.md`, `docs/Voice-MCP-Implementation.md` |
 | 컴퓨터 비전 | wdragon92 | 관측 뼈대(PR #32, 2026-10-10)와 상황 태그 3개의 규칙 · 출력 형식(PR #35, 2026-10-12)을 병합했습니다. 기준값은 모두 `[파일럿]`이고, 실행기 · 서버 연결은 없습니다. 학교 GPU 서버에서 머리 탐지기를 학습했습니다(2026-10-12 끝) | `ai-server/app/modules/vision/README.md` |
 | 인프라 | bb-cloud-create | EC2 템플릿을 검증했습니다(PR #31). 스택은 비용 승인 전이라 만들지 않았습니다 | `infra/aws/README.md` |
@@ -30,7 +30,7 @@
 - 큰 글씨·큰 버튼·간편 화면·단계별 안내·낮은 화면, 화면 하단의 주문 진행 버튼
 - 로컬 터치·상호작용 기록에 서버 세션 ID 연결, 새 서버 세션·새로고침의 로그 세션 분리; 서버 통계 전송·AI 자동 지원은 미연결
 
-터치 원시 기록은 주문 화면에서 로컬로 수집합니다. 백엔드에는 상태·연결 확인, 임시 세션 생성, 특징 전송이 구현돼 있고 상품·Cart·Order 서버 API는 구현 대기입니다. 주문 API가 없는 서버에서는 연결 대기를 표시합니다. 브라우저 테스트는 미리 준비한 HTTP 응답으로 프론트 동작을 검증하며 서버 구현을 대신하지 않습니다.
+터치 원시 기록은 주문 화면에서 로컬로 수집합니다. 백엔드에는 상태·연결 확인, 임시 세션 생성, 특징 전송이 구현돼 있고 상품·Cart·Order 서버 API는 PR #40에서 초안 기준으로 구현됐습니다. 실제 프론트 통합 검증과 최종 계약·정책 합의는 남아 있습니다. 주문 API가 없는 서버에서는 연결 대기를 표시합니다. 브라우저 테스트는 미리 준비한 HTTP 응답으로 프론트 동작을 검증하며 서버 구현을 대신하지 않습니다.
 
 첫 시연에 필수가 아닌 완료 화면 복원·서버 재시작 후 보관·장기 보관·정밀 만료·동적 가격 변경은 후순위입니다. 공개 환경의 세션 접근 정책과 수량·버전·중복 요청 처리는 담당자 리뷰와 팀 합의가 필요합니다. 주문 UI의 새 주문·설정 유지 방향은 프론트 담당자의 검토 결과이며 팀의 최종 세션 정책과 구분합니다. 터치 통계 계산·서버 전송, 비전 수집, 음성·MCP, AI·Jev 기반 자동 지원, 실제 결제·재고 차감은 아직 연결하지 않았습니다.
 
@@ -343,7 +343,7 @@ Capstone-design/
 - [`contract/backend-ai.openapi.yaml`](contract/backend-ai.openapi.yaml): 백엔드 ↔ AI 서버
 - [`contract/voice.openapi.yaml`](contract/voice.openapi.yaml): 프론트엔드 ↔ 백엔드 음성 요청. 팀 검토 전 제안(판 번호는 파일의 `info.version`)
 
-신규 주문 API 6개는 `x-contract-status: draft`로 표시한 팀 검토용 명세입니다. 설계 이유·미정 정책은 [`docs/Product-Cart-Order-API-Draft.md`](docs/Product-Cart-Order-API-Draft.md)에 기록합니다. 명세 반영은 서버 구현이나 실제 주문·결제 연결 완료를 의미하지 않습니다. 프론트 호출 함수·타입·화면은 초안에 맞춰 준비했으며 `x-frontend-status: prepared`, 서버 주문 API는 `x-backend-status: pending`으로 구분합니다. 팀 검토 후 백엔드 라우터·서비스·저장소와 상품 데이터를 구현하고 실제 요청·응답으로 프론트를 검증합니다. 구체적인 담당자·일정은 팀에서 정하고 PR에 기록합니다.
+신규 주문 API 6개는 `x-contract-status: draft`로 표시한 팀 검토용 명세입니다. 설계 이유·미정 정책은 [`docs/Product-Cart-Order-API-Draft.md`](docs/Product-Cart-Order-API-Draft.md)에 기록합니다. 명세 반영은 서버 구현이나 실제 주문·결제 연결 완료를 의미하지 않습니다. 프론트 호출 함수·타입·화면은 초안에 맞춰 준비했으며 `x-frontend-status: prepared`, 서버 주문 API는 `x-backend-status: implemented`로 구분합니다. 백엔드 라우터·서비스·메모리 저장소·시연 상품 데이터는 PR #40에서 구현했습니다. 실제 요청·응답으로 프론트를 통합 검증하고 미정 계약·정책은 팀에서 합의합니다. 구체적인 담당자·일정은 팀에서 정하고 PR에 기록합니다.
 
 ## 역할 분담
 
@@ -419,9 +419,9 @@ docker compose up --build
 
 Compose 이미지에는 `backend/.env`를 복사하지 않으며 현재 Compose에도 `env_file` 설정이 없습니다. 필요한 환경변수는 Compose의 `environment` 등 실행 환경에서 주입합니다. 루트 `.env`를 Compose 변수 치환에 사용하는 것과 컨테이너에 값을 전달하는 것은 별개입니다.
 
-기존 연결 API 검증 기록은 [PR #26](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/26)를 참고합니다. 상품·장바구니·주문 API의 통합 검증은 백엔드 구현 후 별도로 수행합니다.
+기존 연결 API 검증 기록은 [PR #26](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/26)를 참고합니다. 상품·장바구니·주문 API의 통합 검증은 실제 백엔드를 연결해 별도로 수행합니다.
 
-Compose의 frontend는 Nginx의 `/backend/` 프록시로 backend를 호출합니다([프론트엔드 README](frontend/README.md#docker-실행과-백엔드-연결)). 연결 확인·세션 생성·특징 전송은 backend에 구현돼 있으며, 상품·장바구니·모의 주문과 세 서비스의 전체 기능 연동은 구현·검증 대기입니다.
+Compose의 frontend는 Nginx의 `/backend/` 프록시로 backend를 호출합니다([프론트엔드 README](frontend/README.md#docker-실행과-백엔드-연결)). 연결 확인·세션 생성·특징 전송은 backend에 구현돼 있으며, 상품·장바구니·모의 주문 API도 PR #40에서 초안 기준으로 구현됐습니다. 실제 프론트 주문 통합 검증과 세 서비스의 전체 기능 연동은 남아 있습니다.
 
 - API 키와 DB 자격 증명은 저장소에 커밋하지 않습니다.
 - `.env.example`에는 실제 비밀값 없이 필요한 항목을 문서화합니다.
