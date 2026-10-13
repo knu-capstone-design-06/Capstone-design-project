@@ -206,7 +206,7 @@ frontend 음성 입력 (`frontend/src/features/voice/`, 화면 요소 없음)
 | 5 | 실행 결과를 `actions`(`cart_updated` 등)와 SSE 알림으로 전달 | Back-end + Front-end | 4, 3.4 |
 | 6 | 프론트 화면 연결: `features/voice`의 `VoiceController`를 주문 화면에 붙이고(세션·`screen_id` 전달), `voice_guide`나 버튼으로 모드 켜기, `reply_text` 표시, 확인 UI. 인식·요청·상태 조회는 구현함 | Front-end | 판단 모델 결과 수신 |
 | 7 | 실행 환경: 직접 호출(다른 출처)을 지원한다면 CORS에 `Idempotency-Key` 헤더와 필요한 메서드 허용(공용 설정, 합의 필요). Compose의 키 전달은 반영함 | Back-end·infra | — |
-| 8 | 실제 키로 프롬프트 검증, 실험에 쓴 프롬프트 버전(`interpret_v1`)·모델 기록 | Decision AI | 2 |
+| 8 | 실제 키로 프롬프트 검증, 실험에 쓴 프롬프트 버전(현재 `interpret_v2`, v1은 ignored 없음)·모델 기록 | Decision AI | 2 |
 
 ### 7.3 결정이 필요한 항목
 
