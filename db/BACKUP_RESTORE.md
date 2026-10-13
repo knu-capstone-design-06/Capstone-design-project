@@ -40,7 +40,7 @@ foreach ($file in $sqlFiles) {
         throw "backup file missing or empty: $file"
     }
 }
-$sqlFiles | Get-FileHash -Algorithm SHA256 |
+Get-FileHash -LiteralPath $sqlFiles -Algorithm SHA256 -ErrorAction Stop |
     Select-Object Hash, @{ Name = 'File'; Expression = { Split-Path $_.Path -Leaf } } |
     Export-Csv -LiteralPath (Join-Path $backupDir 'SHA256SUMS.csv') -NoTypeInformation -Encoding utf8
 ```
