@@ -102,13 +102,18 @@ export class VoiceController {
 
   /** 모드가 켜져 있고 쉬는 중일 때 한 문장을 듣습니다(예: 부르는 쪽의 마이크 버튼). */
   listen(): boolean {
+    return this.open(false);
+  }
+
+  /** answering: 확인·질문 뒤라 "네" 같은 짧은 대답도 받습니다. */
+  private open(answering: boolean): boolean {
     if (!this.state.enabled || !this.recognition) return false;
     if (this.state.phase === 'listening') return true;
     if (this.state.phase !== 'idle') return false;
     if (!this.context.sessionId.trim()) { this.set({ error: 'no_session' }); return false; }
     const capture = createSpeechCapture(this.recognition, {
       onPartial: text => { if (this.capture === capture) this.set({ partialText: text }); },
-      onFinal: result => { if (this.capture === capture) this.accept(result); },
+      onFinal: result => { if (this.capture === capture) this.accept(result, answering); },
       onError: code => { if (this.capture === capture) this.set({ error: code }); },
       onEnd: () => {
         if (this.capture !== capture) return;
@@ -136,14 +141,15 @@ export class VoiceController {
     if (this.state.phase !== 'idle' || this.state.partialText) this.set({ phase: 'idle', partialText: '' });
   }
 
-  /** 짧거나 신뢰도가 아주 낮은 인식은 주변 소리로 보고 보내지 않습니다. */
-  private looksLikeNoise(result: SpeechResult): boolean {
+  /** 짧거나 신뢰도가 아주 낮은 인식은 주변 소리로 보고 보내지 않습니다. 대답을 기다릴 때는 한 글자도 받습니다. */
+  private looksLikeNoise(result: SpeechResult, answering: boolean): boolean {
     const confidence = result.alternatives[0]?.confidence ?? null;
-    return result.text.replace(/\s/g, '').length < 2 || (confidence !== null && confidence < this.minConfidence);
+    const minLength = answering ? 1 : 2;
+    return result.text.replace(/\s/g, '').length < minLength || (confidence !== null && confidence < this.minConfidence);
   }
 
-  private accept(result: SpeechResult) {
-    if (this.looksLikeNoise(result)) return;
+  private accept(result: SpeechResult, answering: boolean) {
+    if (this.looksLikeNoise(result, answering)) return;
     const controller = new AbortController();
     this.processing = controller;
     this.set({ phase: 'processing', partialText: result.text });
@@ -167,7 +173,7 @@ export class VoiceController {
     }
     this.set({ phase: 'idle', partialText: '', lastResult: outcome, error: null });
     this.onResult(outcome);
-    if (ASKS_USER.has(outcome.status)) this.listen();
+    if (ASKS_USER.has(outcome.status)) this.open(true);
   }
 
   private async poll(sessionId: string, requestId: string, signal: AbortSignal): Promise<VoiceRequestStatus | 'timeout'> {
