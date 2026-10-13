@@ -13,6 +13,9 @@ class SessionService:
     def __init__(self, repository: SessionRepository):
         self._repository = repository
 
+    def exists(self, session_id: str) -> bool:
+        return self._repository.exists(session_id)
+
     def create(self) -> SessionCreateResponse:
         return self._repository.create()
 
