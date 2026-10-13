@@ -29,7 +29,8 @@ export type VoiceControllerOptions = {
 // 제안값입니다. docs/Voice-MCP-Implementation.md의 미정 항목을 참고합니다.
 export const VOICE_SILENCE_MS = 8_000;
 export const VOICE_MIN_CONFIDENCE = 0.3;
-const POLL_INTERVAL_MS = 500;
+// 계약(contract/voice.openapi.yaml)의 상태 조회 간격 1초 이상을 따릅니다.
+const POLL_INTERVAL_MS = 1_000;
 const POLL_TIMEOUT_MS = 15_000;
 const SETTLED = new Set<VoiceStatus>(['completed', 'needs_confirmation', 'needs_clarification', 'ignored', 'failed']);
 // 손님의 대답이 필요한 결과에서는 마이크를 다시 엽니다.
