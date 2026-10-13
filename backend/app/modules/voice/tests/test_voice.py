@@ -297,6 +297,16 @@ class RetentionTests(unittest.TestCase):
         self.assertIsNone(self.repository.get("s1", record.request_id))
 
 
+class PromptVersionTests(unittest.TestCase):
+    def test_current_prompt_explains_every_status(self):
+        from app.modules.voice import interpreter
+
+        self.assertEqual(interpreter.PROMPT_VERSION, "interpret_v2")
+        prompt = interpreter._PROMPT_PATH.read_text(encoding="utf-8")
+        for status in ("completed", "needs_confirmation", "needs_clarification", "ignored"):
+            self.assertIn(f"- {status}:", prompt)
+
+
 class MenuFromProductsTests(unittest.TestCase):
     def test_ordering_catalog_becomes_interpreter_menu(self):
         from app.modules.ordering.catalog import PRODUCTS
