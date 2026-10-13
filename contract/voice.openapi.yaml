@@ -36,8 +36,9 @@ servers:
     description: frontend nginx 프록시 경유 (docker compose). 브라우저 frontend는 이 경로로만 호출합니다.
   - url: http://localhost:8000
     description: |
-      backend 직접 호출 (docker compose). 개발 도구·테스트용입니다. 지금 CORS는 Idempotency-Key 헤더를 허용하지 않아
-      다른 출처의 브라우저에서는 호출할 수 없습니다. 직접 호출을 지원할지는 팀에서 정합니다.
+      backend 직접 호출 (docker compose). 개발 도구·테스트용입니다. backend CORS는 Idempotency-Key 헤더를 허용하지만
+      backend `CORS_ORIGINS`(기본 http://localhost:5173, http://localhost:3000)에 있는 출처의 브라우저만 호출할 수 있습니다.
+      배포 환경에서 직접 호출을 지원할지는 팀에서 정합니다.
 
 paths:
   /api/v1/sessions/{session_id}/voice/requests:
