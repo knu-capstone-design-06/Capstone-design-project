@@ -133,7 +133,9 @@ class OrderingApiTests(unittest.TestCase):
                                   json={"expected_version": 1})
         self.assertEqual(replay.status_code, 201)
         self.assertEqual(replay.json(), order)
-        self.assertEqual(self.client.get(f"{self.base}/cart").json()["items"], [])
+        after = self.client.get(f"{self.base}/cart")
+        self.assertEqual((after.status_code, after.json()["code"]),
+                         (410, "session_expired"))
         expired = self.add(version=2)
         self.assertEqual((expired.status_code, expired.json()["code"]),
                          (410, "session_expired"))

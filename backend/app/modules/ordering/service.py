@@ -28,7 +28,10 @@ class OrderingService:
 
     def cart(self, session_id: str) -> Cart:
         with self._repository.lock:
-            return self._state(session_id).cart.model_copy(deep=True)
+            state = self._state(session_id)
+            if state.completed:
+                raise OrderingError(410, "session_expired", "새 이용 세션을 시작해 주세요.")
+            return state.cart.model_copy(deep=True)
 
     @staticmethod
     def _fingerprint(method: str, path: str, payload: dict, query: str = "") -> str:
