@@ -25,6 +25,13 @@ test('손상된 저장 설정과 boolean이 아닌 값은 기본 설정으로 �
   assert.deepEqual(readSettings(JSON.stringify({ largeText: 'false' })), initialSettings);
 });
 
+test('낮은 화면 설정을 복원하고 이전 저장 형식에서는 기본 높이를 사용한다', () => {
+  const oldSettings = { largeText: true, largeButton: false, simpleScreen: false, stepGuide: true };
+  assert.deepEqual(readSettings(JSON.stringify(oldSettings)), { ...oldSettings, lowScreen: false });
+  assert.deepEqual(readSettings(JSON.stringify({ ...oldSettings, lowScreen: true })), { ...oldSettings, lowScreen: true });
+  assert.deepEqual(readSettings(JSON.stringify({ ...oldSettings, lowScreen: 'true' })), { ...oldSettings, lowScreen: false });
+});
+
 const emptyCart = (session = 'session-1') => ({ session_id: session, version: 0, currency: 'KRW', items: [], total_quantity: 0, total_amount: 0, updated_at: '2026-10-09T00:00:00Z' });
 const populatedCart = (version = 1) => ({ ...emptyCart(), version,
   items: [{ item_id: 'item-1', product_id: 'americano', name: '아메리카노', temperature: 'iced', quantity: 2, unit_price: 3500, line_amount: 7000 }],
