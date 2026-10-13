@@ -52,6 +52,23 @@ test('확인·질문 결과에는 대답을 듣기 위해 마이크를 다시 �
   assert.equal(FakeRecognition.instances.length, 2);
 });
 
+test('확인 질문 뒤의 "네"는 같은 세션의 다음 요청으로 보낸다', async () => {
+  const { calls, controller, delivered } = setup([
+    status('needs_confirmation', { tool_calls: [addAmericano], reply_text: '아이스 아메리카노 2잔 담을까요?' }),
+    status('completed', { tool_calls: [addAmericano] }),
+  ]);
+  controller.setEnabled(true);
+  FakeRecognition.last().final(['아메리카노 두 잔', 0.5]);
+  await tick(20);
+  assert.equal(controller.getSnapshot().phase, 'listening');
+  FakeRecognition.last().final(['네', 0.9]);
+  await tick(20);
+  assert.deepEqual(calls.map(call => [call.sessionId, call.body.text, call.key]), [
+    ['session-1', '아메리카노 두 잔', 'key-1'], ['session-1', '네', 'key-2'],
+  ]);
+  assert.deepEqual(delivered.map(result => result.status), ['needs_confirmation', 'completed']);
+});
+
 test('키오스크에게 한 말이 아니면(ignored) 화면 문구 없이 닫는다', async () => {
   const { controller, delivered } = setup([status('ignored')]);
   controller.setEnabled(true);
@@ -62,7 +79,7 @@ test('키오스크에게 한 말이 아니면(ignored) 화면 문구 없이 닫�
   assert.equal(FakeRecognition.instances.length, 1);
 });
 
-test('한 글자이거나 신뢰도가 아주 낮은 인식은 서버로 보내지 않는다', async () => {
+test('대답을 기다리지 않을 때 한 글자이거나 신뢰도가 아주 낮은 인식은 서버로 보내지 않는다', async () => {
   const { calls, controller } = setup([status('completed')]);
   controller.setEnabled(true);
   FakeRecognition.last().final(['네', 0.9]);
