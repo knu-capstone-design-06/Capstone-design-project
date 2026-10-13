@@ -34,10 +34,18 @@ if ($LASTEXITCODE -ne 0) { throw 'migration schema dump failed' }
 supabase db dump --db-url $env:SUPABASE_ADMIN_DB_URL -f $historyData --use-copy --data-only --schema supabase_migrations
 if ($LASTEXITCODE -ne 0) { throw 'migration history dump failed' }
 
-Get-ChildItem -LiteralPath $backupDir -File | Get-FileHash -Algorithm SHA256
+$sqlFiles = @($roles, $schema, $data, $historySchema, $historyData)
+foreach ($file in $sqlFiles) {
+    if (-not (Test-Path -LiteralPath $file -PathType Leaf) -or (Get-Item -LiteralPath $file).Length -eq 0) {
+        throw "backup file missing or empty: $file"
+    }
+}
+$sqlFiles | Get-FileHash -Algorithm SHA256 |
+    Select-Object Hash, @{ Name = 'File'; Expression = { Split-Path $_.Path -Leaf } } |
+    Export-Csv -LiteralPath (Join-Path $backupDir 'SHA256SUMS.csv') -NoTypeInformation -Encoding utf8
 ```
 
-3. 다섯 파일의 크기가 0보다 크고 해시가 기록되었는지 확인합니다. 암호화된 외부 저장소에 올린 다음 보관된 파일의 해시를 다시 비교합니다. 정한 보존 기간에 따라 오래된 백업을 폐기하고 작업이 끝나면 터미널의 관리자 접속 환경변수를 지웁니다.
+3. 다섯 SQL 파일과 `SHA256SUMS.csv`를 함께 암호화된 외부 저장소에 올립니다. 복구 전 내려받은 SQL 파일의 해시를 CSV와 다시 비교합니다. 정한 보존 기간에 따라 오래된 백업을 폐기하고 작업이 끝나면 터미널의 관리자 접속 환경변수를 지웁니다.
 
 ## 격리된 프로젝트에서 복구 연습
 
@@ -45,6 +53,25 @@ Get-ChildItem -LiteralPath $backupDir -File | Get-FileHash -Algorithm SHA256
 2. 새 프로젝트의 관리자 접속 문자열을 비밀 저장소에서 가져와 `SUPABASE_RESTORE_DB_URL`에 설정합니다. [Supabase 공식 CLI 복구 절차](https://supabase.com/docs/guides/platform/migrating-within-supabase/backup-restore)에 따라 `roles.sql` → `schema.sql` → `data.sql` 순서로 복구합니다. 환경에 따라 확장 기능이나 관리 스키마와 충돌하면 원인을 확인하고 새 연습 프로젝트에서 다시 검증합니다.
 
 ```powershell
+$backupDir = '<내려받아 복호화한 백업 폴더 경로>'
+$roles = Join-Path $backupDir 'roles.sql'
+$schema = Join-Path $backupDir 'schema.sql'
+$data = Join-Path $backupDir 'data.sql'
+$historySchema = Join-Path $backupDir 'history_schema.sql'
+$historyData = Join-Path $backupDir 'history_data.sql'
+
+$expectedFiles = @('roles.sql', 'schema.sql', 'data.sql', 'history_schema.sql', 'history_data.sql')
+$checksums = @(Import-Csv -LiteralPath (Join-Path $backupDir 'SHA256SUMS.csv') -ErrorAction Stop)
+if ($checksums.Count -ne $expectedFiles.Count) { throw 'backup checksum list is incomplete' }
+foreach ($name in $expectedFiles) {
+    $entry = @($checksums | Where-Object File -EQ $name)
+    if ($entry.Count -ne 1) { throw "backup checksum entry missing or duplicated: $name" }
+    $file = Join-Path $backupDir $name
+    if (-not (Test-Path -LiteralPath $file -PathType Leaf) -or (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash -ne $entry[0].Hash) {
+        throw "backup checksum mismatch: $file"
+    }
+}
+
 psql --single-transaction --variable ON_ERROR_STOP=1 --file $roles --file $schema --command 'SET session_replication_role = replica' --file $data --dbname $env:SUPABASE_RESTORE_DB_URL
 if ($LASTEXITCODE -ne 0) { throw 'restore failed' }
 ```
