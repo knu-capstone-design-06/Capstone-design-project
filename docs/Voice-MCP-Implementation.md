@@ -178,7 +178,10 @@ MCP 서버는 외부 AI의 도구 호출을 backend 호출로 바꿔 주는 역�
 
 - 작성일: 2026-10-12 (수정: 2026-10-13, ignored와 frontend 음성 입력 추가)
 
-### 7.1 지금 되는 것 (backend `app/modules/voice/`)
+### 7.1 지금 되는 것
+
+backend 음성 해석 (`backend/app/modules/voice/`)
+
 
 - 음성 요청 접수·상태 조회 API(`contract/voice.openapi.yaml` 0.3.0).
 - OpenAI가 세션별 최근 10턴 대화 맥락과 메뉴 목록으로 발화를 해석해 MCP 장바구니 도구 입력(`tool_calls`)을 만듭니다.
