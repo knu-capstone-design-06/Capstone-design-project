@@ -164,7 +164,9 @@ MCP 서버는 외부 AI의 도구 호출을 backend 호출로 바꿔 주는 역�
 ## 6. 확인 시나리오
 
 - "아이스 아메리카노 두 개 담고 결제로 가줘" → `add_cart_item`, `navigate_screen` → `cart_updated`, `ui_changed` → 화면 갱신·이동
-- "라떼 하나" → 온도가 빠짐 → `assistant_reply`로 확인 질문
+- "라떼 하나" → 온도가 빠짐 → `needs_clarification`의 `reply_text`로 질문(SSE가 생기면 `assistant_reply`)
+- "아메리카노 두 잔"(신뢰도 낮음) → `needs_confirmation` "아이스 아메리카노 2잔 담을까요?" → 마이크 다시 열림 → "네" → `completed`
+- 마이크가 열린 동안 일행이 "너 뭐 먹을래?" → `ignored`, 화면 변화 없음
 - 음성으로 담는 동안 터치로 수량 변경 → 버전 충돌을 감지하고 최신 상태 표시
 - "카페라떼"가 "카페모카"로 인식될 수 있는 상황 → 후보·신뢰도로 확인 질문, 인식 문장을 화면에 표시
 - Chrome 인식·외부 AI 실패 → 안내 후 터치 주문 계속 가능
