@@ -1,10 +1,10 @@
-# 백엔드 초기 실행 환경
+# 백엔드 실행 및 API 현황
 
-Python 3.12 기반 FastAPI 백엔드입니다. 상태 확인, AI 연결 확인, 임시 세션 생성과 특징 전송 API를 제공합니다. 상품·장바구니·모의 주문 API도 서버 메모리 저장 방식으로 연결했습니다. DB·인증은 아직 연결하지 않았으며, `/health` 성공이 DB나 AI 연결의 성공을 뜻하지 않습니다.
+Python 3.12 기반 FastAPI 백엔드입니다. 상태·AI 연결 확인, 임시 세션·특징 전송, 상품·장바구니·모의 주문 API를 제공합니다. 음성 요청 접수·해석 API도 등록돼 있습니다. 세션·주문·음성 기록은 현재 프로세스 메모리에 저장하며, Supabase DB·사용자 인증은 연결하지 않았습니다. `/health` 성공은 프로세스 생존만 뜻하고 DB나 AI 연결 성공을 보장하지 않습니다.
 
 ## 프론트 주문 연동 상태
 
-상품·장바구니·모의 주문 서버 API 6개를 PR #33의 초안 형식으로 구현했습니다. 프론트와 함께 확인할 미정 정책은 [프론트 주문 연동 준비와 담당자 검토](#프론트-주문-연동-준비와-담당자-검토)에 있습니다.
+상품·장바구니·모의 주문 서버 API 6개를 [PR #40](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/40)에서 PR #33의 초안 형식으로 구현했습니다. [PR #43](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/43) 병합 후 계약에는 `x-backend-status: implemented`로 표시돼 있으나 `x-contract-status: draft`는 유지됩니다. 2026-10-14 PR #43 병합 직후 `main`의 Docker 환경에서 실제 프론트 화면과 백엔드의 주문 흐름을 검증했습니다. 미정 정책은 [담당자 검토](#프론트-주문-연동-준비와-담당자-검토)에 정리했습니다.
 
 ## 로컬 실행 (PowerShell)
 
@@ -40,6 +40,16 @@ API 문서: http://127.0.0.1:8000/docs
 
 허용한 프론트 출처에서 GET·POST·PATCH·DELETE와 `Idempotency-Key` 헤더의 CORS 요청을 처리합니다. 현재 주문 API는 `Retry-After`를 반환하지 않습니다. 세션 ID를 가진 누구나 Cart에 접근할 수 있으므로 공개 배포 전 접근 정책과 인증 방식은 별도 합의가 필요합니다.
 
+## Supabase DB 연결 상태
+
+서울 리전 Supabase 프로젝트에는 `kiosk.sessions` 테이블과 백엔드 전용 `kiosk_backend` 역할을 만드는 마이그레이션 2개가 적용돼 있습니다. 역할에는 현재 세션 테이블의 SELECT·INSERT 권한만 있으며, 비밀번호는 마이그레이션에 넣지 않았습니다. **백엔드 코드는 아직 이 테이블을 사용하지 않습니다.** `app/infrastructure/database/`에는 연결 구현이 없고 DB 접속 환경변수도 아직 정의하지 않았습니다. 주문 관련 테이블은 계약·보관 정책을 합의한 뒤 새 마이그레이션으로 설계해야 합니다. 이미 적용한 마이그레이션은 수정하지 않습니다. 현재 구조와 백업 상태는 [DB 안내](../db/README.md)와 [백업·복구 절차](../db/BACKUP_RESTORE.md)를 참고합니다.
+
+## 음성 API 상태
+
+[PR #36](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/36)에서 음성 요청 접수 `POST /api/v1/sessions/{session_id}/voice/requests`와 상태 조회 `GET /api/v1/sessions/{session_id}/voice/requests/{request_id}`를 병합했습니다. [PR #42](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/42)에서 주문 카탈로그를 음성 메뉴에 연결하고 `ignored` 상태를 추가했습니다. 세션별 대화 맥락을 사용해 OpenAI 해석 결과를 `tool_calls`로 만들지만, 도구를 실행하거나 장바구니를 변경하지 않으므로 `actions`는 비어 있습니다. `OPENAI_API_KEY`가 없으면 개발용 응답을 사용하며, 터치 주문과 백엔드 기동은 가능합니다.
+
+도구 실행·장바구니 변경, 주문 완료 세션의 음성 처리 정책, 실제 OpenAI 키를 사용한 검증은 별도 작업입니다. 음성 요청 형식은 [음성 OpenAPI](../contract/voice.openapi.yaml)를 확인합니다.
+
 ## 환경변수
 
 `backend/.env` 또는 프로세스 환경변수에서 읽으며 프로세스 환경변수가 우선합니다. 설정 변경 후 서버를 다시 시작합니다. 빈 값은 기본값을 사용합니다.
@@ -51,10 +61,13 @@ API 문서: http://127.0.0.1:8000/docs
 | CORS_ORIGINS | localhost:5173, localhost:3000의 HTTP 출처 | JSON 배열 |
 | AI_SERVER_URL | http://ai-server:8001 | AI 서버 HTTP(S) 출처 |
 | AI_SERVER_TIMEOUT_SECONDS | 2 | 양의 유한한 초 단위 숫자 |
+| OPENAI_API_KEY | 미설정 | 서버 전용 비밀값 |
+| OPENAI_MODEL | gpt-4o-mini | 모델 이름 |
+| OPENAI_TIMEOUT_SECONDS | 10 | 양의 유한한 초 단위 숫자 |
 
 예: `CORS_ORIGINS=["http://localhost:5173","http://127.0.0.1:5173"]`. 실제 프론트 출처에 맞춰 설정하며 경로나 와일드카드는 허용하지 않습니다. CORS는 GET·POST·PATCH·DELETE를 허용합니다. 기본 허용 출처는 localhost이므로 127.0.0.1에서 직접 교차 출처 요청을 보낼 때는 위 설정이 필요합니다. CORS는 사용자 인증 기능이 아닙니다.
 
-`.env`에는 실제 비밀값을 넣을 수 있지만 Git에 커밋하지 않습니다. `.env.example`은 항목 설명만 공유합니다. DB·외부 API 설정은 실제 연동 시 추가합니다.
+`.env`에는 실제 비밀값을 넣을 수 있지만 Git에 커밋하지 않습니다. `.env.example`은 항목 설명만 공유합니다. 음성 메뉴는 주문 카탈로그와 연결돼 있으며, 실제 OpenAI 키를 사용한 음성 해석은 아직 검증하지 않았습니다. DB 접속 설정은 실제 연동 시 추가합니다.
 
 ## Docker Compose
 
@@ -64,9 +77,9 @@ API 문서: http://127.0.0.1:8000/docs
 docker compose up --build
 ```
 
-백엔드는 `http://127.0.0.1:8000`, AI 서버는 Docker 내부의 `http://ai-server:8001`을 사용합니다. Compose에는 `env_file`이 없고 이미지에도 `.env`가 없으므로, 로컬 직접 실행과 달리 `backend/.env`는 읽지 않습니다. 필요한 값은 실행 환경에서 컨테이너에 주입합니다.
+프론트 화면은 `http://127.0.0.1:8080`에서 제공하고 `/backend/` 요청을 백엔드로 전달합니다. 백엔드의 직접 주소는 `http://127.0.0.1:8000`이며 AI 서버는 Docker 내부의 `http://ai-server:8001`을 사용합니다. Compose에는 `env_file`이 없고 이미지에도 `.env`가 없으므로, 로컬 직접 실행과 달리 `backend/.env`는 읽지 않습니다. 필요한 값은 실행 환경에서 컨테이너에 주입합니다.
 
-연결 API의 기존 실행·통신 검증은 [PR #26](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/26)를 참고합니다. 상품·장바구니·주문 API는 자동 테스트를 통과했으며 실제 프론트 화면과 Docker 환경의 통합 검증은 아직 필요합니다.
+연결 API의 기존 실행·통신 검증은 [PR #26](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/26)를 참고합니다. 2026-10-14에는 PR #43이 병합된 `main`(`3cb8529`)으로 세 이미지를 빌드해 모두 healthy 상태를 확인했습니다. 실제 브라우저의 기본 API 모드에서 상품 조회 → 세션·장바구니 생성 → 상품 추가 → 모의 주문 확정 → 새 주문 시작이 통과했습니다. 주문은 서버에서 처리하되 첫 응답만 유실시킨 검사에서는 화면의 `주문 반영 확인`이 같은 키·본문으로 재요청해 원래 주문번호를 표시했습니다. `/backend/` 프록시를 거친 HTTP 검사에서는 17개 상품, 옵션 오류, 버전 충돌과 최신 Cart, 중복 키·주문 재시도, 완료 세션 410을 확인했습니다. 이 검증은 DB 영속성, 실제 결제, 음성 도구 실행, AI 판단을 확인한 것은 아닙니다.
 
 ## Backend → AI 내부 연동
 
@@ -125,8 +138,8 @@ python -m unittest discover -s app/modules -p 'test_*.py' -v
 
 기존 AI 클라이언트 테스트는 정상 요청·응답, vision 생략/null, 판단 불가, HTTP 오류,
 연결 실패, 전체 타임아웃, 잘못된 응답·세션 불일치, 호출 취소, health 응답과 연결 종료를 확인합니다.
-새 모듈 테스트는 세션 생성·격리, 입력 검증, AI 점수 검증, 연결 장애와 측정 불가의 구분,
-POST CORS를 확인합니다.
+모듈 테스트는 세션 생성·격리, 입력 검증, AI 점수 검증, 연결 장애와 측정 불가의 구분,
+주문 API와 POST CORS를 확인합니다. 위 Docker 검증은 고정 HTTP 응답을 쓰는 프론트 단위·브라우저 검사와 별도로 실제 서버 응답을 사용했습니다.
 
 ## 연결 API (0.1.0 형식 유지)
 
@@ -168,17 +181,20 @@ Invoke-RestMethod -Method Post "$base/api/v1/sessions/$($session.session_id)/fea
 
 ## 프론트 주문 연동 준비와 담당자 검토
 
-기존 상태·AI 연결 확인, 임시 세션 생성, 특징 전송 API를 사용합니다. 상품·장바구니·주문 API는 기존 세션에 연결했으며, 프론트와 실제 통합 검증이 남아 있습니다.
+기존 상태·AI 연결 확인, 임시 세션 생성, 특징 전송 API를 사용합니다. 상품·장바구니·주문 API는 기존 세션에 연결했고, 2026-10-14 Docker 기본 화면에서 실제 요청·응답으로 주요 주문 흐름과 재시도를 확인했습니다.
 
-프론트는 [상품·장바구니·주문 초안](../docs/Product-Cart-Order-API-Draft.md)에 맞춰 API 호출·응답 표시·수동 재시도를 준비했습니다. 서버 API를 같은 형식으로 구현했으며, 프론트용 샘플 응답을 실제 서버로 전환해 연동 확인할 단계입니다.
+프론트는 [상품·장바구니·주문 초안](../docs/Product-Cart-Order-API-Draft.md)에 맞춰 API 호출·응답 표시·수동 재시도를 준비했습니다. 위 통합 검증이 팀의 최종 계약 합의나 공개 배포 준비 완료를 뜻하지는 않습니다.
 
-백엔드 담당자와 확인할 작업:
+백엔드가 이미 구현·검증한 사항:
+- 기존 `modules/sessions/`의 세션 ID로 상품 조회·Cart 조회/변경·모의 주문 연결
+- 고정 17개 상품과 `coffee`/`drink`/`food`, 음료 `iced`/`hot`·푸드 `null` 제공, 가격·옵션·수량·금액 서버 검증
+- `expected_version` 충돌 시 최신 Cart 반환, 동일 키·동일 요청의 성공 결과 재사용, 한 세션의 주문 완료 뒤 Cart 요청 410
+
+팀과 결정하고 이후 구현할 사항:
 - 프론트 요청 타임아웃은 15초입니다. 최종 시간과 시간 초과 후 처리 중 응답·재시도 정책은 백엔드 담당자와 합의할 항목입니다.
-- 기존 `modules/sessions/`의 세션 ID를 사용해 상품 조회·Cart 조회/변경·모의 주문 연결
-- 서버 상품 ID·coffee/drink/food·iced/hot/푸드 null과 샘플 데이터 공급
-- 항목별 수량 한도, 서버 가격·옵션·판매 가능 여부·금액 계산 검증
-- expected_version 충돌의 최신 Cart, 동일 키·동일 요청 재시도, 처리 중 오류·간격·실패 결과 보관 정책
-- 한 세션 1주문·새 주문 새 세션, 서버 주문번호의 형식·범위
+- 현재 구현한 항목별 수량 한도 20개·고정 가격·시연 상품 목록을 최종 시연 정책으로 채택할지
+- 처리 중 중복 요청의 오류·간격, 실패 결과와 성공 키의 보관 기간, DB 전환 시 원자적 저장
+- 한 세션 1주문·새 주문 새 세션의 최종 정책, 완료 후 특징·음성 요청, 서버 주문번호의 형식·보관 범위
 - 공개 주소의 세션 접근·인증·쿠키 및 배포 정책
 
 복원·장기 보관·정밀 만료·동적 가격 변경은 첫 시연 후순위 방향입니다. 프론트 담당자와 검토한 방향이며 팀 전체 합의는 아직 확인되지 않았습니다. 세부 서버 정책은 담당자가 결정·구현하고 계약에는 합의 후 반영합니다.
