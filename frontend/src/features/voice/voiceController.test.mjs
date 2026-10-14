@@ -82,6 +82,19 @@ test('확인 질문 뒤 무음으로 닫혀도 다시 들으면 "네"를 다음 
   assert.deepEqual(calls.map(call => call.body.text), ['아메리카노 두 잔', '네']);
 });
 
+test('확인 흐름이 끝나면 다시 들을 때 한 글자를 다시 거른다', async () => {
+  const { calls, controller } = setup([status('needs_confirmation', { tool_calls: [addAmericano], reply_text: '아이스 아메리카노 2잔 담을까요?' }), status('completed', { tool_calls: [addAmericano] })]);
+  controller.setEnabled(true);
+  FakeRecognition.last().final(['아메리카노 두 잔', 0.5]);
+  await tick(20);
+  FakeRecognition.last().final(['네', 0.9]);
+  await tick(20);
+  controller.listen();
+  FakeRecognition.last().final(['응', 0.9]);
+  await tick(20);
+  assert.deepEqual(calls.map(call => call.body.text), ['아메리카노 두 잔', '네']);
+});
+
 test('키오스크에게 한 말이 아니면(ignored) 화면 문구 없이 닫는다', async () => {
   const { controller, delivered } = setup([status('ignored')]);
   controller.setEnabled(true);
