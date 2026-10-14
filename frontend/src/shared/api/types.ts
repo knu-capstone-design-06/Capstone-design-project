@@ -50,6 +50,7 @@ export interface StateScores {
   hesitation: number;
 }
 
+/** 서버 지원 프리셋. none은 현재 화면 유지이며 수동 낮은 화면(lowScreen)은 로컬 설정이다. */
 export type UIPreset =
   | 'none'
   | 'large_text'

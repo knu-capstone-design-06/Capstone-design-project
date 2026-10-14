@@ -125,7 +125,7 @@ paths:
     "get":
       "x-contract-status": "draft"
       "x-frontend-status": "prepared"
-      "x-backend-status": "pending"
+      "x-backend-status": "implemented"
       "tags": ["products"]
       "summary": "상품 목록 조회"
       "operationId": "getProducts"
@@ -147,7 +147,7 @@ paths:
     "get":
       "x-contract-status": "draft"
       "x-frontend-status": "prepared"
-      "x-backend-status": "pending"
+      "x-backend-status": "implemented"
       "tags": ["cart"]
       "summary": "세션 장바구니 조회"
       "operationId": "getCart"
@@ -177,7 +177,7 @@ paths:
     "post":
       "x-contract-status": "draft"
       "x-frontend-status": "prepared"
-      "x-backend-status": "pending"
+      "x-backend-status": "implemented"
       "tags": ["cart"]
       "summary": "상품 추가 또는 동일 상품·온도 수량 합산"
       "operationId": "addCartItem"
@@ -219,7 +219,7 @@ paths:
     "patch":
       "x-contract-status": "draft"
       "x-frontend-status": "prepared"
-      "x-backend-status": "pending"
+      "x-backend-status": "implemented"
       "tags": ["cart"]
       "summary": "장바구니 항목의 절대 수량 변경"
       "operationId": "updateCartItemQuantity"
@@ -257,7 +257,7 @@ paths:
     "delete":
       "x-contract-status": "draft"
       "x-frontend-status": "prepared"
-      "x-backend-status": "pending"
+      "x-backend-status": "implemented"
       "tags": ["cart"]
       "summary": "장바구니 항목 삭제"
       "operationId": "deleteCartItem"
@@ -288,7 +288,7 @@ paths:
     "post":
       "x-contract-status": "draft"
       "x-frontend-status": "prepared"
-      "x-backend-status": "pending"
+      "x-backend-status": "implemented"
       "tags": ["orders"]
       "summary": "서버 장바구니를 모의 주문으로 확정"
       "operationId": "createSimulatedOrder"
@@ -795,7 +795,11 @@ components:
     UIPreset:
       type: string
       enum: [none, large_text, large_button, simple_screen, step_guide, voice_guide]
-      description: none=화면 유지, 큰 글씨, 큰 버튼, 간편 화면, 단계별 안내, 음성 안내
+      description: |
+        none=현재 화면 유지, 큰 글씨, 큰 버튼, 간편 화면, 단계별 안내, 음성 안내.
+        프론트의 수동 낮은 화면(lowScreen)은 로컬 설정이며 이 프리셋이나 API 요청 필드에 포함하지 않습니다.
+        none은 사용자가 켠 낮은 화면을 해제하지 않습니다.
+        음성·AI·MCP에서 낮은 화면을 적용하는 프리셋 값과 적용·복귀 규칙은 팀 합의 후 별도 반영합니다.
 
     SupportDecision:
       type: object

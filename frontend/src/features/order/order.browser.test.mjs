@@ -119,6 +119,75 @@ test('세로·가로 화면과 독립 접근성 설정에서 전체 주문·설�
   } finally { await browser.close(); }
 });
 
+test('낮은 화면에서 옵션·전체 주문·접근성 조합·새로고침·높이 복귀를 사용할 수 있다', async t => {
+  const browser = await chromium.launch(launchOptions);
+  try {
+    for (const viewport of [{ width: 1080, height: 1920 }, { width: 1920, height: 1080 }, { width: 1365, height: 768 }, { width: 390, height: 844 }]) {
+      for (const settings of [[], ['largeText'], ['largeButton'], ['largeText', 'largeButton', 'simpleScreen', 'stepGuide']]) {
+        const label = `${viewport.width}x${viewport.height}-${settings.join('-') || 'default'}`;
+        await t.test(label, async () => {
+          const first = `low-${label}`, second = `${first}-new`, third = `${first}-reload`;
+          const cart = cartResponse(first, 1, [iced()]);
+          const { page, errors, fixture } = await open(browser, [
+            ...bootstrap(first), mutation(first, '/cart/items', cart),
+            mutation(first, '/orders', orderResponse(cart), { status: 201 }),
+            ...bootstrap(second), ...bootstrap(third),
+          ]);
+          await page.setViewportSize(viewport); await ready(page);
+          await click(page, 'support-toggle');
+          for (const setting of settings) await click(page, `support:${setting}`);
+          await click(page, 'support-toggle');
+          await click(page, 'screen-height-toggle');
+          const top = Math.max(0, viewport.height - Math.max(viewport.height * .6, 720));
+          const root = await page.locator('.kiosk.low-screen').boundingBox();
+          assert(root && Math.abs(root.y - top) < 2, '선택한 높이에 조작 영역을 배치');
+          const reachable = async selector => {
+            const element = page.locator(selector);
+            await element.scrollIntoViewIfNeeded();
+            const rect = await element.boundingBox();
+            assert(rect && rect.y >= top - 1 && rect.y + rect.height <= viewport.height + 1, `${selector}은 낮은 조작 영역 안에 있음`);
+            assert(await element.evaluate(node => {
+              const bounds = node.getBoundingClientRect();
+              return node.contains(document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2));
+            }), `${selector}이 다른 요소에 가려지지 않음`);
+          };
+          await reachable('[data-log-target="support-toggle"]');
+          await reachable('[data-log-target="screen-height-toggle"]');
+          await click(page, 'support-toggle');
+          assert.equal(await page.locator('[data-log-target="support:lowScreen"]').getAttribute('aria-pressed'), 'true');
+          await click(page, 'support-toggle');
+          await click(page, 'product:americano');
+          await reachable('dialog[open]');
+          await reachable('[data-log-target="options-close"]');
+          await reachable('[data-log-target="cart-add"]');
+          await click(page, 'cart-add'); await page.locator('dialog[open]').waitFor({ state: 'hidden' });
+          await noOverflow(page); await bottomAction(page, 'review-open');
+          await page.locator('.low-screen > main').evaluate(element => { element.scrollTop = element.scrollHeight; });
+          const lastProduct = await page.locator('.product').last().boundingBox();
+          const actions = await page.locator('.order-actions').boundingBox();
+          assert(lastProduct.y + lastProduct.height <= actions.y, '낮은 화면에서도 목록 끝을 하단 바 위까지 볼 수 있음');
+          await click(page, 'screen-height-toggle');
+          assert.equal(await page.locator('.low-screen').count(), 0);
+          assert.match(await page.locator('.total').innerText(), /3,500원/, '높이 복귀에도 장바구니 유지');
+          await click(page, 'screen-height-toggle');
+          await screenshot(page, `low-menu-${label}`);
+          await click(page, 'review-open'); await reachable('[data-log-target="review-back"]');
+          await click(page, 'simulate-payment'); await page.locator('.order-number').waitFor();
+          await bottomAction(page, 'new-order'); await click(page, 'new-order'); await ready(page);
+          assert.equal(await page.locator('.kiosk.low-screen').count(), 1, '새 주문에도 낮은 화면 유지');
+          assert.equal(await page.locator('.cart-row').count(), 0);
+          await page.reload(); await ready(page);
+          assert.equal(await page.locator('.kiosk.low-screen').count(), 1, '새로고침에도 낮은 화면 유지');
+          await click(page, 'support-toggle'); await click(page, 'support-reset');
+          assert.equal(await page.locator('.low-screen').count(), 0);
+          assert.equal(await page.locator('.support-options [aria-pressed="true"]').count(), 0);
+          fixture.verify(); assert.deepEqual(errors, []); await page.close();
+        });
+      }
+    }
+  } finally { await browser.close(); }
+});
+
 test('HTML 409 오류의 Retry-After 동안 주문 재확인을 막고 동일 요청으로 복구', async () => {
   const browser = await chromium.launch(launchOptions);
   try {
