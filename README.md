@@ -14,7 +14,7 @@
 |---|---|---|---|
 | 프론트엔드 | dudwlghkd | 샘플 상품·장바구니·모의 주문 화면, 수동 접근성 설정, 로컬 터치 기록을 구현했습니다(PR #17 · #19). 서버 주문 API 응답을 처리하는 프론트 흐름을 준비했습니다(PR #33, 2026-10-12 병합). 서버 쪽 상품·장바구니·주문 API는 구현 대기입니다 | `frontend/README.md` |
 | 백엔드·DB | bb-cloud-create | 연결 확인·임시 세션·특징 전송 API를 구현했습니다(메모리 세션). 상품·장바구니·주문 API는 구현 대기입니다. Supabase 첫 마이그레이션을 적용했습니다(2026-10-07) | `backend/README.md`, `db/README.md` |
-| AI 서버·음성·Jev | jiwon-L-ee | `/v1/analyze`는 명세 예시 값을 돌려주는 자리 표시입니다. 음성·MCP는 제안 단계이고, backend의 음성 해석 API(대화 맥락 해석 → MCP 장바구니 도구 입력 생성)는 PR #36에서 검토 중입니다. Jev는 아직 연동하지 않았습니다 | `ai-server/README.md`, `docs/Voice-MCP-Implementation.md` |
+| AI 서버·음성·Jev | jiwon-L-ee | `/v1/analyze`는 명세 예시 값을 돌려주는 자리 표시입니다. backend의 음성 해석 API(대화 맥락 해석 → MCP 장바구니 도구 입력 생성)를 병합했습니다(PR #36, 2026-10-13). frontend 음성 입력(Chrome 인식을 짧게 여닫기)·잡담 거르기(`ignored`)·주문 메뉴 연결은 PR #42에서 검토 중이고, MCP 도구 실행은 남았습니다. Jev는 아직 연동하지 않았습니다 | `ai-server/README.md`, `docs/Voice-MCP-Implementation.md` |
 | 컴퓨터 비전 | wdragon92 | 관측 뼈대(PR #32, 2026-10-10)와 상황 태그 3개의 규칙 · 출력 형식(PR #35, 2026-10-12)을 병합했습니다. 기준값은 모두 `[파일럿]`이고, 실행기 · 서버 연결은 없습니다. 학교 GPU 서버에서 머리 탐지기를 학습했습니다(2026-10-12 끝) | `ai-server/app/modules/vision/README.md` |
 | 인프라 | bb-cloud-create | EC2 템플릿을 검증했습니다(PR #31). 스택은 비용 승인 전이라 만들지 않았습니다 | `infra/aws/README.md` |
 
