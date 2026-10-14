@@ -100,7 +100,7 @@ export function OrderPage() {
     </div><button data-log-target={`cart:${item.product_id}:${temperatureLabel(item.temperature)}:remove`} className="text-button" aria-label={`${item.name} ${temperatureLabel(item.temperature)} 삭제`} disabled={writeDisabled} onClick={() => void controller.removeItem(item.item_id)}>삭제</button></div>
   </li>);
 
-  const screenHeightButton = <button data-log-target="screen-height-toggle" className="screen-height-toggle" aria-pressed={settings.lowScreen} onClick={toggleScreenHeight}>{settings.lowScreen ? '기본 높이' : '낮은 화면'}</button>;
+  const screenHeightButton = <button data-log-target="screen-height-toggle" className="screen-height-toggle" data-active={settings.lowScreen} onClick={toggleScreenHeight}>{settings.lowScreen ? '기본 높이' : '낮은 화면'}</button>;
 
   return <>{settings.lowScreen && <div className="low-screen-banner" aria-hidden="true"><strong>온기 카페</strong><p>메뉴와 버튼을 아래로 내렸어요.</p></div>}<div ref={touchLog.root} className={`kiosk ${settings.largeText ? 'large-text' : ''} ${settings.largeButton ? 'large-button' : ''} ${settings.simpleScreen ? 'simple-screen' : ''} ${settings.lowScreen ? 'low-screen' : ''}`}>
     <header className="header"><a data-log-target="menu-home" className="brand" href="#" onClick={event => { event.preventDefault(); if (screen !== 'complete') setScreen('menu'); }}>온기 카페</a><span className="sample-badge">{sampleMode ? '개발용 샘플' : '샘플 주문'} · 실제 결제 없음</span><button data-log-target="support-toggle" className="support-trigger" aria-expanded={supportOpen} aria-controls="support-panel" onClick={() => setSupportOpen(!supportOpen)}>화면 도움 {supportOpen ? '닫기' : '열기'}</button></header>
