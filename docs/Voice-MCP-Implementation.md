@@ -58,7 +58,7 @@ MCP 방식에서는 상태 변경이 프론트의 요청에서 시작하지 않�
 | GET | `/api/v1/sessions/{session_id}/voice/requests/{request_id}` | — | `{ status, reply_text, tool_calls, actions, error }` |
 
 - `voice/requests`는 접수만 하고 바로 응답합니다. backend가 OpenAI API로 이용자(세션)별 최근 대화 맥락과 함께 해석해 MCP 장바구니 도구의 입력(`tool_calls`)을 만들고, 상태 조회로 전달합니다. 음성 API는 도구를 실행하지 않습니다.
-- 확실하면 `completed`, 애매하면 이해한 내용을 `needs_confirmation`으로 짧게 확인받고(예: "아이스 아메리카노 2잔 담을까요?"), 정할 수 없으면 `needs_clarification`으로 묻습니다. 대답은 같은 세션의 다음 음성 요청으로 받습니다. 확인 UI와 적용 시점은 부르는 쪽이 정합니다.
+- 확실하면 `completed`, 애매하면 이해한 내용을 `needs_confirmation`으로 짧게 확인받고(예: "아이스 아메리카노 2잔 담을까요?"), 정할 수 없으면 `needs_clarification`으로 묻습니다. 키오스크에게 한 말이 아니면(잡담·일행과의 대화) `ignored`로 답하고 아무것도 하지 않습니다. 대답은 같은 세션의 다음 음성 요청으로 받습니다. 확인 UI와 적용 시점은 부르는 쪽이 정합니다.
 - `alternatives`는 Chrome 인식 후보와 신뢰도입니다(`maxAlternatives`). OpenAI 해석 시 맥락으로 함께 씁니다.
 - 상태 조회는 SSE가 준비되기 전이나 연결이 끊겼을 때 음성 기능을 확인하는 용도입니다.
 - 실패하면 `{ code, detail }`을 반환합니다. 예: `request_in_progress`, `ai_unavailable`
