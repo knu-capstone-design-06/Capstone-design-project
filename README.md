@@ -208,7 +208,7 @@ Jev에는 다음 정보를 전달합니다.
 | 얼굴·자세 특징 | MediaPipe 0.10.33 | 비전 모듈 추론 3종(Face Landmarker·Face Detector·Pose Landmarker lite) 구현. 판정 규칙·서버 연결은 없음 |
 | 객체 탐지 | YOLOX-Nano(Apache-2.0, 후보) | 머리 탐지기 학습 끝(2026-10-12, 학교 GPU 서버. 숫자는 발표 자료에서). 저장소에는 없음. 보조기구 탐지는 보류 |
 | 비전 모델 학습 | PyTorch | 학교 GPU 서버에 학습 환경 구성. 학습 코드의 저장 위치는 팀에서 정하고 가중치는 Git에 올리지 않음(AGENTS.md). 내보낸 모델의 CPU(ONNX) 실행 검증은 후속 작업 |
-| 음성 녹음 | Web MediaRecorder API | 계획. 현재 제안은 Chrome 인식만 쓰고 녹음 파일을 서버로 보내지 않는 방향(PR #36, 멘토·팀 공유 전) |
+| 음성 녹음 | Web MediaRecorder API | 쓰지 않음. Chrome 인식만 쓰고 녹음 파일을 서버로 보내지 않음(PR #36, 멘토·팀 공유 전) |
 | STT | OpenAI Whisper | 계획(수행계획서 기준). `docs/Voice-MCP-Implementation.md`는 Chrome 내장 인식(Web Speech API)을 제안하며, PR #36에서 Whisper 예비 경로를 빼는 안을 검토 중(멘토·팀 공유 전) |
 | 음성 의도 해석 | LLM API | 모델 미정 |
 | TTS | 미정 | 기술 선정 예정 |
