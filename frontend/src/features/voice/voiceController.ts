@@ -63,6 +63,8 @@ export class VoiceController {
   private capture: SpeechCapture | null = null;
   private processing: AbortController | null = null;
   private context = { sessionId: '', screenId: '' };
+  // 확인·질문 결과 뒤 대답을 기다리는 중. 마이크가 닫혀도 다음 결과가 나올 때까지 유지합니다.
+  private awaitingAnswer = false;
 
   constructor(options: VoiceControllerOptions) {
     this.api = options.api;
@@ -84,7 +86,7 @@ export class VoiceController {
 
   /** 세션이 바뀌면 진행 중인 듣기·처리를 버립니다. screen_id는 다음 발화부터 적용됩니다. */
   setContext(context: { sessionId: string; screenId: string }) {
-    if (context.sessionId !== this.context.sessionId) this.halt();
+    if (context.sessionId !== this.context.sessionId) { this.halt(); this.awaitingAnswer = false; }
     this.context = { ...context };
   }
 
@@ -92,6 +94,7 @@ export class VoiceController {
   setEnabled(enabled: boolean): boolean {
     if (!enabled) {
       this.halt();
+      this.awaitingAnswer = false;
       this.set({ enabled: false });
       return true;
     }
@@ -102,10 +105,10 @@ export class VoiceController {
 
   /** 모드가 켜져 있고 쉬는 중일 때 한 문장을 듣습니다(예: 부르는 쪽의 마이크 버튼). */
   listen(): boolean {
-    return this.open(false);
+    return this.open(this.awaitingAnswer);
   }
 
-  /** answering: 확인·질문 뒤라 "네" 같은 짧은 대답도 받습니다. */
+  /** answering: 확인·질문에 대한 대답이라 "네" 같은 짧은 말도 받습니다. */
   private open(answering: boolean): boolean {
     if (!this.state.enabled || !this.recognition) return false;
     if (this.state.phase === 'listening') return true;
@@ -173,7 +176,8 @@ export class VoiceController {
     }
     this.set({ phase: 'idle', partialText: '', lastResult: outcome, error: null });
     this.onResult(outcome);
-    if (ASKS_USER.has(outcome.status)) this.open(true);
+    this.awaitingAnswer = ASKS_USER.has(outcome.status);
+    if (this.awaitingAnswer) this.open(true);
   }
 
   private async poll(sessionId: string, requestId: string, signal: AbortSignal): Promise<VoiceRequestStatus | 'timeout'> {
