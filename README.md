@@ -143,7 +143,7 @@ AI 서버는 판단 결과를 반환하고, 백엔드가 지원을 선택해 적
 → 화면·음성 응답
 ```
 
-위 흐름은 수행계획서 기준입니다. STT 방식(서버로 녹음 전송 + Whisper, 또는 Chrome 내장 인식)은 팀 합의 전이고, 현재 제안은 `docs/Voice-MCP-Implementation.md`와 PR #36에 있습니다.
+위 흐름은 수행계획서 기준입니다. 현재 구현은 Chrome 내장 인식(Web Speech API)으로 텍스트만 보내고 Whisper·녹음 전송은 쓰지 않습니다(PR #36). 수행계획서와 달라진 점은 멘토·팀 공유가 남았습니다(`docs/Voice-MCP-Implementation.md`).
 
 ### 지원 결과 피드백
 
