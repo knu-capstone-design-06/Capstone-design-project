@@ -112,6 +112,22 @@ test('세션이 바뀌거나 음성 모드를 끄면 대답 대기 상태를 지
   }
 });
 
+test('결과 콜백에서 세션을 바꾸면 이전 확인 질문 때문에 마이크를 열거나 "네"를 보내지 않는다', async () => {
+  let controller;
+  const setupResult = setup([status('needs_confirmation', { tool_calls: [addAmericano], reply_text: '아이스 아메리카노 2잔 담을까요?' })], {
+    onResult: () => controller.setContext({ sessionId: 'session-2', screenId: 'menu' }),
+  });
+  controller = setupResult.controller;
+  controller.setEnabled(true);
+  FakeRecognition.last().final(['아메리카노 두 잔', 0.5]);
+  await tick(20);
+  assert.deepEqual([controller.getSnapshot().phase, FakeRecognition.instances.length], ['idle', 1]);
+  controller.listen();
+  FakeRecognition.last().final(['네', 0.9]);
+  await tick(20);
+  assert.deepEqual(setupResult.calls.map(call => call.sessionId), ['session-1']);
+});
+
 test('키오스크에게 한 말이 아니면(ignored) 화면 문구 없이 닫는다', async () => {
   const { controller, delivered } = setup([status('ignored')]);
   controller.setEnabled(true);
