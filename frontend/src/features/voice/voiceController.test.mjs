@@ -95,6 +95,23 @@ test('확인 흐름이 끝나면 다시 들을 때 한 글자를 다시 거른�
   assert.deepEqual(calls.map(call => call.body.text), ['아메리카노 두 잔', '네']);
 });
 
+test('세션이 바뀌거나 음성 모드를 끄면 대답 대기 상태를 지운다', async () => {
+  for (const reset of [
+    controller => controller.setContext({ sessionId: 'session-2', screenId: 'menu' }),
+    controller => { controller.setEnabled(false); controller.setEnabled(true); },
+  ]) {
+    const { calls, controller } = setup([status('needs_confirmation', { tool_calls: [addAmericano], reply_text: '아이스 아메리카노 2잔 담을까요?' })]);
+    controller.setEnabled(true);
+    FakeRecognition.last().final(['아메리카노 두 잔', 0.5]);
+    await tick(20);
+    reset(controller);
+    controller.listen();
+    FakeRecognition.last().final(['네', 0.9]);
+    await tick(20);
+    assert.equal(calls.length, 1);
+  }
+});
+
 test('키오스크에게 한 말이 아니면(ignored) 화면 문구 없이 닫는다', async () => {
   const { controller, delivered } = setup([status('ignored')]);
   controller.setEnabled(true);
