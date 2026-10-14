@@ -14,7 +14,7 @@
 |---|---|---|---|
 | 프론트엔드 | dudwlghkd | 샘플 상품·장바구니·모의 주문 화면, 수동 접근성 설정, 로컬 터치 기록을 구현했습니다(PR #17 · #19). 서버 주문 API 응답을 처리하는 프론트 흐름을 준비했습니다(PR #33, 2026-10-12 병합). 서버 쪽 상품·장바구니·주문 API는 PR #40에서 초안 기준으로 구현됐으며 실제 프론트 통합 검증은 남아 있습니다 | `frontend/README.md` |
 | 백엔드·DB | bb-cloud-create | 연결 확인·임시 세션·특징 전송 API를 구현했습니다(메모리 세션). 상품·장바구니·모의 주문 6개 API는 PR #40에서 초안 기준으로 구현했습니다(메모리 저장). 실제 프론트 통합 검증과 최종 계약·정책 합의는 남아 있습니다. Supabase 첫 마이그레이션을 적용했습니다(2026-10-07) | `backend/README.md`, `db/README.md` |
-| AI 서버·음성·Jev | jiwon-L-ee | `/v1/analyze`는 명세 예시 값을 돌려주는 자리 표시입니다. 음성·MCP는 제안 단계이고, backend의 음성 해석 API(대화 맥락 해석 → MCP 장바구니 도구 입력 생성)는 PR #36에서 검토 중입니다. Jev는 아직 연동하지 않았습니다 | `ai-server/README.md`, `docs/Voice-MCP-Implementation.md` |
+| AI 서버·음성·Jev | jiwon-L-ee | `/v1/analyze`는 명세 예시 값을 돌려주는 자리 표시입니다. backend의 음성 해석 API(대화 맥락 해석 → MCP 장바구니 도구 입력 생성)를 병합했습니다(PR #36, 2026-10-13). frontend 음성 입력(Chrome 인식을 짧게 여닫기)·잡담 거르기(`ignored`)·주문 메뉴 연결은 PR #42에서 검토 중이고, MCP 도구 실행은 남았습니다. Jev는 아직 연동하지 않았습니다 | `ai-server/README.md`, `docs/Voice-MCP-Implementation.md` |
 | 컴퓨터 비전 | wdragon92 | 관측 뼈대(PR #32, 2026-10-10)와 상황 태그 3개의 규칙 · 출력 형식(PR #35, 2026-10-12)을 병합했습니다. 기준값은 모두 `[파일럿]`이고, 실행기 · 서버 연결은 없습니다. 학교 GPU 서버에서 머리 탐지기를 학습했습니다(2026-10-12 끝) | `ai-server/app/modules/vision/README.md` |
 | 인프라 | bb-cloud-create | EC2 템플릿을 검증했습니다(PR #31). 스택은 비용 승인 전이라 만들지 않았습니다 | `infra/aws/README.md` |
 
@@ -145,7 +145,7 @@ AI 서버는 판단 결과를 반환하고, 백엔드가 지원을 선택해 적
 → 화면·음성 응답
 ```
 
-위 흐름은 수행계획서 기준입니다. STT 방식(서버로 녹음 전송 + Whisper, 또는 Chrome 내장 인식)은 팀 합의 전이고, 현재 제안은 `docs/Voice-MCP-Implementation.md`와 PR #36에 있습니다.
+위 흐름은 수행계획서 기준입니다. 현재 구현은 Chrome 내장 인식(Web Speech API)으로 텍스트만 보내고 Whisper·녹음 전송은 쓰지 않습니다(PR #36). 수행계획서와 달라진 점은 멘토·팀 공유가 남았습니다(`docs/Voice-MCP-Implementation.md`).
 
 ### 지원 결과 피드백
 
@@ -210,9 +210,9 @@ Jev에는 다음 정보를 전달합니다.
 | 얼굴·자세 특징 | MediaPipe 0.10.33 | 비전 모듈 추론 3종(Face Landmarker·Face Detector·Pose Landmarker lite) 구현. 판정 규칙·서버 연결은 없음 |
 | 객체 탐지 | YOLOX-Nano(Apache-2.0, 후보) | 머리 탐지기 학습 끝(2026-10-12, 학교 GPU 서버. 숫자는 발표 자료에서). 저장소에는 없음. 보조기구 탐지는 보류 |
 | 비전 모델 학습 | PyTorch | 학교 GPU 서버에 학습 환경 구성. 학습 코드의 저장 위치는 팀에서 정하고 가중치는 Git에 올리지 않음(AGENTS.md). 내보낸 모델의 CPU(ONNX) 실행 검증은 후속 작업 |
-| 음성 녹음 | Web MediaRecorder API | 계획. 현재 제안은 Chrome 인식만 쓰고 녹음 파일을 서버로 보내지 않는 방향(PR #36, 멘토·팀 공유 전) |
-| STT | OpenAI Whisper | 계획(수행계획서 기준). `docs/Voice-MCP-Implementation.md`는 Chrome 내장 인식(Web Speech API)을 제안하며, PR #36에서 Whisper 예비 경로를 빼는 안을 검토 중(멘토·팀 공유 전) |
-| 음성 의도 해석 | LLM API | 모델 미정 |
+| 음성 녹음 | Web MediaRecorder API | 쓰지 않음. Chrome 인식만 쓰고 녹음 파일을 서버로 보내지 않음(PR #36, 멘토·팀 공유 전) |
+| STT | Chrome 내장 인식(Web Speech API) | 구현(PR #42, `frontend/src/features/voice/`). 수행계획서의 OpenAI Whisper는 쓰지 않으며 예비 경로도 뺌(PR #36, 멘토·팀 공유 전) |
+| 음성 의도 해석 | OpenAI Chat Completions(구조화 출력) | backend가 호출. 모델은 `OPENAI_MODEL`(기본 `gpt-4o-mini`), 실제 키 검증 전 |
 | TTS | 미정 | 기술 선정 예정 |
 | 지원 선택 | Jev API, 규칙 기반 선택기 | 비교 평가 |
 | 실시간 전달 | SSE 또는 WebSocket | 지원 제안·상태 전달. `docs/Voice-MCP-Implementation.md` 3.4는 SSE를 제안(팀 검토 전) |

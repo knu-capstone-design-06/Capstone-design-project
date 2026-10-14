@@ -10,6 +10,7 @@ from app.common.config.settings import Settings, get_settings
 from app.infrastructure.external.ai_client import AiServerClient
 from app.infrastructure.external.openai_client import OpenAiClient, create_openai_http
 from app.modules.connectivity.router import router as connectivity_router
+from app.modules.ordering.catalog import PRODUCTS
 from app.modules.ordering.repository import OrderingRepository
 from app.modules.ordering.router import router as ordering_router
 from app.modules.sessions.repository import SessionRepository
@@ -18,7 +19,7 @@ from app.modules.sessions.service import SessionService
 from app.modules.voice.interpreter import build_voice_interpreter
 from app.modules.voice.repository import VoiceRepository
 from app.modules.voice.router import router as voice_router
-from app.modules.voice.service import VoiceService, empty_menu
+from app.modules.voice.service import VoiceService, menu_from_products
 
 
 class HealthResponse(BaseModel):
@@ -54,8 +55,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             app.state.voice_service = VoiceService(
                 session_repository.exists, VoiceRepository(),
                 build_voice_interpreter(openai),
-                # No product API yet; connect the product query here when it exists.
-                menu_provider=empty_menu,
+                # Same demo catalog the ordering API sells.
+                menu_provider=lambda: menu_from_products(PRODUCTS),
             )
             try:
                 yield

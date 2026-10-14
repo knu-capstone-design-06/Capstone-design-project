@@ -70,7 +70,7 @@ class VoiceApiTests(unittest.TestCase):
     def setUp(self):
         self.interpreter = FakeInterpreter()
         for target, value in (("app.main.build_voice_interpreter", self.interpreter),
-                              ("app.main.empty_menu", MENU)):
+                              ("app.main.menu_from_products", MENU)):
             patcher = patch(target, return_value=value)
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -154,6 +154,16 @@ class VoiceApiTests(unittest.TestCase):
         self.say("실패할 요청")
         self.interpreter.result = interpretation(call("add_cart_item", "mocha", "iced", 1))
         self.say("메뉴에 없는 요청")
+        self.interpreter.result = interpretation(ADD_AMERICANO)
+        self.say("아메리카노")
+        self.say("다음")
+        self.assertEqual([t.request.text for t in self.interpreter.histories[-1]], ["아메리카노"])
+
+    def test_ignored_speech_is_reported_without_reply_or_history(self):
+        self.interpreter.result = VoiceInterpretation(status="ignored", tool_calls=[], reply_text=None)
+        body = self.status(self.say("너 뭐 먹을래?")).json()
+        self.assertEqual(body["status"], "ignored")
+        self.assertEqual((body["reply_text"], body["tool_calls"], body["actions"]), (None, [], []))
         self.interpreter.result = interpretation(ADD_AMERICANO)
         self.say("아메리카노")
         self.say("다음")
@@ -287,6 +297,29 @@ class RetentionTests(unittest.TestCase):
         self.assertIsNone(self.repository.get("s1", record.request_id))
 
 
+class PromptVersionTests(unittest.TestCase):
+    def test_current_prompt_explains_every_status(self):
+        from app.modules.voice import interpreter
+
+        self.assertEqual(interpreter.PROMPT_VERSION, "interpret_v2")
+        prompt = interpreter._PROMPT_PATH.read_text(encoding="utf-8")
+        for status in ("completed", "needs_confirmation", "needs_clarification", "ignored"):
+            self.assertIn(f"- {status}:", prompt)
+
+
+class MenuFromProductsTests(unittest.TestCase):
+    def test_ordering_catalog_becomes_interpreter_menu(self):
+        from app.modules.ordering.catalog import PRODUCTS
+        from app.modules.voice.service import menu_from_products
+
+        menu = menu_from_products(PRODUCTS)
+        self.assertEqual(len(menu), len(PRODUCTS))
+        americano = next(item for item in menu if item.product_id == "americano")
+        self.assertEqual(americano, MENU[0])
+        sandwich = next(item for item in menu if item.product_id == "sandwich")
+        self.assertEqual(sandwich.temperatures, [])
+
+
 class DefaultWiringTests(unittest.TestCase):
     def request_status(self, client):
         session_id = client.post("/api/v1/sessions").json()["session_id"]
@@ -298,7 +331,7 @@ class DefaultWiringTests(unittest.TestCase):
 
     def test_empty_menu_skips_the_interpreter(self):
         interpreter = FakeInterpreter()
-        with patch("app.main.build_voice_interpreter", return_value=interpreter):
+        with patch("app.main.build_voice_interpreter", return_value=interpreter),                 patch("app.main.PRODUCTS", ()):
             app = create_app(Settings(_env_file=None, openai_api_key=None))
             with TestClient(app) as client:
                 body = self.request_status(client)
@@ -307,8 +340,7 @@ class DefaultWiringTests(unittest.TestCase):
         self.assertEqual(body["error"]["code"], "ai_unavailable")
         self.assertIn("메뉴", body["error"]["detail"])
 
-    @patch("app.main.empty_menu", return_value=MENU)
-    def test_app_without_key_uses_stub_question(self, _menu):
+    def test_app_without_key_uses_stub_question(self):
         app = create_app(Settings(_env_file=None, openai_api_key=None))
         with TestClient(app) as client:
             self.assertIsInstance(
@@ -386,6 +418,10 @@ class OpenAiInterpreterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status, "needs_confirmation")
         self.assertEqual(result.reply_text, CONFIRM)
 
+    async def test_ignored_output_is_parsed(self):
+        result = await self.interpret(openai_output(status="ignored", tool_calls=[]))
+        self.assertEqual((result.status, result.tool_calls, result.reply_text), ("ignored", [], None))
+
     async def test_failures_return_none(self):
         async def slow(request):
             await asyncio.sleep(1)
@@ -408,6 +444,8 @@ class OpenAiInterpreterTests(unittest.IsolatedAsyncioTestCase):
             openai_output(status="needs_confirmation", tool_calls=[], reply_text="담을까요?"),
             openai_output(status="needs_confirmation", reply_text="가" * 61),  # too long
             openai_output(status="needs_clarification", tool_calls=[], reply_text="  "),
+            openai_output(status="ignored"),                    # ignored with calls
+            openai_output(status="ignored", tool_calls=[], reply_text="네?"),  # ignored with text
             openai_output(tool_calls=[{**ADD_AMERICANO, "tool": "pay"}]),
             openai_output(tool_calls=[call("add_cart_item", "americano", "iced", 21)]),
             openai_output(tool_calls=[call("update_cart_item", "americano", "iced", 0)]),

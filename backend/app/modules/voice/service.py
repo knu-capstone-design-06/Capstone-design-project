@@ -1,6 +1,6 @@
 import hashlib
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from uuid import UUID
 
 from app.modules.voice.exceptions import VoiceRequestNotFound, VoiceSessionNotFound
@@ -16,9 +16,13 @@ logger = logging.getLogger(__name__)
 FALLBACK_REPLY = "지금은 음성 주문이 어려워요. 화면을 눌러 주문해 주세요."
 
 
-def empty_menu() -> list[MenuItem]:
-    """Placeholder until the backend product API exists."""
-    return []
+def menu_from_products(products: Iterable[object]) -> list[MenuItem]:
+    """Keep only the product fields the interpreter needs (e.g. the ordering catalog)."""
+    fields = MenuItem.model_fields.keys()
+    return [
+        MenuItem.model_validate({name: getattr(product, name) for name in fields})
+        for product in products
+    ]
 
 
 def matches_menu(result: VoiceInterpretation, menu: list[MenuItem]) -> bool:
@@ -92,7 +96,9 @@ class VoiceService:
                 error=VoiceErrorResponse(code="ai_unavailable", detail="외부 AI를 사용할 수 없습니다."),
             )
             return
-        self._repository.append_turn(session_id, VoiceTurn(request=request, result=result))
+        if result.status != "ignored":
+            # Speech not meant for the kiosk would only confuse later turns.
+            self._repository.append_turn(session_id, VoiceTurn(request=request, result=result))
         # tool_calls are MCP inputs (a proposal when needs_confirmation); nothing has
         # been changed here, so actions stay empty.
         self._repository.update(request_id, result.status, result.reply_text, result.tool_calls)

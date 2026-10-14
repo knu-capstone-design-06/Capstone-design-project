@@ -15,7 +15,7 @@ from app.modules.voice.schemas import (
 logger = logging.getLogger(__name__)
 
 # Record this version with experiment results; add a new file for a new prompt.
-PROMPT_VERSION = "interpret_v1"
+PROMPT_VERSION = "interpret_v2"
 _PROMPT_PATH = Path(__file__).parent / "prompts" / f"{PROMPT_VERSION}.md"
 
 _TEMPERATURE = {"type": ["string", "null"], "enum": ["iced", "hot", None]}
@@ -45,7 +45,7 @@ _OUTPUT_SCHEMA = {
     "properties": {
         "status": {
             "type": "string",
-            "enum": ["completed", "needs_confirmation", "needs_clarification"],
+            "enum": ["completed", "needs_confirmation", "needs_clarification", "ignored"],
         },
         "tool_calls": {
             "type": "array",

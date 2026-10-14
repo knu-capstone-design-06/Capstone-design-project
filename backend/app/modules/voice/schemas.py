@@ -6,7 +6,8 @@ Confidence = Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
 Quantity = Annotated[int, Field(strict=True, ge=1, le=20)]
 Temperature = Literal["iced", "hot"] | None
 VoiceStatus = Literal[
-    "accepted", "processing", "completed", "needs_confirmation", "needs_clarification", "failed",
+    "accepted", "processing", "completed", "needs_confirmation", "needs_clarification",
+    "ignored", "failed",
 ]
 VoiceAction = Literal["cart_updated", "ui_changed", "confirmation_required"]
 VoiceErrorCode = Literal[
@@ -83,17 +84,18 @@ class VoiceInterpretation(BaseModel):
 
     completed: tool_calls are ready for MCP. needs_confirmation: tool_calls are a
     proposal awaiting the user's answer. needs_clarification: question only.
+    ignored: not addressed to the kiosk (chatter, talk to companions); nothing to do.
     """
 
-    status: Literal["completed", "needs_confirmation", "needs_clarification"]
+    status: Literal["completed", "needs_confirmation", "needs_clarification", "ignored"]
     tool_calls: list[ToolCall] = Field(max_length=10)
     # Short enough to read at a glance on the kiosk.
     reply_text: str | None = Field(max_length=60)
 
     @model_validator(mode="after")
     def validate_status(self) -> Self:
-        needs_calls = self.status != "needs_clarification"
-        needs_reply = self.status != "completed"
+        needs_calls = self.status in {"completed", "needs_confirmation"}
+        needs_reply = self.status in {"needs_confirmation", "needs_clarification"}
         if bool(self.tool_calls) != needs_calls:
             raise ValueError(f"{self.status} tool_calls mismatch")
         if bool(self.reply_text and self.reply_text.strip()) != needs_reply:
