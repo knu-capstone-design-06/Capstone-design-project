@@ -182,7 +182,6 @@ MCP 서버는 외부 AI의 도구 호출을 backend 호출로 바꿔 주는 역�
 
 backend 음성 해석 (`backend/app/modules/voice/`)
 
-
 - 음성 요청 접수·상태 조회 API(`contract/voice.openapi.yaml` 0.3.0).
 - OpenAI가 세션별 최근 10턴 대화 맥락과 메뉴 목록으로 발화를 해석해 MCP 장바구니 도구 입력(`tool_calls`)을 만듭니다.
   - 확실하면 `completed`, 애매하면 `needs_confirmation`(제안 + 짧은 확인 문장), 정할 수 없으면 `needs_clarification`(질문), 키오스크에게 한 말이 아니면 `ignored`.
