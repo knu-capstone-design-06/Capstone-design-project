@@ -174,10 +174,11 @@ export class VoiceController {
       this.set({ phase: 'idle', partialText: '', error: outcome });
       return;
     }
+    // 구독자·onResult가 세션을 바꾸거나 모드를 끄면 그 초기화가 남도록, 알리기 전에 대기 상태를 정합니다.
+    this.awaitingAnswer = ASKS_USER.has(outcome.status);
     this.set({ phase: 'idle', partialText: '', lastResult: outcome, error: null });
     this.onResult(outcome);
-    this.awaitingAnswer = ASKS_USER.has(outcome.status);
-    if (this.awaitingAnswer) this.open(true);
+    if (this.awaitingAnswer && this.context.sessionId === sessionId) this.open(true);
   }
 
   private async poll(sessionId: string, requestId: string, signal: AbortSignal): Promise<VoiceRequestStatus | 'timeout'> {
