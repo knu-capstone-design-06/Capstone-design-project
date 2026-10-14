@@ -124,10 +124,15 @@ MCP 서버는 외부 AI의 도구 호출을 backend 호출로 바꿔 주는 역�
 
 ### 3.6 프론트 연동 (Front-end)
 
-- Chrome `SpeechRecognition`(ko-KR)으로 인식, 말하는 중 부분 텍스트와 최종 인식 문장 표시
-  - 음성 입력 기능은 `frontend/src/features/voice/`에 있습니다(AI 담당, 화면 요소 없음). 아래 7.1 참고
-- 인식 후보·신뢰도와 함께 `voice/requests` 호출, 듣는 중·처리 중 상태 표시
-- Chrome 인식을 쓸 수 없으면 음성 버튼을 숨기거나 비활성화하고 터치 주문으로 안내
+구현됨 (`frontend/src/features/voice/`, AI 담당, 화면 요소 없음. 7.1 참고)
+
+- Chrome `SpeechRecognition`(ko-KR) 인식, 말하는 중 부분 텍스트(`partialText`)와 최종 인식 문장
+- 인식 후보·신뢰도와 함께 `voice/requests` 호출, 상태 조회, 듣는 중·처리 중 상태(`phase`)
+- Chrome 인식 지원 여부 판별(`isSpeechSupported`)
+
+남음 (Front-end)
+
+- 위 상태를 화면에 표시하고, Chrome 인식을 쓸 수 없으면 음성 버튼을 숨기거나 비활성화하고 터치 주문으로 안내
 - 음성 모드 진입·종료 UI(모드 전환 방식은 프론트가 정함)
 - `EventSource` 구독, 재연결 후 장바구니 재조회
 - 이벤트에 따라 화면 이동·프리셋 적용·확인 창 표시
