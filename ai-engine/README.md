@@ -1,6 +1,6 @@
 # ai-engine 초기 실행 환경
 
-Python 3.12 기반 FastAPI 서버입니다. `contract/backend-ai.openapi.yaml`(0.1.0)의 `GET /health`, `POST /v1/analyze`를 제공합니다. backend만 호출하는 내부 서버이며 DB·외부 AI API를 쓰지 않습니다.
+Python 3.12 기반 FastAPI 서버입니다. `contract/backend-ai.openapi.yaml`(0.2.0)의 `GET /health`, `POST /v1/analyze`를 제공합니다. backend만 호출하는 내부 서버이며 DB·외부 AI API를 쓰지 않습니다.
 
 판단 모델은 아직 없습니다. `/v1/analyze`는 점수를 계산하지 않고 명세의 예시 값을 그대로 돌려주는 **자리 표시**입니다. 이 결과를 실제 UI 결정에 쓰면 안 됩니다.
 

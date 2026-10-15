@@ -12,7 +12,7 @@ class HealthResponse(BaseModel):
 
 
 def create_app() -> FastAPI:
-    application = FastAPI(title="Capstone ai-engine", version="0.1.0")
+    application = FastAPI(title="Capstone ai-engine", version="0.2.0")
 
     @application.get(
         "/health",

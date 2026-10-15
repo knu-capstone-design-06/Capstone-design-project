@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Backend ↔ ai-engine API
-  version: 0.1.0
+  version: 0.2.0
   description: |
     FastAPI backend와 ai-engine 사이의 내부 API 명세입니다.
     ai-engine은 Docker 내부 네트워크에서만 접근하며 외부에 포트를 공개하지 않습니다.
