@@ -90,26 +90,24 @@
 
 ```mermaid
 flowchart LR
+    GPU[GPU 서버<br/>학습 · 평가 · 경량화] -.->|경량화한 모델 탑재| AI1
     subgraph KIOSK[키오스크 PC]
+        direction LR
         CAM[카메라] -->|영상은 PC 안에서만| AI1
         subgraph AI[ai-engine]
-            AI1[① 비전 관측] --> AI2[② 상황 태그] --> AI3[③ 판단<br/>규칙표 + Jev 확률 + 반응 이력]
+            direction LR
+            AI1[① 비전 관측] --> AI2[② 상황 태그] --> AI3[③ 판단<br/>규칙표 · Jev 확률 · 반응 이력]
         end
-        FE[React 프론트엔드<br/>터치 로그 · 하단 제안 영역 · 반응 · Chrome 음성 인식]
+        AI1 -->|관측값| FE[React 프론트엔드<br/>터치 로그 · 하단 제안 영역 · 반응]
     end
-    subgraph SRV[backend 서버 · Docker Compose]
-        BE[FastAPI backend<br/>세션 · 주문 · 결정 상태 · 음성 해석 · Jev 어댑터]
+    subgraph SRV[backend 서버]
+        direction TB
+        BE[FastAPI backend<br/>세션 · 주문 · 결정 상태 · 음성 해석 · Jev 어댑터] <--> DB[(Supabase PostgreSQL)]
     end
-    DB[(Supabase PostgreSQL · 외부 호스팅)]
-    AI1 -->|관측값| FE
-    FE -->|터치 통계 · 관측값 · 반응 · 인식 문장| BE
-    BE -->|분석 요청 · Jev 확률| AI2
-    AI3 -->|결정 · Jev 질문| BE
-    BE -->|지원 제안 · 적용| FE
-    BE <--> DB
+    FE <-->|터치 통계 · 관측값 · 반응 · 인식 문장 ↔ 지원 제안 · 적용| BE
+    AI3 <-->|결정 · Jev 질문 ↔ 분석 요청 · Jev 확률| BE
     BE <-.->|질문 · 선택지별 확률| JEV[Jev API]
     BE <-.->|인식 문장 · 조작 명령| LLM[음성 해석 LLM<br/>OpenAI API]
-    GPU[GPU 서버<br/>모델 학습 · 평가 → CPU용 경량화 · 변환] -.->|경량화한 모델 탑재| AI1
 ```
 
 ### 구성별 책임
