@@ -84,30 +84,26 @@
 
 ## 시스템 아키텍처
 
-설계안(2026-10-16, 비전 담당 작성; 팀 확인은 PR #48 리뷰). 영상은 키오스크 PC 밖으로 나가지 않고, 비전 관측 · 상황 태그 · 판단은 키오스크 PC의 ai-engine이 맡습니다. backend는 세션 · 주문 · 결정 상태와 외부 AI 호출을 맡고, GPU 서버는 모델 학습 · 평가와 CPU 추론용 경량화 · 변환(ONNX)에만 씁니다.
-
-![시스템 파이프라인(설계안, 2026-10-16)](docs/images/system_pipeline_2026-10-16.png)
+구조도는 팀의 기존 mermaid에 설계안(2026-10-15 · 16, 비전 담당; 팀 확인은 PR #48 리뷰)에 맞춰 네 곳만 고쳤습니다: 카메라는 키오스크 PC의 ai-engine이 읽고(영상은 PC 밖으로 나가지 않음), backend는 터치 통계·관측값의 분석을 요청하며, 음성 해석은 OpenAI LLM, 비전 모델은 GPU 서버에서 학습·경량화해 탑재합니다. 실행 위치와 역할은 아래 표에 있습니다.
 
 ```mermaid
-flowchart LR
-    GPU[GPU 서버<br/>학습 · 평가 · 경량화] -.->|경량화한 모델 탑재| AI1
-    subgraph KIOSK[키오스크 PC]
-        direction LR
-        CAM[카메라] -->|영상은 PC 안에서만| AI1
-        subgraph AI[ai-engine]
-            direction LR
-            AI1[① 비전 관측] --> AI2[② 상황 태그] --> AI3[③ 판단<br/>규칙표 · Jev 확률 · 반응 이력]
-        end
-        AI1 -->|관측값| FE[React 프론트엔드<br/>터치 로그 · 하단 제안 영역 · 반응]
-    end
-    subgraph SRV[backend 서버]
-        direction TB
-        BE[FastAPI backend<br/>세션 · 주문 · 결정 상태 · 음성 해석 · Jev 어댑터] <--> DB[(Supabase PostgreSQL)]
-    end
-    FE <-->|터치 통계 · 관측값 · 반응 · 인식 문장 ↔ 지원 제안 · 적용| BE
-    AI3 <-->|결정 · Jev 질문 ↔ 분석 요청 · Jev 확률| BE
-    BE <-.->|질문 · 선택지별 확률| JEV[Jev API]
-    BE <-.->|인식 문장 · 조작 명령| LLM[음성 해석 LLM<br/>OpenAI API]
+flowchart TD
+    USER[사용자] --> FE[React 프론트엔드]
+    CAMERA[카메라] --> AI
+    AI -.->|관측값| FE
+
+    FE -->|상품·주문·세션·터치 로그·비전 입력·음성 요청| BE[FastAPI 백엔드]
+
+    BE <--> DB[(Supabase PostgreSQL)]
+    BE -->|터치 통계·관측값 분석 요청| AI[ai-engine]
+
+    BE <--> JEV[Jev API]
+    BE <--> VOICE[OpenAI 음성 해석 LLM]
+
+    AI -->|판단 결과| BE
+    BE -->|검증된 명령·지원 제안·응답| FE
+    FE -->|수락·거절·적용 결과| BE
+    GPU[GPU 서버: 학습·평가·경량화] -.->|경량화한 모델 탑재| AI
 ```
 
 ### 구성별 책임
