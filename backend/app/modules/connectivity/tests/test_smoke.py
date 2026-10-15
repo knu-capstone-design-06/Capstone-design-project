@@ -29,7 +29,7 @@ class SmokeTests(unittest.TestCase):
         requests = []
         responses = [
             _Response(200, {"status": "ok", "service": "backend"}),
-            _Response(200, {"backend": "ok", "ai_server": "ok"}),
+            _Response(200, {"backend": "ok", "ai_engine": "ok"}),
             _Response(201, {"session_id": "sample-id"}),
             _Response(200, {"session_id": "sample-id", "ai_available": True}),
         ]
@@ -61,18 +61,18 @@ class SmokeTests(unittest.TestCase):
     def test_rejects_unavailable_ai_before_creating_session(self):
         responses = [
             _Response(200, {"status": "ok", "service": "backend"}),
-            _Response(200, {"backend": "ok", "ai_server": "unreachable"}),
+            _Response(200, {"backend": "ok", "ai_engine": "unreachable"}),
         ]
         with patch("app.modules.connectivity.smoke._open",
                    side_effect=lambda *_args, **_kwargs: responses.pop(0)):
-            with self.assertRaisesRegex(SmokeError, "AI server is not reachable"):
+            with self.assertRaisesRegex(SmokeError, "ai-engine is not reachable"):
                 run("http://127.0.0.1:8000", 5.0)
         self.assertFalse(responses)
 
     def test_feature_failure_does_not_print_session_id(self):
         responses = [
             _Response(200, {"status": "ok", "service": "backend"}),
-            _Response(200, {"backend": "ok", "ai_server": "ok"}),
+            _Response(200, {"backend": "ok", "ai_engine": "ok"}),
             _Response(201, {"session_id": "private-session-id"}),
         ]
 

@@ -8,11 +8,11 @@ from app.modules.analyze.router import router as analyze_router
 
 class HealthResponse(BaseModel):
     status: Literal["ok"] = "ok"
-    service: Literal["ai-server"] = "ai-server"
+    service: Literal["ai-engine"] = "ai-engine"
 
 
 def create_app() -> FastAPI:
-    application = FastAPI(title="Capstone AI Server", version="0.1.0")
+    application = FastAPI(title="Capstone ai-engine", version="0.1.0")
 
     @application.get(
         "/health",

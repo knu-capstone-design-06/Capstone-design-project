@@ -6,7 +6,7 @@ export interface HealthResponse {
 
 export interface ConnectivityResponse {
   backend: 'ok';
-  ai_server: 'ok' | 'unreachable';
+  ai_engine: 'ok' | 'unreachable';
 }
 
 export interface SessionCreateResponse {

@@ -6,7 +6,7 @@ test('명세의 경로, HTTP 메서드와 본문으로 backend만 호출한다',
   const calls = [];
   const results = [
     { status: 'ok', service: 'backend' },
-    { backend: 'ok', ai_server: 'unreachable' },
+    { backend: 'ok', ai_engine: 'unreachable' },
     { session_id: 'session-1', started_at: '2026-10-01T10:00:00Z' },
     { session_id: 'session-1', ai_available: false, states: null,
       support: { preset: 'none', requires_confirmation: false, decided_by: 'rule_placeholder' } },

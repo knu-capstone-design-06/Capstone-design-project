@@ -35,7 +35,7 @@ paths:
 
   /api/v1/connectivity:
     get:
-      summary: backend → ai-server 연결 확인 (Docker 네트워크 확인용)
+      summary: backend → ai-engine 연결 확인 (Docker 네트워크 확인용)
       operationId: getConnectivity
       x-frontend-status: client-only
       x-backend-status: implemented
@@ -46,7 +46,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ConnectivityResponse"
-              example: { backend: ok, ai_server: ok }
+              example: { backend: ok, ai_engine: ok }
 
   /api/v1/sessions:
     post:
@@ -76,8 +76,8 @@ paths:
       summary: 시간 구간 특징 전송 → 불편 상태와 지원 방식 응답
       description: |
         frontend가 1~3초 구간마다 터치 통계와 비전 특징을 보냅니다.
-        backend는 ai-server로 불편 상태를 판단하고, 지원 방식을 결정해 돌려줍니다.
-        ai-server 호출이 실패하면 ai_available=false, states=null, model_version=null, preset=none으로 응답합니다.
+        backend는 ai-engine으로 불편 상태를 판단하고, 지원 방식을 결정해 돌려줍니다.
+        ai-engine 호출이 실패하면 ai_available=false, states=null, model_version=null, preset=none으로 응답합니다.
       operationId: sendFeatureWindow
       x-frontend-status: client-only
       x-backend-status: implemented
@@ -734,10 +734,10 @@ components:
 
     ConnectivityResponse:
       type: object
-      required: [backend, ai_server]
+      required: [backend, ai_engine]
       properties:
         backend: { type: string, const: ok }
-        ai_server: { type: string, enum: [ok, unreachable] }
+        ai_engine: { type: string, enum: [ok, unreachable] }
 
     SessionCreateResponse:
       type: object
@@ -814,7 +814,7 @@ components:
       required: [session_id, ai_available, support]
       properties:
         session_id: { type: string }
-        ai_available: { type: boolean, description: ai-server 호출 실패 시 false }
+        ai_available: { type: boolean, description: ai-engine 호출 실패 시 false }
         states:
           oneOf:
             - $ref: "#/components/schemas/StateScores"

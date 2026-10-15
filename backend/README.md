@@ -59,8 +59,8 @@ API 문서: http://127.0.0.1:8000/docs
 | APP_NAME | Capstone Backend | 문자열 |
 | DOCS_ENABLED | true | true / false |
 | CORS_ORIGINS | localhost:5173, localhost:3000의 HTTP 출처 | JSON 배열 |
-| AI_SERVER_URL | http://ai-server:8001 | AI 서버 HTTP(S) 출처 |
-| AI_SERVER_TIMEOUT_SECONDS | 2 | 양의 유한한 초 단위 숫자 |
+| AI_ENGINE_URL | http://ai-engine:8001 | ai-engine HTTP(S) 출처 |
+| AI_ENGINE_TIMEOUT_SECONDS | 2 | 양의 유한한 초 단위 숫자 |
 | OPENAI_API_KEY | 미설정 | 서버 전용 비밀값 |
 | OPENAI_MODEL | gpt-4o-mini | 모델 이름 |
 | OPENAI_TIMEOUT_SECONDS | 10 | 양의 유한한 초 단위 숫자 |
@@ -71,34 +71,34 @@ API 문서: http://127.0.0.1:8000/docs
 
 ## Docker Compose
 
-루트 Compose는 프론트엔드·백엔드·AI 서버를 실행합니다. Docker 엔진을 실행한 뒤 저장소 루트에서 시작합니다.
+루트 Compose는 프론트엔드·백엔드·ai-engine을 실행합니다. Docker 엔진을 실행한 뒤 저장소 루트에서 시작합니다.
 
 ```powershell
 docker compose up --build
 ```
 
-프론트 화면은 `http://127.0.0.1:8080`에서 제공하고 `/backend/` 요청을 백엔드로 전달합니다. 백엔드의 직접 주소는 `http://127.0.0.1:8000`이며 AI 서버는 Docker 내부의 `http://ai-server:8001`을 사용합니다. Compose에는 `env_file`이 없고 이미지에도 `.env`가 없으므로, 로컬 직접 실행과 달리 `backend/.env`는 읽지 않습니다. 필요한 값은 실행 환경에서 컨테이너에 주입합니다.
+프론트 화면은 `http://127.0.0.1:8080`에서 제공하고 `/backend/` 요청을 백엔드로 전달합니다. 백엔드의 직접 주소는 `http://127.0.0.1:8000`이며 ai-engine은 Docker 내부의 `http://ai-engine:8001`을 사용합니다. Compose에는 `env_file`이 없고 이미지에도 `.env`가 없으므로, 로컬 직접 실행과 달리 `backend/.env`는 읽지 않습니다. 필요한 값은 실행 환경에서 컨테이너에 주입합니다.
 
 연결 API의 기존 실행·통신 검증은 [PR #26](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/26)를 참고합니다. 2026-10-14에는 PR #43이 병합된 `main`(`3cb8529`)으로 세 이미지를 빌드해 모두 healthy 상태를 확인했습니다. 실제 브라우저의 기본 API 모드에서 상품 조회 → 세션·장바구니 생성 → 상품 추가 → 모의 주문 확정 → 새 주문 시작이 통과했습니다. 주문은 서버에서 처리하되 첫 응답만 유실시킨 검사에서는 화면의 `주문 반영 확인`이 같은 키·본문으로 재요청해 원래 주문번호를 표시했습니다. `/backend/` 프록시를 거친 HTTP 검사에서는 17개 상품, 옵션 오류, 버전 충돌과 최신 Cart, 중복 키·주문 재시도, 완료 세션 410을 확인했습니다. 이 검증은 DB 영속성, 실제 결제, 음성 도구 실행, AI 판단을 확인한 것은 아닙니다.
 
 ## Backend → AI 내부 연동
 
-`app/infrastructure/external/ai_client.py`의 `AiServerClient`가 AI 서버의
+`app/infrastructure/external/ai_client.py`의 `AiEngineClient`가 ai-engine의
 `POST /v1/analyze`, `GET /health`를 호출합니다. FastAPI lifespan이 HTTP 연결을
-생성·재사용·종료하며 `get_ai_server_client`를 `Depends`로 주입할 수 있습니다.
-서버 시작이나 백엔드 `/health` 호출 시에는 AI 서버 접속을 시도하지 않습니다.
+생성·재사용·종료하며 `get_ai_engine_client`를 `Depends`로 주입할 수 있습니다.
+서버 시작이나 백엔드 `/health` 호출 시에는 ai-engine 접속을 시도하지 않습니다.
 
-`/v1/analyze`는 **AI 서버의 엔드포인트**입니다. 백엔드에 동일 경로를 추가하지
+`/v1/analyze`는 **ai-engine의 엔드포인트**입니다. 백엔드에 동일 경로를 추가하지
 않았습니다. 프론트엔드용 특징 전송 라우터가 임시 세션을 확인한 뒤 이 클라이언트를 호출합니다. 사용자 인증은 아직 구현하지 않았습니다.
 
 서비스 계층에서 사용할 패턴:
 
 ```python
-from app.infrastructure.external.ai_client import AiServerClient
+from app.infrastructure.external.ai_client import AiEngineClient
 from app.infrastructure.external.ai_schemas import AnalyzeRequest
 
 
-async def analyze_window(ai: AiServerClient, window: AnalyzeRequest):
+async def analyze_window(ai: AiEngineClient, window: AnalyzeRequest):
     result = await ai.analyze(window)
     if result is None or not result.measurable:
         return None  # 판단을 생성하지 않고 현재 흐름 유지
@@ -122,14 +122,14 @@ async def analyze_window(ai: AiServerClient, window: AnalyzeRequest):
   내부 전송 클라이언트의 `JsonObject`는 그대로 유지하므로 직접 사용하는 다른 호출자는 별도의 의미 검증이 필요합니다.
   현재 AI는 dummy 모델이고 지원 선택 기준도 미정이므로 검증된 점수라도 자동 UI 결정에는 사용하지 않습니다.
 
-`ai-server` 호스트 이름은 동일 Docker 네트워크에서 해석됩니다. 루트 Compose는
-AI 서버의 호스트 포트를 공개하지 않습니다. 두 서버를
-호스트에서 직접 실행할 때만 `AI_SERVER_URL=http://127.0.0.1:8001`로 변경합니다.
+`ai-engine` 호스트 이름은 동일 Docker 네트워크에서 해석됩니다. 루트 Compose는
+ai-engine의 호스트 포트를 공개하지 않습니다. 두 서버를
+호스트에서 직접 실행할 때만 `AI_ENGINE_URL=http://127.0.0.1:8001`로 변경합니다.
 
 ## 테스트
 
 의존성 설치 후 `backend/`에서 실행합니다. 표준 라이브러리 unittest와 HTTPX
-MockTransport를 사용하므로 실제 AI 서버·DB·Docker가 필요하지 않습니다.
+MockTransport를 사용하므로 실제 ai-engine·DB·Docker가 필요하지 않습니다.
 
 ```powershell
 python -m unittest discover -s tests -v
@@ -145,7 +145,7 @@ python -m unittest discover -s app/modules -p 'test_*.py' -v
 
 | 요청 | 결과 |
 | --- | --- |
-| GET /api/v1/connectivity | 200, backend=ok 및 ai_server=ok 또는 unreachable |
+| GET /api/v1/connectivity | 200, backend=ok 및 ai_engine=ok 또는 unreachable |
 | POST /api/v1/sessions | 201, session_id와 UTC started_at |
 | POST /api/v1/sessions/{session_id}/features | 200, AI 점수 또는 판단 없는 응답 |
 
