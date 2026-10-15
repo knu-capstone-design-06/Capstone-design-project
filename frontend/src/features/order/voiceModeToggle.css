@@ -1,0 +1,33 @@
+.voice-mode-control { margin-bottom: 28px; }
+.voice-mode-toggle { width: 100%; display: flex; align-items: center; gap: 18px; padding: 20px 24px; border: 2px solid #b9c3bd; border-radius: 18px; background: #fffefb; color: #45554d; text-align: left; transition: background .2s, border-color .2s, box-shadow .2s; }
+.voice-mode-toggle:hover { background: #f0f3ef; border-color: #7e9185; }
+.voice-mode-icon { display: grid; place-items: center; flex-shrink: 0; width: 52px; height: 52px; border-radius: 16px; background: #e9ede8; }
+.voice-mode-icon svg { width: 28px; height: 28px; }
+.voice-mode-mute { stroke-width: 2.4; }
+.voice-mode-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
+.voice-mode-copy strong { font-size: 1.125em; }
+.voice-mode-status { display: flex; align-items: center; gap: 8px; font-size: .875em; line-height: 1.6; }
+.voice-mode-dot { flex-shrink: 0; width: 9px; height: 9px; border-radius: 50%; background: #7a867e; }
+.voice-mode-switch { position: relative; display: flex; align-items: center; justify-content: flex-end; flex-shrink: 0; width: 100px; height: 48px; padding: 0 12px; border: 1px solid #8b9a90; border-radius: 28px; background: #e1e6e0; color: #374b3e; font-size: 14px; font-weight: 800; letter-spacing: .04em; }
+.voice-mode-knob { position: absolute; top: 5px; left: 5px; width: 36px; height: 36px; border-radius: 50%; background: #fff; box-shadow: 0 2px 5px #193c3426; transition: transform .2s; }
+.voice-mode-control[data-enabled=true] .voice-mode-toggle { background: #eaf5ed; border-color: #267548; color: #174d30; box-shadow: 0 0 0 4px #26754814, 0 5px 18px #26754812; }
+.voice-mode-control[data-enabled=true] .voice-mode-toggle:hover { background: #dfefe4; border-color: #1b6038; }
+.voice-mode-control[data-enabled=true] .voice-mode-icon { background: #267548; color: #fff; }
+.voice-mode-control[data-enabled=true] .voice-mode-dot { background: #267548; animation: voice-mode-pulse 1.8s ease-out infinite; }
+.voice-mode-control[data-enabled=true] .voice-mode-switch { justify-content: flex-start; background: #21683f; border-color: #21683f; color: #fff; }
+.voice-mode-control[data-enabled=true] .voice-mode-knob { transform: translateX(52px); }
+.voice-mode-preview { margin: 9px 4px 0; font-size: .75em; line-height: 1.6; color: #657867; }
+.large-text .voice-mode-copy strong { font-size: 23px; }
+.large-text .voice-mode-status, .large-text .voice-mode-preview { font-size: 18px; }
+.large-button .voice-mode-toggle { padding: 24px; min-height: 104px; }
+@keyframes voice-mode-pulse { 0% { box-shadow: 0 0 0 0 #26754850; } 75%, 100% { box-shadow: 0 0 0 7px #26754800; } }
+@media (max-width: 520px) {
+  .voice-mode-toggle, .large-button .voice-mode-toggle { gap: 12px; padding: 16px; flex-wrap: wrap; }
+  .voice-mode-icon { width: 44px; height: 44px; border-radius: 12px; }
+  .voice-mode-copy { flex-basis: calc(100% - 56px); }
+  .voice-mode-switch { margin-left: auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .voice-mode-toggle, .voice-mode-knob { transition: none; }
+  .voice-mode-control[data-enabled=true] .voice-mode-dot { animation: none; }
+}
