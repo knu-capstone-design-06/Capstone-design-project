@@ -16,7 +16,7 @@
 .voice-mode-control[data-enabled=true] .voice-mode-dot { background: #267548; animation: voice-mode-pulse 1.8s ease-out infinite; }
 .voice-mode-control[data-enabled=true] .voice-mode-switch { justify-content: flex-start; background: #21683f; border-color: #21683f; color: #fff; }
 .voice-mode-control[data-enabled=true] .voice-mode-knob { transform: translateX(52px); }
-.voice-mode-preview { margin: 9px 4px 0; font-size: .75em; line-height: 1.6; color: #657867; }
+.voice-mode-preview { margin: 9px 4px 0; font-size: .75em; line-height: 1.6; color: #45554d; }
 .large-text .voice-mode-copy strong { font-size: 23px; }
 .large-text .voice-mode-status, .large-text .voice-mode-preview { font-size: 18px; }
 .large-button .voice-mode-toggle { padding: 24px; min-height: 104px; }
