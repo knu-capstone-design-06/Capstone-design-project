@@ -1,11 +1,103 @@
 // 별도 검증용: 실행 중인 Vite와 외부 제공 Playwright가 필요합니다. 서비스 의존성을 추가하지 않습니다.
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
 import { bootstrap, cartResponse, iced, installOrderResponses, mutation, orderResponse } from './orderApiFixture.mjs';
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ?? 'playwright');
 const url = process.env.TOUCH_LOG_BROWSER_URL ?? 'http://127.0.0.1:5173';
 const channel = process.env.PLAYWRIGHT_CHANNEL ?? 'msedge';
 const launchOptions = { headless: true, ...(channel === 'default' ? {} : { channel }) };
+
+test('원시 요약의 대상·종료 기록과 재방문 표시를 확인하고 새 세션은 이전 입력을 제외한다', async () => {
+  const browser = await chromium.launch(launchOptions);
+  try {
+    const page = await browser.newPage({ viewport: { width: 1080, height: 1920 } });
+    await page.route('https://fonts.googleapis.com/**', route => route.abort());
+    const first = bootstrap('summary-first'); first[2].body = cartResponse('summary-first', 1, [iced()]);
+    const responses = await installOrderResponses(page, [...first, ...bootstrap('summary-second')]);
+    await page.goto(url);
+    await page.waitForFunction(() => window.kioskTouchLogDraft?.read().serverSessionId === 'summary-first');
+    await page.locator('[data-log-target="category:커피"]').click();
+    await page.evaluate(() => {
+      const root = document.querySelector('.kiosk');
+      const emit = (element, type, pointerId) => element.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId, clientX: 1, clientY: 1 }));
+      emit(root, 'pointerdown', 200); emit(root, 'pointerup', 200);
+      const disabled = document.createElement('button'); disabled.disabled = true; root.append(disabled);
+      emit(disabled, 'pointerdown', 201); emit(disabled, 'pointerup', 201); disabled.remove();
+      const category = document.querySelector('[data-log-target="category:커피"]');
+      emit(category, 'pointerdown', 202); emit(category, 'pointercancel', 202);
+    });
+    await page.locator('[data-log-target="review-open"]').click();
+    await page.locator('[data-log-target="review-back"]').click();
+    const result = await page.evaluate(() => window.kioskTouchLogDraft.summarize());
+    assert.equal(result.counts.presses, 6);
+    assert.equal(result.counts.activeTargetPresses, 4);
+    assert.equal(result.counts.disabledTargetPresses, 1);
+    assert.equal(result.counts.outsideTargetPresses, 1);
+    assert.equal(result.counts.releases, 5);
+    assert.equal(result.counts.cancellations, 1);
+    assert.deepEqual(result.visits.map(visit => visit.screen), ['menu', 'review', 'menu']);
+    const ids = await page.evaluate(() => window.kioskTouchLogDraft.read().events.map(event => event.id));
+    await page.getByRole('button', { name: '터치 로그 보기', exact: true }).click();
+    await page.waitForFunction(() => document.querySelector('[data-touch-count="presses"]')?.textContent === '6');
+    assert.equal(await page.locator('[data-touch-count="disabledTargetPresses"]').innerText(), '1');
+    assert.match(await page.locator('[data-touch-outside-ratio]').innerText(), /16\.7% \(1 \/ 누름 시작 6\)/);
+    await page.locator('.touch-log-visits > summary').click();
+    assert.equal(await page.locator('.touch-log-visits tbody tr').count(), 3);
+    assert.deepEqual(await page.evaluate(() => window.kioskTouchLogDraft.read().events.map(event => event.id)), ids);
+    await page.reload();
+    await page.waitForFunction(() => window.kioskTouchLogDraft?.read().serverSessionId === 'summary-second');
+    assert.equal(await page.evaluate(() => window.kioskTouchLogDraft.summarize().counts.presses), 0);
+    assert.equal(await page.evaluate(() => window.kioskTouchLogDraft.read().events.filter(event => event.kind === 'pointer_start').length), 6);
+    await page.getByRole('button', { name: '터치 로그 보기', exact: true }).click();
+    await page.waitForFunction(() => document.querySelector('[data-touch-count="presses"]')?.textContent === '0');
+    assert.match(await page.locator('[data-touch-outside-ratio]').innerText(), /산출 안 함 · 누름 기록 없음/);
+    responses.verify();
+  } finally { await browser.close(); }
+});
+
+test('원시 요약은 기본·확대·낮은 화면에서 넘치지 않고 방문 표와 최근 기록에 접근할 수 있다', async t => {
+  const browser = await chromium.launch(launchOptions);
+  try {
+    for (const viewport of [{ width: 1080, height: 1920 }, { width: 1920, height: 1080 }, { width: 1365, height: 768 }, { width: 390, height: 844 }]) {
+      for (const enlarged of [false, true]) for (const lowScreen of [false, true]) {
+        const label = `${viewport.width}x${viewport.height}-${enlarged ? 'large' : 'default'}-${lowScreen ? 'low' : 'normal'}`;
+        await t.test(label, async () => {
+          const page = await browser.newPage({ viewport });
+          try {
+            await page.route('https://fonts.googleapis.com/**', route => route.abort());
+            await page.addInitScript(settings => localStorage.setItem('kiosk-ui-settings-v1', JSON.stringify(settings)), {
+              largeText: enlarged, largeButton: enlarged, simpleScreen: false, stepGuide: false, lowScreen,
+            });
+            const responses = await installOrderResponses(page, bootstrap(`summary-${label}`));
+            await page.goto(url);
+            await page.waitForFunction(() => Boolean(window.kioskTouchLogDraft?.read().serverSessionId));
+            await page.locator('[data-log-target="category:커피"]').click();
+            await page.getByRole('button', { name: '터치 로그 보기', exact: true }).click();
+            await page.locator('.touch-log-visits > summary').click();
+            const panel = page.locator('.touch-log-panel');
+            await page.waitForFunction(() => document.querySelector('[data-touch-count="presses"]')?.textContent === '1');
+            const bounds = await panel.boundingBox();
+            assert(bounds.x >= 0 && bounds.x + bounds.width <= viewport.width && bounds.y >= 0 && bounds.y + bounds.height <= viewport.height);
+            assert(await panel.evaluate(element => element.scrollWidth <= element.clientWidth));
+            await page.locator('.touch-log-visits table').scrollIntoViewIfNeeded();
+            const table = await page.locator('.touch-log-visits table').boundingBox();
+            assert(table.y >= bounds.y && table.y < bounds.y + bounds.height);
+            await page.getByRole('heading', { name: '최근 기록 20개 · 최신순' }).scrollIntoViewIfNeeded();
+            const screenshotDir = process.env.TOUCH_LOG_SUMMARY_SCREENSHOT_DIR;
+            if (screenshotDir && viewport.width === 1080 && (!lowScreen || enlarged)) {
+              await mkdir(screenshotDir, { recursive: true });
+              await panel.evaluate(element => { element.scrollTop = 0; });
+              await page.screenshot({ path: join(screenshotDir, `summary-${enlarged ? 'large' : 'default'}-${lowScreen ? 'low' : 'normal'}.png`) });
+            }
+            responses.verify();
+          } finally { await page.close(); }
+        });
+      }
+    }
+  } finally { await browser.close(); }
+});
 
 test('로컬 로그: 중복 방지, 화면·옵션·설정, 서버 세션 연결·새로고침 분리, 실제 터치 스크롤', async () => {
   const browser = await chromium.launch(launchOptions);

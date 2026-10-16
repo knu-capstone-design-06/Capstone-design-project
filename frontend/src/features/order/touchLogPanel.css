@@ -12,6 +12,17 @@
 .touch-log-summary { display: flex; flex-wrap: wrap; gap: 8px 14px; background: #eef3ee; padding: 9px; border-radius: 8px; font-size: 11px; }
 .touch-log-summary strong { font-size: 14px; }
 .touch-log-session { margin: 8px 0 14px; font-size: 10px; overflow-wrap: anywhere; }
+.touch-log-raw-summary { border-top: 1px solid #dce4dc; border-bottom: 1px solid #dce4dc; padding: 12px 0; margin-bottom: 12px; }
+.touch-log-counts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px 12px; margin: 8px 0; }
+.touch-log-counts > div { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }
+.touch-log-counts dt { font-size: 11px; }
+.touch-log-counts dd { margin: 0; font-size: 14px; font-weight: 700; }
+.touch-log-visits summary { cursor: pointer; font-size: 12px; }
+.touch-log-table-scroll { overflow-x: auto; }
+.touch-log-visits table { width: 100%; border-collapse: collapse; font-size: 10px; margin-top: 6px; }
+.touch-log-visits caption { text-align: left; font-size: 10px; padding-bottom: 5px; }
+.touch-log-visits th, .touch-log-visits td { padding: 5px 3px; border-bottom: 1px solid #dce4dc; text-align: right; }
+.touch-log-visits th:first-child { text-align: left; }
 .touch-log-panel h3 { font-size: 12px; margin: 0 0 6px; }
 .touch-log-events { list-style: none; margin: 0; padding: 0; max-height: 200px; overflow-y: auto; overscroll-behavior: contain; }
 .touch-log-events button { display: flex; width: 100%; justify-content: space-between; align-items: center; gap: 8px; border-color: transparent; text-align: left; background: transparent; }
