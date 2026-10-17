@@ -1,9 +1,11 @@
 import { useEffect, useRef } from 'react';
 import { createTouchLog, distanceToRect } from './touchLog.ts';
 import type { LogContext, Point, Rect, SavedLog } from './touchLog.ts';
+import { summarizeTouchLog } from './touchLogSummary.ts';
+import type { RawTouchSummary } from './touchLogSummary.ts';
 import type { Settings } from './model.ts';
 
-type DraftInspector = { read: () => SavedLog; exportJson: () => void; status: () => string | null };
+type DraftInspector = { read: () => SavedLog; summarize: () => RawTouchSummary; exportJson: () => void; status: () => string | null };
 declare global { interface Window { kioskTouchLogDraft?: DraftInspector } }
 type Gesture = {
   id: string; context: LogContext; start: Point; last: Point; maxDistance: number;
@@ -156,6 +158,7 @@ export function useTouchLog(screen: string, category: string, productId: string 
     }
     const inspector: DraftInspector = {
       read: () => recorder.read(), status: () => recorder.getWarning(),
+      summarize: () => summarizeTouchLog(recorder.read()),
       exportJson() {
         const url = URL.createObjectURL(new Blob([JSON.stringify(recorder.read(), null, 2)], { type: 'application/json' }));
         const link = document.createElement('a'); link.href = url; link.download = 'touch-log-draft.json'; link.click();
