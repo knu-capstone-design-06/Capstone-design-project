@@ -18,11 +18,11 @@
 
 ## API 연결
 
-`src/shared/api/`는 기존 네 API(상태 확인·연결 확인·세션 생성·특징 전송)와 신규 상품·장바구니·모의 주문 6개 API의 타입·호출 함수를 제공합니다. `contract/frontend-backend.openapi.yaml` 0.3.0에서도 이 형식을 유지합니다. 호출 함수가 있다는 것이 서버 구현 완료를 의미하지는 않습니다. 프론트엔드는 backend와만 통신합니다.
+`src/shared/api/`는 기존 네 API(상태 확인·연결 확인·세션 생성·특징 전송)와 신규 상품·장바구니·모의 주문 6개 API의 타입·호출 함수를 제공합니다. `contract/frontend-backend.openapi.yaml` 0.4.0에서도 이 형식을 유지합니다. 호출 함수가 있다는 것이 서버 구현 완료를 의미하지는 않습니다. 프론트엔드는 backend와만 통신합니다.
 
 ## 주문 API 명세 반영 상태
 
-OpenAPI 0.3.0에 상품 조회, 장바구니 조회·추가·수량 변경·삭제, 모의 주문 확정의 신규 6개 API를 팀 검토용 초안으로 추가했습니다. 요청·응답의 기준 형식은 [OpenAPI](../contract/frontend-backend.openapi.yaml), 설계 이유와 미정 정책은 [주문 API 검토 문서](../docs/Product-Cart-Order-API-Draft.md)를 확인합니다. 신규 operation의 `x-contract-status: draft`는 팀 검토 대기 상태입니다.
+OpenAPI 0.4.0에 상품 조회, 장바구니 조회·추가·수량 변경·삭제, 모의 주문 확정의 신규 6개 API를 팀 검토용 초안으로 추가했습니다. 요청·응답의 기준 형식은 [OpenAPI](../contract/frontend-backend.openapi.yaml), 설계 이유와 미정 정책은 [주문 API 검토 문서](../docs/Product-Cart-Order-API-Draft.md)를 확인합니다. 신규 operation의 `x-contract-status: draft`는 팀 검토 대기 상태입니다.
 
 주문 operation의 `x-frontend-status: prepared`는 프론트 준비, `x-backend-status: implemented`는 초안 기준 서버 구현 완료를 뜻합니다. 기존 네 연결 API는 백엔드에 구현돼 있으며 상품·장바구니·모의 주문 6개 API는 PR #40에서 초안 기준으로 구현했습니다(메모리 저장). 실제 프론트 통합 검증과 최종 계약·정책 합의는 남아 있습니다.
 

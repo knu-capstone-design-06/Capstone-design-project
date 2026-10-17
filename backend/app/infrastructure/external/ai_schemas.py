@@ -49,4 +49,4 @@ class AnalyzeResponse(BaseModel):
 
 class AiHealthResponse(BaseModel):
     status: Literal["ok"]
-    service: Literal["ai-server"]
+    service: Literal["ai-engine"]

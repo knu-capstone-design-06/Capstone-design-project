@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from app.infrastructure.external.ai_client import AiServerClient, get_ai_server_client
+from app.infrastructure.external.ai_client import AiEngineClient, get_ai_engine_client
 from app.modules.sessions.exceptions import SessionNotFound
 from app.modules.sessions.schemas import (
     FeatureWindowRequest, FeatureWindowResponse, SessionCreateResponse,
@@ -24,7 +24,7 @@ def create_session(service: SessionService = Depends(get_session_service)):
 async def features(
     session_id: str, window: FeatureWindowRequest,
     service: SessionService = Depends(get_session_service),
-    ai: AiServerClient = Depends(get_ai_server_client),
+    ai: AiEngineClient = Depends(get_ai_engine_client),
 ):
     try:
         return await service.analyze(session_id, window, ai)

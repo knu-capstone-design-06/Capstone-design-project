@@ -1,4 +1,4 @@
-/** contract/frontend-backend.openapi.yaml (0.3.0; order operations remain a team-review draft) */
+/** contract/frontend-backend.openapi.yaml (0.4.0; order operations remain a team-review draft) */
 export interface HealthResponse {
   status: 'ok';
   service: 'backend';
@@ -6,7 +6,7 @@ export interface HealthResponse {
 
 export interface ConnectivityResponse {
   backend: 'ok';
-  ai_server: 'ok' | 'unreachable';
+  ai_engine: 'ok' | 'unreachable';
 }
 
 export interface SessionCreateResponse {

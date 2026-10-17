@@ -17,16 +17,16 @@ class Settings(BaseSettings):
     app_name: str = "Capstone Backend"
     docs_enabled: bool = True
     cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
-    ai_server_url: str = "http://ai-server:8001"
-    ai_server_timeout_seconds: float = Field(default=2.0, gt=0, allow_inf_nan=False)
+    ai_engine_url: str = "http://ai-engine:8001"
+    ai_engine_timeout_seconds: float = Field(default=2.0, gt=0, allow_inf_nan=False)
     # Unset key: voice requests use development stub replies without calling OpenAI.
     openai_api_key: SecretStr | None = None
     openai_model: str = "gpt-4o-mini"
     openai_timeout_seconds: float = Field(default=10.0, gt=0, allow_inf_nan=False)
 
-    @field_validator("ai_server_url")
+    @field_validator("ai_engine_url")
     @classmethod
-    def validate_ai_server_url(cls, value: str) -> str:
+    def validate_ai_engine_url(cls, value: str) -> str:
         parsed = urlsplit(value)
         if (
             parsed.scheme not in {"http", "https"}
@@ -37,7 +37,7 @@ class Settings(BaseSettings):
             or parsed.query
             or parsed.fragment
         ):
-            raise ValueError("AI_SERVER_URL must be an HTTP(S) origin")
+            raise ValueError("AI_ENGINE_URL must be an HTTP(S) origin")
         _ = parsed.port
         return value.rstrip("/")
 

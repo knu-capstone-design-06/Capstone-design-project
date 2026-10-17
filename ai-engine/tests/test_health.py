@@ -10,7 +10,7 @@ class HealthTests(unittest.TestCase):
         with TestClient(create_app()) as client:
             response = client.get("/health")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"status": "ok", "service": "ai-server"})
+        self.assertEqual(response.json(), {"status": "ok", "service": "ai-engine"})
 
     def test_operation_ids_match_contract(self):
         paths = create_app().openapi()["paths"]
