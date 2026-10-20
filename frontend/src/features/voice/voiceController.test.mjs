@@ -38,6 +38,7 @@ test('음성 모드를 켜면 바로 듣고, 확실한 결과는 넘긴 뒤 마�
   } }]);
   const snapshot = controller.getSnapshot();
   assert.deepEqual([snapshot.phase, snapshot.lastResult.status, snapshot.error], ['idle', 'completed', null]);
+  assert.equal(snapshot.lastTranscript, '아이스 아메리카노 두 잔', '처리 결과가 나온 뒤에도 인식 문장을 표시할 수 있음');
   assert.deepEqual(delivered.map(result => result.tool_calls), [[addAmericano]]);
   assert.equal(FakeRecognition.instances.length, 1);
 });
@@ -48,6 +49,7 @@ test('확인·질문 결과에는 대답을 듣기 위해 마이크를 다시 �
   FakeRecognition.last().final(['아메리카노 두 잔', 0.5]);
   await tick(20);
   assert.equal(controller.getSnapshot().lastResult.reply_text, '아이스 아메리카노 2잔 담을까요?');
+  assert.equal(controller.getSnapshot().lastTranscript, '아메리카노 두 잔', '대답을 다시 듣는 동안 첫 인식 문장 유지');
   assert.equal(controller.getSnapshot().phase, 'listening');
   assert.equal(FakeRecognition.instances.length, 2);
 });
@@ -147,9 +149,89 @@ test('키오스크에게 한 말이 아니면(ignored) 화면 문구 없이 닫�
   controller.setEnabled(true);
   FakeRecognition.last().final(['너 뭐 먹을래', 0.8]);
   await tick(20);
-  assert.deepEqual([controller.getSnapshot().phase, controller.getSnapshot().lastResult.reply_text], ['idle', null]);
+  assert.deepEqual([controller.getSnapshot().phase, controller.getSnapshot().lastResult], ['idle', null]);
   assert.equal(delivered[0].status, 'ignored');
+  assert.equal(controller.getSnapshot().lastTranscript, '', '주변 대화로 무시된 문장은 화면에 남기지 않음');
   assert.equal(FakeRecognition.instances.length, 1);
+});
+
+test('확인 질문 중 주변 대화가 무시돼도 질문을 유지하고 다시 말하기의 "네"를 받는다', async () => {
+  const question = status('needs_confirmation', { tool_calls: [addAmericano], reply_text: '아이스 아메리카노 2잔 담을까요?' });
+  const { controller, calls } = setup([question, status('ignored'), status('completed', { tool_calls: [addAmericano] })]);
+  controller.setEnabled(true);
+  FakeRecognition.last().final(['아메리카노 두 잔', 0.9]);
+  await tick(20);
+  FakeRecognition.last().final(['너 뭐 먹을래', 0.9]);
+  await tick(20);
+  assert.equal(controller.getSnapshot().lastResult, question);
+  assert.equal(controller.getSnapshot().lastTranscript, '');
+  assert.equal(controller.getSnapshot().phase, 'idle');
+  assert.equal(FakeRecognition.instances.length, 2, '주변 대화 때문에 마이크를 반복해서 열지 않음');
+  controller.listen();
+  FakeRecognition.last().final(['네', 0.9]);
+  await tick(20);
+  assert.deepEqual(calls.map(call => call.body.text), ['아메리카노 두 잔', '너 뭐 먹을래', '네']);
+  assert.equal(controller.getSnapshot().lastResult.status, 'completed');
+  controller.dispose();
+});
+
+// Chrome의 비동기 stop/abort 종료를 직접 제어하며 중복 마이크 시작을 거부합니다.
+function deferredRecognition() {
+  let active = null;
+  return () => new class extends FakeRecognition {
+    start() {
+      if (active) throw new Error('previous recognition is still active');
+      active = this;
+      super.start();
+    }
+    stop() { this.stopped += 1; }
+    abort() { this.aborted += 1; }
+    finish() { if (active === this) active = null; this.onend?.(); }
+  }();
+}
+
+test('빠른 질문 응답이 와도 이전 마이크의 onend 뒤에만 다시 듣는다', async () => {
+  const { controller } = setup([status('needs_clarification', { reply_text: '온도를 골라 주세요.' })], { recognition: deferredRecognition() });
+  controller.setEnabled(true);
+  const first = FakeRecognition.last();
+  first.final(['아메리카노 주세요', 0.9]);
+  await tick(20);
+  assert.equal(FakeRecognition.instances.length, 1);
+  controller.listen();
+  first.final(['중복 최종 이벤트', 0.9]);
+  first.finish();
+  assert.equal(FakeRecognition.instances.length, 2);
+  assert.deepEqual([controller.getSnapshot().phase, controller.getSnapshot().error], ['listening', null]);
+  controller.dispose();
+  FakeRecognition.last().finish();
+});
+
+test('마이크 종료 대기 중 모드를 끄면 예약된 재청취를 취소한다', async () => {
+  const { controller } = setup([status('needs_clarification', { reply_text: '온도를 골라 주세요.' })], { recognition: deferredRecognition() });
+  controller.setEnabled(true);
+  const first = FakeRecognition.last();
+  first.final(['아메리카노 주세요', 0.9]);
+  await tick(20);
+  controller.setEnabled(false);
+  first.finish();
+  assert.equal(FakeRecognition.instances.length, 1);
+  assert.deepEqual([controller.getSnapshot().enabled, controller.getSnapshot().phase], [false, 'idle']);
+});
+
+test('빠르게 OFF→ON해도 이전 abort 종료를 기다리고 늦은 발화는 버린다', () => {
+  const { controller, calls } = setup([status('completed')], { recognition: deferredRecognition() });
+  controller.setEnabled(true);
+  const first = FakeRecognition.last();
+  controller.setEnabled(false);
+  controller.setEnabled(true);
+  first.final(['취소한 발화', 0.9]);
+  assert.equal(FakeRecognition.instances.length, 1);
+  assert.equal(calls.length, 0);
+  first.finish();
+  assert.equal(FakeRecognition.instances.length, 2);
+  assert.deepEqual([controller.getSnapshot().phase, controller.getSnapshot().error], ['listening', null]);
+  controller.dispose();
+  FakeRecognition.last().finish();
 });
 
 test('대답을 기다리지 않을 때 한 글자이거나 신뢰도가 아주 낮은 인식은 서버로 보내지 않는다', async () => {
@@ -175,6 +257,33 @@ test('처리 중에 음성 모드를 끄면 늦게 온 결과를 버린다', asy
   const snapshot = controller.getSnapshot();
   assert.deepEqual([snapshot.enabled, snapshot.phase, snapshot.lastResult, delivered.length], [false, 'idle', null, 0]);
   assert.equal(FakeRecognition.instances.length, 1);
+});
+
+test('화면을 떠나 모드를 끄면 이전 질문을 지우고 다시 켤 때 새 문장으로 시작한다', async () => {
+  const { controller, calls } = setup([
+    status('needs_clarification', { reply_text: '온도를 골라 주세요.' }),
+    status('completed'),
+  ]);
+  controller.setContext({ sessionId: 'session-1', screenId: 'menu_list' });
+  controller.setEnabled(true);
+  FakeRecognition.last().final(['아메리카노 주세요', 0.9]);
+  await tick(20);
+  assert.equal(controller.getSnapshot().lastResult.reply_text, '온도를 골라 주세요.');
+  assert.equal(controller.getSnapshot().phase, 'listening');
+
+  controller.setEnabled(false);
+  assert.deepEqual([controller.getSnapshot().enabled, controller.getSnapshot().phase, controller.getSnapshot().lastResult, controller.getSnapshot().lastTranscript], [false, 'idle', null, '']);
+  controller.setContext({ sessionId: 'session-2', screenId: 'menu_list' });
+  controller.setEnabled(true);
+  FakeRecognition.last().final(['네', 0.9]);
+  await tick(20);
+  assert.equal(calls.length, 1, '이전 질문의 짧은 대답을 새 세션으로 보내지 않음');
+  controller.listen();
+  FakeRecognition.last().final(['핫 아메리카노 주세요', 0.9]);
+  await tick(20);
+  assert.deepEqual(calls.map(call => [call.sessionId, call.body.screen_id]), [
+    ['session-1', 'menu_list'], ['session-2', 'menu_list'],
+  ]);
 });
 
 test('인식기가 없거나 세션이 없으면 켜지 않고 이유를 남긴다', () => {
