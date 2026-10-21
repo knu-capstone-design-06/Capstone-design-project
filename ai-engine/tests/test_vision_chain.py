@@ -26,6 +26,7 @@ AI_ENGINE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VISION_DIR = os.path.join(AI_ENGINE_DIR, "app", "modules", "vision")
 MODEL_DIR = os.path.join(VISION_DIR, "models")
 CONTRACT_FB = os.path.join(os.path.dirname(AI_ENGINE_DIR), "contract", "frontend-backend.openapi.yaml")
+TOUCH_LOG_TS = os.path.join(os.path.dirname(AI_ENGINE_DIR), "frontend", "src", "features", "order", "touchLog.ts")
 H1_PATH = os.path.join(MODEL_DIR, "h1_head_yolox_nano_416.onnx")
 P1_PATH = os.path.join(MODEL_DIR, "p1_head_direction_resnet18_56.onnx")
 
@@ -352,11 +353,12 @@ T0_MS = 1_792_600_000_000.0
 
 
 def touch_log(folder, events, video=None, clock=True):
-    """A touch log export (touchLog.ts SavedLog) with events [(ms from the first frame, kind, screen, data)] and,
-    when video is given, the video's clock file."""
-    evs = [{"id": f"e{i}", "sessionId": "s1", "serverSessionId": None, "occurredAt": _iso(T0_MS + ms),
-            "elapsedMs": ms + 1000, "screen": screen, "visitId": "v", "settings": {}, "kind": kind, "data": data}
-           for i, (ms, kind, screen, data) in enumerate(events)]
+    """A touch log export (touchLog.ts SavedLog) with events [(ms from the first frame, kind, screen, data[, session
+    id])] (session 's1' unless given) and, when video is given, the video's clock file."""
+    evs = [{"id": f"e{i}", "sessionId": ev[4] if len(ev) > 4 else "s1", "serverSessionId": None,
+            "occurredAt": _iso(T0_MS + ev[0]), "elapsedMs": ev[0] + 1000, "screen": ev[2], "visitId": "v",
+            "settings": {}, "kind": ev[1], "data": ev[3]}
+           for i, ev in enumerate(events)]
     path = os.path.join(folder, "take_touch.json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump({"version": 1, "sessionId": "s1", "serverSessionId": None, "startedAt": T0_MS - 1000,
@@ -368,14 +370,25 @@ def touch_log(folder, events, video=None, clock=True):
 
 
 MENU_EVENTS = [(-1000, "session_start", "menu", None), (-900, "screen_enter", "menu", None),
-               (500, "pointer_start", "menu", {"target": None}),
+               (500, "pointer_start", "menu", {"target": None,                    # a miss; next press product:1 = a fix
+                                               "nearestCandidates": [{"id": "product:1", "kind": "button"}]}),
                (700, "pointer_start", "menu", {"target": {"id": "product:1", "kind": "button", "disabled": False}}),
                (800, "pointer_start", "menu", {"start": {"x": 1, "y": 2}}),               # no target field
                (900, "pointer_start", "menu", {"target": {"id": "cart-add", "kind": "button", "disabled": True}}),
                (2000, "screen_enter", "review", {"from": "menu"}),
                (3000, "screen_enter", "menu", {"from": "review"}),
                (3500, "pointer_start", "menu", {"target": {"id": "cart-add", "kind": "button", "disabled": False}}),
-               (4000, "screen_enter", "menu", {"from": "complete"})]
+               (4000, "screen_enter", "menu", {"from": "complete"}),
+               (4500, "pointer_start", "menu", {"target": None,                    # a miss; next press elsewhere
+                                                "nearestCandidates": [{"id": "product:3", "kind": "button"}]}),
+               (4700, "pointer_start", "menu", {"target": {"id": "product:2", "kind": "button", "disabled": False}}),
+               (5000, "options_open", "menu", {"productId": "2"}),
+               (5500, "options_close", "menu", {"productId": "2"}),
+               (6000, "session_suspend", "menu", {"reason": "pagehide"}),
+               (7000, "session_resume", "menu", {"reason": "bfcache"}), (7000, "screen_enter", "menu", None),
+               (8000, "session_end", "menu", {"reason": "server_session_change"}),
+               (8100, "session_start", "menu", {"reason": "server_session_change"}, "s2"),
+               (8100, "screen_enter", "menu", None, "s2")]
 
 
 class TouchTests(unittest.TestCase):   # plain Python: runs with the server packages too
@@ -388,7 +401,7 @@ class TouchTests(unittest.TestCase):   # plain Python: runs with the server pack
         tl = load_timeline(touch_log(self.folder, MENU_EVENTS, self.video), self.video)
         self.assertEqual(tl.meta["anchor"], "take.mp4.clock.json first_frame.wall_epoch_ms")
         c = tl.counts(0.0, 1.0)
-        self.assertEqual((c["tap_count"], c["miss_tap_count"], c["unknown_target_presses"]), (4, 1, 1))
+        self.assertEqual((c["tap_count"], c["miss_tap_count"], c["unknown_target_presses"]), (4, None, 1))
         self.assertIsNone(c["repeat_tap_count"])
         self.assertIsNone(c["dwell_ms"])
         self.assertEqual(tl.counts(2.5, 3.0)["back_count"], 1)        # review -> menu
@@ -409,15 +422,70 @@ class TouchTests(unittest.TestCase):   # plain Python: runs with the server pack
         self.assertIsNone(tl.counts(0.0, 1.0))
         self.assertEqual(tl.counts(2.0, 3.0)["tap_count"], 1)
         self.assertEqual(tl.counts(3.0, 9.0)["tap_count"], 0)          # after the last event: covered, no touch
+        self.assertIsNone(tl.counts(1.5, 2.5))                          # starts before the first event, ends after
+        self.assertFalse(tl.covered_interval(1.5, 2.5))
+        self.assertEqual(tl.counts(2.0, 3.0)["near_miss_fix_count"], 0)   # a miss without candidates is no fix
 
     def test_start_offset_without_a_clock_file_and_the_error_without_both(self):
         from app.modules.vision.touch import load_timeline
         log = touch_log(self.folder, MENU_EVENTS, self.video, clock=False)
         tl = load_timeline(log, self.video, start_offset_s=10.0)       # the first event is at video 10 s
         self.assertAlmostEqual(tl.first_t, 10.0)
-        self.assertAlmostEqual(tl.last_press(20.0), 10.0 + 4.5)
+        self.assertAlmostEqual(tl.last_press(20.0), 10.0 + 5.7)
         with self.assertRaises(ValueError):
             load_timeline(log, self.video)
+
+    def test_misses_fixed_at_once_and_unknown_targets(self):
+        from app.modules.vision.touch import load_timeline
+        tl = load_timeline(touch_log(self.folder, MENU_EVENTS, self.video), self.video)
+        c = tl.counts(0.4, 0.75)                                        # the miss at 0.5, then product:1 at 0.7
+        self.assertEqual((c["tap_count"], c["miss_tap_count"], c["near_miss_fix_count"]), (2, 1, 1))
+        c = tl.counts(0.0, 1.0)                                         # the 0.8-s press has no target field
+        self.assertEqual((c["miss_tap_count"], c["near_miss_fix_count"], c["unknown_target_presses"]), (None, None, 1))
+        c = tl.counts(4.4, 4.8)                                         # the next press is not one of the candidates
+        self.assertEqual((c["miss_tap_count"], c["near_miss_fix_count"]), (1, 0))
+        self.assertEqual(tl.counts(0.6, 0.75)["near_miss_fix_count"], 0)   # counted at the miss's time, not the fix's
+        other = [(0, "session_start", "menu", None),
+                 (100, "pointer_start", "menu", {"target": None, "nearestCandidates": [{"id": "product:1"}]}),
+                 (200, "pointer_start", "menu", {"target": {"id": "product:1", "kind": "button"}}, "s2")]
+        tl = load_timeline(touch_log(self.folder, other, self.video), self.video)
+        self.assertEqual(tl.counts(0.0, 0.3)["near_miss_fix_count"], 0)   # the next press is in another session
+
+    def test_observation_spans_sessions_and_options(self):
+        from app.modules.vision.touch import load_timeline
+        tl = load_timeline(touch_log(self.folder, MENU_EVENTS, self.video), self.video)
+        self.assertEqual(tl.spans, [(-1.0, 6.0), (7.0, 8.0), (8.1, None)])
+        self.assertIsNone(tl.counts(6.2, 6.8))                          # between session_suspend and session_resume
+        self.assertIsNone(tl.counts(5.5, 7.5))                          # reaches into the stretch not observed
+        self.assertEqual(tl.counts(7.0, 7.5)["tap_count"], 0)           # observed again from session_resume
+        self.assertEqual((tl.covered(6.5), tl.covered(7.5)), (False, True))
+        self.assertEqual(tl.screen_at(6.5), (None, None))               # after session_suspend
+        self.assertEqual(tl.screen_at(7.5), ("menu", 7.0))
+        self.assertEqual(tl.screen_at(8.05), (None, None))              # after session_end
+        self.assertEqual(tl.screen_at(8.5), ("menu", 8.1))
+        self.assertIsNone(tl.options_open_at(-2.0))                     # before the first event
+        self.assertEqual([tl.options_open_at(t) for t in (4.9, 5.2, 5.6)], [False, True, False])
+        self.assertEqual((tl.session_at(-2.0), tl.session_at(0.0), tl.session_at(8.05), tl.session_at(8.5)),
+                         (None, "s1", "s1", "s2"))
+        self.assertEqual([(s["session_id"], s["first_t"], s["last_t"]) for s in tl.meta["sessions"]],
+                         [("s1", -1.0, 8.0), ("s2", 8.1, 8.1)])
+        self.assertEqual((tl.meta["truncated_possible"], tl.meta["warnings"]), (False, []))
+
+    def test_a_log_at_the_frontend_limit_may_have_lost_its_start(self):
+        from app.modules.vision.touch import LOG_LIMIT, load_timeline
+        if os.path.isfile(TOUCH_LOG_TS):                                # the frontend's own limit
+            with open(TOUCH_LOG_TS, encoding="utf-8") as f:
+                self.assertEqual(int(re.search(r"logLimit = (\d+)", f.read()).group(1)), LOG_LIMIT)
+        full = [(1000 + 10 * i, "pointer_start", "menu", {"target": None}) for i in range(LOG_LIMIT)]
+        tl = load_timeline(touch_log(self.folder, full, self.video), self.video)
+        self.assertTrue(tl.meta["truncated_possible"])
+        self.assertEqual(len(tl.meta["warnings"]), 1)
+        self.assertIsNone(tl.counts(0.5, 1.5))                          # before the first remaining event: unknown
+        other = os.path.join(self.folder, "no_clock")
+        os.makedirs(other)
+        log = touch_log(other, full)                                    # no clock file
+        with self.assertRaisesRegex(ValueError, "clock file"):
+            load_timeline(log, os.path.join(other, "take.mp4"), start_offset_s=3.0)
 
     def test_events_without_a_time_are_skipped_and_counted(self):
         from app.modules.vision.touch import load_timeline
@@ -750,7 +818,7 @@ class FrameChainTests(unittest.TestCase):
         self.assertEqual(r["mouth_motion"], 0.0)                  # an unchanged face after a 0.5-s baseline
         self.assertIsNone(rows[0]["mouth_motion"])
         self.assertEqual([x["tap_count"] for x in rows[4:10]], [0, 1, 0, 1, 1, 1])   # presses at 0.5 / 0.7 / 0.8 / 0.9 s
-        self.assertEqual(sum(x["miss_tap_count"] for x in rows), 1)
+        self.assertEqual([x["miss_tap_count"] for x in rows[4:10]], [0, 1, 0, 0, None, 0])   # 0.8 s: no target field
         for key in ("ms_heads", "ms_head_dir", "ms_chain", "cpu_ms_chain", "ms_total"):
             self.assertGreaterEqual(r[key], 0.0, key)
 
