@@ -52,7 +52,7 @@ def _p(default, source: str, unit: str = ""):
 class PilotParams:
     """Chain values with their sources (the `source` metadata of each field; PilotParams.sources())."""
 
-    # --- head detector (perception/head.py) -------------------------------------------------------------------
+    # --- head detector (app/inference/head.py) ---------------------------------------------------------------
     head_score_min: float = _p(
         0.65, "데이터(E3b): H1 README 결과 절, Open Images 검증 전부(h1_val_all) 입력 416에서 F1이 가장 큰 점수 기준 "
               "0.65(정밀도 0.682 · 재현율 0.676). 키오스크 시점 값 아님", "score 0~1")

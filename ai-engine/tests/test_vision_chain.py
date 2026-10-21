@@ -160,7 +160,7 @@ class ParamsTests(unittest.TestCase):   # plain Python: runs with the server pac
 class HeadPostprocessTests(unittest.TestCase):
     def test_letterbox_keeps_the_aspect_ratio_at_the_top_left_with_pad_114(self):
         import numpy as np
-        from app.modules.vision.perception.head import letterbox
+        from app.inference.head import letterbox
         img = np.full((480, 640, 3), 10, np.uint8)
         x, r = letterbox(img, (416, 416))
         self.assertEqual(x.shape, (3, 416, 416))
@@ -170,7 +170,7 @@ class HeadPostprocessTests(unittest.TestCase):
         self.assertTrue((x[:, 312:, :] == 114).all())            # padding below
 
     def test_grid_has_the_3549_anchors_of_a_416_input(self):
-        from app.modules.vision.perception.head import grid_and_strides
+        from app.inference.head import grid_and_strides
         grid, strides = grid_and_strides((416, 416))
         self.assertEqual(grid.shape, (52 * 52 + 26 * 26 + 13 * 13, 2))
         self.assertEqual(float(strides[0, 0]), 8.0)
@@ -179,7 +179,7 @@ class HeadPostprocessTests(unittest.TestCase):
 
     def test_decode_and_nms(self):
         import numpy as np
-        from app.modules.vision.perception.head import decode, grid_and_strides, nms
+        from app.inference.head import decode, grid_and_strides, nms
         grid, st = grid_and_strides((416, 416))
         raw = np.zeros((len(grid), 6), np.float32)
         raw[:, 4] = 0.0
@@ -195,7 +195,7 @@ class HeadPostprocessTests(unittest.TestCase):
 
     def test_filtering_before_nms_equals_nms_at_the_floor_then_filtering(self):
         import numpy as np
-        from app.modules.vision.perception.head import nms
+        from app.inference.head import nms
         rng = np.random.default_rng(1)
         xy = rng.random((300, 2)) * 300
         wh = rng.random((300, 2)) * 60 + 5
@@ -212,7 +212,7 @@ class HeadPostprocessTests(unittest.TestCase):
     def test_detector_call_path_with_a_stub_session(self):
         """The whole __call__ (letterbox, decode, threshold, NMS, frame fractions) with a stub ONNX session."""
         import numpy as np
-        from app.modules.vision.perception.head import HeadDetector, grid_and_strides
+        from app.inference.head import HeadDetector, grid_and_strides
         det = HeadDetector.__new__(HeadDetector)
         det.size_hw = (416, 416)
         det.grid, det.strides = grid_and_strides(det.size_hw)
@@ -236,7 +236,7 @@ class HeadPostprocessTests(unittest.TestCase):
 class OnnxModelTests(unittest.TestCase):
     def test_head_detector_on_a_drawn_frame(self):
         import numpy as np
-        from app.modules.vision.perception.head import HeadDetector
+        from app.inference.head import HeadDetector
         det = HeadDetector(H1_PATH, 0.65, 0.65, threads=1)
         self.assertEqual(det.size_hw, (416, 416))
         heads = det(np.full((360, 640, 3), 127, np.uint8))
@@ -246,7 +246,7 @@ class OnnxModelTests(unittest.TestCase):
 
     def test_head_direction_probabilities(self):
         import numpy as np
-        from app.modules.vision.perception.head_direction import DIR_CLASSES, HeadDirection
+        from app.inference.head_direction import DIR_CLASSES, HeadDirection
         model = HeadDirection(P1_PATH, threads=1)
         img = np.full((240, 320, 3), 90, np.uint8)
         probs = model.probs(img, [[100, 60, 160, 140], [0, 0, 20, 30]])
@@ -259,7 +259,7 @@ class OnnxModelTests(unittest.TestCase):
 class HeadDirectionInputTests(unittest.TestCase):
     def test_crop_is_square_grey_outside_and_rgb(self):
         import numpy as np
-        from app.modules.vision.perception.head_direction import GREY, head_crop, square_crop, to_input
+        from app.inference.head_direction import GREY, head_crop, square_crop, to_input
         img = np.zeros((100, 100, 3), np.uint8)
         img[:, :] = (255, 0, 0)                                  # pure blue in BGR
         crop, side, inside = square_crop(img, (-10, -10, 10, 30))   # long side 40 -> 60 px, centred at (0, 10)
@@ -700,7 +700,7 @@ class FakeHeads:
 
     def __call__(self, img):
         import numpy as np
-        from app.modules.vision.perception.head import Heads
+        from app.inference.head import Heads
         H, W = img.shape[:2]
         boxes = [[0.38, 0.22, 0.62, 0.58]] + ([[0.10, 0.20, 0.16, 0.28]] if self.behind else [])
         frac = np.array(boxes, float)

@@ -1,4 +1,4 @@
-"""Export the two perception checkpoints to ONNX for the CPU runtime (perception/head.py, perception/head_direction.py).
+"""Export the two perception checkpoints to ONNX for the CPU runtime (app/inference/head.py, head_direction.py).
 
 Runs in a separate environment with CPU torch, torchvision and YOLOX (commit 6ddff48) - not in the runtime one, which
 needs only onnxruntime. From ai-engine/:
@@ -24,7 +24,8 @@ explicitly (torch.serialization.safe_globals) instead of switching weights_only 
 Checks written to <out-dir>/onnx_export.json and printed:
 - ONNX Runtime vs PyTorch on the same inputs: max |difference| of the raw outputs (H1: a random 0-255 input as the
   Run 1 tool did, and a letterboxed synthetic frame; P1: a random normalised batch);
-- H1 boxes after this module's decode + NMS (perception/head.py) from both outputs at the YOLOX evaluation floor 0.01;
+- H1 boxes after this module's decode + NMS (app/inference/head.py) from both outputs at the YOLOX evaluation floor
+  0.01;
 - P1 input: this module's numpy crop transform (head_direction.to_input) vs the torchvision v2 transforms of
   p1_data.transforms(False) (Resize 64, CenterCrop 56, ToDtype scale, Normalize) on random crops;
 - sizes and SHA-256 of the checkpoints and the ONNX files, package versions.
@@ -120,7 +121,7 @@ def export_h1(ckpt_path: str, out_path: str, exp_file: str | None, simplify: boo
     from yolox.models.network_blocks import SiLU
     from yolox.utils import replace_module
 
-    from app.modules.vision.perception.head import decode, grid_and_strides, letterbox, nms
+    from app.inference.head import decode, grid_and_strides, letterbox, nms
 
     if exp_file:
         exp = get_exp(exp_file, None)
@@ -182,7 +183,7 @@ def export_p1(ckpt_path: str, out_path: str, simplify: bool) -> dict:
     import torchvision
     from torchvision.transforms import v2
 
-    from app.modules.vision.perception import head_direction as hd
+    from app.inference import head_direction as hd
 
     p = _safe_load(ckpt_path)
     classes = tuple(p["classes"])

@@ -1,7 +1,8 @@
 """선택 열 (optional columns) of events.py, made from one frame's perception outputs.
 
-Layers: 추론 (app/inference/vision.py MediaPipe; perception/ H1 · P1) -> 관측값 (features.py) + this file -> 사건
-(events.py) -> 상황 (situation.py). numpy only (no OpenCV, MediaPipe or ONNX Runtime here), so it is tested on arrays.
+Layers: 추론 (app/inference/vision.py MediaPipe; app/inference/head.py H1 · head_direction.py P1) -> 관측값
+(features.py) + this file -> 사건 (events.py) -> 상황 (situation.py). numpy only (no OpenCV, MediaPipe or ONNX Runtime
+here), so it is tested on arrays.
 
 Columns (names = the ones events.py reads, then observation-only columns no rule reads yet):
   people_behind_count   heads standing behind the main user: every head box other than the main user's and the
@@ -37,8 +38,9 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from app.inference.head_direction import DIR_KEYS
+
 from .events import SEEN
-from .perception.head_direction import DIR_KEYS
 
 SHOULDERS = (11, 12)   # left / right shoulder in the 33-point pose map [D3]; = features.SHOULDERS
 DIR_COLUMNS = tuple(f"head_dir_{k}" for k in DIR_KEYS)
@@ -98,7 +100,7 @@ def assign_heads(boxes: np.ndarray, frame_wh: tuple, face_xy, params) -> HeadRol
 
 
 def head_columns(heads, roles: HeadRoles, dir_probs) -> dict:
-    """The head columns of one frame. heads = perception.head.Heads (or anything with .boxes and .scores);
+    """The head columns of one frame. heads = app.inference.head.Heads (or anything with .boxes and .scores);
     dir_probs = the P1 probabilities of the main user's head (5,), or None."""
     boxes = np.asarray(heads.boxes, dtype=np.float64).reshape(-1, 4)
     out = {"people_behind_count": len(roles.behind),

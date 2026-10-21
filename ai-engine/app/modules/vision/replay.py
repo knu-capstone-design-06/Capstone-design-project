@@ -108,13 +108,13 @@ def load_perception(models_dir: str, params, threads: int, heads_on: bool, log) 
         return None, None, info
     h1, p1 = os.path.join(models_dir, H1_ONNX), os.path.join(models_dir, P1_ONNX)
     if os.path.isfile(h1):
-        from .perception.head import HeadDetector
+        from app.inference.head import HeadDetector
         detector = HeadDetector(h1, params.head_score_min, params.head_nms_iou, threads)
         info[H1_ONNX] = {"bytes": os.path.getsize(h1), "sha256": sha256(h1)}
     else:
         log(f"머리 탐지기 파일이 없습니다({h1}): 뒤 사람 · 동행자 열은 결측입니다. tools/export_onnx.py로 만드세요")
     if detector is not None and os.path.isfile(p1):
-        from .perception.head_direction import HeadDirection
+        from app.inference.head_direction import HeadDirection
         direction = HeadDirection(p1, threads)
         info[P1_ONNX] = {"bytes": os.path.getsize(p1), "sha256": sha256(p1)}
     elif detector is not None:

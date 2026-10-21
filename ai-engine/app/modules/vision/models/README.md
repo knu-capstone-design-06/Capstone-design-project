@@ -35,7 +35,7 @@ c9af046c80b74e384cdfc4e088a25f7e8a0226244e4474736be75664c9731d50  model_final.pt
 - 체크포인트는 저장소 밖(학교 GPU 서버와 비전 담당 작업 공간)에 있습니다. 필요하면 비전 담당에게 요청해 주세요.
 - 형식: H1은 입력 `images` = 배치 × 3 × 416 × 416(BGR 0~255, letterbox, 정규화 없음), 출력 `output` = 배치 × 3,549 × 6(상자 · objectness · head, 디코딩 전), opset 11. P1은 입력 `crops` = 배치 × 3 × 56 × 56(RGB, 정규화), 출력 `logits` = 배치 × 5(중간 · 위 · 좌 · 우 · 뒤), opset 11. 둘 다 배치 축이 동적이고, 클래스 · 크롭 값은 ONNX 메타데이터에 들어 있습니다.
 - 변환 확인(같은 입력에서 ONNX Runtime과 PyTorch 비교, `onnx_export.json`에 기록): H1 원출력 최대 차이 1.4 × 10⁻⁵(무작위 0~255 입력) · 2.0 × 10⁻⁴(그린 화면), 0.01 이상 상자를 NMS한 결과 18개 · 0개가 둘에서 같음. P1 logits 최대 차이 4.3 × 10⁻⁶, 가장 큰 방향이 8장 모두 같음. P1 입력 변환(numpy)과 torchvision 변환의 최대 차이 7.2 × 10⁻⁷.
-- 쓰는 곳: `perception/head.py`(H1), `perception/head_direction.py`(P1).
+- 쓰는 곳: `app/inference/head.py`(H1), `app/inference/head_direction.py`(P1).
 
 ### 다시 만들기 (서버 환경과 따로, CPU)
 

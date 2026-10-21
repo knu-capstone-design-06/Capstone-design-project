@@ -1,7 +1,7 @@
 """The runtime chain shared by replay.py and live.py.
 
 Per frame (FrameChain.process): features.Observer row (MediaPipe face / face detector / pose, plus blendshapes when
-on) -> H1 head boxes (perception/head.py) -> main user, companion, people behind and the main user's P1 direction
+on) -> H1 head boxes (app/inference/head.py) -> main user, companion, people behind and the main user's P1 direction
 (columns.py) -> shoulders, mouth_motion -> touch counts since the previous row (touch.py). Each part that is not
 available (no ONNX model, blendshapes off, no touch log) leaves its columns blank or absent, so the events layer treats
 the cue as missing ('모름'), never as 'absent'.

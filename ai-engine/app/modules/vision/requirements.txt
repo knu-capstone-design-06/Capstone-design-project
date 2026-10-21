@@ -22,8 +22,9 @@ pyparsing==3.3.3
 python-dateutil==2.9.0.post0
 six==1.17.0
 sounddevice==0.5.6
-# ONNX Runtime for the H1 head detector and the P1 head direction (perception/, 2026-10-22): onnxruntime 1.30.0 and the
-# protobuf it pulled in with Python 3.12.10 on Windows 11 (pip install, 2026-10-22); its other needs (flatbuffers, numpy,
-# packaging) are pinned above. The export tool's packages (torch, YOLOX) are not needed here: models/README.md.
+# ONNX Runtime for the H1 head detector and the P1 head direction (app/inference/head.py, head_direction.py;
+# 2026-10-22): onnxruntime 1.30.0 and the protobuf it pulled in with Python 3.12.10 on Windows 11 (pip install,
+# 2026-10-22); its other needs (flatbuffers, numpy, packaging) are pinned above. The export tool's packages (torch,
+# YOLOX) are not needed here: models/README.md.
 onnxruntime==1.30.0
 protobuf==7.36.2
