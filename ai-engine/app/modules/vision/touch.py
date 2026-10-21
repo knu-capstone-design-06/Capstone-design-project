@@ -25,7 +25,8 @@ own summary (touchLogSummary.ts) where that exists:
   near_miss_fix_count  misses fixed at once (tree table 3-가 4-1 '같은 버튼 근처 빗나감 · 바로 고침'): a miss whose
                   data.nearestCandidates (the enabled buttons nearest to a press outside every button, useTouchLog.ts;
                   no distance limit, T03 undecided) holds the target id of the next press of the same session. Counted
-                  at the miss's time; a miss without candidates is never a fix. None under the same condition as
+                  at the miss's time, and only once the fixing press lies at or before the interval's end, so no count
+                  reads a press after t1; a miss without candidates is never a fix. None under the same condition as
                   miss_tap_count. Linking a near press to the next press is T07, undecided: this is the proposal.
   back_count      screen_enter events from 'review' to 'menu' (OrderPage.tsx: '← 메뉴 더 고르기' review-back and the
                   menu-home link set the screen from review to menu). 'complete' -> 'menu' starts a new order (a new
@@ -78,6 +79,7 @@ class TouchEvent:
     target_id: str | None = None   # press on a button / link: its data-log-target id
     candidates: tuple = ()         # miss: the ids of data.nearestCandidates
     fixed_next: bool = False       # miss whose next press of the same session hits one of its candidates
+    fix_t: float | None = None     # fixed miss: video time of that next press
     resume: bool = False           # session_start / session_resume: observation (re)starts
     stop: bool = False             # session_end / session_suspend: observation stops
     options_open: bool = False
@@ -150,7 +152,7 @@ def mark_fixes(events: list) -> list:
         if e.miss and e.candidates:
             nxt = next_press.get(e.session)
             if nxt is not None and nxt.target_id in e.candidates:
-                out[i] = dataclasses.replace(e, fixed_next=True)
+                out[i] = dataclasses.replace(e, fixed_next=True, fix_t=nxt.t)
         if e.press:
             next_press[e.session] = e
     return out
@@ -205,7 +207,7 @@ class TouchTimeline:
         evs = self._between(t0, t1)
         unknown = sum(e.target_unknown for e in evs)
         return {"tap_count": sum(e.press for e in evs), "miss_tap_count": None if unknown else sum(e.miss for e in evs),
-                "near_miss_fix_count": None if unknown else sum(e.fixed_next for e in evs),
+                "near_miss_fix_count": None if unknown else sum(e.fixed_next and e.fix_t <= t1 for e in evs),
                 "back_count": sum(e.back for e in evs), "unknown_target_presses": unknown,
                 "repeat_tap_count": None, "dwell_ms": None}
 

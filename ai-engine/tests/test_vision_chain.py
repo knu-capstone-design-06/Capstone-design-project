@@ -470,6 +470,7 @@ class TouchTests(unittest.TestCase):   # plain Python: runs with the server pack
         c = tl.counts(4.4, 4.8)                                         # the next press is not one of the candidates
         self.assertEqual((c["miss_tap_count"], c["near_miss_fix_count"]), (1, 0))
         self.assertEqual(tl.counts(0.6, 0.75)["near_miss_fix_count"], 0)   # counted at the miss's time, not the fix's
+        self.assertEqual(tl.counts(0.4, 0.6)["near_miss_fix_count"], 0)    # the fixing press (0.7 s) is after t1
         other = [(0, "session_start", "menu", None),
                  (100, "pointer_start", "menu", {"target": None, "nearestCandidates": [{"id": "product:1"}]}),
                  (200, "pointer_start", "menu", {"target": {"id": "product:1", "kind": "button"}}, "s2")]
