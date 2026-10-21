@@ -29,6 +29,7 @@ CONTRACT_FB = os.path.join(os.path.dirname(AI_ENGINE_DIR), "contract", "frontend
 TOUCH_LOG_TS = os.path.join(os.path.dirname(AI_ENGINE_DIR), "frontend", "src", "features", "order", "touchLog.ts")
 H1_PATH = os.path.join(MODEL_DIR, "h1_head_yolox_nano_416.onnx")
 P1_PATH = os.path.join(MODEL_DIR, "p1_head_direction_resnet18_56.onnx")
+HEAD_IMAGE_ENV = "VISION_TEST_HEAD_IMAGE"   # opt-in: an image with at least one head (read only, never shown or saved)
 
 HAS_NUMPY = importlib.util.find_spec("numpy") is not None
 HAS_CV2 = HAS_NUMPY and importlib.util.find_spec("cv2") is not None
@@ -254,6 +255,25 @@ class OnnxModelTests(unittest.TestCase):
         self.assertEqual(probs.shape, (2, len(DIR_CLASSES)))
         self.assertTrue(np.allclose(probs.sum(1), 1.0))
         self.assertEqual(model.probs(img, []).shape, (0, 5))
+
+    @unittest.skipUnless(HAS_CV2 and os.path.isfile(os.environ.get(HEAD_IMAGE_ENV, "")),
+                         f"opt-in: set {HEAD_IMAGE_ENV} to an image with at least one head")
+    def test_head_image_runs_h1_and_p1(self):
+        """H1 boxes -> P1 directions on an image the tester names (the repository holds no picture of a person; the
+        image is read in memory only, never printed, shown or saved)."""
+        import cv2
+        import numpy as np
+        from app.inference.head import HeadDetector
+        from app.inference.head_direction import DIR_CLASSES, HeadDirection
+        from app.modules.vision.params import PilotParams
+        img = cv2.imread(os.environ[HEAD_IMAGE_ENV])
+        self.assertIsNotNone(img, "the image could not be read")
+        p = PilotParams()
+        heads = HeadDetector(H1_PATH, p.head_score_min, p.head_nms_iou, threads=1)(img)
+        self.assertGreaterEqual(len(heads), 1)
+        probs = HeadDirection(P1_PATH, threads=1).probs(img, heads.boxes_px)
+        self.assertEqual(probs.shape, (len(heads), len(DIR_CLASSES)))
+        self.assertTrue(np.allclose(probs.sum(1), 1.0))
 
 
 @unittest.skipUnless(HAS_CV2, SKIP)
@@ -945,6 +965,10 @@ class ReplayWithFakePerceptionTests(unittest.TestCase):
         meta, recs, out = self.run_replay(sched)
         self.assertEqual(meta["frames"], len(sched))
         self.assertEqual(len(recs), meta["windows"])
+        self.assertNotIn("partial", recs[0])                       # full windows at 1 ... 5 s
+        self.assertAlmostEqual(recs[-1]["partial"]["segment_s"], 0.9)   # the last 0.9 s (frames to 5.9 s)
+        self.assertAlmostEqual(meta["last_window_partial_s"], 0.9)
+        self.assertEqual(meta["counts"]["frames"], {"with_face": 60, "with_heads": 60, "with_direction": 60})
         names = [r["situation"]["name"] for r in recs]
         self.assertIn("looking_around", names)
         tagged = next(r for r in recs if r["situation"]["name"] == "looking_around")
@@ -1014,6 +1038,8 @@ class LiveTests(unittest.TestCase):
                         direction=FakeDirection(), show_window=False, out_dir=folder, blendshapes=False,
                         print_fn=lines.append)
         self.assertEqual(len(lines), meta["windows"])
+        self.assertAlmostEqual(meta["last_window_partial_s"], 0.9)   # frames to 5.9 s: one shorter window at the end
+        self.assertEqual(meta["counts"]["frames"]["with_heads"], meta["frames"])
         self.assertTrue(all(line.startswith("[") and "상황" in line for line in lines))
         self.assertIn("column:tap_count", " ".join(lines))          # no touch log in live use
         self.assertFalse(meta["window_shown"])
@@ -1061,8 +1087,13 @@ class ReplaySmokeTests(unittest.TestCase):
         with open(os.path.join(out, "meta.json"), encoding="utf-8") as f:
             meta = json.load(f)
         self.assertEqual(meta["frames"], 30)
-        self.assertEqual(len(recs), 2)                             # windows at 1.0 s and 2.0 s
+        self.assertEqual([r["t"] for r in recs], [1.0, 2.0, 2.9])   # two full windows and the last 0.9 s
+        self.assertNotIn("partial", recs[1])
+        self.assertAlmostEqual(recs[-1]["partial"]["segment_s"], 0.9)
+        self.assertEqual(recs[-1]["segment_s"], [2.0, 2.9])
         self.assertEqual(recs[0]["touch"]["tap_count"], 4)
+        # drawn shapes give no head box, so the H1 -> P1 path is not exercised here (test_head_image_runs_h1_and_p1)
+        self.assertEqual(meta["counts"]["frames"]["with_heads"], 0)
         for r in recs:
             self.assertEqual(r["situation"]["name"], "unknown")
             self.assertTrue(r["situation"]["unknown_reason"])

@@ -17,8 +17,11 @@ From ai-engine/ (runtime environment: requirements.txt + app/modules/vision/requ
 - Models: MediaPipe files in app/modules/vision/models/ (download_models.py) and the two ONNX files from
   tools/export_onnx.py. A missing ONNX file is reported and its columns stay missing (--no-heads does the same on
   purpose).
+- Windows: one every segment_s from the first frame; the rows after the last full window get one shorter window at
+  the last frame (its record has 'partial': {segment_s}; meta last_window_partial_s), so the end of the take is judged.
 - Outputs in --out: windows.jsonl, rows.csv (one line per processed frame), meta.json (inputs, bundle with sources,
-  model hashes, versions, timing p50 / p95, counts per tag and decision).
+  model hashes, versions, timing p50 / p95, counts per tag and decision, frames with a face / a head box / a head
+  direction).
 """
 from __future__ import annotations
 
@@ -35,6 +38,7 @@ from collections import deque
 
 from .chain import SOURCE_KIND, FrameChain, WindowJudge, history_s
 from .columns import OPTIONAL_COLUMNS
+from .events import SEEN
 from .params import load_bundle
 
 CODE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -132,6 +136,19 @@ def environment() -> dict:
     return env
 
 
+def frame_flags(row: dict) -> dict:
+    """Which perception outputs one row has: a face seen, at least one head box (H1), a head direction (P1)."""
+    return {"with_face": row.get("face_state") == SEEN, "with_heads": (row.get("head_count") or 0) >= 1,
+            "with_direction": row.get("head_dir_middle") is not None}
+
+
+def add_frame_counts(counts: dict, row: dict) -> dict:
+    """counts (meta counts.frames) with one more row."""
+    for key, present in frame_flags(row).items():
+        counts[key] = counts.get(key, 0) + int(present)
+    return counts
+
+
 def write_rows(path: str, rows: list):
     from .features import COLUMNS
     extra = [c for c in OPTIONAL_COLUMNS + TOUCH_ROW_COLUMNS + TIMING_COLUMNS if any(c in r for r in rows)]
@@ -154,13 +171,13 @@ def run_replay(source, out_dir: str, bundle, *, timeline=None, models=None, dete
     judge = WindowJudge(bundle, timeline, session_id=session_id)
     keep_s = history_s(bundle)
     rows, recent, records = [], deque(), []
-    next_t = None
+    next_t, partial_s = None, None
     wall0 = time.perf_counter()
     stop_reason = "input ended"
     with open(os.path.join(out_dir, "windows.jsonl"), "w", encoding="utf-8") as out:
-        def emit(t_end):
+        def emit(t_end, seg_len=None):
             window_rows = [r for r in recent if float(r["t_s"]) >= t_end - keep_s]
-            rec = judge.evaluate(window_rows, t_end)
+            rec = judge.evaluate(window_rows, t_end, segment_s=seg_len)
             records.append(rec)
             out.write(json.dumps(jsonable(rec), ensure_ascii=False) + "\n")
 
@@ -185,8 +202,15 @@ def run_replay(source, out_dir: str, bundle, *, timeline=None, models=None, dete
             close = getattr(frames, "close", None)
             if close:
                 close()
+        last_end = None if next_t is None else next_t - bundle.chain.segment_s
+        if rows and last_end is not None and float(rows[-1]["t_s"]) > last_end:   # rows after the last full window
+            partial_s = float(rows[-1]["t_s"]) - last_end
+            emit(float(rows[-1]["t_s"]), partial_s)
     wall_s = time.perf_counter() - wall0
     write_rows(os.path.join(out_dir, "rows.csv"), rows)
+    frame_counts = {"with_face": 0, "with_heads": 0, "with_direction": 0}
+    for row in rows:
+        add_frame_counts(frame_counts, row)
     tags, transitions, supports = {}, {}, {}
     for rec in records:
         tags[rec["situation"]["name"]] = tags.get(rec["situation"]["name"], 0) + 1
@@ -200,7 +224,9 @@ def run_replay(source, out_dir: str, bundle, *, timeline=None, models=None, dete
             "settings": settings or {}, "bundle": bundle.to_dict(), "pilot_fields": bundle.pilot_fields(),
             "touch": None if timeline is None else timeline.meta, "models": model_info or {},
             "environment": environment(), "timing_ms": timing_summary(rows, records),
-            "counts": {"situation": tags, "transition": transitions, "opened_support": supports},
+            "counts": {"situation": tags, "transition": transitions, "opened_support": supports,
+                       "frames": frame_counts},
+            "last_window_partial_s": None if partial_s is None else round(partial_s, 4),
             "jev_questions_recorded": len(judge.jev.log)}
     with open(os.path.join(out_dir, "meta.json"), "w", encoding="utf-8") as f:
         json.dump(jsonable(meta), f, ensure_ascii=False, indent=2)
@@ -239,6 +265,8 @@ def main(argv=None) -> int:
     if a.touch_log:
         from .touch import load_timeline
         timeline = load_timeline(a.touch_log, a.video, a.start_offset)
+        for warning in timeline.meta.get("warnings", []):
+            print(f"터치 로그 경고: {warning}", flush=True)
     import cv2
     cv2.setNumThreads(1)
     from app.inference.vision import FACE_LANDMARKER_MODEL, POSE_LANDMARKER_MODEL, FACE_DETECTOR_MODEL, MediaPipeModels

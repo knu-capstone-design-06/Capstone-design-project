@@ -14,6 +14,7 @@ From ai-engine/:
   missing, so every tag that needs 'no touch' stays 'unknown' (its reason says column:tap_count) and the rule table's
   touch rows do not open. That is the rules' missing-cue path, not an error.
 - The ring buffer keeps the rows a window needs (chain.history_s: window_s + 2 x gap_s of the value bundle).
+- When the run stops, the rows after the last full window get one shorter window (record 'partial').
 - --out DIR: windows.jsonl and meta.json only. The camera picture is never saved.
 """
 from __future__ import annotations
@@ -27,7 +28,7 @@ from collections import deque
 
 from .chain import SOURCE_KIND, FrameChain, WindowJudge, history_s
 from .params import load_bundle
-from .replay import MODELS_DIR, environment, jsonable, load_perception, timing_summary
+from .replay import MODELS_DIR, add_frame_counts, environment, jsonable, load_perception, timing_summary
 
 WINDOW = "vision chain live (q = stop)"   # ASCII: OpenCV window titles may not show Korean on Windows
 
@@ -75,44 +76,53 @@ def run_live(source, bundle, *, models, detector=None, direction=None, show_wind
     judge = WindowJudge(bundle, None, session_id="live")
     keep_s = history_s(bundle) + bundle.chain.segment_s
     buf, all_ms, records = deque(), [], []
+    frame_counts = {"with_face": 0, "with_heads": 0, "with_direction": 0}
     out = open(os.path.join(out_dir, "windows.jsonl"), "w", encoding="utf-8") if out_dir else None
-    next_t, stop_reason, last_text = None, "input ended", ""
+    next_t, stop_reason, last_t, partial_s = None, "input ended", None, None
     if show_window:
         import cv2
         cv2.namedWindow(WINDOW, cv2.WINDOW_NORMAL)
+
+    def emit(t_end, ms_frame, seg_len=None):
+        rec = judge.evaluate(list(buf), t_end, segment_s=seg_len)
+        records.append({"ms_window": rec["ms_window"]})
+        print_fn(window_line(rec, ms_frame))
+        if out:
+            out.write(json.dumps(jsonable(rec), ensure_ascii=False) + "\n")
+            out.flush()
+
     frames = iter(source)
     try:
-        for frame in frames:
-            row = chain.process(frame)
-            buf.append(row)
-            all_ms.append({"ms_total": row.get("ms_total"), "ms_heads": row.get("ms_heads"),
-                           "ms_head_dir": row.get("ms_head_dir"), "ms_chain": row.get("ms_chain"),
-                           "cpu_ms_chain": row.get("cpu_ms_chain")})
-            t = float(row["t_s"])
-            while buf and float(buf[0]["t_s"]) < t - keep_s:
-                buf.popleft()
-            if next_t is None:
-                next_t = t + bundle.chain.segment_s
-            while t >= next_t:
-                rec = judge.evaluate(list(buf), next_t)
-                records.append({"ms_window": rec["ms_window"]})
-                last_text = window_line(rec, row.get("ms_chain"))
-                print_fn(last_text)
-                if out:
-                    out.write(json.dumps(jsonable(rec), ensure_ascii=False) + "\n")
-                    out.flush()
-                next_t += bundle.chain.segment_s
-            if show_window:
-                import cv2
-                cv2.imshow(WINDOW, _draw(frame.image, row, f"t={t:.1f}s"))
-                if (cv2.waitKey(1) & 0xFF) == ord("q"):
-                    stop_reason = "q in the window"
-                    break
-                if cv2.getWindowProperty(WINDOW, cv2.WND_PROP_VISIBLE) < 1:
-                    stop_reason = "window closed"
-                    break
-    except KeyboardInterrupt:
-        stop_reason = "Ctrl+C"
+        try:
+            for frame in frames:
+                row = chain.process(frame)
+                buf.append(row)
+                add_frame_counts(frame_counts, row)
+                all_ms.append({"ms_total": row.get("ms_total"), "ms_heads": row.get("ms_heads"),
+                               "ms_head_dir": row.get("ms_head_dir"), "ms_chain": row.get("ms_chain"),
+                               "cpu_ms_chain": row.get("cpu_ms_chain")})
+                t = last_t = float(row["t_s"])
+                while buf and float(buf[0]["t_s"]) < t - keep_s:
+                    buf.popleft()
+                if next_t is None:
+                    next_t = t + bundle.chain.segment_s
+                while t >= next_t:
+                    emit(next_t, row.get("ms_chain"))
+                    next_t += bundle.chain.segment_s
+                if show_window:
+                    import cv2
+                    cv2.imshow(WINDOW, _draw(frame.image, row, f"t={t:.1f}s"))
+                    if (cv2.waitKey(1) & 0xFF) == ord("q"):
+                        stop_reason = "q in the window"
+                        break
+                    if cv2.getWindowProperty(WINDOW, cv2.WND_PROP_VISIBLE) < 1:
+                        stop_reason = "window closed"
+                        break
+        except KeyboardInterrupt:
+            stop_reason = "Ctrl+C"
+        if next_t is not None and last_t > next_t - bundle.chain.segment_s:   # rows after the last full window
+            partial_s = last_t - (next_t - bundle.chain.segment_s)
+            emit(last_t, None, partial_s)
     finally:
         close = getattr(frames, "close", None)
         if close:
@@ -127,7 +137,9 @@ def run_live(source, bundle, *, models, detector=None, direction=None, show_wind
         stop_reason = getattr(source, "end_reason", None) or stop_reason
     meta = {"created": time.strftime("%Y-%m-%d %H:%M:%S"), "frames": len(all_ms), "windows": len(records),
             "stop_reason": stop_reason, "bundle": bundle.to_dict(), "environment": environment(),
-            "timing_ms": timing_summary(all_ms, records), "window_shown": bool(show_window)}
+            "timing_ms": timing_summary(all_ms, records), "window_shown": bool(show_window),
+            "counts": {"frames": frame_counts},
+            "last_window_partial_s": None if partial_s is None else round(partial_s, 4)}
     if out_dir:
         with open(os.path.join(out_dir, "meta.json"), "w", encoding="utf-8") as f:
             json.dump(jsonable(meta), f, ensure_ascii=False, indent=2)

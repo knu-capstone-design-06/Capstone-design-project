@@ -6,8 +6,9 @@ on) -> H1 head boxes (app/inference/head.py) -> main user, companion, people beh
 available (no ONNX model, blendshapes off, no touch log) leaves its columns blank or absent, so the events layer treats
 the cue as missing ('모름'), never as 'absent'.
 
-Per window (WindowJudge.evaluate, one every params.segment_s): situation.assess over [t - window_s, t] with the
-reasons of an 'unknown' (unknown_reasons), touch counts of the segment (t - segment_s, t], the rule table v0
+Per window (WindowJudge.evaluate, one every params.segment_s; the runners add one shorter window for the input's last
+stretch, marked 'partial'): situation.assess over [t - window_s, t] with the reasons of an 'unknown' (unknown_reasons),
+touch counts of the segment (t - segment_s, t], the rule table v0
 (judgment/rule_table_v0.py) on the emulated session state, the Jev question recorded in shadow mode, and the contract
 view (contract_view.py). Nothing after t is read, so a replay gives what the kiosk would have given at t.
 """
@@ -230,11 +231,11 @@ class WindowJudge:
         self.state = R.SessionState()
         self.jev = jev or ShadowJev()
 
-    def _touch(self, t_end: float) -> tuple:
+    def _touch(self, t_end: float, seg_len: float) -> tuple:
         p, tl = self.b.chain, self.timeline
         if tl is None:
             return None, None, {"name": None, "steps_left": None, "pause_s": None, "options_open": None}, None, None
-        seg = tl.counts(t_end - p.segment_s, t_end)
+        seg = tl.counts(t_end - seg_len, t_end)
         recent = tl.counts(t_end - p.touch_span_s, t_end)
         screen, since = tl.screen_at(t_end)
         steps_left = (len(SCREEN_FLOW) - 1 - SCREEN_FLOW.index(screen)) if screen in SCREEN_FLOW else None
@@ -243,22 +244,25 @@ class WindowJudge:
         # choosing anything yet is not a pause after choosing
         chosen = last_press is not None and since is not None and last_press >= since
         pause = t_end - last_press if chosen else None
-        flags = tl.flags(t_end - p.segment_s, t_end) if seg is not None else None
+        flags = tl.flags(t_end - seg_len, t_end) if seg is not None else None
         progress = None if flags is None else (flags["forward"] or flags["cart_add"])
         return seg, recent, {"name": screen, "steps_left": steps_left, "pause_s": pause,
                              "options_open": tl.options_open_at(t_end)}, progress, flags
 
-    def evaluate(self, rows: list, t_end: float) -> dict:
+    def evaluate(self, rows: list, t_end: float, segment_s: float | None = None) -> dict:
+        """One window record. segment_s = the length of this window's segment (rows and touch counts); default the
+        bundle's segment_s. A shorter one (the input's last stretch) is recorded as record['partial']."""
         w0 = time.perf_counter()
         p, sp = self.b.chain, self.b.situation
-        seg_rows = [r for r in rows if t_end - p.segment_s < float(r["t_s"]) <= t_end]
+        seg_len = p.segment_s if segment_s is None else segment_s
+        seg_rows = [r for r in rows if t_end - seg_len < float(r["t_s"]) <= t_end]
         if sp is None:
             out, reasons = None, [{"code": "no_value_bundle"}]
         else:
             out, _ = assess(rows, t_end, sp, landmarker_num_faces=LANDMARKER_NUM_FACES)
             reasons = unknown_reasons(rows, t_end, sp) if out["name"] == UNKNOWN else []
         situation = situation_view(out, reasons)
-        seg, recent, screen, progress, _ = self._touch(t_end)
+        seg, recent, screen, progress, _ = self._touch(t_end, seg_len)
         face_seen = any(r.get("face_state") == SEEN for r in seg_rows)
         has_touch = seg is not None and (seg["tap_count"] > 0 or seg["back_count"] > 0)
         measurable = bool(has_touch or face_seen)
@@ -285,12 +289,14 @@ class WindowJudge:
             jev = {k: v for k, v in entry.items() if k != "request"}
         d = decision.to_dict() | {"withdrawn_id": withdrawn_id}
         record = {
-            "t": round(t_end, 4), "segment_s": [round(t_end - p.segment_s, 4), round(t_end, 4)],
+            "t": round(t_end, 4), "segment_s": [round(t_end - seg_len, 4), round(t_end, 4)],
             "frames": len(seg_rows), "situation": situation, "touch": seg,
             "screen": {**screen, "pause_s": None if screen["pause_s"] is None else round(screen["pause_s"], 3)},
             "vision": vision_summary(seg_rows, gaze), "measurable": measurable, "decision": d,
             "session": self.state.snapshot(), "jev": jev,
         }
+        if seg_len != p.segment_s:
+            record["partial"] = {"segment_s": round(seg_len, 4)}
         record["contract"] = to_contract(record, self.session_id)
         record["ms_window"] = (time.perf_counter() - w0) * 1000.0
         return record
