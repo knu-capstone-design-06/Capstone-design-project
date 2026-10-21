@@ -4,9 +4,11 @@ reason, alternatives, measurable, rule-table decision, session state, contract v
 From ai-engine/ (runtime environment: requirements.txt + app/modules/vision/requirements.txt + onnxruntime):
   python -m app.modules.vision.replay --video TAKE.mp4 [--touch-log TAKE_touch.json] [--start-offset S]
                                       [--params BUNDLE.json] --out DIR [--step N] [--width W] [--threads 1]
-                                      [--max-seconds S] [--no-blendshapes] [--no-heads] [--overwrite]
+                                      [--max-seconds S] [--blendshapes] [--no-heads] [--overwrite]
 
 - Frame times: TAKE.mp4.times.csv when it is there (record_clip.py), else frame index / container fps (sources.py).
+- Blendshapes: off unless --blendshapes is given (decision list 2026-10-10 §16: a setting, off by default); while
+  off, mouth_motion stays blank and the cues that need it are missing.
 - Touch log: placed on the video time axis with TAKE.mp4.clock.json (record_clip.py) or with --start-offset (touch.py).
   Without --touch-log the touch columns are missing and every rule that needs them stays 'unknown'.
 - Value bundle (--params): the 13 situation values (no defaults, vision README '상황 층') and overrides of the chain's
@@ -141,7 +143,7 @@ def write_rows(path: str, rows: list):
 
 
 def run_replay(source, out_dir: str, bundle, *, timeline=None, models=None, detector=None, direction=None,
-               blendshapes: bool = True, max_seconds: float | None = None, session_id: str = "replay",
+               blendshapes: bool = False, max_seconds: float | None = None, session_id: str = "replay",
                model_info: dict | None = None, settings: dict | None = None, log=print) -> dict:
     """Run the chain over a frame source (sources.VideoFileSource or any iterable of sources.Frame) and write the
     outputs. models = MediaPipe models (or a fake with .infer(frame)); detector / direction = perception models or
@@ -225,7 +227,8 @@ def main(argv=None) -> int:
     ap.add_argument("--models", default=MODELS_DIR)
     ap.add_argument("--max-seconds", type=float, default=None, help="stop after this video time")
     ap.add_argument("--session-id", default=None, help="session_id in the contract view (default: the video name)")
-    ap.add_argument("--no-blendshapes", action="store_true", help="blendshapes off: mouth_motion stays blank")
+    ap.add_argument("--blendshapes", action="store_true",
+                    help="blendshapes on (default off, decision list 2026-10-10 §16); off: mouth_motion stays blank")
     ap.add_argument("--no-heads", action="store_true", help="no H1 / P1: head columns stay missing")
     ap.add_argument("--overwrite", action="store_true")
     a = ap.parse_args(argv)
@@ -246,16 +249,16 @@ def main(argv=None) -> int:
         p = os.path.join(a.models, name)
         if os.path.isfile(p):
             info[name] = {"bytes": os.path.getsize(p), "sha256": sha256(p)}
-    models = MediaPipeModels(a.models, blendshapes=not a.no_blendshapes)
-    settings = {"step": a.step, "width": a.width, "threads": a.threads, "blendshapes": not a.no_blendshapes,
+    models = MediaPipeModels(a.models, blendshapes=a.blendshapes)
+    settings = {"step": a.step, "width": a.width, "threads": a.threads, "blendshapes": a.blendshapes,
                 "heads": detector is not None, "head_direction": direction is not None,
                 "face_landmarker": "VIDEO, num_faces=1, transformation matrix on, blendshapes "
-                                   + ("off" if a.no_blendshapes else "on"),
+                                   + ("on" if a.blendshapes else "off"),
                 "touch_log": a.touch_log, "start_offset_s": a.start_offset, "params_file": a.params}
     print(f"재생 시작: {source.name} → {a.out}", flush=True)
     try:
         meta = run_replay(source, a.out, bundle, timeline=timeline, models=models, detector=detector,
-                          direction=direction, blendshapes=not a.no_blendshapes, max_seconds=a.max_seconds,
+                          direction=direction, blendshapes=a.blendshapes, max_seconds=a.max_seconds,
                           session_id=a.session_id or os.path.splitext(os.path.basename(a.video))[0],
                           model_info=info, settings=settings)
     finally:

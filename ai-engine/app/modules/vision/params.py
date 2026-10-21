@@ -77,8 +77,8 @@ class PilotParams:
         MOUTH_AND_JAW_DIALS, "Apple ARKit ARFaceAnchor.BlendShapeLocation의 'Mouth and Jaw' 묶음(jaw · mouth로 "
                              "시작하는 이름 27개); 결정 §3 '입 움직임(jawOpen 등 입 다이얼)'")
     mouth_baseline_s: float = _p(
-        2.0, f"{PILOT} 시작값: 입 다이얼의 사람별 기준선 = 직전 이만큼(초)의 얼굴 프레임 중앙값(결정 16: 기준선을 뺀 "
-             "창 안 변동)", "s")
+        2.0, f"{PILOT} 시작값: 입 다이얼의 사람별 기준선 = 직전 이만큼(초)의 얼굴 프레임 중앙값(결정 목록 2026-10-10 "
+             "§16: 기준선을 뺀 창 안 변동)", "s")
 
     # --- runners (replay.py, live.py) -------------------------------------------------------------------------
     segment_s: float = _p(
@@ -104,7 +104,7 @@ class PilotParams:
         10.0, f"{PILOT} 시작값: 띄운 묻기에 반응이 없으면 무응답으로 거둠(JP §0-6 '무응답은 policy의 시간 [파일럿]')",
         "s")
     delay_notice_on: bool = _p(
-        False, "평가 조건표 스위치(D10 결정 14, JP §0-2): 켜면 3-1의 허용 후보는 지연 책임 안내 하나")
+        False, "평가 조건표 스위치(결정 목록 2026-10-10 §14, JP §0-2): 켜면 3-1의 허용 후보는 지연 책임 안내 하나")
     defer_option_on: bool = _p(
         True, "평가 조건표 스위치(JP §0-2): 3-1의 허용 후보에 '큰 버튼 질문 미룸'을 넣음(안내가 꺼진 조건)")
 

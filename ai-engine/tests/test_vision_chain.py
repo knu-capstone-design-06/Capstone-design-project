@@ -848,6 +848,8 @@ class LiveTests(unittest.TestCase):
         from app.modules.vision.live import parse_args, run_live
         a = parse_args(["--camera", "0", "--no-window", "--seconds", "1"])
         self.assertTrue(a.no_window)                               # parsing opens no camera
+        self.assertFalse(a.blendshapes)                            # off by default (decision list 2026-10-10 §16)
+        self.assertTrue(parse_args(["--camera", "0", "--no-window", "--seconds", "1", "--blendshapes"]).blendshapes)
         lines = []
         sched = [fake_inference(y) for y in yaw_schedule()]
         folder = tempfile.mkdtemp()
@@ -908,7 +910,8 @@ class ReplaySmokeTests(unittest.TestCase):
             self.assertEqual(r["situation"]["name"], "unknown")
             self.assertTrue(r["situation"]["unknown_reason"])
         self.assertTrue(set(meta["models"]) >= {"h1_head_yolox_nano_416.onnx", "p1_head_direction_resnet18_56.onnx"})
-        self.assertTrue(meta["settings"]["blendshapes"])
+        self.assertFalse(meta["settings"]["blendshapes"])         # off unless --blendshapes (decision list §16)
+        self.assertIn("blendshapes off", meta["settings"]["face_landmarker"])
 
 
 if __name__ == "__main__":

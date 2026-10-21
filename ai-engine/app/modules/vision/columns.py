@@ -15,8 +15,9 @@ Columns (names = the ones events.py reads, then observation-only columns no rule
                         None when the body is not seen.
   mouth_motion          largest absolute change of a mouth / jaw blendshape (params.mouth_dials) from that dial's
                         baseline = the median of the same dial over the previous mouth_baseline_s seconds of the same
-                        unbroken face run (decision 16: the person's baseline subtracted, change only). None while the
-                        face is not seen, while the run is shorter than mouth_baseline_s, and when blendshapes are off.
+                        unbroken face run (decision list 2026-10-10 §16: the person's baseline subtracted, change
+                        only). None while the face is not seen, while the run is shorter than mouth_baseline_s, and
+                        when blendshapes are off.
   head_count, primary_box, primary_score, primary_from   all kept head boxes; the main user's box, its H1 score and how
                         it was chosen ('face' | 'largest'); observation only
   head_dir_middle, head_dir_up, head_dir_left, head_dir_right, head_dir_back   P1 probabilities of the main user's

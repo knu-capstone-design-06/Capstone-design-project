@@ -3,9 +3,12 @@
 From ai-engine/:
   python -m app.modules.vision.live --camera 0 --no-window [--seconds 60] [--params BUNDLE.json] [--out DIR]
                                     [--threads 1] [--cam-width 640 --cam-height 480] [--backend any|msmf|dshow]
+                                    [--blendshapes] [--no-heads]
 
 - --no-window: nothing appears on the screen (tests, headless use). Without it a window shows the frame with the main
   user's head box (green) and the companion's (blue) and the frame time; q or closing it stops.
+- --blendshapes turns the Face Landmarker's blendshapes on (default off, decision list 2026-10-10 §16); while off,
+  mouth_motion stays blank.
 - Stop: --seconds, q in the window, or Ctrl+C. Without a window the run needs --seconds or Ctrl+C.
 - There is no touch log in live use (the order screen is not wired to this runner): tap_count / miss_tap_count are
   missing, so every tag that needs 'no touch' stays 'unknown' (its reason says column:tap_count) and the rule table's
@@ -65,7 +68,7 @@ def _draw(img, row: dict, text: str):
 
 
 def run_live(source, bundle, *, models, detector=None, direction=None, show_window: bool = False,
-             out_dir: str | None = None, blendshapes: bool = True, print_fn=print) -> dict:
+             out_dir: str | None = None, blendshapes: bool = False, print_fn=print) -> dict:
     """Run the chain on a live frame source (sources.LiveCameraSource or any iterable of sources.Frame)."""
     chain = FrameChain(models, bundle.chain, detector, direction, None, blendshapes=blendshapes,
                        source_kind=SOURCE_KIND.get(getattr(source, "kind", ""), ""))
@@ -144,7 +147,8 @@ def parse_args(argv=None):
     ap.add_argument("--cam-height", type=int, default=None)
     ap.add_argument("--backend", default="any", choices=["any", "msmf", "dshow"])
     ap.add_argument("--fps", type=float, default=None, help="overrides the frame rate the driver reports")
-    ap.add_argument("--no-blendshapes", action="store_true")
+    ap.add_argument("--blendshapes", action="store_true",
+                    help="blendshapes on (default off, decision list 2026-10-10 §16); off: mouth_motion stays blank")
     ap.add_argument("--no-heads", action="store_true")
     a = ap.parse_args(argv)
     if a.no_window and a.seconds is None:
@@ -167,12 +171,12 @@ def main(argv=None) -> int:
     from app.inference.vision import MediaPipeModels
     from .sources import LiveCameraSource
     detector, direction, _ = load_perception(a.models, bundle.chain, a.threads, not a.no_heads, print)
-    models = MediaPipeModels(a.models, blendshapes=not a.no_blendshapes)
+    models = MediaPipeModels(a.models, blendshapes=a.blendshapes)
     try:
         source = LiveCameraSource(a.camera, a.cam_width, a.cam_height, a.backend, a.fps, a.seconds)
         print(f"카메라 {a.camera} 시작 — 창마다 한 줄씩 나옵니다", flush=True)
         meta = run_live(source, bundle, models=models, detector=detector, direction=direction,
-                        show_window=not a.no_window, out_dir=a.out, blendshapes=not a.no_blendshapes)
+                        show_window=not a.no_window, out_dir=a.out, blendshapes=a.blendshapes)
     finally:
         models.close()
     print(f"끝: 프레임 {meta['frames']}장 · 창 {meta['windows']}개 · 멈춘 이유 {meta['stop_reason']}", flush=True)

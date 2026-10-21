@@ -13,7 +13,7 @@
 | `blaze_face_short_range.tflite` | 229,746 | `b4578f35…380b0152f` | https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite |
 | `blaze_face_full_range.tflite` | 1,083,786 | `3698b18f…aed2b181b` | https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_full_range/float16/1/blaze_face_full_range.tflite |
 
-- 쓰는 곳: `app/inference/vision.py`(모듈 폴더의 `vision/inference.py`는 같은 이름을 다시 내보냄) — 얼굴 점(Face Landmarker), 얼굴 검출(기본 short-range, `--face-detector full_range`면 full-range), 몸 점(Pose Landmarker lite). full-range 검출기는 mediapipe 0.10.33부터 돕니다. blendshape 52개는 Face Landmarker 묶음 안의 모델이 내고, 재생 · 실시간 실행기만 켭니다(결정 16: 기본 꺼짐).
+- 쓰는 곳: `app/inference/vision.py`(모듈 폴더의 `vision/inference.py`는 같은 이름을 다시 내보냄) — 얼굴 점(Face Landmarker), 얼굴 검출(기본 short-range, `--face-detector full_range`면 full-range), 몸 점(Pose Landmarker lite). full-range 검출기는 mediapipe 0.10.33부터 돕니다. blendshape 52개는 Face Landmarker 묶음 안의 모델이 내고, 재생 · 실시간 실행기에 `--blendshapes`를 줄 때만 켭니다(결정 목록 2026-10-10 §16: 기본 꺼짐).
 - 전체 해시는 `download_models.py`에 있고, 실행할 때마다 `runs/<이름>/meta.json`의 `models`에도 적힙니다.
 
 ## ONNX 모델 2개 (`tools/export_onnx.py`가 만듦)
