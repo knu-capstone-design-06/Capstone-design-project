@@ -539,15 +539,46 @@ class RuleTableTests(unittest.TestCase):   # plain Python: runs with the server 
         self.assertLessEqual(numbers, {0, 1, 2, 3, 4, 7})   # ranks 2 3 4 7 (JP 0-3); 0 = no step left; id step 1
 
     def test_3_2_companion_opens_the_wait_and_a_touch_ends_it(self):
-        (d1, d2, d3), state = self.run_windows([
-            win(10, situation=sit("consulting_companion")), win(11, situation=sit("consulting_companion")),
-            win(12, situation=sit("consulting_companion"), taps_segment=1)])
+        busy = sit("consulting_companion")
+        (d1, d2, d3, d4, d5), state = self.run_windows([
+            win(10, situation=busy), win(11, situation=busy), win(12, situation=busy, taps_segment=1),
+            win(13, situation=busy), win(14, measurable=False, situation=busy)])
         self.assertEqual((d1.transition, d1.support, d1.action, d1.rank), ("open", "wait_hold_timer", "wait", 2))
         self.assertEqual(d1.form(), ("none", False))
         self.assertIsNone(d1.jev_request)                          # ask_jev false (JP scene table)
-        self.assertEqual(d2.transition, "keep")
-        self.assertEqual((d3.transition, d3.decision_id), ("withdraw", d1.decision_id))
-        self.assertIsNone(state.held)
+        self.assertEqual(d1.session_signal, {"name": "hold_timer"})
+        self.assertEqual((d2.transition, d2.session_signal, d2.scene), ("keep", {"name": "hold_timer"}, "3-2"))
+        self.assertEqual((d3.transition, d3.decision_id, d3.session_signal), ("withdraw", d1.decision_id, None))
+        self.assertEqual((d4.transition, d4.support, d4.scope), ("open", "wait_hold_timer", d1.scope))   # re-opened
+        self.assertNotEqual(d4.decision_id, d1.decision_id)
+        self.assertEqual((d5.transition, d5.session_signal), ("keep", None))   # not measurable: no hold_timer
+        self.assertEqual(state.held.decision_id, d4.decision_id)
+        self.assertEqual(d1.to_dict()["session_signal"], {"name": "hold_timer"})
+
+    def test_a_kept_decision_keeps_its_content(self):
+        lost = dict(situation=sit("none", 0), screen="menu", steps_left=2, backs_recent=1)
+        (d1, d2), state = self.run_windows([win(10, **lost), win(11, **lost)])
+        self.assertEqual((d1.transition, d1.scene, d1.policy["kind"]), ("open", "4-2", "fit"))
+        self.assertIsNotNone(d1.jev_request)
+        self.assertEqual((d2.transition, d2.decision_id, d2.scene, d2.policy, d2.cues),
+                         ("keep", d1.decision_id, "4-2", d1.policy, d1.cues))
+        self.assertIsNone(d2.jev_request)                          # no new Jev question on a keep
+        self.assertEqual(d2.to_dict()["steps_left"], 2)
+        self.assertEqual(state.snapshot()["held"]["scene"], "4-2")
+
+    def test_execution_fields_of_notices_and_highlights(self):
+        R = self.R
+        self.assertEqual(R.execution(R.NOTICE, win(screen="menu", steps_left=2)),
+                         {"steps_left": 2, "target_id": "cart_progress", "message_id": "steps_left_notice"})
+        self.assertEqual(R.execution(R.DELAY, win(screen="menu", steps_left=2))["message_id"],
+                         "delay_responsibility_notice")
+        highlight = [R.execution(R.HIGHLIGHT, win(screen=s, steps_left=2, options_open=o))["target_id"]
+                     for s, o in (("menu", True), ("review", False), ("menu", False))]
+        self.assertEqual(highlight, ["cart-add", "cart:*:decrease", None])
+        self.assertIsNone(R.execution(R.BIG, win(screen="menu", steps_left=2))["target_id"])
+        (d,), _ = self.run_windows([win(situation=sit("looking_back_with_people_behind"), screen="menu", steps_left=2)])
+        self.assertEqual({k: d.to_dict()[k] for k in ("steps_left", "target_id", "message_id")},
+                         {"steps_left": 2, "target_id": "cart_progress", "message_id": "steps_left_notice"})
 
     def test_3_1_queue_notice_with_fit_or_choice(self):
         (d,), state = self.run_windows([win(situation=sit("looking_back_with_people_behind"), screen="menu",
@@ -949,6 +980,8 @@ class ReplayWithFakePerceptionTests(unittest.TestCase):
             self.assertIn(c["support"]["decided_by"], decided)
             self.assertIsInstance(c["support"]["requires_confirmation"], bool)
             self.assertEqual(c["analyze_response"]["session_id"], "t1")
+            self.assertLessEqual({"steps_left", "target_id", "message_id", "session_signal"},   # JP 2-5 execution
+                                 set(c["extension"]["decision_meta"]))
         if HAS_PYDANTIC:
             from app.modules.analyze.schemas import AnalyzeResponse
             for r in recs:

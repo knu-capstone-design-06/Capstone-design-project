@@ -37,6 +37,11 @@ Rows (JP scene table; rank = JP 0-3 rank table):
 Withdraw conditions (tree 3-나): 3-2 'touch_resumed' (터치가 이어짐), 3-1 and 4-2 'cart_progress' (장바구니가 나아감 /
 다음 단계로 나아감: a press on the cart-add button or a screen forward), 4-1 none (반응 · 무응답으로 끝남).
 A tag that is 'unknown' (or not judged) opens no tag row: the touch rows still run (JP 0-2: 상황 근거만 빼고).
+The 3-2 wait is a session action: the withdrawn filter skips it, so every trigger re-opens it (JP v1.6 note: withdrawn
+거름은 화면에 띄우는 지원에만), and it carries session_signal {name: hold_timer} when it opens and in every measurable
+window that keeps it (JP 0-1 item 3, 2-5), not in a window that is not measurable. A keep repeats the whole held
+decision (JP 0-1 item 1: held = the decision's fields + decision_id + status) with no new Jev question. Every opened
+decision carries the execution fields of JP 2-5 decision_meta (steps_left · target_id · message_id; execution()).
 
 The fit criteria of large_button and highlight_next_action are worded here as a draft (JP 2-2 gives only the 3-1 texts).
 Every count and time compared here is a params.PilotParams field (its source text says [파일럿] where no standard
@@ -55,6 +60,7 @@ SCENE_OF_TAG = {QUEUE: "queue", BUSY: "busy", AROUND: "lost"}   # tree 5-1 index
 WAIT, NOTICE, DELAY, BIG, HIGHLIGHT = ("wait_hold_timer", "remaining_steps_notice", "delay_responsibility_notice",
                                        "large_button", "highlight_next_action")
 DEFER = "defer_big_button_question"       # JP 0-2: an option of the 3-1 choice, not a row
+HOLD_TIMER = "hold_timer"                 # JP 0-1 item 3 / 2-5: session_signal name of a kept 3-2 wait
 INTERVENTION = {"wait": "기다림", "propose": "묻기", "apply": "바로 적용", "call_staff": "직원 호출"}
 # contract FeatureWindowResponse.support (UIPreset, requires_confirmation) per support: JP 2-5 table
 CONTRACT_FORM = {WAIT: ("none", False), NOTICE: ("step_guide", False), DELAY: ("step_guide", False),
@@ -134,6 +140,7 @@ class Held:
     withdraw_on: str | None
     status: str          # 'shown': in shadow mode a decision is shown in the response of the window it opens
     shown_t: float
+    decision: Decision   # the applied decision with its id (JP 0-1 item 1: held keeps the whole decision)
 
 
 @dataclass
@@ -151,8 +158,8 @@ class SessionState:
 
     def snapshot(self) -> dict:
         held = None if self.held is None else {"decision_id": self.held.decision_id, "support": self.held.support,
-                                               "action": self.held.action, "status": self.held.status,
-                                               "scope": list(self.held.scope)}
+                                               "scene": self.held.decision.scene, "action": self.held.action,
+                                               "status": self.held.status, "scope": list(self.held.scope)}
         return {"held": held, "active": list(self.active), "refused": list(self.refused),
                 "withdrawn": [{**w, "scope": list(w["scope"])} for w in self.withdrawn]}
 
@@ -172,6 +179,8 @@ class Decision:
     cues: dict = field(default_factory=dict)
     decision_id: str | None = None         # keep / withdraw: the held decision's id; open / replace: set by apply()
     reason: str = ""
+    session_signal: dict | None = None     # {name: hold_timer} on an opened or kept 3-2 wait (measurable windows)
+    execution: dict = field(default_factory=dict)   # steps_left · target_id · message_id (execution(); JP 2-5)
 
     def form(self) -> tuple:
         """(preset, requires_confirmation) of contract SupportDecision for this decision (JP 2-5)."""
@@ -186,7 +195,31 @@ class Decision:
                 "scope": None if self.scope is None else list(self.scope), "withdraw_on": self.withdraw_on,
                 "decision_id": self.decision_id, "preset": preset, "requires_confirmation": confirm,
                 "policy": self.policy, "jev_request": self.jev_request, "cues": self.cues, "meta": self.meta,
-                "reason": self.reason}
+                "reason": self.reason, "session_signal": self.session_signal,
+                "steps_left": self.execution.get("steps_left"), "target_id": self.execution.get("target_id"),
+                "message_id": self.execution.get("message_id")}
+
+
+# [설계 제안] the execution fields; the notices follow the JP 2-5 example, the highlight targets tree table 3-가 4-2
+NOTICE_EXECUTION = {NOTICE: ("cart_progress", "steps_left_notice"),          # JP 2-5 example
+                    DELAY: ("cart_progress", "delay_responsibility_notice")}
+CART_ADD_TARGET = "cart-add"              # OrderPage.tsx data-log-target of the options dialog's '담기' button
+CART_DECREASE_TARGETS = "cart:*:decrease"  # OrderPage.tsx cart rows' '−' buttons: cart:<product>:<temperature>:decrease
+
+
+def execution(support: str | None, inp: WindowInput) -> dict:
+    """What the front end needs to carry out a support (JP 2-5 decision_meta: steps_left · target_id · message_id).
+    Notices: the progress line and the notice's text id. 4-2 highlight (tree table 3-가 4-2: '카테고리 → 자주 찾는
+    메뉴 줄 · 검색, 옵션 → "담기" 강조, 장바구니 → "−" 강조'): the options dialog open on the menu -> its '담기' button,
+    the review screen -> the cart rows' '−' buttons, otherwise None (the order screen has no frequent-menu row or search
+    yet); no message_id while the one-line texts are not fixed. Other supports: no target, no message."""
+    target, message = NOTICE_EXECUTION.get(support, (None, None))
+    if support == HIGHLIGHT:
+        if inp.screen == "menu" and inp.options_open is True:
+            target = CART_ADD_TARGET
+        elif inp.screen == "review":
+            target = CART_DECREASE_TARGETS
+    return {"steps_left": inp.steps_left, "target_id": target, "message_id": message}
 
 
 def _withdrawn(state: SessionState, support: str, scope: tuple) -> bool:
@@ -204,14 +237,15 @@ def _withdraw_met(condition: str | None, inp: WindowInput) -> bool:
 def candidate_rows(inp: WindowInput, state: SessionState, p, tag: str | None, tag_scope: tuple,
                    screen_scope: tuple) -> list:
     """The rows this window opens, after the JP 0-2 filter (active, refused, the held support, the same scope's
-    withdrawn). tag = the situation tag of this window, None when unknown / not judged."""
+    withdrawn; the withdrawn filter is for supports shown on the screen, not for the 3-2 wait). tag = the situation tag
+    of this window, None when unknown / not judged."""
     excluded = set(state.active) | set(state.refused) | ({state.held.support} if state.held else set())
 
     def free(support: str, scope: tuple) -> bool:
         return support not in excluded and not _withdrawn(state, support, scope)
 
     rows = []
-    if tag == BUSY and free(WAIT, tag_scope):                                       # 3-2
+    if tag == BUSY and WAIT not in excluded:                     # 3-2: a session action, re-opened at every trigger
         rows.append(Row(WAIT, "3-2", "wait", 2, True, "touch_resumed", False, cues={"tag": tag}))
 
     steps_open = inp.steps_left is None or inp.steps_left > 0
@@ -316,7 +350,7 @@ def decide(inp: WindowInput, state: SessionState, params) -> Decision:
     held = state.held
     if not inp.measurable:                                                          # 0''
         if held is not None and held.status == "shown":
-            return _keep(held, meta, "window not measurable")
+            return _keep(held, meta, "window not measurable", measurable=False)
         return Decision("none", meta, reason="window not measurable")
     if held is not None and _withdraw_met(held.withdraw_on, inp):                   # ①
         return Decision("withdraw", meta, held.support, None, held.action, held.rank, held.scope, held.withdraw_on,
@@ -325,8 +359,8 @@ def decide(inp: WindowInput, state: SessionState, params) -> Decision:
     screen_scope = ("screen", inp.screen, screen_since)
     rows = candidate_rows(inp, state, params, name if name in TAGS else None, tag_scope, screen_scope)
     if not rows:                                                                    # ②
-        return _keep(held, meta, "no candidate row") if held is not None else Decision("none", meta,
-                                                                                       reason="no candidate row")
+        return _keep(held, meta, "no candidate row", measurable=True) if held is not None else Decision(
+            "none", meta, reason="no candidate row")
     row = min(rows, key=lambda r: r.rank)
     if held is None:                                                                # ④
         transition = "open"
@@ -336,17 +370,22 @@ def decide(inp: WindowInput, state: SessionState, params) -> Decision:
         quiet_shown = held.status == "shown" and held.action == "apply" and held.support in QUIET_APPLY
         transition = "replace" if (row.rank < held.rank or (quiet_shown and row.action == "propose")) else "keep"
     if transition == "keep":                                                        # ⑥
-        return _keep(held, meta, f"held {held.support} stays; row {row.support} waits")
+        return _keep(held, meta, f"held {held.support} stays; row {row.support} waits", measurable=True)
     scope = tag_scope if row.from_tag else screen_scope
     asked = row.ask_jev and known                           # fit / choice need a known situation (JP 0-4)
     return Decision(transition, meta, row.support, row.scene, row.action, row.rank, scope, row.withdraw_on,
                     _policy(row, asked, params), jev_request(row, row.jev_kind, inp, state) if asked else None,
-                    row.cues, reason=f"row {row.scene} rank {row.rank}")
+                    row.cues, reason=f"row {row.scene} rank {row.rank}",
+                    session_signal={"name": HOLD_TIMER} if row.support == WAIT else None,
+                    execution=execution(row.support, inp))
 
 
-def _keep(held: Held, meta: dict, reason: str) -> Decision:
-    return Decision("keep", meta, held.support, None, held.action, held.rank, held.scope, held.withdraw_on,
-                    decision_id=held.decision_id, reason=reason)
+def _keep(held: Held, meta: dict, reason: str, measurable: bool) -> Decision:
+    """The held decision again (JP 0-1 item 1): same id, support, scene, policy, cues and execution fields, no new
+    Jev question. A kept 3-2 wait carries {name: hold_timer} in a measurable window only (JP 0-1 item 3)."""
+    signal = {"name": HOLD_TIMER} if (held.action == "wait" and measurable) else None
+    return replace(held.decision, transition="keep", meta=meta, reason=reason, jev_request=None,
+                   session_signal=signal)
 
 
 # --- the backend's part, emulated for replay (JP 0-1, transition table) -------------------------------------------
@@ -369,9 +408,9 @@ def apply(state: SessionState, decision: Decision) -> tuple:
             for w in s.withdrawn:                                   # items bound to the replaced decision move on
                 if w.get("replaced_by") == s.held.decision_id:
                     w["replaced_by"] = new_id
-        s.held = Held(new_id, decision.support, decision.action, decision.rank, decision.scope, decision.withdraw_on,
-                      "shown", m["t"])
         decision = replace(decision, decision_id=new_id)
+        s.held = Held(new_id, decision.support, decision.action, decision.rank, decision.scope, decision.withdraw_on,
+                      "shown", m["t"], decision)
     elif decision.transition == "withdraw" and s.held is not None:
         s.withdrawn.append({"support": s.held.support, "scope": s.held.scope, "reason": "withdraw",
                             "replaced_by": None})

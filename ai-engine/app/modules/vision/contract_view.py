@@ -11,7 +11,8 @@ agenda V04 '상황 태그를 실을 명세 칸').
                     no discomfort-state model exists in this chain
   support           {preset, requires_confirmation, decided_by}: UIPreset and the confirmation flag of the rule table's
                     support (JP 2-5 table); decided_by 'rule_placeholder' (shadow mode: Jev never changes the screen)
-  extension         {situation: {...}, decision_meta: {...}}
+  extension         {situation: {...}, decision_meta: {...}}; decision_meta also carries the execution fields of
+                    JP 2-5 (steps_left, target_id, message_id) and session_signal ({name: hold_timer} on the 3-2 wait)
 """
 from __future__ import annotations
 
@@ -33,7 +34,8 @@ def to_contract(record: dict, session_id: str) -> dict:
                           "unknown_reason": sit["unknown_reason"], "quality": sit["quality"], "source": sit["source"]},
             "decision_meta": {k: d[k] for k in ("decision_id", "withdrawn_id", "support", "scene", "action",
                                                 "intervention", "transition", "scope", "rank", "withdraw_on",
-                                                "policy", "meta")}
+                                                "policy", "meta", "steps_left", "target_id", "message_id",
+                                                "session_signal")}
                              | {"jev_kind": (record.get("jev") or {}).get("kind"),
                                 "jev": None if not record.get("jev") else {"shadow": True, "applied": False,
                                                                            "answer": None}},
