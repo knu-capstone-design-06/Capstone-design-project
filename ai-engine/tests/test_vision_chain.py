@@ -49,6 +49,11 @@ def sit_params(**over):
     return PilotParams(**{**SIT_VALUES, **over})
 
 
+def sourced(values: dict, text: str = "test value") -> dict:
+    """The value-bundle file form of plain values: {name: {"value": v, "source": text}}."""
+    return {k: {"value": v, "source": text} for k, v in values.items()}
+
+
 def bundle(situation=True, **chain):
     from app.modules.vision.params import Bundle, PilotParams
     return Bundle(PilotParams(**chain), sit_params() if situation else None, "test")
@@ -108,23 +113,47 @@ class ParamsTests(unittest.TestCase):   # plain Python: runs with the server pac
                 PilotParams(**bad)
 
     def test_bundle_file_needs_all_13_situation_values_and_keeps_sources(self):
-        from app.modules.vision.params import load_bundle
+        from app.modules.vision.params import PilotParams, SituationParams, load_bundle
         folder = tempfile.mkdtemp()
         good = os.path.join(folder, "bundle.json")
         with open(good, "w", encoding="utf-8") as f:
-            json.dump({"bundle_id": "b1", "situation": {**SIT_VALUES, "window_s": {"value": 8.0, "source": "test"}},
-                       "chain": {"segment_s": {"value": 2.0, "source": "test"}, "tremor_miss_min": 3}}, f)
+            json.dump({"bundle_id": "b1",
+                       "situation": {**sourced(SIT_VALUES), "window_s": {"value": 8.0, "source": "window text"}},
+                       "chain": {"head_score_min": {"value": 0.9, "source": "override text"},
+                                 "tremor_miss_min": {"value": 3, "source": "count text"}}}, f)
         b = load_bundle(good)
-        self.assertEqual((b.situation.window_s, b.chain.segment_s, b.chain.tremor_miss_min), (8.0, 2.0, 3))
+        self.assertEqual((b.situation.window_s, b.chain.head_score_min, b.chain.tremor_miss_min), (8.0, 0.9, 3))
         self.assertEqual(b.bundle_id, "b1")
+        rec = b.to_dict()
+        self.assertEqual(rec["chain"]["head_score_min"],              # the override's own source, not the default's
+                         {"value": 0.9, "unit": "score 0~1", "source": "override text", "origin": "bundle"})
+        self.assertEqual((rec["chain"]["segment_s"]["origin"], rec["chain"]["segment_s"]["source"]),
+                         ("default", PilotParams.sources()["segment_s"]))
+        self.assertEqual(rec["situation"]["window_s"], {"value": 8.0, "source": "window text", "origin": "bundle"})
+        self.assertEqual(rec["situation"]["gap_s"]["source"], "test value")
+        self.assertNotIn("head_score_min", b.pilot_fields())
+        self.assertIn("segment_s", b.pilot_fields())
+        code = bundle(segment_s=2.0).to_dict()                          # built in code: no source given
+        self.assertEqual(code["situation"]["gap_s"], {"value": SIT_VALUES["gap_s"], "source": None, "origin": "code"})
+        self.assertEqual((code["chain"]["segment_s"]["source"], code["chain"]["segment_s"]["origin"]), (None, "code"))
+        self.assertFalse({f.name for f in dataclasses.fields(PilotParams)}             # Bundle.sources is one dict
+                         & {f.name for f in dataclasses.fields(SituationParams)})
         self.assertIsNone(load_bundle(None).situation)          # no file: chain defaults, no situation values
-        for broken in ({"situation": {k: v for k, v in SIT_VALUES.items() if k != "gap_s"}},
-                       {"chain": {"no_such_value": 1}}, {"situations": {}}):
+        for broken in ({"situation": sourced({k: v for k, v in SIT_VALUES.items() if k != "gap_s"})},
+                       {"chain": {"no_such_value": {"value": 1, "source": "x"}}}, {"situations": {}},
+                       {"chain": {"segment_s": 2.0}},                                    # a bare number
+                       {"chain": {"segment_s": {"value": 2.0, "source": " "}}},          # an empty source
+                       {"chain": {"segment_s": {"value": 2.0}}},                         # no source
+                       {"situation": {**sourced(SIT_VALUES), "gap_s": 0.25}}):           # a bare situation value
             p = os.path.join(folder, "broken.json")
             with open(p, "w", encoding="utf-8") as f:
                 json.dump(broken, f)
             with self.assertRaises(ValueError, msg=repr(broken)):
                 load_bundle(p)
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump({"chain": {"segment_s": 2.0}}, f)
+        with self.assertRaisesRegex(ValueError, r'chain\.segment_s.*"source"'):      # names the field and the form
+            load_bundle(p)
 
 
 @unittest.skipUnless(HAS_CV2, SKIP)
@@ -863,7 +892,7 @@ class ReplaySmokeTests(unittest.TestCase):
         log = touch_log(folder, MENU_EVENTS, clip)
         bundle_path = os.path.join(folder, "bundle.json")
         with open(bundle_path, "w", encoding="utf-8") as f:
-            json.dump({"bundle_id": "smoke", "situation": SIT_VALUES, "chain": {}}, f)
+            json.dump({"bundle_id": "smoke", "situation": sourced(SIT_VALUES), "chain": {}}, f)
         out = os.path.join(folder, "out")
         with redirect_stdout(io.StringIO()):
             code = replay.main(["--video", clip, "--touch-log", log, "--params", bundle_path, "--out", out])

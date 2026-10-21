@@ -11,15 +11,18 @@ Two kinds live here:
 
 Value bundle file (JSON; one per replay run, fixed before the run - D13 3 and 19):
     {"bundle_id": "...", "note": "...",
-     "situation": {<all 13 events.PilotParams fields>},      # optional section; all 13 when present
-     "chain": {<PilotParams field>: value, ...}}             # optional overrides of the defaults below
-Each value may also be written as {"value": v, "source": "..."} so the bundle can carry its own sources.
+     "situation": {<each of the 13 events.PilotParams fields>: {"value": v, "source": "..."}},   # optional section;
+                                                                                                 # all 13 when present
+     "chain": {<PilotParams field>: {"value": v, "source": "..."}, ...}}   # optional overrides of the defaults below
+Every value in the file carries its own non-empty source: the bundle is the one place where values are fixed before a
+recording, and every constant names where it comes from. A bare value or an empty source is an error (ValueError naming
+the field). Bundle.to_dict() records each value with its source and origin: 'bundle' (the file's source text),
+'default' (a chain default with the source written below) or 'code' (set in code without a source, e.g. in tests).
 
 Plain Python (dataclasses, json): no numpy, OpenCV or ONNX Runtime.
 """
 from __future__ import annotations
 
-import dataclasses
 import json
 import math
 import numbers
@@ -134,12 +137,12 @@ class PilotParams:
 
     @staticmethod
     def pilot_fields() -> list:
-        """The fields whose value has no standard and no measured data ([파일럿] in the source)."""
-        return [f.name for f in fields(PilotParams) if f.metadata["source"].startswith(PILOT)
-                or f" {PILOT}" in f.metadata["source"]]
+        """The fields whose default value has no standard and no measured data ([파일럿] in the source)."""
+        return [f.name for f in fields(PilotParams) if _is_pilot(f.metadata["source"])]
 
     def to_dict(self) -> dict:
-        """{field: {"value", "source", "unit"}} - written into the runners' meta."""
+        """{field: {"value", "source", "unit"}} with each field's default source (the code's view; the runners record
+        Bundle.to_dict(), which names where each value came from)."""
         out = {}
         for f in fields(self):
             value = getattr(self, f.name)
@@ -149,49 +152,106 @@ class PilotParams:
 
     @classmethod
     def from_dict(cls, values: dict) -> "PilotParams":
-        """Defaults overridden by values ({field: value} or {field: {"value": v, ...}}); unknown names are errors."""
+        """Defaults overridden by plain values {field: value}; unknown names are errors. A bundle file goes through
+        load_bundle, which also requires a source for every value."""
         names = {f.name for f in fields(cls)}
         unknown = sorted(set(values) - names)
         if unknown:
             raise ValueError(f"unknown chain parameter(s) {unknown}; known: {sorted(names)}")
-        clean = {k: _value(v) for k, v in values.items()}
+        clean = dict(values)
         if "mouth_dials" in clean:
             clean["mouth_dials"] = tuple(clean["mouth_dials"])
         return cls(**clean)
 
 
-def _value(v):
-    return v["value"] if isinstance(v, dict) and "value" in v else v
+def _is_pilot(source: str | None) -> bool:
+    return isinstance(source, str) and (source.startswith(PILOT) or f" {PILOT}" in source)
+
+
+SOURCED_FORM = '{"value": <value>, "source": "<where the value comes from>"}'
+
+
+def _split(section: str, entries: dict, names: list) -> tuple:
+    """({field: value}, {field: source}) of one bundle section. Every entry must be {"value": v, "source": text}
+    with a non-empty text; anything else raises ValueError naming the field and the required form."""
+    if not isinstance(entries, dict):
+        raise ValueError(f"value bundle section {section!r} must be an object {{field: {SOURCED_FORM}}}")
+    unknown = sorted(set(entries) - set(names))
+    if unknown:
+        raise ValueError(f"value bundle section {section!r}: unknown name(s) {unknown}; known: {sorted(names)}")
+    values, sources = {}, {}
+    for name, entry in entries.items():
+        if not isinstance(entry, dict) or "value" not in entry:
+            raise ValueError(f"value bundle {section}.{name}: write it as {SOURCED_FORM}, got {entry!r}")
+        extra = sorted(set(entry) - {"value", "source"})
+        if extra:
+            raise ValueError(f"value bundle {section}.{name}: unknown key(s) {extra}; write it as {SOURCED_FORM}")
+        source = entry.get("source")
+        if not isinstance(source, str) or not source.strip():
+            raise ValueError(f"value bundle {section}.{name}: the source is missing or empty; write it as "
+                             f"{SOURCED_FORM}")
+        values[name], sources[name] = entry["value"], source
+    return values, sources
 
 
 @dataclass(frozen=True)
 class Bundle:
-    """One value bundle: the chain values and, when the file has them, the 13 situation values."""
+    """One value bundle: the chain values and, when the file has them, the 13 situation values. sources = {field:
+    source text given in the bundle file} (empty for a Bundle built in code); the chain and situation fields share no
+    name, so one dict holds both."""
     chain: PilotParams
     situation: SituationParams | None
     bundle_id: str = ""
     note: str = ""
     path: str = ""
+    sources: dict = field(default_factory=dict)
+
+    def _chain_entry(self, f) -> tuple:
+        """(source, origin) of one chain field: the file's text, else the default's source when the value is the
+        default, else None (set in code without a source)."""
+        if f.name in self.sources:
+            return self.sources[f.name], "bundle"
+        if getattr(self.chain, f.name) == f.default:
+            return f.metadata["source"], "default"
+        return None, "code"
+
+    def pilot_fields(self) -> list:
+        """The chain fields whose recorded source carries [파일럿] (an override keeps its own source)."""
+        return [f.name for f in fields(self.chain) if _is_pilot(self._chain_entry(f)[0])]
 
     def to_dict(self) -> dict:
-        return {"bundle_id": self.bundle_id, "note": self.note, "path": self.path,
-                "chain": self.chain.to_dict(),
-                "situation": None if self.situation is None else dataclasses.asdict(self.situation)}
+        """The bundle as the runners record it: chain {field: {"value", "unit", "source", "origin"}} with origin
+        'bundle' | 'default' | 'code', situation {field: {"value", "source", "origin"}} with origin 'bundle' | 'code'
+        (source None when the Bundle was built in code), or None without situation values."""
+        chain = {}
+        for f in fields(self.chain):
+            value = getattr(self.chain, f.name)
+            source, origin = self._chain_entry(f)
+            chain[f.name] = {"value": list(value) if isinstance(value, tuple) else value, "unit": f.metadata["unit"],
+                             "source": source, "origin": origin}
+        situation = None
+        if self.situation is not None:
+            situation = {f.name: {"value": getattr(self.situation, f.name), "source": self.sources.get(f.name),
+                                  "origin": "bundle" if f.name in self.sources else "code"}
+                         for f in fields(self.situation)}
+        return {"bundle_id": self.bundle_id, "note": self.note, "path": self.path, "chain": chain,
+                "situation": situation}
 
 
 def situation_from_dict(values: dict) -> SituationParams:
-    """All 13 situation values, no defaults (events.PilotParams checks the ranges)."""
+    """All 13 situation values as plain values, no defaults (events.PilotParams checks the ranges)."""
     names = [f.name for f in fields(SituationParams)]
     missing = [n for n in names if n not in values]
     unknown = sorted(set(values) - set(names))
     if missing or unknown:
         raise ValueError(f"situation section: missing {missing}, unknown {unknown} (all 13 events.PilotParams "
                          f"fields are needed, none has a default)")
-    return SituationParams(**{n: _value(values[n]) for n in names})
+    return SituationParams(**{n: values[n] for n in names})
 
 
 def load_bundle(path: str | None) -> Bundle:
-    """The value bundle at path, or the chain defaults and no situation values when path is None."""
+    """The value bundle at path, or the chain defaults and no situation values when path is None. Every value in the
+    file must be {"value": v, "source": "..."} (module docstring)."""
     if path is None:
         return Bundle(PilotParams(), None)
     with open(path, encoding="utf-8") as f:
@@ -199,6 +259,12 @@ def load_bundle(path: str | None) -> Bundle:
     unknown = sorted(set(data) - {"bundle_id", "note", "situation", "chain"})
     if unknown:
         raise ValueError(f"{path}: unknown top-level key(s) {unknown}")
-    situation = situation_from_dict(data["situation"]) if data.get("situation") is not None else None
-    return Bundle(PilotParams.from_dict(data.get("chain") or {}), situation,
-                  str(data.get("bundle_id", "")), str(data.get("note", "")), path)
+    chain_values, sources = _split("chain", data.get("chain") or {}, [f.name for f in fields(PilotParams)])
+    situation = None
+    if data.get("situation") is not None:
+        situation_values, situation_sources = _split("situation", data["situation"],
+                                                     [f.name for f in fields(SituationParams)])
+        situation = situation_from_dict(situation_values)
+        sources = {**sources, **situation_sources}
+    return Bundle(PilotParams.from_dict(chain_values), situation, str(data.get("bundle_id", "")),
+                  str(data.get("note", "")), path, sources)

@@ -195,7 +195,7 @@ def run_replay(source, out_dir: str, bundle, *, timeline=None, models=None, dete
             "frame_time_source": getattr(source, "time_source", None), "fps_nominal": getattr(source, "fps", None),
             "frames": len(rows), "windows": len(records), "wall_s": round(wall_s, 3), "stop_reason": stop_reason,
             "first_t": rows[0]["t_s"] if rows else None, "last_t": rows[-1]["t_s"] if rows else None,
-            "settings": settings or {}, "bundle": bundle.to_dict(), "pilot_fields": bundle.chain.pilot_fields(),
+            "settings": settings or {}, "bundle": bundle.to_dict(), "pilot_fields": bundle.pilot_fields(),
             "touch": None if timeline is None else timeline.meta, "models": model_info or {},
             "environment": environment(), "timing_ms": timing_summary(rows, records),
             "counts": {"situation": tags, "transition": transitions, "opened_support": supports},
