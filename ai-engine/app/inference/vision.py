@@ -45,19 +45,23 @@ class FrameInference:
     pose:        (33, 4) x, y (fractions), visibility, presence of the first pose [D3]; None = no body;
                  a value the library left empty is NaN
     ms:          ms_prep, ms_face_lm, ms_face_det, ms_pose - each model time includes turning its output into arrays
+    blendshapes: {category_name: score 0..1} of the first face's 52 blendshapes [D1] when MediaPipeModels was made
+                 with blendshapes=True (decision 16: off by default); None when off or when no face was found
     """
     face_points: np.ndarray | None
     face_matrix: np.ndarray | None
     detections: list
     pose: np.ndarray | None
     ms: dict = field(default_factory=dict)
+    blendshapes: dict | None = None
 
 
 class MediaPipeModels:
     """The three MediaPipe Tasks models in VIDEO mode (frames in order, so the landmarkers track)."""
 
-    def __init__(self, model_dir: str, face_detector: str = "short_range"):
+    def __init__(self, model_dir: str, face_detector: str = "short_range", blendshapes: bool = False):
         self.face_detector_model = FACE_DETECTOR_MODELS[face_detector]
+        self.blendshapes = bool(blendshapes)   # decision 16: one setting, off by default; the runners turn it on
 
         paths = {}
         for name in (FACE_LANDMARKER_MODEL, self.face_detector_model, POSE_LANDMARKER_MODEL):
@@ -70,7 +74,7 @@ class MediaPipeModels:
             base_options=mpp.BaseOptions(model_asset_path=paths[FACE_LANDMARKER_MODEL]),
             running_mode=V.RunningMode.VIDEO,             # frames in order -> tracking (doc 28 section 0)
             num_faces=1,                                  # smoothing only with num_faces=1 [D1] (doc 28 sections 1, 4-4)
-            output_face_blendshapes=False,                # no observation uses blendshapes
+            output_face_blendshapes=self.blendshapes,     # off unless asked (decision 16); on = mouth_motion source
             output_facial_transformation_matrixes=True))  # head direction (doc 28 sections 2, 3)
         # min_face_detection / min_face_presence / min_tracking confidence: library default 0.5 [D1] -
         # a library pass mark, not our criterion (doc 28 section 0).
@@ -110,11 +114,13 @@ class MediaPipeModels:
 
         t = time.perf_counter()
         r_face = self.face_lm.detect_for_video(mimg, ts)
-        face_points = face_matrix = None
+        face_points = face_matrix = blendshapes = None
         if r_face.face_landmarks:
             face_points = np.array([[p.x, p.y] for p in r_face.face_landmarks[0]], dtype=np.float64)
             if r_face.facial_transformation_matrixes:
                 face_matrix = np.asarray(r_face.facial_transformation_matrixes[0], dtype=np.float64)
+            if self.blendshapes and r_face.face_blendshapes:
+                blendshapes = {c.category_name: float(c.score) for c in r_face.face_blendshapes[0]}
         ms["ms_face_lm"] = (time.perf_counter() - t) * 1000.0
 
         t = time.perf_counter()
@@ -131,7 +137,7 @@ class MediaPipeModels:
                               np.nan if p.presence is None else p.presence] for p in r_pose.pose_landmarks[0]],
                             dtype=np.float64)
         ms["ms_pose"] = (time.perf_counter() - t) * 1000.0
-        return FrameInference(face_points, face_matrix, detections, pose, ms)
+        return FrameInference(face_points, face_matrix, detections, pose, ms, blendshapes)
 
 
 def _cpu_name() -> str:
