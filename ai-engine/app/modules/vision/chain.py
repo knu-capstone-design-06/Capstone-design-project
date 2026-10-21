@@ -182,8 +182,10 @@ def history_s(bundle) -> float:
 
 def facing(seg_rows: list, sp) -> bool | None:
     """The rule table's gaze gate (JP 0-2 '고개 방향이 화면 안'): at the last frame of the segment that saw the face or
-    the body - True = face seen with |yaw| below offscreen_yaw_deg, False = face beyond it or face lost while the body
-    is seen (turned away or covered); None = no such frame, no yaw, or no situation values."""
+    the body - True = face seen with |yaw| below offscreen_yaw_deg, False = face seen with |yaw| at or beyond it;
+    None = that frame saw the body without the face (the head direction cannot be measured: covered, turned beyond
+    the landmarker's range, or lost), no such frame, no yaw, or no situation values. A None window takes the raised
+    criterion of the tap rows (tree section 4 ⑦), not the 'looking away' path."""
     if sp is None:
         return None
     for r in reversed(seg_rows):
@@ -191,7 +193,7 @@ def facing(seg_rows: list, sp) -> bool | None:
             yaw = finite(r.get("yaw_deg"))
             return None if yaw is None else abs(yaw) < sp.offscreen_yaw_deg
         if r.get("body_state") == SEEN:
-            return False
+            return None
     return None
 
 
@@ -231,17 +233,20 @@ class WindowJudge:
     def _touch(self, t_end: float) -> tuple:
         p, tl = self.b.chain, self.timeline
         if tl is None:
-            return None, None, {"name": None, "steps_left": None, "pause_s": None}, None, None
+            return None, None, {"name": None, "steps_left": None, "pause_s": None, "options_open": None}, None, None
         seg = tl.counts(t_end - p.segment_s, t_end)
         recent = tl.counts(t_end - p.touch_span_s, t_end)
         screen, since = tl.screen_at(t_end)
         steps_left = (len(SCREEN_FLOW) - 1 - SCREEN_FLOW.index(screen)) if screen in SCREEN_FLOW else None
         last_press = tl.last_press(t_end)
-        starts = [x for x in (last_press, since) if x is not None]
-        pause = t_end - max(starts) if starts else None
+        # tree 4-2 '고른 뒤 멈춤': the pause counts from a press of this screen visit; reading a screen without
+        # choosing anything yet is not a pause after choosing
+        chosen = last_press is not None and since is not None and last_press >= since
+        pause = t_end - last_press if chosen else None
         flags = tl.flags(t_end - p.segment_s, t_end) if seg is not None else None
         progress = None if flags is None else (flags["forward"] or flags["cart_add"])
-        return seg, recent, {"name": screen, "steps_left": steps_left, "pause_s": pause}, progress, flags
+        return seg, recent, {"name": screen, "steps_left": steps_left, "pause_s": pause,
+                             "options_open": tl.options_open_at(t_end)}, progress, flags
 
     def evaluate(self, rows: list, t_end: float) -> dict:
         w0 = time.perf_counter()
@@ -263,8 +268,10 @@ class WindowJudge:
         inp = R.WindowInput(t=t_end, measurable=measurable, situation=out, screen=screen["name"],
                             steps_left=screen["steps_left"], gaze=gaze,
                             misses_recent=None if recent is None else recent["miss_tap_count"],
+                            fixes_recent=None if recent is None else recent["near_miss_fix_count"],
                             backs_recent=None if recent is None else recent["back_count"], pause_s=screen["pause_s"],
-                            taps_segment=None if seg is None else seg["tap_count"], progress_segment=progress)
+                            taps_segment=None if seg is None else seg["tap_count"], progress_segment=progress,
+                            options_open=screen["options_open"])
         decision = R.decide(inp, self.state, p)
         self.state, decision = R.apply(self.state, decision)
         withdrawn_id = expired

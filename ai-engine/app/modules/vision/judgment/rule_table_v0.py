@@ -18,13 +18,22 @@ Rows (JP scene table; rank = JP 0-3 rank table):
                                                                 길 needs a look_down event that does not exist)
   3-1    remaining_steps_notice  apply (바로 적용)        3     tag looking_back_with_people_behind and steps  2 options: choice;
          (delay_responsibility_notice when the condition switch is on)  left (or unknown)                   1: fit / none
-  4-1    large_button            propose (묻기)           4     misses in the last touch_span_s >=            fit (facing);
-                                                                tremor_miss_min while facing the screen;     none (gaze
-                                                                >= tremor_miss_min_no_gaze when the camera    unknown)
-                                                                cannot tell; no row while looking away
-  4-2    highlight_next_action   apply (바로 적용, 조용히)  7     a back, or a pause >= lost_pause_s            fit
-                                                                (lost_pause_s_vision with looking_around or
-                                                                facing the screen), on a screen with steps left
+                                                                (the option defer_big_button_question only
+                                                                beside a 4-1 row opened through the gaze
+                                                                gate, tree 5-2)
+  4-1    large_button            propose (묻기)           4     near misses fixed at once in the last         fit (facing);
+                                                                touch_span_s (touch.py near_miss_fix_count,   none (gaze
+                                                                tree 3-가 4-1 '빗나감 · 바로 고침 반복') >=    unknown)
+                                                                tremor_miss_min while facing the screen;
+                                                                >= tremor_miss_min_no_gaze when the camera
+                                                                cannot tell; no row while looking away, and
+                                                                only while steps are left (조작 중)
+  4-2    highlight_next_action   apply (바로 적용, 조용히)  7     a back, or a pause after choosing >=          fit
+                                                                lost_pause_s (lost_pause_s_vision with
+                                                                looking_around or facing the screen), on a
+                                                                screen with steps left; pause = time since the
+                                                                last press of this screen visit, none before
+                                                                one ('고른 뒤 멈춤')
 Withdraw conditions (tree 3-나): 3-2 'touch_resumed' (터치가 이어짐), 3-1 and 4-2 'cart_progress' (장바구니가 나아감 /
 다음 단계로 나아감: a press on the cart-add button or a screen forward), 4-1 none (반응 · 무응답으로 끝남).
 A tag that is 'unknown' (or not judged) opens no tag row: the touch rows still run (JP 0-2: 상황 근거만 빼고).
@@ -91,10 +100,13 @@ class WindowInput:
     steps_left: int | None = None          # screens left before the order ends; None = unknown
     gaze: bool | None = None               # facing the screen at the segment end; None = the camera cannot tell
     misses_recent: int | None = None       # presses outside every button in the last touch_span_s; None = no log
+    fixes_recent: int | None = None        # near misses fixed at once in the last touch_span_s (touch.py
+                                           # near_miss_fix_count); None = no log or not known
     backs_recent: int | None = None        # backs (review -> menu) in the last touch_span_s
-    pause_s: float | None = None           # seconds without a press on this screen visit
+    pause_s: float | None = None           # seconds since the last press of this screen visit; None before a press
     taps_segment: int | None = None        # presses in this segment
     progress_segment: bool | None = None   # a cart-add press or a screen forward in this segment
+    options_open: bool | None = None       # the options dialog is open at t (touch log); None = no log
 
 
 @dataclass(frozen=True)
@@ -203,16 +215,17 @@ def candidate_rows(inp: WindowInput, state: SessionState, p, tag: str | None, ta
         rows.append(Row(WAIT, "3-2", "wait", 2, True, "touch_resumed", False, cues={"tag": tag}))
 
     steps_open = inp.steps_left is None or inp.steps_left > 0
-    tremor = None                                                                    # 4-1
+    tremor = None                                                                    # 4-1 (조작 중: steps left)
     deferred = _withdrawn(state, DEFER, tag_scope)
-    if inp.misses_recent is not None and not deferred and free(BIG, screen_scope):
-        cues = {"misses_recent": inp.misses_recent, "facing_screen": inp.gaze}
-        if inp.gaze is True and inp.misses_recent >= p.tremor_miss_min:
+    if steps_open and inp.fixes_recent is not None and not deferred and free(BIG, screen_scope):
+        cues = {"misses_recent": inp.misses_recent, "fixes_recent": inp.fixes_recent, "facing_screen": inp.gaze}
+        if inp.gaze is True and inp.fixes_recent >= p.tremor_miss_min:
             tremor = Row(BIG, "4-1", "propose", 4, False, None, True, "fit", "wait", cues=cues)
-        elif inp.gaze is None and inp.misses_recent >= p.tremor_miss_min_no_gaze:   # raised criterion, no Jev
+        elif inp.gaze is None and inp.fixes_recent >= p.tremor_miss_min_no_gaze:    # raised criterion, no Jev
             tremor = Row(BIG, "4-1", "propose", 4, False, None, False, None, None, cues={**cues, "raised": True})
     if tremor is not None:
         rows.append(tremor)
+    gated = tremor is not None and inp.gaze is True   # tree 5-2: a 4-1 row without the gaze gate is no defer premise
 
     group_held = state.held is not None and state.held.support in (NOTICE, DELAY)
     if tag == QUEUE and steps_open and not group_held:                               # 3-1
@@ -220,7 +233,7 @@ def candidate_rows(inp: WindowInput, state: SessionState, p, tag: str | None, ta
             options = (DELAY,) if free(DELAY, tag_scope) else ()
         else:
             options = (NOTICE,) if free(NOTICE, tag_scope) else ()
-            if options and p.defer_option_on and tremor is not None and free(DEFER, tag_scope):
+            if options and p.defer_option_on and gated and free(DEFER, tag_scope):
                 options += (DEFER,)
         if options:
             kind = "choice" if len(options) == 2 else ("fit" if options[0] == NOTICE else None)
@@ -257,7 +270,8 @@ def jev_request(row: Row, kind: str, inp: WindowInput, state: SessionState) -> d
                         "dropped_cues": ["mouth_moving"] if isinstance(conf, dict) and not conf.get("quality_ok")
                         else []},
           "screen": {"name": inp.screen, "steps_left": inp.steps_left},
-          "touch": {"misses_recent": inp.misses_recent, "backs_recent": inp.backs_recent,
+          "touch": {"misses_recent": inp.misses_recent, "fixes_recent": inp.fixes_recent,
+                    "backs_recent": inp.backs_recent,
                     "pause_s": None if inp.pause_s is None else round(inp.pause_s, 1)},
           "vision": {"facing_screen": inp.gaze, "looking_around": sit.get("name") == AROUND},
           "session": {"active": list(state.active), "held": state.held.support if state.held else None,

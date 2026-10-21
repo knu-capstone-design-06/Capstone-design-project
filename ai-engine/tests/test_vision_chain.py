@@ -560,12 +560,17 @@ class RuleTableTests(unittest.TestCase):   # plain Python: runs with the server 
         self.assertEqual(d.jev_request["state"]["situation"]["evidence"], {"look_back": 3})
         self.assertFalse(re.search("[가-힣]", json.dumps(d.jev_request["questions"], ensure_ascii=False)))
         (d,), _ = self.run_windows([win(situation=sit("looking_back_with_people_behind"), screen="menu", steps_left=2,
-                                        gaze=True, misses_recent=self.p.tremor_miss_min)])
+                                        gaze=True, fixes_recent=self.p.tremor_miss_min)])
         self.assertEqual((d.support, d.rank, d.policy["kind"]), ("remaining_steps_notice", 3, "choice"))
         self.assertEqual(d.policy["default_choice"], "remaining_steps_notice")
         self.assertEqual(set(d.jev_request["questions"]["queue_support"]["criteria"]),
                          {"remaining_steps_notice", "defer_big_button_question"})
         self.assertIsNone(d.policy["T_CHOICE"])                    # 기준 없음: shadow mode
+        self.assertEqual(d.jev_request["state"]["touch"]["fixes_recent"], self.p.tremor_miss_min)
+        (d,), _ = self.run_windows([win(situation=sit("looking_back_with_people_behind"), screen="menu", steps_left=2,
+                                        gaze=None, fixes_recent=self.p.tremor_miss_min_no_gaze)])
+        self.assertEqual((d.support, d.policy["kind"], d.cues["options"]),    # the raised 4-1 row is no defer premise
+                         ("remaining_steps_notice", "fit", ["remaining_steps_notice"]))
 
     def test_3_1_with_the_delay_notice_switch_and_without_steps(self):
         p = dataclasses.replace(self.p, delay_notice_on=True)
@@ -578,16 +583,26 @@ class RuleTableTests(unittest.TestCase):   # plain Python: runs with the server 
 
     def test_4_1_needs_the_gaze_gate(self):
         k = self.p.tremor_miss_min
-        (d,), _ = self.run_windows([win(misses_recent=k, gaze=True, screen="menu", steps_left=2)])
+        (d,), _ = self.run_windows([win(fixes_recent=k, misses_recent=k, gaze=True, screen="menu", steps_left=2)])
         self.assertEqual((d.support, d.action, d.form()), ("large_button", "propose", ("large_button", True)))
         self.assertIsNone(d.jev_request)                           # situation not known: no Jev (JP 0-4)
-        (d,), _ = self.run_windows([win(misses_recent=k, gaze=False, screen="menu", steps_left=2)])
+        self.assertEqual(d.cues["fixes_recent"], k)
+        (d,), _ = self.run_windows([win(fixes_recent=k, gaze=False, screen="menu", steps_left=2)])
         self.assertEqual(d.transition, "none")                     # looking away: ask later
-        (d,), _ = self.run_windows([win(misses_recent=k, gaze=None, screen="menu", steps_left=2)])
+        (d,), _ = self.run_windows([win(fixes_recent=k, gaze=None, screen="menu", steps_left=2)])
         self.assertEqual(d.transition, "none")                     # camera cannot tell: the raised criterion
-        (d,), _ = self.run_windows([win(misses_recent=self.p.tremor_miss_min_no_gaze, gaze=None, screen="menu",
+        (d,), _ = self.run_windows([win(fixes_recent=self.p.tremor_miss_min_no_gaze, gaze=None, screen="menu",
                                         steps_left=2, situation=sit("none", 0))])
         self.assertEqual((d.support, d.policy["ask_jev"], d.cues.get("raised")), ("large_button", False, True))
+
+    def test_4_1_opens_on_fixed_misses_while_steps_are_left(self):
+        k = self.p.tremor_miss_min
+        (d,), _ = self.run_windows([win(misses_recent=k + 3, fixes_recent=0, gaze=True, screen="menu", steps_left=2)])
+        self.assertEqual(d.transition, "none")                     # misses alone, none fixed at once: no 4-1
+        (d,), _ = self.run_windows([win(misses_recent=k, gaze=True, screen="menu", steps_left=2)])
+        self.assertEqual(d.transition, "none")                     # fixes unknown
+        (d,), _ = self.run_windows([win(fixes_recent=k, gaze=True, screen="complete", steps_left=0)])
+        self.assertEqual(d.transition, "none")                     # complete screen: nothing left to press
 
     def test_4_2_back_or_pause_and_the_vision_lowered_pause(self):
         (d,), _ = self.run_windows([win(backs_recent=1, screen="menu", steps_left=2)])
@@ -605,7 +620,7 @@ class RuleTableTests(unittest.TestCase):   # plain Python: runs with the server 
     def test_rank_order_held_ask_and_replacements(self):
         k = self.p.tremor_miss_min
         both = dict(situation=sit("looking_back_with_people_behind"), screen="menu", steps_left=2, gaze=True,
-                    misses_recent=k)
+                    fixes_recent=k)
         (d1, d2), state = self.run_windows([win(10, **both), win(11, **both)])
         self.assertEqual((d1.support, d2.transition, d2.support), ("remaining_steps_notice", "replace",
                                                                     "large_button"))   # shown notice -> ask
@@ -626,7 +641,7 @@ class RuleTableTests(unittest.TestCase):   # plain Python: runs with the server 
 
     def test_no_response_refusal_and_scope(self):
         R, k = self.R, self.p.tremor_miss_min
-        ask = dict(misses_recent=k, gaze=True, screen="menu", steps_left=2)
+        ask = dict(fixes_recent=k, gaze=True, screen="menu", steps_left=2)
         (d1,), state = self.run_windows([win(10, **ask)])
         state, gone = R.tick(state, 10 + self.p.no_response_s, self.p)
         self.assertEqual((gone, state.held), (d1.decision_id, None))
@@ -712,6 +727,40 @@ class UnknownReasonTests(unittest.TestCase):
                 for r in reasons:
                     if r["code"] == "missing_cue":
                         self.assertTrue(r["missing"], f"missing_cue without a cue at {t}: {r}")
+
+
+@unittest.skipUnless(HAS_NUMPY, SKIP)
+class WindowJudgeTests(unittest.TestCase):
+    def test_gaze_gate_needs_a_measured_head_direction(self):
+        from app.modules.vision.chain import facing as gaze
+        sp = sit_params()                                          # offscreen_yaw_deg 30 (test value)
+        face_lost = {"face_state": NOT_SEEN, "yaw_deg": NAN, "face_cx": NAN}      # the body is still seen
+        nothing = {**face_lost, "body_state": NOT_SEEN}
+        self.assertIsNone(gaze(rows_of(facing(3), [(2, face_lost)]), sp))          # cannot measure, not 'away'
+        self.assertTrue(gaze(rows_of([(3, {"yaw_deg": 10.0})]), sp))
+        self.assertFalse(gaze(rows_of([(3, {"yaw_deg": -45.0})]), sp))
+        self.assertTrue(gaze(rows_of([(3, {"yaw_deg": 5.0})], [(2, nothing)]), sp))   # the last frame seeing anyone
+        self.assertIsNone(gaze(rows_of(facing(3)), None))                          # no situation values
+
+    def test_pause_counts_only_after_a_press_on_this_screen_visit(self):
+        from app.modules.vision.chain import WindowJudge
+        from app.modules.vision.touch import load_timeline
+        folder = tempfile.mkdtemp()
+        video = os.path.join(folder, "take.mp4")
+        events = [(-1000, "session_start", "menu", None), (-900, "screen_enter", "menu", None)]
+        rows = rows_of(facing(40))
+
+        def screen_at(t_end):
+            tl = load_timeline(touch_log(folder, events, video), video)
+            return WindowJudge(bundle(), tl).evaluate(rows, t_end)["screen"]
+        self.assertIsNone(screen_at(3.0)["pause_s"])               # reading the first menu without choosing
+        events.append((1000, "pointer_start", "menu", {"target": {"id": "product:1", "kind": "button",
+                                                                  "disabled": False}}))
+        self.assertAlmostEqual(screen_at(3.0)["pause_s"], 2.0)     # from the press at 1.0 s
+        events.append((2500, "screen_enter", "review", {"from": "menu"}))
+        self.assertEqual((screen_at(3.0)["name"], screen_at(3.0)["pause_s"]), ("review", None))   # a new visit
+        events.append((3500, "options_open", "review", {"productId": "1"}))
+        self.assertEqual((screen_at(3.0)["options_open"], screen_at(3.9)["options_open"]), (False, True))
 
 
 @unittest.skipUnless(HAS_NUMPY, SKIP)
@@ -843,7 +892,9 @@ class ReplayWithFakePerceptionTests(unittest.TestCase):
         video = os.path.join(folder, "take.mp4")
         tl = None
         if touch:
-            events = [(-1000, "session_start", "menu", None), (-900, "screen_enter", "menu", None)]
+            events = [(-1000, "session_start", "menu", None), (-900, "screen_enter", "menu", None),
+                      (-500, "pointer_start", "menu", {"target": {"id": "category:커피", "kind": "button",
+                                                                  "disabled": False}})]   # chosen before the take
             tl = load_timeline(touch_log(folder, events, video), video)
         out = os.path.join(folder, "out")
         meta = run_replay(frames(len(sched)), out, bundle(situation=situation), timeline=tl, models=FakeModels(sched),
