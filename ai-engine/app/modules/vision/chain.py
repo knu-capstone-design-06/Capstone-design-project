@@ -8,9 +8,11 @@ the cue as missing ('모름'), never as 'absent'.
 
 Per window (WindowJudge.evaluate, one every params.segment_s; the runners add one shorter window for the input's last
 stretch, marked 'partial'): situation.assess over [t - window_s, t] with the reasons of an 'unknown' (unknown_reasons),
-touch counts of the segment (t - segment_s, t], the rule table v0
-(judgment/rule_table_v0.py) on the emulated session state, the Jev question recorded in shadow mode, and the contract
-view (contract_view.py). Nothing after t is read, so a replay gives what the kiosk would have given at t.
+touch counts of the segment (t - segment_s, t], the rule table v0 (judgment/rule_table_v0.py) on the emulated session
+state, the Jev question recorded in shadow mode, and the contract view (contract_view.py). When the touch log's
+sessionId changes (a new order or a reload), the emulated session state starts again (tree section 4 ①: 새 세션은
+처음부터 다시 판정) and that window's record says session_reset. Nothing after t is read, so a replay gives what the
+kiosk would have given at t.
 """
 from __future__ import annotations
 
@@ -222,14 +224,16 @@ def situation_view(out: dict | None, reasons: list) -> dict:
 
 
 class WindowJudge:
-    """Per-window evaluation with the session state of the rule table carried from window to window."""
+    """Per-window evaluation with the session state of the rule table carried from window to window; a new sessionId
+    in the touch log starts the state again (tree section 4 ①)."""
 
     def __init__(self, bundle, timeline=None, session_id: str = "replay", jev=None):
         self.b = bundle
         self.timeline = timeline
-        self.session_id = session_id
+        self.session_id = session_id          # the contract view's session_id
         self.state = R.SessionState()
         self.jev = jev or ShadowJev()
+        self.log_session = None               # the touch log's last sessionId seen at a window end
 
     def _touch(self, t_end: float, seg_len: float) -> tuple:
         p, tl = self.b.chain, self.timeline
@@ -267,6 +271,12 @@ class WindowJudge:
         has_touch = seg is not None and (seg["tap_count"] > 0 or seg["back_count"] > 0)
         measurable = bool(has_touch or face_seen)
         gaze = facing(seg_rows, sp)
+        log_session = None if self.timeline is None else self.timeline.session_at(t_end)
+        session_reset = log_session is not None and self.log_session is not None and log_session != self.log_session
+        if session_reset:
+            self.state = R.SessionState()     # tree section 4 ①: a new session is judged from the start
+        if log_session is not None:
+            self.log_session = log_session
         self.state, expired = R.tick(self.state, t_end, p)
         held_before = self.state.held.decision_id if self.state.held else None
         inp = R.WindowInput(t=t_end, measurable=measurable, situation=out, screen=screen["name"],
@@ -293,7 +303,7 @@ class WindowJudge:
             "frames": len(seg_rows), "situation": situation, "touch": seg,
             "screen": {**screen, "pause_s": None if screen["pause_s"] is None else round(screen["pause_s"], 3)},
             "vision": vision_summary(seg_rows, gaze), "measurable": measurable, "decision": d,
-            "session": self.state.snapshot(), "jev": jev,
+            "session": self.state.snapshot(), "session_reset": session_reset, "jev": jev,
         }
         if seg_len != p.segment_s:
             record["partial"] = {"segment_s": round(seg_len, 4)}

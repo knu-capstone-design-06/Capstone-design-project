@@ -818,6 +818,28 @@ class WindowJudgeTests(unittest.TestCase):
         events.append((3500, "options_open", "review", {"productId": "1"}))
         self.assertEqual((screen_at(3.0)["options_open"], screen_at(3.9)["options_open"]), (False, True))
 
+    def test_a_new_touch_log_session_starts_the_state_again(self):
+        from app.modules.vision.chain import WindowJudge
+        from app.modules.vision.touch import load_timeline
+        folder = tempfile.mkdtemp()
+        video = os.path.join(folder, "take.mp4")
+        events = [(-1000, "session_start", "menu", None), (-900, "screen_enter", "menu", None),
+                  (1000, "screen_enter", "review", {"from": "menu"}),
+                  (2000, "screen_enter", "menu", {"from": "review"}),
+                  (6000, "session_end", "menu", {"reason": "server_session_change"}),
+                  (6100, "session_start", "menu", {"reason": "server_session_change"}, "s2"),
+                  (6100, "screen_enter", "menu", None, "s2")]
+        judge = WindowJudge(bundle(), load_timeline(touch_log(folder, events, video), video))
+        rows = rows_of(facing(90))
+        r1 = judge.evaluate(rows, 4.0)                             # the back at 2.0 s opens the 4-2 highlight
+        self.assertEqual((r1["decision"]["transition"], r1["decision"]["support"], r1["session_reset"]),
+                         ("open", "highlight_next_action", False))
+        r2 = judge.evaluate(rows, 7.0)                             # session s2: judged from the start
+        self.assertTrue(r2["session_reset"])
+        self.assertIsNone(r2["session"]["held"])
+        self.assertNotEqual(r2["decision"]["transition"], "keep")
+        self.assertFalse(judge.evaluate(rows, 8.0)["session_reset"])
+
 
 @unittest.skipUnless(HAS_NUMPY, SKIP)
 class HistoryTests(unittest.TestCase):
@@ -969,6 +991,8 @@ class ReplayWithFakePerceptionTests(unittest.TestCase):
         self.assertAlmostEqual(recs[-1]["partial"]["segment_s"], 0.9)   # the last 0.9 s (frames to 5.9 s)
         self.assertAlmostEqual(meta["last_window_partial_s"], 0.9)
         self.assertEqual(meta["counts"]["frames"], {"with_face": 60, "with_heads": 60, "with_direction": 60})
+        self.assertEqual(meta["counts"]["session_resets"], 0)      # one touch-log session
+        self.assertTrue(all(r["session_reset"] is False for r in recs))
         names = [r["situation"]["name"] for r in recs]
         self.assertIn("looking_around", names)
         tagged = next(r for r in recs if r["situation"]["name"] == "looking_around")

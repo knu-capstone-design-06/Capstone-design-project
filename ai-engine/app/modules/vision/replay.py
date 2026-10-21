@@ -212,6 +212,7 @@ def run_replay(source, out_dir: str, bundle, *, timeline=None, models=None, dete
     for row in rows:
         add_frame_counts(frame_counts, row)
     tags, transitions, supports = {}, {}, {}
+    session_resets = sum(rec["session_reset"] for rec in records)
     for rec in records:
         tags[rec["situation"]["name"]] = tags.get(rec["situation"]["name"], 0) + 1
         transitions[rec["decision"]["transition"]] = transitions.get(rec["decision"]["transition"], 0) + 1
@@ -225,7 +226,7 @@ def run_replay(source, out_dir: str, bundle, *, timeline=None, models=None, dete
             "touch": None if timeline is None else timeline.meta, "models": model_info or {},
             "environment": environment(), "timing_ms": timing_summary(rows, records),
             "counts": {"situation": tags, "transition": transitions, "opened_support": supports,
-                       "frames": frame_counts},
+                       "frames": frame_counts, "session_resets": session_resets},
             "last_window_partial_s": None if partial_s is None else round(partial_s, 4),
             "jev_questions_recorded": len(judge.jev.log)}
     with open(os.path.join(out_dir, "meta.json"), "w", encoding="utf-8") as f:
