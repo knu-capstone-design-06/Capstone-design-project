@@ -30,7 +30,7 @@ API 문서: http://127.0.0.1:8000/docs
 
 ## 주문 API 명세 반영 상태
 
-[프론트엔드 ↔ 백엔드 OpenAPI](../contract/frontend-backend.openapi.yaml) 0.3.0의 상품 조회, 세션 장바구니 조회·추가·수량 변경·삭제, 모의 주문 확정 6개 API를 구현했습니다. 첫 시연의 고정 17개 상품·현재 가격·옵션·항목별 최대 20개, 실제 결제·재고 차감 없는 모의 주문, 한 세션 한 주문·새 주문 새 세션은 채택됐습니다. 계약 문서의 `draft` 표시는 미정 정책의 팀 리뷰가 끝날 때까지 유지합니다. FastAPI `/docs`에는 현재 등록된 여섯 경로가 표시됩니다.
+[프론트엔드 ↔ 백엔드 OpenAPI](../contract/frontend-backend.openapi.yaml) 0.4.0의 상품 조회, 세션 장바구니 조회·추가·수량 변경·삭제, 모의 주문 확정 6개 API를 구현했습니다. 첫 시연의 고정 17개 상품·현재 가격·옵션·항목별 최대 20개, 실제 결제·재고 차감 없는 모의 주문, 한 세션 한 주문·새 주문 새 세션은 채택됐습니다. 계약 문서의 `draft` 표시는 미정 정책의 팀 리뷰가 끝날 때까지 유지합니다. FastAPI `/docs`에는 현재 등록된 여섯 경로가 표시됩니다.
 
 설계 이유·미정 정책은 [주문 API 검토 문서](../docs/Product-Cart-Order-API-Draft.md)를 확인합니다. 상품 목록은 프론트 개발 샘플의 17개 메뉴와 가격을 서버의 고정 시연 데이터로 옮겼습니다. 가격·옵션·수량을 서버가 검증하고, 세션별 Cart 버전과 `Idempotency-Key`의 성공 결과를 같은 프로세스의 잠금 아래 저장합니다. 모의 주문은 항목·금액 스냅샷을 반환하고 Cart를 비우며 같은 키 재시도에는 원래 주문 응답을 반환합니다. 신규 API의 검증 오류는 `OrderApiError` 형식이고 기존 API 오류 형식은 유지합니다.
 
@@ -116,7 +116,7 @@ async def analyze_window(ai: AiEngineClient, window: AnalyzeRequest):
 - 호출자의 취소는 상위로 전달합니다. 로그에는 오류 종류만 기록합니다.
 - 시간 필드는 시간대가 있는 날짜·시간이어야 하며 종료 시각이 시작 시각보다 뒤여야 합니다.
 - `TouchFeatures`, `VisionFeatures`, `StateScores`의 현재 형식은
-  `contract/frontend-backend.openapi.yaml`(0.3.0, 기존 0.1.0 형식 유지)에 정의돼 있습니다. 다만 비전
+  `contract/frontend-backend.openapi.yaml`(0.4.0, 기존 0.1.0 형식 유지)에 정의돼 있습니다. 다만 비전
   세부 특징과 터치 통계 계산 기준에는 팀 검토 항목이 남아 있습니다.
   연결 API는 `modules/sessions/schemas.py`에서 입력 필드와 반환 점수 5개·범위·타입을 검증합니다.
   내부 전송 클라이언트의 `JsonObject`는 그대로 유지하므로 직접 사용하는 다른 호출자는 별도의 의미 검증이 필요합니다.

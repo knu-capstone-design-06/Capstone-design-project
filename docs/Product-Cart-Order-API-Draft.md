@@ -3,7 +3,7 @@
 - 작성일: 2026-10-04
 - 수정일: 2026-10-15 — 첫 시연 정책 A·B·C 채택을 반영. 나머지 계약은 검토 중.
 - 상태: 첫 시연 정책 A·B·C는 2026-10-15 백엔드 담당자 지시로 채택. 나머지 주문 API 정책과 전체 계약은 검토용 초안입니다.
-- 기준 명세: `contract/frontend-backend.openapi.yaml` 0.3.0. 기존 0.1.0의 네 API 형식은 유지합니다.
+- 기준 명세: `contract/frontend-backend.openapi.yaml` 0.4.0. 기존 0.1.0의 네 API 형식은 유지합니다.
 - 대상: 프론트엔드·백엔드 담당자. 음성 명령 연결은 AI 담당자도 검토합니다(음성·MCP 구현은 프론트 작업 범위 밖).
 
 이 문서는 서버 장바구니 방식으로 상품 조회부터 모의 주문 확정까지 연결하기 위한 계약 검토 문서입니다. [첫 시연 정책 A·B·C](Order-API-First-Demo-Policy-Proposal.md)는 백엔드 담당자의 2026-10-15 명시적 결정으로 채택했으며, 다른 담당자의 검토는 변경 PR에서 요청합니다. OpenAPI 0.3.0의 신규 operation은 나머지 미정 정책 때문에 `x-contract-status: draft`를 유지합니다. `x-frontend-status: prepared`와 `x-backend-status: implemented`는 구현 상태이며 팀 전체 합의를 뜻하지 않습니다. 서버 업무 로직은 PR #40에서 초안 기준으로 구현했고, 2026-10-14 실제 프론트 통합 흐름을 검증했습니다.
@@ -294,7 +294,7 @@ Content-Type: application/json
 
 ## 9. 오류 형식 제안
 
-기존 네 API의 오류 형식은 변경하지 않습니다. 신규 API에는 구분 가능한 `code`를 사용하며, OpenAPI 0.3.0의 `OrderApiError` 스키마로 정의합니다.
+기존 네 API의 오류 형식은 변경하지 않습니다. 신규 API에는 구분 가능한 `code`를 사용하며, OpenAPI 0.4.0의 `OrderApiError` 스키마로 정의합니다.
 
 ```json
 {
