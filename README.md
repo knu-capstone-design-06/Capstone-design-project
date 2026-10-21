@@ -112,7 +112,7 @@ flowchart TD
 |---|---|
 | 프론트엔드 | 주문 화면, 접근성 기능(큰 글씨 · 큰 버튼 · 간편 화면 · 단계별 안내 · 낮은 화면 · 음성 모드), 로컬 터치 기록, 비전 관측값의 특징 창 전송, Chrome 음성 인식 · backend 요청, 하단 제안 영역의 지원 제안 표시와 수락 · 거절 · 되돌리기 |
 | 백엔드 | 세션 · 주문 · 결정 상태 관리, DB 저장, ai-engine 호출, 외부 AI(OpenAI 음성 해석 · Jev) 호출과 어댑터, 적용 조건 · 명령 검증 |
-| ai-engine | 키오스크 PC에서 실행하는 AI 엔진: ① 비전 관측(얼굴 · 고개 방향 · 거리 · 주변 사람 · 보조기구) → ② 상황 태그(근거 · 측정 품질 · '모름') → ③ 판단(규칙표에 Jev 확률과 반응 이력을 더해 기다림 · 묻기 · 바로 적용 · 직원 호출 가운데 하나). 경량화 · 변환한 모델(ONNX)을 탑재 |
+| ai-engine | 키오스크 PC에서 실행하는 AI 엔진(설계안, 운영 배치는 아래 문단): ① 비전 관측(얼굴 · 고개 방향 · 거리 · 주변 사람 · 보조기구) → ② 상황 태그(근거 · 측정 품질 · '모름') → ③ 판단(규칙표에 Jev 확률과 반응 이력을 더해 기다림 · 묻기 · 바로 적용 · 직원 호출 가운데 하나). 경량화 · 변환한 모델(ONNX)을 탑재 |
 | GPU 서버 | 비전 모델 학습 · 평가 전용(AI Hub · Open Images). 실행 경로에 없으며 학습한 모델을 CPU 추론용으로 경량화 · 변환(ONNX)해 ai-engine에 탑재 |
 | 외부 AI | Jev API(상황 · 선택지 → 선택지별 확률), OpenAI API(인식 문장 → 키오스크 조작 명령). backend만 호출 |
 | Supabase | PostgreSQL: 세션 · 주문 · 결정 기록 저장(첫 마이그레이션 적용, 서비스 연결 전) |
@@ -120,7 +120,7 @@ flowchart TD
 
 판단은 ai-engine의 ③ 판단 층이 하고, backend는 결정을 받아 적용 조건(현재 화면 · 지원 이력)을 확인한 뒤 프론트엔드에 전달합니다. 음성 명령에 따른 주문 변경도 backend가 검증합니다. 프론트엔드는 실제 적용 결과와 사용자 반응을 다시 보내고, 그 반응은 다음 판단에 들어갑니다.
 
-실행 위치는 설계안입니다(비전 담당, 2026-10-15; 승용 2026-10-08 "키오스크에서 관측값 계산해서 서버에는 값만 전송"). 비전 관측값은 같은 PC의 프론트엔드가 특징 창의 `vision` 칸으로 backend에 보내고(`FeatureWindowRequest.vision`), backend가 ai-engine의 `/v1/analyze`를 부릅니다. 호출 경로와 기존 특징 전송 골격은 계약 그대로입니다: 프론트엔드는 backend와만 통신하고(frontend-backend 0.4.0), backend ↔ ai-engine은 backend-ai 0.2.0입니다. 상황 태그 · 근거 · '모름' 이유 · 결정 · 사용자 반응 · Jev 질문 · 확률 필드는 아직 두 계약에 없어, 추가형 명세 제안을 팀이 합의한 뒤 넣습니다. backend는 소형 서버(또는 매장 PC)에서 돌고, 시연은 PC 한 대에서 세 서비스를 Docker Compose로 띄웁니다. 운영 배치안 [`infra/deployment-architecture.md`](infra/deployment-architecture.md)(팀 검토 중)는 ai-engine을 backend와 같은 EC2에 두는 이전 안이며, 이 README의 키오스크 PC 배치와 로컬 전달 경로(공개 HTTPS 화면에서 같은 PC의 localhost 연결)는 실기기에서 아직 검증하지 않았습니다.
+실행 위치는 설계안입니다(비전 담당, 2026-10-15; 승용 2026-10-08 "키오스크에서 관측값 계산해서 서버에는 값만 전송"). 비전 관측값은 같은 PC의 프론트엔드가 특징 창의 `vision` 칸으로 backend에 보내고(`FeatureWindowRequest.vision`), backend가 ai-engine의 `/v1/analyze`를 부릅니다. 호출 경로와 기존 특징 전송 골격은 계약 그대로입니다: 프론트엔드는 backend와만 통신하고(frontend-backend 0.4.0), backend ↔ ai-engine은 backend-ai 0.2.0입니다. 상황 태그 · 근거 · '모름' 이유 · 결정 · 사용자 반응 · Jev 질문 · 확률 필드는 아직 두 계약에 없어, 추가형 명세 제안을 팀이 합의한 뒤 넣습니다. backend는 소형 서버(또는 매장 PC)에서 돌고, 시연은 PC 한 대에서 세 서비스를 Docker Compose로 띄웁니다. 운영 배치는 아직 정하지 않았습니다. 이 README의 키오스크 PC 배치안과 [`infra/deployment-architecture.md`](infra/deployment-architecture.md)의 EC2 동거안(ai-engine을 backend와 같은 EC2에 두는 이전 안) 가운데 어느 쪽도 실기기에서 검증하지 않았고, backend와 ai-engine이 다른 기기에 있을 때의 통신 경로(주소 · 인증 · 보안)도 정하지 않았습니다. 현재 Compose 설정(`AI_ENGINE_URL=http://ai-engine:8001`)은 두 서비스가 같은 Docker 네트워크에 있을 때만 동작합니다. 배치와 경로는 다음 팀 회의 안건으로 올립니다.
 
 터치 통계의 계산 위치는 아직 팀 검토 항목입니다. 이 README는 프론트엔드 계산으로 적고, `contract/frontend-backend.openapi.yaml`의 `TouchFeatures`도 프론트엔드 계산입니다(`docs/Touch-Log-Review.md` 5장 T12). 비전 학습 코드의 최종 저장 위치는 팀에서 별도로 정합니다.
 
