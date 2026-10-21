@@ -301,6 +301,11 @@ class ColumnsTests(unittest.TestCase):
         self.assertEqual((r.companion, r.behind), (None, (0, 1)))
         r = self.roles([far, user], behind_max_area_ratio=0.05)             # far head not small enough
         self.assertEqual(r.behind, ())
+        user2 = [0.45, 0.30, 0.55, 0.50]          # 0.10 x 0.20
+        big_far = [0.85, 0.25, 0.945, 0.455]      # second largest, about 4 user widths away: not beside
+        near = [0.60, 0.30, 0.69, 0.49]           # smaller, beside (about 1.5 user widths)
+        r = self.roles([big_far, near, user2])
+        self.assertEqual((r.primary, r.companion, r.behind), (2, 1, (0,)))   # the larger far head does not hide it
 
     def test_main_user_follows_the_tracked_face(self):
         big = [0.05, 0.05, 0.35, 0.55]

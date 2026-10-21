@@ -9,9 +9,10 @@ Columns (names = the ones events.py reads, then observation-only columns no rule
                         companion's whose area is below behind_max_area_ratio x the main user's (decision table 3:
                         '주 사용자보다 작은 상자'). 0 when no head is found. 'Standing, not passing' is the events layer's
                         job (stay_min_s). Absent (column missing) when the head detector did not run.
-  companion_box         (x0, y0, x1, y1) as fractions of the frame: the largest head other than the main user's when its
-                        area is at least companion_min_area_ratio x the main user's ('비슷한 크기') and its centre lies
-                        within companion_max_dist_widths main-user head widths ('옆'); None when there is no such head.
+  companion_box         (x0, y0, x1, y1) as fractions of the frame: among the heads other than the main user's, largest
+                        first, the first whose area is at least companion_min_area_ratio x the main user's ('비슷한
+                        크기') and whose centre lies within companion_max_dist_widths main-user head widths ('옆'), so a
+                        larger head farther away does not hide a nearer one; None when no head meets both.
   shoulder_cx, shoulder_cy  midpoint of pose points 11 and 12 (left / right shoulder [D3]) as fractions of the frame;
                         None when the body is not seen.
   mouth_motion          largest absolute change of a mouth / jaw blendshape (params.mouth_dials) from that dial's
@@ -86,14 +87,15 @@ def assign_heads(boxes: np.ndarray, frame_wh: tuple, face_xy, params) -> HeadRol
     others = [i for i in order if i != primary]
     companion = None
     if others and areas[primary] > 0:
-        c = others[0]                                                           # the largest other head
         width_px = (boxes[primary, 2] - boxes[primary, 0]) * W
         pcx, pcy = centre_x[primary] * W, (boxes[primary, 1] + boxes[primary, 3]) / 2.0 * H
-        ccx, ccy = centre_x[c] * W, (boxes[c, 1] + boxes[c, 3]) / 2.0 * H
-        dist_widths = math.hypot(ccx - pcx, ccy - pcy) / width_px if width_px > 0 else math.inf
-        if areas[c] >= params.companion_min_area_ratio * areas[primary] and \
-                dist_widths <= params.companion_max_dist_widths:
-            companion = c
+        for c in others:                                                        # largest first: the first that fits
+            ccx, ccy = centre_x[c] * W, (boxes[c, 1] + boxes[c, 3]) / 2.0 * H
+            dist_widths = math.hypot(ccx - pcx, ccy - pcy) / width_px if width_px > 0 else math.inf
+            if areas[c] >= params.companion_min_area_ratio * areas[primary] and \
+                    dist_widths <= params.companion_max_dist_widths:
+                companion = c
+                break
     behind = tuple(sorted(i for i in others
                           if i != companion and areas[i] < params.behind_max_area_ratio * areas[primary]))
     return HeadRoles(primary, companion, behind, how)
