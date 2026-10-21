@@ -4,7 +4,7 @@ Python 3.12 기반 FastAPI 백엔드입니다. 상태·AI 연결 확인, 임시 
 
 ## 프론트 주문 연동 상태
 
-상품·장바구니·모의 주문 서버 API 6개를 [PR #40](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/40)에서 PR #33의 초안 형식으로 구현했습니다. [PR #43](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/43) 병합 후 계약에는 `x-backend-status: implemented`로 표시돼 있으나 `x-contract-status: draft`는 유지됩니다. 2026-10-14 PR #43 병합 직후 `main`의 Docker 환경에서 실제 프론트 화면과 백엔드의 주문 흐름을 검증했습니다. 미정 정책은 [담당자 검토](#프론트-주문-연동-준비와-담당자-검토)에 정리했습니다.
+상품·장바구니·모의 주문 서버 API 6개를 [PR #40](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/40)에서 PR #33의 초안 형식으로 구현했습니다. [PR #43](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/43) 병합 후 계약에는 `x-backend-status: implemented`로 표시돼 있습니다. 2026-10-15 첫 시연 정책 A·B·C를 백엔드 담당자가 채택했으며, 나머지 정책이 남아 `x-contract-status: draft`는 유지됩니다. 2026-10-14 PR #43 병합 직후 `main`의 Docker 환경에서 실제 프론트 화면과 백엔드의 주문 흐름을 검증했습니다. 미정 정책은 [담당자 검토](#프론트-주문-연동-준비와-담당자-검토)에 정리했습니다.
 
 ## 로컬 실행 (PowerShell)
 
@@ -30,7 +30,7 @@ API 문서: http://127.0.0.1:8000/docs
 
 ## 주문 API 명세 반영 상태
 
-[프론트엔드 ↔ 백엔드 OpenAPI](../contract/frontend-backend.openapi.yaml) 0.3.0의 상품 조회, 세션 장바구니 조회·추가·수량 변경·삭제, 모의 주문 확정 6개 API를 구현했습니다. 계약 문서의 `draft` 표시는 팀 리뷰에서 확정되기 전까지 유지합니다. FastAPI `/docs`에는 현재 등록된 여섯 경로가 표시됩니다.
+[프론트엔드 ↔ 백엔드 OpenAPI](../contract/frontend-backend.openapi.yaml) 0.3.0의 상품 조회, 세션 장바구니 조회·추가·수량 변경·삭제, 모의 주문 확정 6개 API를 구현했습니다. 첫 시연의 고정 17개 상품·현재 가격·옵션·항목별 최대 20개, 실제 결제·재고 차감 없는 모의 주문, 한 세션 한 주문·새 주문 새 세션은 채택됐습니다. 계약 문서의 `draft` 표시는 미정 정책의 팀 리뷰가 끝날 때까지 유지합니다. FastAPI `/docs`에는 현재 등록된 여섯 경로가 표시됩니다.
 
 설계 이유·미정 정책은 [주문 API 검토 문서](../docs/Product-Cart-Order-API-Draft.md)를 확인합니다. 상품 목록은 프론트 개발 샘플의 17개 메뉴와 가격을 서버의 고정 시연 데이터로 옮겼습니다. 가격·옵션·수량을 서버가 검증하고, 세션별 Cart 버전과 `Idempotency-Key`의 성공 결과를 같은 프로세스의 잠금 아래 저장합니다. 모의 주문은 항목·금액 스냅샷을 반환하고 Cart를 비우며 같은 키 재시도에는 원래 주문 응답을 반환합니다. 신규 API의 검증 오류는 `OrderApiError` 형식이고 기존 API 오류 형식은 유지합니다.
 
@@ -192,9 +192,8 @@ Invoke-RestMethod -Method Post "$base/api/v1/sessions/$($session.session_id)/fea
 
 팀과 결정하고 이후 구현할 사항:
 - 프론트 요청 타임아웃은 15초입니다. 최종 시간과 시간 초과 후 처리 중 응답·재시도 정책은 백엔드 담당자와 합의할 항목입니다.
-- 현재 구현한 항목별 수량 한도 20개·고정 가격·시연 상품 목록을 최종 시연 정책으로 채택할지
 - 처리 중 중복 요청의 오류·간격, 실패 결과와 성공 키의 보관 기간, DB 전환 시 원자적 저장
-- 한 세션 1주문·새 주문 새 세션의 최종 정책, 완료 후 특징·음성 요청, 서버 주문번호의 형식·보관 범위
+- 완료 후 특징·음성 요청, 서버 주문번호의 형식·보관 범위, 세션 만료·복원
 - 공개 주소의 세션 접근·인증·쿠키 및 배포 정책
 
 복원·장기 보관·정밀 만료·동적 가격 변경은 첫 시연 후순위 방향입니다. 프론트 담당자와 검토한 방향이며 팀 전체 합의는 아직 확인되지 않았습니다. 세부 서버 정책은 담당자가 결정·구현하고 계약에는 합의 후 반영합니다.
