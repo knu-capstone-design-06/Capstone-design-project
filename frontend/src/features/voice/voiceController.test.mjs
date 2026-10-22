@@ -175,6 +175,49 @@ test('확인 질문 중 주변 대화가 무시돼도 질문을 유지하고 다
   controller.dispose();
 });
 
+test('확인·추가 질문 뒤 서버 실패에도 질문을 유지하고 수동 재청취로 짧은 답변을 보낸다', async () => {
+  for (const kind of ['needs_confirmation', 'needs_clarification']) {
+    const question = status(kind, { reply_text: '이 메뉴로 할까요?' });
+    const failed = status('failed', { error: { code: 'llm_error', detail: '해석 실패' } });
+    const { controller, calls, delivered } = setup([question, failed, status('completed')]);
+    controller.setEnabled(true);
+    FakeRecognition.last().final(['아메리카노 주세요', 0.9]);
+    await tick(20);
+    FakeRecognition.last().final(['네', 0.9]);
+    await tick(20);
+    assert.equal(controller.getSnapshot().lastResult, question);
+    assert.equal(controller.getSnapshot().error, 'request_failed');
+    assert.equal(controller.getSnapshot().phase, 'idle');
+    assert.equal(FakeRecognition.instances.length, 2, '실패 뒤 자동 재청취하지 않음');
+    controller.listen();
+    assert.equal(controller.getSnapshot().error, null);
+    FakeRecognition.last().final(['네', 0.9]);
+    await tick(20);
+    assert.deepEqual(calls.map(call => call.body.text), ['아메리카노 주세요', '네', '네']);
+    assert.deepEqual(delivered.map(result => result.status), [kind, 'failed', 'completed']);
+    assert.equal(controller.getSnapshot().lastResult.status, 'completed');
+    controller.listen();
+    FakeRecognition.last().final(['네', 0.9]);
+    await tick(20);
+    assert.equal(calls.length, 3, '완료 후에는 이전 대답 대기를 지움');
+    controller.dispose();
+  }
+});
+
+test('이전 질문이 없는 서버 실패는 대답 대기를 새로 만들지 않는다', async () => {
+  const { controller, calls } = setup([status('failed')]);
+  controller.setEnabled(true);
+  FakeRecognition.last().final(['아메리카노 주세요', 0.9]);
+  await tick(20);
+  assert.equal(controller.getSnapshot().lastResult.status, 'failed');
+  assert.equal(controller.getSnapshot().error, 'request_failed');
+  controller.listen();
+  FakeRecognition.last().final(['네', 0.9]);
+  await tick(20);
+  assert.equal(calls.length, 1);
+  controller.dispose();
+});
+
 // Chrome의 비동기 stop/abort 종료를 직접 제어하며 중복 마이크 시작을 거부합니다.
 function deferredRecognition() {
   let active = null;

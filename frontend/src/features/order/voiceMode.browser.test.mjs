@@ -128,6 +128,69 @@ test('주변 대화는 표시하지 않고 이전 확인 질문에 짧게 답할
   } finally { await browser.close(); }
 });
 
+test('확인 질문 뒤 서버 실패를 알리고 다시 말하기에서 질문과 짧은 답변을 유지한다', async () => {
+  const session = 'voice-failed';
+  const { browser, page, errors, fixture } = await open([
+    ...bootstrap(session),
+    voicePost(session), voiceGet(session, voiceStatus('needs_confirmation', { reply_text: '아이스 아메리카노 담을까요?' })),
+    voicePost(session), voiceGet(session, voiceStatus('failed', { error: { code: 'llm_error', detail: '해석 실패' } })),
+    voicePost(session), voiceGet(session, voiceStatus('completed')),
+  ]);
+  try {
+    await page.locator('[data-log-target="voice-mode-toggle"]').click();
+    await page.evaluate(() => window.voiceFakes.at(-1).final('아메리카노 주세요'));
+    await page.waitForFunction(() => window.voiceFakes.length === 2);
+    await page.evaluate(() => window.voiceFakes.at(-1).final('네'));
+    await page.locator('.voice-mode-feedback').getByText(/음성 요청을 처리하지 못했어요/).waitFor();
+    assert.equal(await page.evaluate(() => window.voiceFakes.length), 2);
+    await page.locator('[data-log-target="voice-listen"]').click();
+    await page.waitForFunction(() => window.voiceFakes.length === 3);
+    assert.match(await page.locator('.voice-mode-feedback').innerText(), /아이스 아메리카노 담을까요/);
+    await page.evaluate(() => window.voiceFakes.at(-1).final('네'));
+    await page.locator('.voice-mode-feedback').getByText(/주문을 변경하는 기능은 아직 준비 중/).waitFor();
+    assert.deepEqual(fixture.requests.filter(request => request.method === 'POST' && request.path.endsWith('/voice/requests')).map(request => request.body.text), ['아메리카노 주세요', '네', '네']);
+    fixture.verify();
+    assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
+test('터치로 상품 추가·수량 변경·삭제를 저장하는 동안과 저장 후에도 음성 모드를 유지한다', async () => {
+  const session = 'voice-cart-saving';
+  const { browser, page, errors, fixture } = await open([
+    ...bootstrap(session),
+    mutation(session, '/cart/items', cartResponse(session, 1, [iced()])),
+    mutation(session, '/cart/items/item-iced', cartResponse(session, 2, [iced(2)]), { method: 'PATCH' }),
+    mutation(session, '/cart/items/item-iced?expected_version=2', cartResponse(session, 3), { method: 'DELETE' }),
+  ]);
+  let release;
+  try {
+    // 응답을 보류해 실제 saving 상태에서도 모드와 인식기가 유지되는지 확인합니다.
+    await page.route('**/cart/items**', async route => {
+      await new Promise(resolve => { release = resolve; });
+      await route.fallback();
+    });
+    const toggle = page.locator('[data-log-target="voice-mode-toggle"]');
+    await toggle.click();
+    await page.locator('[data-log-target="product:americano"]').click();
+    for (const target of ['cart-add', 'cart:americano:아이스:increase', 'cart:americano:아이스:remove']) {
+      await page.locator(`[data-log-target="${target}"]`).click();
+      await page.locator('.order-progress').waitFor();
+      assert.equal(await toggle.getAttribute('aria-checked'), 'true');
+      assert.equal(await toggle.isEnabled(), true, '저장 중에도 모드 해제 가능');
+      assert.equal(await page.evaluate(() => window.voiceFakes.at(-1).aborted), false);
+      release();
+      await page.locator('.order-progress').waitFor({ state: 'hidden' });
+      await page.locator('dialog[open]').waitFor({ state: 'hidden' });
+      assert.equal(await toggle.getAttribute('aria-checked'), 'true');
+    }
+    assert.equal(await page.evaluate(() => window.voiceFakes.length), 1, '저장 후 마이크를 새로 열지 않음');
+    await toggle.click();
+    assert.equal(await page.evaluate(() => window.voiceFakes.at(-1).aborted), true);
+    fixture.verify();
+    assert.deepEqual(errors, []);
+  } finally { release?.(); await browser.close(); }
+});
+
 test('마이크 권한 오류를 알리고 큰 글씨·큰 버튼·낮은 화면에서도 조작할 수 있다', async () => {
   const { browser, page, errors, fixture } = await open(bootstrap('voice-layout'));
   try {

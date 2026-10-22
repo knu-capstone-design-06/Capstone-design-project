@@ -44,7 +44,7 @@ export function OrderPage() {
     voiceController.setContext({ sessionId: state.session?.session_id ?? '', screenId: 'menu_list' });
   }, [voiceController, state.session?.session_id]);
   useEffect(() => {
-    if (screen !== 'menu' || state.status !== 'ready' || state.order || sampleMode) voiceController.setEnabled(false);
+    if (screen !== 'menu' || (state.status !== 'ready' && state.status !== 'saving') || state.order || sampleMode) voiceController.setEnabled(false);
   }, [voiceController, screen, state.status, state.order]);
   useEffect(() => () => voiceController.dispose(), [voiceController]);
   useEffect(() => { try { localStorage.setItem(settingsStorageKey, JSON.stringify(settings)); } catch { setStorageWarning(true); } }, [settings]);
@@ -123,7 +123,7 @@ export function OrderPage() {
     {supportOpen && <section id="support-panel" className="support-panel" aria-label="화면 도움 설정"><div><h2>편한 화면으로 주문해 주세요</h2><p>설정을 바꿔도 담은 메뉴는 그대로예요.</p></div><div className="support-options">{(Object.keys(supportLabels) as (keyof Settings)[]).map(key => <button data-log-target={`support:${key}`} key={key} aria-pressed={settings[key]} onClick={() => setSettings(current => ({ ...current, [key]: !current[key] }))}>{settings[key] ? '✓ ' : ''}{supportLabels[key]}</button>)}<button data-log-target="support:combinedEnlargement" aria-pressed={combinedEnlargement} onClick={toggleCombinedEnlargement}>{combinedEnlargement ? '✓ ' : ''}큰 글씨 + 큰 버튼 (테스트)</button><button data-log-target="support-reset" onClick={() => setSettings({ ...initialSettings })}>기본 화면</button></div></section>}
     <main>
       {!selected && feedback}
-      {screen === 'menu' && <VoiceModeToggle controller={voiceController} ready={state.status === 'ready' && state.session !== null && state.order === null} sampleMode={sampleMode} />}
+      {screen === 'menu' && <VoiceModeToggle controller={voiceController} ready={(state.status === 'ready' || state.status === 'saving') && state.session !== null && state.order === null} sampleMode={sampleMode} />}
       <div className="cart-notice" role="status" aria-live="polite" hidden={!state.notice || screen !== 'menu'}>{state.notice}<button data-log-target="notice-close" aria-label="안내 닫기" onClick={() => controller.clearNotice()}>✕</button></div>
       <nav className="steps" aria-label="주문 단계">{['메뉴 선택', '주문 확인', '주문 완료'].map((label, index) => <span key={label} aria-current={index === ['menu', 'review', 'complete'].indexOf(screen) ? 'step' : undefined}><b>0{index + 1}</b> {label}</span>)}</nav>
       {storageWarning && <p role="alert">화면 설정을 기억하지 못했어요. 새로고침하면 기본 화면으로 돌아갈 수 있어요.</p>}

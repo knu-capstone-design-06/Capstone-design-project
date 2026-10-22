@@ -191,6 +191,12 @@ export class VoiceController {
       this.onResult(outcome);
       return;
     }
+    if (outcome.status === 'failed') {
+      // 서버도 실패한 발화를 대화 맥락에 넣지 않으므로 이전 질문과 대답 대기를 유지합니다.
+      this.set({ phase: 'idle', partialText: '', lastResult: this.awaitingAnswer ? this.state.lastResult : outcome, error: 'request_failed' });
+      this.onResult(outcome);
+      return;
+    }
     // 구독자·onResult가 세션을 바꾸거나 모드를 끄면 그 초기화가 남도록, 알리기 전에 대기 상태를 정합니다.
     this.awaitingAnswer = ASKS_USER.has(outcome.status);
     this.set({ phase: 'idle', partialText: '', lastResult: outcome, error: null });
