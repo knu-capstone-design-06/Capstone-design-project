@@ -1,7 +1,9 @@
 /// <reference types="vite/client" />
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { SavedLog } from './touchLog.ts';
 import { logLimit } from './touchLog.ts';
+import { summarizeTouchLog } from './touchLogSummary.ts';
+import type { RawTouchCounts } from './touchLogSummary.ts';
 import './touchLogPanel.css';
 
 const labels: Record<string, string> = {
@@ -11,6 +13,15 @@ const labels: Record<string, string> = {
   ui_settings_change: 'UI 설정 변경', session_start: '세션 시작', session_resume: '세션 재개',
   session_suspend: '세션 일시 중단', session_end: '세션 종료',
 };
+
+const countLabels: [keyof RawTouchCounts, string][] = [
+  ['presses', '누름 시작'], ['activeTargetPresses', '활성 대상 안 누름'],
+  ['disabledTargetPresses', '비활성 대상 안 누름'], ['outsideTargetPresses', '대상 밖 누름'],
+  ['releases', '손 뗌 기록'], ['cancellations', '취소 기록'], ['interruptions', '중단 기록'], ['scrolls', '스크롤 관측'],
+  ['screenEntries', '화면 진입'], ['categoryChanges', '분류 변경'],
+  ['optionsOpened', '옵션 열기'], ['optionsClosed', '옵션 닫기'], ['settingsChanges', 'UI 설정 변경'],
+];
+const screenLabels: Record<string, string> = { menu: '메뉴', review: '주문 확인', complete: '주문 완료' };
 
 // 주문 UI가 아닌 개발 확인 도구. 프로덕션 빌드에서는 표시하지 않습니다.
 export function TouchLogPanel() {
@@ -43,7 +54,7 @@ function DraftPanel() {
 
   const recent = snapshot?.events.slice(-20).reverse() ?? [];
   const selected = recent.find(event => event.id === selectedId) ?? recent[0];
-  const currentEvents = snapshot?.events.filter(event => event.sessionId === snapshot.sessionId) ?? [];
+  const summary = useMemo(() => snapshot ? summarizeTouchLog(snapshot) : null, [snapshot]);
   return <aside className="touch-log-tools" aria-label="개발용 터치 로그 확인">
     {open && <section id="touch-log-panel" className="touch-log-panel" aria-labelledby="touch-log-title">
       <header className="touch-log-heading">
@@ -58,9 +69,36 @@ function DraftPanel() {
       {warning && <p className="touch-log-warning" role="status">{warning}</p>}
       <div className="touch-log-summary">
         <span>보관 <strong>{snapshot?.events.length ?? 0}</strong> / {logLimit.toLocaleString('ko-KR')}</span>
-        <span>보관 중인 현재 세션 누름 <strong>{currentEvents.filter(event => event.kind === 'pointer_start').length}</strong></span>
+        <span>보관 중인 현재 세션 누름 <strong>{summary?.counts.presses ?? 0}</strong></span>
       </div>
       <p className="touch-log-session">세션 <code>{snapshot?.sessionId ?? '연결 대기'}</code></p>
+      {summary && <section className="touch-log-raw-summary" aria-labelledby="touch-log-raw-title">
+        <h3 id="touch-log-raw-title">현재 세션 원시 로그 요약</h3>
+        <p className="touch-log-hint">보관 중인 현재 세션 기록 {summary.counts.events}개만 계산합니다. 최대 {logLimit.toLocaleString('ko-KR')}개 버퍼에서 지워진 기록은 포함하지 않습니다.</p>
+        {!summary.hasSessionStart && <p className="touch-log-warning">현재 세션의 시작 기록이 없습니다. 세션 전체 수치로 해석하지 마세요.</p>}
+        <dl className="touch-log-counts" aria-label="보관 중인 현재 세션 원시 기록 수">
+          {countLabels.map(([key, label]) => <div key={key}><dt>{label}</dt><dd data-touch-count={key}>{summary.counts[key]}</dd></div>)}
+        </dl>
+        <p className="touch-log-hint" data-touch-outside-ratio>대상 밖 비율: {summary.outsidePressRatio === null
+          ? `산출 안 함 · ${summary.counts.presses ? '대상 판정 정보 부족' : '누름 기록 없음'}`
+          : `${(summary.outsidePressRatio * 100).toFixed(1)}% (${summary.counts.outsideTargetPresses} / 누름 시작 ${summary.counts.presses})`}</p>
+        {(summary.counts.unknownTargetPresses > 0 || summary.counts.unknownEnds > 0) && <p className="touch-log-warning">
+          대상 정보 없는 누름 {summary.counts.unknownTargetPresses}개 · 취소 여부 없는 종료 {summary.counts.unknownEnds}개. 다른 항목에 추측해 넣지 않습니다.
+        </p>}
+        <details className="touch-log-visits">
+          <summary>화면 방문별 요약 · 보관 순서</summary>
+          <div className="touch-log-table-scroll"><table>
+            <caption>같은 화면의 재방문은 별도 행입니다. 방문 정보가 없으면 별도로 표시합니다.</caption>
+            <thead><tr><th scope="col">화면</th><th scope="col">누름</th><th scope="col">대상 밖</th><th scope="col">손 뗌</th><th scope="col">취소</th><th scope="col">스크롤</th></tr></thead>
+            <tbody>{summary.visits.map((visit, index) => <tr key={JSON.stringify([visit.visitId, visit.screen])}>
+              <th scope="row">{index + 1}. {visit.screen ? screenLabels[visit.screen] ?? visit.screen : '화면 정보 없음'}{!visit.visitId && ' · 방문 정보 없음'}</th>
+              <td>{visit.counts.presses}</td><td>{visit.counts.outsideTargetPresses}</td><td>{visit.counts.releases}</td><td>{visit.counts.cancellations}</td><td>{visit.counts.scrolls}</td>
+            </tr>)}</tbody>
+          </table></div>
+        </details>
+        <p className="touch-log-hint">대상은 수집 당시 버튼·링크입니다. 대상 밖 누름은 실패, 손 뗌은 조작 성공을 뜻하지 않습니다. 취소·스크롤도 각각의 기록 수입니다.</p>
+        <p className="touch-log-hint">반복 입력·주변 입력·체류시간·성공/실패 판정과 서버용 통계는 기준 합의 후 연결합니다.</p>
+      </section>}
       <h3>최근 기록 20개 · 최신순</h3>
       <ol className="touch-log-events" aria-label="최근 터치 로그">
         {recent.map(event => <li key={event.id}><button type="button" aria-pressed={selected?.id === event.id} onClick={() => setSelectedId(event.id)}>
