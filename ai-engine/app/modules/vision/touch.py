@@ -42,7 +42,8 @@ Truncation: the frontend keeps only its last LOG_LIMIT events, so a log that lon
 With the clock file meta['warnings'] says so (counts before the first remaining event are unknown, as above); without it
 the log cannot be placed (--start-offset anchors on the first remaining event, which is then not the log's start).
 Sessions: every event carries the frontend's sessionId (a random id, not personal data); meta['sessions'] lists them in
-time order and session_at(t) names the session of the last event at or before t.
+time order, session_at(t) names the session of the last event at or before t and, after a change of session,
+session_since(t) gives the time of that session's first event.
 """
 from __future__ import annotations
 
@@ -230,6 +231,19 @@ class TouchTimeline:
         """The sessionId of the last event at or before t; None before the first event."""
         k = bisect.bisect_right(self.times, t)
         return self.events[k - 1].session if k else None
+
+    def session_since(self, t: float) -> float | None:
+        """Video time of the first event of the session at t (session_at) when an earlier event belongs to another
+        session: the log changed sessions there. None before the first event, for an event without a sessionId and
+        in the log's first session, whose start may lie before the log or the recording."""
+        k = bisect.bisect_right(self.times, t)
+        session = self.events[k - 1].session if k else None
+        if session is None:
+            return None
+        i = k - 1
+        while i > 0 and self.events[i - 1].session == session:
+            i -= 1
+        return self.events[i].t if i > 0 else None
 
     def options_open_at(self, t: float) -> bool | None:
         """Whether the options dialog is open at t: the last options_open / options_close / screen_enter / stop event

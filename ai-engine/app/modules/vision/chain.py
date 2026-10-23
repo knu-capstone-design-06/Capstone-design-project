@@ -11,8 +11,9 @@ stretch, marked 'partial'): situation.assess over [t - window_s, t] with the rea
 touch counts of the segment (t - segment_s, t], the rule table v0 (judgment/rule_table_v0.py) on the emulated session
 state, the Jev question recorded in shadow mode, and the contract view (contract_view.py). When the touch log's
 sessionId changes (a new order or a reload), the emulated session state starts again (tree section 4 ①: 새 세션은
-처음부터 다시 판정) and that window's record says session_reset. Nothing after t is read, so a replay gives what the
-kiosk would have given at t.
+처음부터 다시 판정) and that window's record says session_reset; from then on a window reads only the rows from the
+new session's first event (touch.TouchTimeline.session_since), so the previous user's observations stay out of it.
+Nothing after t is read, so a replay gives what the kiosk would have given at t.
 """
 from __future__ import annotations
 
@@ -225,7 +226,7 @@ def situation_view(out: dict | None, reasons: list) -> dict:
 
 class WindowJudge:
     """Per-window evaluation with the session state of the rule table carried from window to window; a new sessionId
-    in the touch log starts the state again (tree section 4 ①)."""
+    in the touch log starts the state again and limits the rows to that session (tree section 4 ①)."""
 
     def __init__(self, bundle, timeline=None, session_id: str = "replay", jev=None):
         self.b = bundle
@@ -259,6 +260,18 @@ class WindowJudge:
         w0 = time.perf_counter()
         p, sp = self.b.chain, self.b.situation
         seg_len = p.segment_s if segment_s is None else segment_s
+        # tree section 4 ①: a new session is judged from the start - its state and its rows. The session is read
+        # before the situation: after a change of session a window reads only the rows from the session's first event,
+        # so the previous user's observations reach neither the situation nor measurable nor the gaze gate
+        log_session = None if self.timeline is None else self.timeline.session_at(t_end)
+        session_reset = log_session is not None and self.log_session is not None and log_session != self.log_session
+        if session_reset:
+            self.state = R.SessionState()
+        if log_session is not None:
+            self.log_session = log_session
+        session_start = None if self.timeline is None else self.timeline.session_since(t_end)
+        if session_start is not None:
+            rows = [r for r in rows if float(r["t_s"]) >= session_start]
         seg_rows = [r for r in rows if t_end - seg_len < float(r["t_s"]) <= t_end]
         if sp is None:
             out, reasons = None, [{"code": "no_value_bundle"}]
@@ -271,12 +284,6 @@ class WindowJudge:
         has_touch = seg is not None and (seg["tap_count"] > 0 or seg["back_count"] > 0)
         measurable = bool(has_touch or face_seen)
         gaze = facing(seg_rows, sp)
-        log_session = None if self.timeline is None else self.timeline.session_at(t_end)
-        session_reset = log_session is not None and self.log_session is not None and log_session != self.log_session
-        if session_reset:
-            self.state = R.SessionState()     # tree section 4 ①: a new session is judged from the start
-        if log_session is not None:
-            self.log_session = log_session
         self.state, expired = R.tick(self.state, t_end, p)
         held_before = self.state.held.decision_id if self.state.held else None
         inp = R.WindowInput(t=t_end, measurable=measurable, situation=out, screen=screen["name"],

@@ -493,6 +493,7 @@ class TouchTests(unittest.TestCase):   # plain Python: runs with the server pack
         self.assertEqual([tl.options_open_at(t) for t in (4.9, 5.2, 5.6)], [False, True, False])
         self.assertEqual((tl.session_at(-2.0), tl.session_at(0.0), tl.session_at(8.05), tl.session_at(8.5)),
                          (None, "s1", "s1", "s2"))
+        self.assertEqual([tl.session_since(t) for t in (-2.0, 5.0, 8.05, 8.5)], [None, None, None, 8.1])
         self.assertEqual([(s["session_id"], s["first_t"], s["last_t"]) for s in tl.meta["sessions"]],
                          [("s1", -1.0, 8.0), ("s2", 8.1, 8.1)])
         self.assertEqual((tl.meta["truncated_possible"], tl.meta["warnings"]), (False, []))
@@ -840,6 +841,37 @@ class WindowJudgeTests(unittest.TestCase):
         self.assertIsNone(r2["session"]["held"])
         self.assertNotEqual(r2["decision"]["transition"], "keep")
         self.assertFalse(judge.evaluate(rows, 8.0)["session_reset"])
+
+    def test_a_new_session_reads_only_its_own_rows(self):
+        """The previous user's observations stay out of the next session: look-backs with a person behind in s1 open
+        the 3-1 notice there, and every window of s2 reads only the rows from s2's first event, as if s2 were the
+        whole record (the 6-s windows at 3.5 / 4.5 / 5.5 s still reach back into s1)."""
+        from app.modules.vision.chain import WindowJudge
+        from app.modules.vision.situation import assess
+        from app.modules.vision.touch import load_timeline
+        folder = tempfile.mkdtemp()
+        video = os.path.join(folder, "take.mp4")
+        events = [(-1000, "session_start", "menu", None), (-900, "screen_enter", "menu", None),
+                  (3000, "session_end", "menu", {"reason": "server_session_change"}),
+                  (3100, "session_start", "menu", {"reason": "server_session_change"}, "s2"),
+                  (3100, "screen_enter", "menu", None, "s2")]
+        rows = rows_of(facing(5), look_back(), facing(4), look_back(), facing(40),
+                       extra={**FULL, "people_behind_count": 1})   # turns end at 1.3 s and 2.5 s, in s1
+        judge = WindowJudge(bundle(), load_timeline(touch_log(folder, events, video), video))
+        upto = lambda t: [r for r in rows if r["t_s"] <= t]
+        r1 = judge.evaluate(upto(3.0), 3.0)
+        self.assertEqual((r1["situation"]["name"], r1["decision"]["transition"], r1["decision"]["support"]),
+                         ("looking_back_with_people_behind", "open", "remaining_steps_notice"))
+        for t in (3.5, 4.5, 5.5):
+            r = judge.evaluate(upto(t), t)
+            own, _ = assess([x for x in upto(t) if x["t_s"] >= 3.1], t, bundle().situation, landmarker_num_faces=1)
+            self.assertEqual(r["session_reset"], t == 3.5)
+            self.assertEqual((r["situation"]["name"], r["situation"]["evidence_ids"]), ("none", []))
+            self.assertEqual(r["situation"]["name"], own["name"])
+            self.assertEqual((r["decision"]["transition"], r["session"]["held"]), ("none", None))
+            if t == 3.5:
+                self.assertEqual(r["frames"], 5)                   # the segment's rows from 3.1 s on
+                self.assertIsNone(r["touch"])                      # a segment reaching into s1 has no touch count
 
 
 @unittest.skipUnless(HAS_NUMPY, SKIP)
