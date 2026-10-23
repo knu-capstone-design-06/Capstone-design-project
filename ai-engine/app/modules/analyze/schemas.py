@@ -1,6 +1,6 @@
 """Request/response models of POST /v1/analyze.
 
-Mirrors contract/backend-ai.openapi.yaml (0.1.0). The feature items there are
+Mirrors contract/backend-ai.openapi.yaml (0.2.0). The feature items there are
 still provisional, so change this file together with the contract.
 """
 

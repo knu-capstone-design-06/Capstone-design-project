@@ -31,7 +31,7 @@ export class ApiError extends Error {
   }
 }
 
-/** backend 주소를 실행 환경에서 전달합니다. AI 서버를 직접 호출하지 않습니다. */
+/** backend 주소를 실행 환경에서 전달합니다. ai-engine을 직접 호출하지 않습니다. */
 export function createBackendApi(baseUrl: string, fetcher: typeof fetch = fetch) {
   const base = baseUrl.replace(/\/+$/, '');
 

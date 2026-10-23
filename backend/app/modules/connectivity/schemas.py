@@ -5,4 +5,4 @@ from pydantic import BaseModel
 
 class ConnectivityResponse(BaseModel):
     backend: Literal["ok"] = "ok"
-    ai_server: Literal["ok", "unreachable"]
+    ai_engine: Literal["ok", "unreachable"]
