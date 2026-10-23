@@ -35,7 +35,9 @@ Rows (JP scene table; rank = JP 0-3 rank table):
                                                                 last press of this screen visit, none before
                                                                 one ('고른 뒤 멈춤')
 Withdraw conditions (tree 3-나): 3-2 'touch_resumed' (터치가 이어짐), 3-1 and 4-2 'cart_progress' (장바구니가 나아감 /
-다음 단계로 나아감: a press on the cart-add button or a screen forward), 4-1 none (반응 · 무응답으로 끝남).
+다음 단계로 나아감: a screen forward), 4-1 none (반응 · 무응답으로 끝남). A press on the cart-add button is only an
+attempt (a cancel or a failed order call leaves the cart as it was) and the raw log has no result of it
+(Touch-Log-Review T06), so it leaves cart_progress unknown and withdraws nothing.
 A tag that is 'unknown' (or not judged) opens no tag row: the touch rows still run (JP 0-2: 상황 근거만 빼고).
 The 3-2 wait is a session action: the withdrawn filter skips it, so every trigger re-opens it (JP v1.6 note: withdrawn
 거름은 화면에 띄우는 지원에만), and it carries session_signal {name: hold_timer} when it opens and in every measurable
@@ -111,7 +113,8 @@ class WindowInput:
     backs_recent: int | None = None        # backs (review -> menu) in the last touch_span_s
     pause_s: float | None = None           # seconds since the last press of this screen visit; None before a press
     taps_segment: int | None = None        # presses in this segment
-    progress_segment: bool | None = None   # a cart-add press or a screen forward in this segment
+    progress_segment: bool | None = None   # a screen forward in this segment; None = not known (no log, or a press
+                                           # on the cart-add button, whose result the raw log does not record)
     options_open: bool | None = None       # the options dialog is open at t (touch log); None = no log
 
 

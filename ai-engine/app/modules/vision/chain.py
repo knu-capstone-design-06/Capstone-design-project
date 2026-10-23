@@ -250,7 +250,13 @@ class WindowJudge:
         chosen = last_press is not None and since is not None and last_press >= since
         pause = t_end - last_press if chosen else None
         flags = tl.flags(t_end - seg_len, t_end) if seg is not None else None
-        progress = None if flags is None else (flags["forward"] or flags["cart_add"])
+        # cart_progress (tree 3-나): a screen forward is progress the log shows. A press on the cart-add button is an
+        # attempt - a cancelled press or a failed order call leaves the cart as it was - and the raw log has no result
+        # of it (Touch-Log-Review T06), so it leaves progress unknown (None), which withdraws nothing
+        if flags is None:
+            progress = None
+        else:
+            progress = True if flags["forward"] else (None if flags["cart_add"] else False)
         return seg, recent, {"name": screen, "steps_left": steps_left, "pause_s": pause,
                              "options_open": tl.options_open_at(t_end)}, progress, flags
 

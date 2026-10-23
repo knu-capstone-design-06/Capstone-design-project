@@ -74,7 +74,7 @@ class TouchEvent:
     target_unknown: bool = False   # press whose data has no target field (cannot tell)
     back: bool = False
     forward: bool = False
-    cart_add: bool = False
+    cart_add: bool = False         # press on the enabled cart-add button: an attempt (its result is not in the log)
     screen_enter: bool = False
     session: str | None = None     # the event's sessionId
     target_id: str | None = None   # press on a button / link: its data-log-target id
@@ -213,6 +213,9 @@ class TouchTimeline:
                 "repeat_tap_count": None, "dwell_ms": None}
 
     def flags(self, t0: float, t1: float) -> dict:
+        """Whether (t0, t1] holds a screen forward, a press on the cart-add button and a screen entry. cart_add is the
+        press, an attempt: it can still be cancelled or its order call fail, and the raw log has no result of it
+        (Touch-Log-Review T06)."""
         evs = self._between(t0, t1)
         return {"forward": any(e.forward for e in evs), "cart_add": any(e.cart_add for e in evs),
                 "screen_enter": any(e.screen_enter for e in evs)}

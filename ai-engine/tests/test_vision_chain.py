@@ -873,6 +873,38 @@ class WindowJudgeTests(unittest.TestCase):
                 self.assertEqual(r["frames"], 5)                   # the segment's rows from 3.1 s on
                 self.assertIsNone(r["touch"])                      # a segment reaching into s1 has no touch count
 
+    def test_a_cancelled_or_unsaved_cart_add_press_keeps_the_guidance(self):
+        """A press on the cart-add button is an attempt: a cancelled press or a failed order call leaves the cart as it
+        was, and the raw log records no result of the press (Touch-Log-Review T06), so neither withdraws the 4-2
+        highlight or blocks it for the screen visit; a screen forward still withdraws it (cart_progress)."""
+        from app.modules.vision.chain import WindowJudge
+        from app.modules.vision.touch import load_timeline
+        folder = tempfile.mkdtemp()
+        video = os.path.join(folder, "take.mp4")
+        opened = [(-6000, "session_start", "menu", None), (-5900, "screen_enter", "menu", None),
+                  (200, "screen_enter", "review", {"from": "menu"}),
+                  (500, "screen_enter", "menu", {"from": "review"})]    # a back: the highlight opens at 1.0 s
+        rows = rows_of(facing(40))
+
+        def records(after):
+            judge = WindowJudge(bundle(), load_timeline(touch_log(folder, opened + after, video), video))
+            return [judge.evaluate(rows, t) for t in (1.0, 2.0, 3.0)]
+        cart_add = {"target": {"id": "cart-add", "kind": "button", "disabled": False}}
+        for cancelled in (True, False):                            # False: released, then the order call fails
+            r1, r2, r3 = records([(900, "options_open", "menu", {"productId": "1"}),
+                                  (1500, "pointer_start", "menu", cart_add),
+                                  (1600, "pointer_end", "menu", {"inputId": "e5", "cancelled": cancelled})])
+            self.assertEqual((r1["decision"]["transition"], r1["decision"]["support"]),
+                             ("open", "highlight_next_action"))
+            self.assertEqual([r["decision"]["transition"] for r in (r2, r3)], ["keep", "keep"])
+            self.assertEqual(r3["decision"]["decision_id"], r1["decision"]["decision_id"])
+            self.assertEqual(r3["session"]["withdrawn"], [])
+        r1, r2, _ = records([(1500, "pointer_start", "menu", {"target": {"id": "review-open", "kind": "button",
+                                                                         "disabled": False}}),
+                             (1600, "screen_enter", "review", {"from": "menu"})])
+        self.assertEqual((r2["decision"]["transition"], r2["decision"]["decision_id"], r2["decision"]["reason"]),
+                         ("withdraw", r1["decision"]["decision_id"], "withdraw condition cart_progress"))
+
 
 @unittest.skipUnless(HAS_NUMPY, SKIP)
 class HistoryTests(unittest.TestCase):
