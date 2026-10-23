@@ -31,7 +31,7 @@ Input: one dict per frame.
                               person / head detector (H1, not built); a whole number >= 0 in every row
     companion_box             (x0, y0, x1, y1) as fractions of width / height: a second box of similar size beside
                               the main user, from the same detector; None = no such box in that frame
-    mouth_motion              change of the blendshape mouth dials (jawOpen and others, decision 16: within-window
+    mouth_motion              change of the blendshape mouth dials (jawOpen and others, decision list 2026-10-10 §16: within-window
                               change after the person's baseline); blank where the face is not seen
     shoulder_cx, shoulder_cy  midpoint of pose points 11 and 12 as fractions of width / height; blank where the body
                               is not seen
