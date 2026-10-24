@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from app.common.config.settings import Settings
-from app.infrastructure.external.ai_client import AiServerClient
+from app.infrastructure.external.ai_client import AiEngineClient
 from app.infrastructure.external.ai_schemas import AnalyzeRequest
 from app.main import create_app
 
@@ -42,17 +42,17 @@ RESPONSE = {
 class AiClientTests(unittest.IsolatedAsyncioTestCase):
     async def call_analyze(self, handler, payload=None, timeout=2.0):
         async with httpx.AsyncClient(
-            base_url="http://ai-server:8001",
+            base_url="http://ai-engine:8001",
             transport=httpx.MockTransport(handler),
         ) as http:
-            client = AiServerClient(http, timeout)
+            client = AiEngineClient(http, timeout)
             return await client.analyze(AnalyzeRequest.model_validate(
                 REQUEST if payload is None else payload
             ))
 
     async def test_success_preserves_features_and_scores(self):
         def handler(request):
-            self.assertEqual(str(request.url), "http://ai-server:8001/v1/analyze")
+            self.assertEqual(str(request.url), "http://ai-engine:8001/v1/analyze")
             self.assertEqual(request.method, "POST")
             self.assertEqual(json.loads(request.content), REQUEST)
             self.assertEqual(request.extensions["timeout"]["read"], 2.0)
@@ -148,7 +148,7 @@ class AiClientTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_ai_health(self):
         for payload, expected in (
-            ({"status": "ok", "service": "ai-server"}, True),
+            ({"status": "ok", "service": "ai-engine"}, True),
             ({"status": "ok", "service": "backend"}, False),
         ):
             def handler(request):
@@ -157,33 +157,33 @@ class AiClientTests(unittest.IsolatedAsyncioTestCase):
                 return httpx.Response(200, json=payload)
 
             async with httpx.AsyncClient(
-                base_url="http://ai-server:8001", transport=httpx.MockTransport(handler)
+                base_url="http://ai-engine:8001", transport=httpx.MockTransport(handler)
             ) as http:
-                self.assertEqual((await AiServerClient(http).health()) is not None, expected)
+                self.assertEqual((await AiEngineClient(http).health()) is not None, expected)
 
 
 class IntegrationTests(unittest.TestCase):
     def test_lifespan_owns_connection_and_health_remains_local(self):
-        http = httpx.AsyncClient(base_url="http://ai-server:8001")
+        http = httpx.AsyncClient(base_url="http://ai-engine:8001")
         application = create_app(Settings(_env_file=None))
         with patch("app.main.httpx.AsyncClient", return_value=http):
             with TestClient(application) as client:
-                self.assertIsInstance(application.state.ai_server_client, AiServerClient)
+                self.assertIsInstance(application.state.ai_engine_client, AiEngineClient)
                 self.assertEqual(client.get("/health").json(), {
                     "status": "ok", "service": "backend",
                 })
                 self.assertEqual(client.get("/openapi.json").status_code, 200)
                 self.assertFalse(http.is_closed)
         self.assertTrue(http.is_closed)
-        self.assertFalse(hasattr(application.state, "ai_server_client"))
+        self.assertFalse(hasattr(application.state, "ai_engine_client"))
 
     def test_invalid_settings(self):
-        for url in ("ftp://ai-server", "http://ai-server/path", "http://user:pass@ai-server"):
+        for url in ("ftp://ai-engine", "http://ai-engine/path", "http://user:pass@ai-engine"):
             with self.assertRaises(ValidationError):
-                Settings(_env_file=None, ai_server_url=url)
+                Settings(_env_file=None, ai_engine_url=url)
         for timeout in (0, -1, float("inf"), float("nan")):
             with self.assertRaises(ValidationError):
-                Settings(_env_file=None, ai_server_timeout_seconds=timeout)
+                Settings(_env_file=None, ai_engine_timeout_seconds=timeout)
 
     def test_window_requires_timezone_and_positive_duration(self):
         for override in (

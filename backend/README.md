@@ -30,7 +30,7 @@ API 문서: http://127.0.0.1:8000/docs
 
 ## 주문 API 명세 반영 상태
 
-[프론트엔드 ↔ 백엔드 OpenAPI](../contract/frontend-backend.openapi.yaml) 0.3.0의 상품 조회, 세션 장바구니 조회·추가·수량 변경·삭제, 모의 주문 확정 6개 API를 구현했습니다. 첫 시연의 고정 17개 상품·현재 가격·옵션·항목별 최대 20개, 실제 결제·재고 차감 없는 모의 주문, 한 세션 한 주문·새 주문 새 세션은 채택됐습니다. 계약 문서의 `draft` 표시는 미정 정책의 팀 리뷰가 끝날 때까지 유지합니다. FastAPI `/docs`에는 현재 등록된 여섯 경로가 표시됩니다.
+[프론트엔드 ↔ 백엔드 OpenAPI](../contract/frontend-backend.openapi.yaml) 0.4.0의 상품 조회, 세션 장바구니 조회·추가·수량 변경·삭제, 모의 주문 확정 6개 API를 구현했습니다. 첫 시연의 고정 17개 상품·현재 가격·옵션·항목별 최대 20개, 실제 결제·재고 차감 없는 모의 주문, 한 세션 한 주문·새 주문 새 세션은 채택됐습니다. 계약 문서의 `draft` 표시는 미정 정책의 팀 리뷰가 끝날 때까지 유지합니다. FastAPI `/docs`에는 현재 등록된 여섯 경로가 표시됩니다.
 
 설계 이유·미정 정책은 [주문 API 검토 문서](../docs/Product-Cart-Order-API-Draft.md)를 확인합니다. 상품 목록은 프론트 개발 샘플의 17개 메뉴와 가격을 서버의 고정 시연 데이터로 옮겼습니다. 가격·옵션·수량을 서버가 검증하고, 세션별 Cart 버전과 `Idempotency-Key`의 성공 결과를 같은 프로세스의 잠금 아래 저장합니다. 모의 주문은 항목·금액 스냅샷을 반환하고 Cart를 비우며 같은 키 재시도에는 원래 주문 응답을 반환합니다. 신규 API의 검증 오류는 `OrderApiError` 형식이고 기존 API 오류 형식은 유지합니다.
 
@@ -59,8 +59,8 @@ API 문서: http://127.0.0.1:8000/docs
 | APP_NAME | Capstone Backend | 문자열 |
 | DOCS_ENABLED | true | true / false |
 | CORS_ORIGINS | localhost:5173, localhost:3000의 HTTP 출처 | JSON 배열 |
-| AI_SERVER_URL | http://ai-server:8001 | AI 서버 HTTP(S) 출처 |
-| AI_SERVER_TIMEOUT_SECONDS | 2 | 양의 유한한 초 단위 숫자 |
+| AI_ENGINE_URL | http://ai-engine:8001 | ai-engine HTTP(S) 출처 |
+| AI_ENGINE_TIMEOUT_SECONDS | 2 | 양의 유한한 초 단위 숫자 |
 | OPENAI_API_KEY | 미설정 | 서버 전용 비밀값 |
 | OPENAI_MODEL | gpt-4o-mini | 모델 이름 |
 | OPENAI_TIMEOUT_SECONDS | 10 | 양의 유한한 초 단위 숫자 |
@@ -71,34 +71,34 @@ API 문서: http://127.0.0.1:8000/docs
 
 ## Docker Compose
 
-루트 Compose는 프론트엔드·백엔드·AI 서버를 실행합니다. Docker 엔진을 실행한 뒤 저장소 루트에서 시작합니다.
+루트 Compose는 프론트엔드·백엔드·ai-engine을 실행합니다. Docker 엔진을 실행한 뒤 저장소 루트에서 시작합니다.
 
 ```powershell
 docker compose up --build
 ```
 
-프론트 화면은 `http://127.0.0.1:8080`에서 제공하고 `/backend/` 요청을 백엔드로 전달합니다. 백엔드의 직접 주소는 `http://127.0.0.1:8000`이며 AI 서버는 Docker 내부의 `http://ai-server:8001`을 사용합니다. Compose에는 `env_file`이 없고 이미지에도 `.env`가 없으므로, 로컬 직접 실행과 달리 `backend/.env`는 읽지 않습니다. 필요한 값은 실행 환경에서 컨테이너에 주입합니다.
+프론트 화면은 `http://127.0.0.1:8080`에서 제공하고 `/backend/` 요청을 백엔드로 전달합니다. 백엔드의 직접 주소는 `http://127.0.0.1:8000`이며 ai-engine은 Docker 내부의 `http://ai-engine:8001`을 사용합니다. Compose에는 `env_file`이 없고 이미지에도 `.env`가 없으므로, 로컬 직접 실행과 달리 `backend/.env`는 읽지 않습니다. 필요한 값은 실행 환경에서 컨테이너에 주입합니다.
 
 연결 API의 기존 실행·통신 검증은 [PR #26](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/26)를 참고합니다. 2026-10-14에는 PR #43이 병합된 `main`(`3cb8529`)으로 세 이미지를 빌드해 모두 healthy 상태를 확인했습니다. 실제 브라우저의 기본 API 모드에서 상품 조회 → 세션·장바구니 생성 → 상품 추가 → 모의 주문 확정 → 새 주문 시작이 통과했습니다. 주문은 서버에서 처리하되 첫 응답만 유실시킨 검사에서는 화면의 `주문 반영 확인`이 같은 키·본문으로 재요청해 원래 주문번호를 표시했습니다. `/backend/` 프록시를 거친 HTTP 검사에서는 17개 상품, 옵션 오류, 버전 충돌과 최신 Cart, 중복 키·주문 재시도, 완료 세션 410을 확인했습니다. 이 검증은 DB 영속성, 실제 결제, 음성 도구 실행, AI 판단을 확인한 것은 아닙니다.
 
 ## Backend → AI 내부 연동
 
-`app/infrastructure/external/ai_client.py`의 `AiServerClient`가 AI 서버의
+`app/infrastructure/external/ai_client.py`의 `AiEngineClient`가 ai-engine의
 `POST /v1/analyze`, `GET /health`를 호출합니다. FastAPI lifespan이 HTTP 연결을
-생성·재사용·종료하며 `get_ai_server_client`를 `Depends`로 주입할 수 있습니다.
-서버 시작이나 백엔드 `/health` 호출 시에는 AI 서버 접속을 시도하지 않습니다.
+생성·재사용·종료하며 `get_ai_engine_client`를 `Depends`로 주입할 수 있습니다.
+서버 시작이나 백엔드 `/health` 호출 시에는 ai-engine 접속을 시도하지 않습니다.
 
-`/v1/analyze`는 **AI 서버의 엔드포인트**입니다. 백엔드에 동일 경로를 추가하지
+`/v1/analyze`는 **ai-engine의 엔드포인트**입니다. 백엔드에 동일 경로를 추가하지
 않았습니다. 프론트엔드용 특징 전송 라우터가 임시 세션을 확인한 뒤 이 클라이언트를 호출합니다. 사용자 인증은 아직 구현하지 않았습니다.
 
 서비스 계층에서 사용할 패턴:
 
 ```python
-from app.infrastructure.external.ai_client import AiServerClient
+from app.infrastructure.external.ai_client import AiEngineClient
 from app.infrastructure.external.ai_schemas import AnalyzeRequest
 
 
-async def analyze_window(ai: AiServerClient, window: AnalyzeRequest):
+async def analyze_window(ai: AiEngineClient, window: AnalyzeRequest):
     result = await ai.analyze(window)
     if result is None or not result.measurable:
         return None  # 판단을 생성하지 않고 현재 흐름 유지
@@ -116,20 +116,20 @@ async def analyze_window(ai: AiServerClient, window: AnalyzeRequest):
 - 호출자의 취소는 상위로 전달합니다. 로그에는 오류 종류만 기록합니다.
 - 시간 필드는 시간대가 있는 날짜·시간이어야 하며 종료 시각이 시작 시각보다 뒤여야 합니다.
 - `TouchFeatures`, `VisionFeatures`, `StateScores`의 현재 형식은
-  `contract/frontend-backend.openapi.yaml`(0.3.0, 기존 0.1.0 형식 유지)에 정의돼 있습니다. 다만 비전
+  `contract/frontend-backend.openapi.yaml`(0.4.0, 기존 0.1.0 형식 유지)에 정의돼 있습니다. 다만 비전
   세부 특징과 터치 통계 계산 기준에는 팀 검토 항목이 남아 있습니다.
   연결 API는 `modules/sessions/schemas.py`에서 입력 필드와 반환 점수 5개·범위·타입을 검증합니다.
   내부 전송 클라이언트의 `JsonObject`는 그대로 유지하므로 직접 사용하는 다른 호출자는 별도의 의미 검증이 필요합니다.
   현재 AI는 dummy 모델이고 지원 선택 기준도 미정이므로 검증된 점수라도 자동 UI 결정에는 사용하지 않습니다.
 
-`ai-server` 호스트 이름은 동일 Docker 네트워크에서 해석됩니다. 루트 Compose는
-AI 서버의 호스트 포트를 공개하지 않습니다. 두 서버를
-호스트에서 직접 실행할 때만 `AI_SERVER_URL=http://127.0.0.1:8001`로 변경합니다.
+`ai-engine` 호스트 이름은 동일 Docker 네트워크에서 해석됩니다. 루트 Compose는
+ai-engine의 호스트 포트를 공개하지 않습니다. 두 서버를
+호스트에서 직접 실행할 때만 `AI_ENGINE_URL=http://127.0.0.1:8001`로 변경합니다.
 
 ## 테스트
 
 의존성 설치 후 `backend/`에서 실행합니다. 표준 라이브러리 unittest와 HTTPX
-MockTransport를 사용하므로 실제 AI 서버·DB·Docker가 필요하지 않습니다.
+MockTransport를 사용하므로 실제 ai-engine·DB·Docker가 필요하지 않습니다.
 
 ```powershell
 python -m unittest discover -s tests -v
@@ -145,7 +145,7 @@ python -m unittest discover -s app/modules -p 'test_*.py' -v
 
 | 요청 | 결과 |
 | --- | --- |
-| GET /api/v1/connectivity | 200, backend=ok 및 ai_server=ok 또는 unreachable |
+| GET /api/v1/connectivity | 200, backend=ok 및 ai_engine=ok 또는 unreachable |
 | POST /api/v1/sessions | 201, session_id와 UTC started_at |
 | POST /api/v1/sessions/{session_id}/features | 200, AI 점수 또는 판단 없는 응답 |
 
