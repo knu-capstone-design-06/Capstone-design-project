@@ -1,7 +1,7 @@
 """Download the four MediaPipe model files the vision module uses into this folder. Model weights are not kept in
 Git (AGENTS.md section 5); sources, sizes and licence are in README.md next to this file.
 
-  python app/modules/vision/models/download_models.py        (from ai-server/)
+  python app/modules/vision/models/download_models.py        (from ai-engine/)
 
 Each file is checked against the SHA-256 of the file the skeleton was tested with; a file that differs is not kept.
 """

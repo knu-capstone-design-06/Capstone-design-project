@@ -1,5 +1,5 @@
 # Vision module only (python -m app.modules.vision.run, tests/test_vision.py). The server does not need
-# these: ai-server/requirements.txt and the Dockerfile stay as they are.
+# these: ai-engine/requirements.txt and the Dockerfile stay as they are.
 # mediapipe 0.10.33 is pinned on purpose: the last release without the usage-metrics uploader, 0.10.35 is the first
 # with it (wheel check of 2026-10-07 in the vision design note, section 6); 0.10.33 also runs the full-range face
 # detector. The other pins are what mediapipe 0.10.33 installed with Python 3.12.10 on Windows 11 (pip freeze,

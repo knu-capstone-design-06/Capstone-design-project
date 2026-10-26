@@ -1,6 +1,6 @@
 from pydantic import ValidationError
 
-from app.infrastructure.external.ai_client import AiServerClient
+from app.infrastructure.external.ai_client import AiEngineClient
 from app.infrastructure.external.ai_schemas import AnalyzeRequest
 from app.modules.sessions.exceptions import SessionNotFound
 from app.modules.sessions.repository import SessionRepository
@@ -20,7 +20,7 @@ class SessionService:
         return self._repository.create()
 
     async def analyze(
-        self, session_id: str, window: FeatureWindowRequest, ai: AiServerClient
+        self, session_id: str, window: FeatureWindowRequest, ai: AiEngineClient
     ) -> FeatureWindowResponse:
         if not self._repository.exists(session_id):
             raise SessionNotFound()

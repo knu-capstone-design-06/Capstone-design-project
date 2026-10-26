@@ -3,7 +3,7 @@
 - features layer on fake inference outputs: needs numpy and OpenCV only (no MediaPipe, no model files)
 - inference + features on blank frames: also needs mediapipe and the model files
   (python app/modules/vision/models/download_models.py)
-Tests whose packages or files are missing are skipped, so the server tests still run with ai-server/requirements.txt.
+Tests whose packages or files are missing are skipped, so the server tests still run with ai-engine/requirements.txt.
 """
 
 import importlib.util
@@ -13,8 +13,8 @@ import subprocess
 import sys
 import unittest
 
-AI_SERVER_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MODEL_DIR = os.path.join(AI_SERVER_DIR, "app", "modules", "vision", "models")
+AI_ENGINE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+MODEL_DIR = os.path.join(AI_ENGINE_DIR, "app", "modules", "vision", "models")
 HAS_NUMPY_CV2 = all(importlib.util.find_spec(m) is not None for m in ("numpy", "cv2"))
 HAS_MEDIAPIPE = HAS_NUMPY_CV2 and importlib.util.find_spec("mediapipe") is not None
 SKIP_REASON = "vision packages not installed (pip install -r app/modules/vision/requirements.txt)"
@@ -43,7 +43,7 @@ class FeaturesOnFakeInferenceTests(unittest.TestCase):
 
         # importing the features layer loads no MediaPipe (checked in a fresh interpreter)
         code = "import sys, app.modules.vision.features; print('mediapipe' in sys.modules)"
-        out = subprocess.run([sys.executable, "-c", code], cwd=AI_SERVER_DIR, capture_output=True, text=True,
+        out = subprocess.run([sys.executable, "-c", code], cwd=AI_ENGINE_DIR, capture_output=True, text=True,
                              check=True).stdout.strip()
         self.assertEqual(out, "False")
 

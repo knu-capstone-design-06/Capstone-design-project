@@ -36,7 +36,7 @@ class ConnectionTests(unittest.TestCase):
             if self.mode == "down":
                 raise httpx.ConnectError("offline", request=request)
             if request.url.path == "/health":
-                return httpx.Response(200, json={"status": "ok", "service": "ai-server"})
+                return httpx.Response(200, json={"status": "ok", "service": "ai-engine"})
             payload = json.loads(request.content)
             return httpx.Response(200, json={
                 "session_id": payload["session_id"], "measurable": self.mode != "unmeasurable",
@@ -44,8 +44,8 @@ class ConnectionTests(unittest.TestCase):
                 "model_version": "dummy-0.1",
             })
 
-        self.app = create_app(Settings(_env_file=None, ai_server_timeout_seconds=0.05))
-        http = httpx.AsyncClient(base_url="http://ai-server:8001",
+        self.app = create_app(Settings(_env_file=None, ai_engine_timeout_seconds=0.05))
+        http = httpx.AsyncClient(base_url="http://ai-engine:8001",
                                  transport=httpx.MockTransport(handler))
         patcher = patch("app.main.httpx.AsyncClient", return_value=http)
         patcher.start()
@@ -77,10 +77,10 @@ class ConnectionTests(unittest.TestCase):
 
     def test_connectivity_and_liveness_during_failure(self):
         self.assertEqual(self.client.get("/api/v1/connectivity").json(),
-                         {"backend": "ok", "ai_server": "ok"})
+                         {"backend": "ok", "ai_engine": "ok"})
         self.mode = "down"
         self.assertEqual(self.client.get("/api/v1/connectivity").json(),
-                         {"backend": "ok", "ai_server": "unreachable"})
+                         {"backend": "ok", "ai_engine": "unreachable"})
         self.assertEqual(self.client.get("/health").status_code, 200)
 
     def test_unknown_session_never_calls_ai(self):
@@ -144,7 +144,7 @@ class ConnectionTests(unittest.TestCase):
     def test_sessions_do_not_leak_between_app_instances(self):
         session = self.session()["session_id"]
         other = create_app(Settings(_env_file=None))
-        other_http = AsyncClient(base_url="http://ai-server:8001")
+        other_http = AsyncClient(base_url="http://ai-engine:8001")
         with patch("app.main.httpx.AsyncClient", return_value=other_http):
             with TestClient(other) as client:
                 self.assertEqual(client.post(f"/api/v1/sessions/{session}/features",

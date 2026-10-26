@@ -1,6 +1,6 @@
-# AI 서버 초기 실행 환경
+# ai-engine 초기 실행 환경
 
-Python 3.12 기반 FastAPI 서버입니다. `contract/backend-ai.openapi.yaml`(0.1.0)의 `GET /health`, `POST /v1/analyze`를 제공합니다. backend만 호출하는 내부 서버이며 DB·외부 AI API를 쓰지 않습니다.
+Python 3.12 기반 FastAPI 서버입니다. `contract/backend-ai.openapi.yaml`(0.2.0)의 `GET /health`, `POST /v1/analyze`를 제공합니다. backend만 호출하는 내부 서버이며 DB·외부 AI API를 쓰지 않습니다.
 
 판단 모델은 아직 없습니다. `/v1/analyze`는 점수를 계산하지 않고 명세의 예시 값을 그대로 돌려주는 **자리 표시**입니다. 이 결과를 실제 UI 결정에 쓰면 안 됩니다.
 
@@ -9,21 +9,21 @@ Python 3.12 기반 FastAPI 서버입니다. `contract/backend-ai.openapi.yaml`(0
 저장소 루트에서 Python 3.12를 사용해 실행합니다.
 
 ```powershell
-py -3.12 -m venv ai-server/.venv
-ai-server/.venv/Scripts/python.exe -m pip install -r ai-server/requirements.txt
-cd ai-server
+py -3.12 -m venv ai-engine/.venv
+ai-engine/.venv/Scripts/python.exe -m pip install -r ai-engine/requirements.txt
+cd ai-engine
 .venv/Scripts/python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8001
 ```
 
 http://127.0.0.1:8001/health 응답:
 
 ```json
-{"status":"ok","service":"ai-server"}
+{"status":"ok","service":"ai-engine"}
 ```
 
 API 문서: http://127.0.0.1:8001/docs
 
-backend를 호스트에서 직접 실행해 연결할 때는 backend의 `AI_SERVER_URL=http://127.0.0.1:8001`로 둡니다.
+backend를 호스트에서 직접 실행해 연결할 때는 backend의 `AI_ENGINE_URL=http://127.0.0.1:8001`로 둡니다.
 
 ## POST /v1/analyze
 
@@ -46,13 +46,13 @@ Docker 엔진을 실행한 뒤 저장소 루트에서 프론트엔드·백엔드
 docker compose up --build
 ```
 
-루트 Compose에는 frontend·backend·ai-server 세 서비스가 있습니다. AI 서버의 호스트 포트를 공개하지 않으며 backend가 `http://ai-server:8001`로 호출합니다. 호스트 브라우저에서 `localhost:8001`로 접근하는 구성은 아닙니다.
+루트 Compose에는 frontend·backend·ai-engine 세 서비스가 있습니다. ai-engine의 호스트 포트를 공개하지 않으며 backend가 `http://ai-engine:8001`로 호출합니다. 호스트 브라우저에서 `localhost:8001`로 접근하는 구성은 아닙니다.
 
 기존 두 서버 실행·통신 검증 기록은 [PR #14](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/14)를 참고합니다. 2026-10-07 문서 정리에서는 Docker 테스트를 재실행하지 않았습니다.
 
 ## 테스트
 
-의존성 설치 후 `ai-server/`에서 실행합니다. 표준 라이브러리 unittest와 FastAPI TestClient를 사용하므로 Docker나 backend가 필요하지 않습니다.
+의존성 설치 후 `ai-engine/`에서 실행합니다. 표준 라이브러리 unittest와 FastAPI TestClient를 사용하므로 Docker나 backend가 필요하지 않습니다.
 
 ```powershell
 python -m unittest discover -s tests -v

@@ -27,7 +27,7 @@
 | `db/` | 마이그레이션, 스키마, 시드 데이터 |
 | `frontend/src/shared/`, `frontend/src/app/` | 공통 UI·API·훅·타입, 라우팅·Provider·레이아웃 |
 | `backend/app/common/`, `backend/app/infrastructure/` | 공통 설정·예외·상수, DB·외부 연결 |
-| `ai-server/app/common/`, `ai-server/app/infrastructure/` | 공통 설정, 외부 연결 |
+| `ai-engine/app/common/`, `ai-engine/app/infrastructure/` | 공통 설정, 외부 연결 |
 | 루트 설정 파일 | `docker-compose.yml`, `.gitignore`, `infra/`, 각 서비스의 `Dockerfile`·의존성 파일 |
 | 공통 문서 | `README.md`, `AGENTS.md`, `CLAUDE.md`, `docs/Convention.md` |
 
@@ -46,8 +46,8 @@
 |---|---|---|
 | 프론트엔드 | frontend | `frontend/` |
 | 백엔드 | backend | `backend/`, `db/` |
-| 컴퓨터 비전 | vision | `ai-server/app/modules/vision/`, `ai-server/app/inference/vision.py`(관측 뼈대). 학습 코드의 저장 위치는 팀에서 확정 예정 |
-| AI | ai | `ai-server/` |
+| 컴퓨터 비전 | vision | `ai-engine/app/modules/vision/`, `ai-engine/app/inference/vision.py`(관측 뼈대). 학습 코드의 저장 위치는 팀에서 확정 예정 |
+| AI | ai | `ai-engine/` |
 | 문서 | docs | `docs/` |
 
 - 자기 담당 영역 안의 기능 폴더(예: `frontend/src/features/<feature>/`, `backend/app/modules/<module>/`)는 자유롭게 작업합니다.
@@ -63,17 +63,17 @@
 - `src/features/<feature>/`: 기능별 코드(`api/`, `components/`, `hook/`, `types/`, `utils/`, `pages/`)를 둡니다. 외부에는 `index.ts`로 공개할 것만 내보냅니다.
 - `src/shared/`: 두 개 이상의 기능에서 실제로 쓰는 코드만 둡니다. 한 기능에서만 쓰는 코드는 그 기능 폴더에 둡니다.
 - 기능끼리는 서로의 내부 파일을 직접 import하지 않고 `index.ts`를 통해 사용합니다.
-- 프론트엔드는 backend와만 통신합니다. ai-server와 외부 AI API를 직접 호출하지 않습니다.
+- 프론트엔드는 backend와만 통신합니다. ai-engine과 외부 AI API를 직접 호출하지 않습니다.
 
 ### backend (FastAPI)
 
 - `app/modules/<module>/`: `router.py`(엔드포인트) → `service.py`(업무 로직) → `repository.py`(DB 접근) 방향으로만 호출합니다.
 - 요청·응답 형식은 `schemas.py`, DB 모델은 `models.py`, 모듈 전용 예외는 `exceptions.py`, 테스트는 `tests/`에 둡니다.
 - DB·스토리지·외부 API 연결 코드는 `app/infrastructure/`에, 여러 모듈이 쓰는 설정·상수·예외는 `app/common/`에 둡니다.
-- AI 서버와 외부 AI API의 결과는 백엔드가 검증한 뒤 주문 상태나 UI에 반영합니다.
-- 외부 AI API(STT·LLM·Jev)는 backend가 호출합니다. ai-server는 외부 AI API를 호출하지 않습니다.
+- ai-engine과 외부 AI API의 결과는 백엔드가 검증한 뒤 주문 상태나 UI에 반영합니다.
+- 외부 AI API(STT·LLM·Jev)는 backend가 호출합니다. ai-engine은 외부 AI API를 호출하지 않습니다.
 
-### ai-server (FastAPI)
+### ai-engine (FastAPI)
 
 - `app/modules/<module>/`: 비전 특징 추출, 불편 상태 판단 엔드포인트를 둡니다.
 - `app/inference/`: 직접 실행하는 모델의 로딩·추론 코드만 둡니다.

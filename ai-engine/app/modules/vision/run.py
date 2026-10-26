@@ -1,6 +1,6 @@
 """Run the vision skeleton on one video file or image folder - or, only when asked with --camera, on the webcam.
 
-From ai-server/, after python app/modules/vision/models/download_models.py:
+From ai-engine/, after python app/modules/vision/models/download_models.py:
   python -m app.modules.vision.run INPUT [--out DIR] [--fps 15] [--step 2] [--width 640] [--show]
   python -m app.modules.vision.run --camera 0 --show [--seconds 30] [--cam-width 640 --cam-height 480]
   python -m app.modules.vision.run --replot DIR   (rebuild timing.csv, plots, contact sheet, meta.json from the CSV)

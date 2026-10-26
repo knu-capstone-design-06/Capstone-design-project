@@ -16,7 +16,7 @@ from app.infrastructure.external.ai_schemas import (
 logger = logging.getLogger(__name__)
 
 
-class AiServerClient:
+class AiEngineClient:
     """Uses an application-owned HTTP client; no automatic retries.
 
     None means transport/response failure, while measurable=False is a valid
@@ -59,6 +59,6 @@ class AiServerClient:
             return None
 
 
-def get_ai_server_client(request: Request) -> AiServerClient:
-    """Inject with Depends(get_ai_server_client) in a future backend router."""
-    return request.app.state.ai_server_client
+def get_ai_engine_client(request: Request) -> AiEngineClient:
+    """Inject with Depends(get_ai_engine_client) in a future backend router."""
+    return request.app.state.ai_engine_client

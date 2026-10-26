@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Initial EC2 host for the capstone backend and AI server; no public inbound ports.
+Description: Initial EC2 host for the capstone backend and ai-engine; no public inbound ports.
 
 Parameters:
   VpcId:

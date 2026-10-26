@@ -1,19 +1,19 @@
 openapi: 3.1.0
 info:
-  title: Backend ↔ AI Server API
-  version: 0.1.0
+  title: Backend ↔ ai-engine API
+  version: 0.2.0
   description: |
-    FastAPI backend와 ai-server 사이의 내부 API 명세입니다.
-    ai-server는 Docker 내부 네트워크에서만 접근하며 외부에 포트를 공개하지 않습니다.
-    ai-server는 자체 모델 추론(비전 특징, 불편 상태 판단)만 하고 DB·외부 AI API를 쓰지 않습니다. (AGENTS.md 4장)
+    FastAPI backend와 ai-engine 사이의 내부 API 명세입니다.
+    ai-engine은 Docker 내부 네트워크에서만 접근하며 외부에 포트를 공개하지 않습니다.
+    ai-engine은 자체 모델 추론(비전 특징, 불편 상태 판단)만 하고 DB·외부 AI API를 쓰지 않습니다. (AGENTS.md 4장)
 servers:
-  - url: http://ai-server:8001
-    description: docker compose 내부 주소 (backend 환경변수 AI_SERVER_URL)
+  - url: http://ai-engine:8001
+    description: docker compose 내부 주소 (backend 환경변수 AI_ENGINE_URL)
 
 paths:
   /health:
     get:
-      summary: ai-server 프로세스 상태 확인
+      summary: ai-engine 프로세스 상태 확인
       operationId: getAiHealth
       responses:
         "200":
@@ -22,7 +22,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthResponse"
-              example: { status: ok, service: ai-server }
+              example: { status: ok, service: ai-engine }
 
   /v1/analyze:
     post:
@@ -75,7 +75,7 @@ components:
       required: [status, service]
       properties:
         status: { type: string, const: ok }
-        service: { type: string, const: ai-server }
+        service: { type: string, const: ai-engine }
 
     # TouchFeatures, VisionFeatures, StateScores는 frontend-backend.openapi.yaml과 같은 형식입니다.
     TouchFeatures:
