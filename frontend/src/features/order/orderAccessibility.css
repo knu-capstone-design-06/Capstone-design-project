@@ -1,0 +1,119 @@
+/* PR #55 로컬 반영. 물리 문자 높이와 터치 도달 범위는 G10에서 최종 실측합니다. */
+body { background: #fff; }
+body:has(.kiosk.high-contrast) { background: #000; }
+.low-screen-banner p { font-size: 28px; }
+body:has(.kiosk.high-contrast) .low-screen-banner { color: #fff; background: #000; }
+body:has(.kiosk.high-contrast) .low-screen-banner strong { color: #fff; }
+.kiosk {
+  --base-size: 28px;
+  --text-scale: 1;
+  --ui-ink: #17212b;
+  --ui-muted: #414e5a;
+  --ui-surface: #fff;
+  --ui-canvas: #f4f5f7;
+  --ui-line: #64717e;
+  --ui-accent: #163f35;
+  --ui-on-accent: #fff;
+  color: var(--ui-ink);
+  background: var(--ui-surface);
+  font-size: calc(var(--base-size) * var(--text-scale));
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.kiosk.large-text { --text-scale: 2; }
+.kiosk.high-contrast {
+  --ui-ink: #fff;
+  --ui-muted: #fff;
+  --ui-surface: #000;
+  --ui-canvas: #111;
+  --ui-line: #fff;
+  --ui-accent: #ffe66b;
+  --ui-on-accent: #000;
+  color-scheme: dark;
+}
+.kiosk button { color: var(--ui-ink); background: var(--ui-surface); border: 2px solid var(--ui-line); font-size: 1em; min-height: 64px; min-width: 48px; border-radius: 8px; }
+.kiosk .categories button, .kiosk .support-options button, .kiosk .option-buttons button, .kiosk .primary { font-size: 1em; }
+.kiosk button:hover { background: var(--ui-canvas); border-color: var(--ui-ink); }
+.kiosk button:disabled { opacity: 1; color: var(--ui-muted); background: var(--ui-canvas); border-style: dashed; cursor: default; }
+.kiosk :focus-visible { outline: 4px solid var(--ui-accent); outline-offset: 4px; }
+.kiosk [aria-pressed=true], .kiosk .screen-height-toggle[data-active=true], .kiosk .primary { background: var(--ui-accent); color: var(--ui-on-accent); border-color: var(--ui-accent); }
+.kiosk [aria-pressed=true]:hover, .kiosk .screen-height-toggle[data-active=true]:hover, .kiosk .primary:hover { background: var(--ui-accent); color: var(--ui-on-accent); }
+.kiosk .primary:disabled { color: var(--ui-muted); background: var(--ui-canvas); border-color: var(--ui-line); }
+.kiosk .header { gap: 16px; padding: 20px 24px; flex-wrap: wrap; background: var(--ui-surface); border-color: var(--ui-line); }
+.kiosk .brand { font-size: 1.25em; color: var(--ui-accent); letter-spacing: normal; }
+.kiosk .sample-badge { font-size: 1em; color: var(--ui-muted); background: var(--ui-canvas); }
+.kiosk main { padding: 24px; }
+.kiosk .intro h1, .kiosk .complete h1 { font-size: 1.35em; letter-spacing: normal; }
+.kiosk h1:focus { outline: none; }
+.kiosk .intro p, .kiosk .steps, .kiosk .product-category, .kiosk .description,
+.kiosk .cart-row strong, .kiosk .cart-row > div > span, .kiosk .text-button,
+.kiosk .cart-heading h2, .kiosk .cart-heading > span, .kiosk .empty-cart > span:last-child,
+.kiosk .empty-cart p, .kiosk .cart-summary, .kiosk .order-actions p, .kiosk .total > span,
+.kiosk .support-panel p, .kiosk .support-panel h2, .kiosk .footer,
+.kiosk .options-dialog p, .kiosk legend, .kiosk .screen-height-toggle { font-size: 1em; }
+.kiosk .intro p, .kiosk .steps, .kiosk .product-category, .kiosk .description,
+.kiosk .cart-row > div > span, .kiosk .text-button, .kiosk .empty-cart,
+.kiosk .cart-summary, .kiosk .order-actions p, .kiosk .support-panel p,
+.kiosk .complete p, .kiosk .options-dialog p, .kiosk .footer { color: var(--ui-muted); }
+.kiosk .steps { flex-wrap: wrap; gap: 12px 24px; margin-bottom: 24px; }
+.kiosk .steps b { font-size: 1em; padding: 0; background: none; color: inherit; }
+.kiosk .steps [aria-current] { color: var(--ui-accent); text-decoration: underline; text-underline-offset: 6px; }
+.kiosk .steps [aria-current] b { background: none; color: inherit; }
+.kiosk .order-layout { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+.kiosk .menu-section { min-width: 0; }
+.kiosk .categories { flex-wrap: wrap; gap: 12px; }
+.kiosk .product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.kiosk.large-text .product-grid, .kiosk.simple-screen .product-grid { grid-template-columns: minmax(0, 1fr); }
+.kiosk .product { padding: 0; background: var(--ui-surface); }
+.kiosk .product-info { padding: 24px; gap: 12px; }
+.kiosk .product-info strong, .kiosk .product-price { font-size: 1.15em; letter-spacing: normal; }
+.kiosk .product-price, .kiosk .total { flex-wrap: wrap; }
+.kiosk .cart { position: static; min-width: 0; max-height: 650px; overflow-y: auto; }
+.kiosk .cart, .kiosk .review-card, .kiosk .options-dialog { color: var(--ui-ink); background: var(--ui-surface); border-color: var(--ui-line); }
+.kiosk .cart-heading, .kiosk .cart-row { border-color: var(--ui-line); }
+.kiosk .cart-heading { flex-wrap: wrap; gap: 12px; }
+.kiosk .cart-heading > span, .kiosk .empty-cart > span:first-child { background: var(--ui-canvas); }
+.kiosk .cart-controls, .kiosk .review-card .cart-row, .kiosk .dialog-quantity { flex-wrap: wrap; gap: 16px; }
+.kiosk .quantity { flex-wrap: wrap; gap: 12px; }
+.kiosk .quantity button { font-size: 1em; min-width: 64px; padding: 8px 16px; }
+.kiosk .order-actions { height: auto; max-height: 45dvh; overflow-y: auto; background: var(--ui-surface); border-color: var(--ui-line); box-shadow: none; }
+.kiosk .order-actions-inner { height: auto; padding: 16px 24px; grid-template-columns: auto minmax(0, 1fr); gap: 12px; }
+.kiosk .order-actions-inner > :first-child { grid-column: 1 / -1; min-width: 0; }
+.kiosk .order-actions-summary { flex-wrap: wrap; gap: 12px; }
+.kiosk .total strong { font-size: 1.2em; white-space: normal; }
+.kiosk .order-confirm { font-size: 1em; line-height: 1.5; min-height: 72px; border-width: 2px; box-shadow: none; padding: 12px 16px; }
+.kiosk .order-actions-inner > .primary:last-child { grid-column: auto / -1; }
+.kiosk .order-restart, .kiosk .order-confirm { position: sticky; bottom: 0; z-index: 1; }
+.kiosk .support-panel { padding: 24px; background: var(--ui-canvas); border-color: var(--ui-line); }
+.kiosk .support-options { gap: 12px; }
+.kiosk .guide, .kiosk .cart-notice, .kiosk .order-progress, .kiosk .order-feedback { background: var(--ui-canvas); color: var(--ui-ink); border-color: var(--ui-line); }
+.kiosk .order-feedback { max-height: var(--order-feedback-space, 50dvh); overflow-y: auto; }
+.kiosk .order-feedback-actions { position: sticky; bottom: 0; background: var(--ui-canvas); padding-block: 8px; }
+.kiosk .footer { background: var(--ui-surface); border-color: var(--ui-line); padding: 24px; flex-wrap: wrap; }
+.kiosk .options-dialog { width: min(900px, calc(100% - 32px)); border: 2px solid var(--ui-line); }
+.kiosk .dialog-heading { align-items: start; }
+.kiosk .dialog-heading h2 { font-size: 1.2em; }
+.kiosk .option-buttons { flex-wrap: wrap; gap: 12px; }
+.kiosk .option-buttons button { min-width: min(100%, 160px); }
+.kiosk.low-screen { background: var(--ui-surface); border-color: var(--ui-line); }
+.kiosk.low-screen > .header { padding: 12px 24px; max-height: 28%; overflow-y: auto; }
+.kiosk.low-screen .order-actions { max-height: min(45dvh, calc(var(--low-screen-height) * .4)); }
+.kiosk.low-screen > .support-panel { max-height: min(360px, max(180px, calc(var(--low-screen-height) - var(--order-actions-space) - 200px))); }
+.kiosk.low-screen > main { scroll-padding-bottom: 24px; }
+.kiosk.large-text .header { gap: 12px; }
+.kiosk.large-text .sample-badge { flex-basis: 100%; margin-left: 0; }
+.kiosk.low-screen.large-text .header { flex-wrap: nowrap; }
+.kiosk.low-screen.large-text .header .sample-badge { display: none; }
+.kiosk.low-screen.large-text .brand { flex-shrink: 1; min-width: 0; }
+.kiosk.large-text .cart { max-height: 850px; }
+.kiosk.large-button button { min-height: 80px; }
+.kiosk.large-button .product { padding: 0; }
+.kiosk.large-button .order-confirm { min-height: 88px; }
+@media (max-width: 760px) {
+  .kiosk .product-grid { grid-template-columns: minmax(0, 1fr); }
+  .kiosk .order-actions-inner { grid-template-columns: minmax(0, 1fr); }
+  .kiosk .order-restart, .kiosk .order-confirm { position: static; }
+  .kiosk .header, .kiosk main { padding: 16px; }
+  .kiosk.low-screen.large-text > .header { max-height: min(50dvh, 260px); }
+  .kiosk.low-screen.large-text > .header .brand { display: none; }
+}

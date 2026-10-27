@@ -15,7 +15,7 @@ async function screenshot(page, name, clipHeight = null) {
     ...(clipHeight ? { clip: { x: 0, y: 0, width: 1080, height: clipHeight } } : {}) });
 }
 
-async function open(steps) {
+async function open(steps, pageUrl = url) {
   const browser = await chromium.launch({ headless: true, ...(channel === 'default' ? {} : { channel }) });
   const page = await browser.newPage({ viewport: { width: 1080, height: 1920 } });
   const errors = [];
@@ -36,10 +36,44 @@ async function open(steps) {
     window.webkitSpeechRecognition = FakeRecognition;
   });
   const fixture = await installOrderResponses(page, steps);
-  await page.goto(url);
+  await page.goto(pageUrl);
   await page.locator('[data-log-target="voice-mode-toggle"]:not([disabled])').waitFor();
   return { browser, page, errors, fixture };
 }
+
+test('개발 샘플에서 짧은 말도 인식하고 다시 듣기·오류·화면 이동을 처리하며 backend를 호출하지 않는다', { skip: !process.env.ORDER_SAMPLE_BROWSER_URL }, async () => {
+  const { browser, page, errors, fixture } = await open([], process.env.ORDER_SAMPLE_BROWSER_URL);
+  try {
+    const toggle = page.getByRole('switch', { name: '음성 인식 테스트', exact: true });
+    await toggle.click();
+    await page.evaluate(() => window.voiceFakes.at(-1).partial('아이스 아메리카노'));
+    assert.match(await page.locator('.voice-mode-feedback').innerText(), /아이스 아메리카노/);
+    await page.evaluate(() => window.voiceFakes.at(-1).final('네'));
+    await page.locator('[data-log-target="voice-listen"]').waitFor();
+    assert.match(await page.locator('.voice-mode-transcript').innerText(), /인식한 말\s+네/);
+    assert.match(await page.locator('.voice-mode-preview').innerText(), /주문은 바뀌지 않습니다/);
+    assert.equal(await page.locator('.cart-row').count(), 0);
+    await page.locator('[data-log-target="voice-listen"]').click();
+    await page.evaluate(() => window.voiceFakes.at(-1).fail('not-allowed'));
+    assert.match(await page.locator('.voice-mode-feedback').innerText(), /마이크 사용을 허용/);
+    await page.locator('[data-log-target="voice-listen"]').click();
+    await page.evaluate(() => window.voiceFakes.at(-1).final('아메리카노 두 잔'));
+    await page.locator('[data-log-target="voice-listen"]').waitFor();
+    assert.match(await page.locator('.voice-mode-transcript').innerText(), /아메리카노 두 잔/);
+    await page.locator('[data-log-target="product:americano"]').click();
+    await page.locator('[data-log-target="cart-add"]').click();
+    await page.locator('dialog[open]').waitFor({ state: 'hidden' });
+    await page.locator('[data-log-target="voice-listen"]').click();
+    await page.locator('[data-log-target="review-open"]').click();
+    assert.equal(await page.evaluate(() => window.voiceFakes.at(-1).aborted), true);
+    await page.locator('[data-log-target="review-back"]').click();
+    assert.equal(await toggle.getAttribute('aria-checked'), 'false');
+    assert.equal(await page.locator('.voice-mode-transcript').count(), 0);
+    assert.deepEqual(fixture.requests, []);
+    fixture.verify(); assert.deepEqual(errors, []);
+    await screenshot(page, 'sample-recognition-test');
+  } finally { await browser.close(); }
+});
 
 const voiceStatus = (status, extra = {}) => ({ request_id: 'voice-1', status, reply_text: null, tool_calls: [], actions: [], error: null, ...extra });
 const voicePost = session => ({ method: 'POST', path: `/api/v1/sessions/${session}/voice/requests`, status: 202,
@@ -71,7 +105,7 @@ test('메뉴에서 마이크·질문·해석 결과를 표시하고 주문 확�
     await screenshot(page, 'voice-question-menu', 450);
     await page.evaluate(() => window.voiceFakes.at(-1).final('핫'));
     await page.locator('.voice-mode-feedback').getByText(/주문을 변경하는 기능은 아직 준비 중/).waitFor();
-    assert.match(await page.locator('.voice-mode-transcript').innerText(), /Chrome이 인식한 말\s+핫/);
+    assert.match(await page.locator('.voice-mode-transcript').innerText(), /인식한 말\s+핫/);
     assert.match(await page.locator('.total').innerText(), /0원/, '해석만으로 장바구니를 변경하지 않음');
     await screenshot(page, 'voice-result-menu');
     const submitted = fixture.requests.filter(request => request.path.endsWith('/voice/requests') && request.method === 'POST');
@@ -201,7 +235,7 @@ test('마이크 권한 오류를 알리고 큰 글씨·큰 버튼·낮은 화면
     await page.locator('[data-log-target="support-toggle"]').click();
     await page.locator('[data-log-target="voice-mode-toggle"]').click();
     await page.evaluate(() => window.voiceFakes.at(-1).fail('not-allowed'));
-    assert.match(await page.locator('.voice-mode-feedback').innerText(), /마이크 권한/);
+    assert.match(await page.locator('.voice-mode-feedback').innerText(), /마이크 사용을 허용/);
     assert.equal(await page.locator('[data-log-target="voice-listen"]').isVisible(), true);
     await screenshot(page, 'voice-permission-low-large');
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);

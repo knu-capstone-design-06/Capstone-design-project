@@ -219,8 +219,9 @@ test('주변 후보는 화면·컨테이너에서 보이는 부분만 사용하�
       const product = document.querySelector('[data-log-target="product:americano"]');
       return product && !product.disabled;
     });
-    await page.evaluate(() => window.scrollTo(0, 250));
-    await page.waitForFunction(() => window.scrollY === 250);
+    const scrollPastHeader = await page.evaluate(() => document.querySelector('.header').getBoundingClientRect().height + 20);
+    await page.evaluate(y => window.scrollTo(0, y), scrollPastHeader);
+    await page.waitForFunction(y => Math.abs(window.scrollY - y) < 1, scrollPastHeader);
     await page.mouse.click(890, 2);
     const outside = await page.evaluate(() => window.kioskTouchLogDraft.read().events.filter(event => event.kind === 'pointer_start').at(-1));
     assert.equal(outside.data.target, null);
@@ -378,7 +379,7 @@ test('하단 주문 바의 완전·부분 가림을 제외하고 주문 버튼�
             dialog.style.cssText = 'position:fixed;inset:0;margin:auto;width:80vw;height:95vh;max-height:none;max-width:none';
             const bounds = dialog.getBoundingClientRect();
             const bar = document.querySelector('.order-actions').getBoundingClientRect();
-            dialog.querySelectorAll('button').forEach(button => button.setAttribute('aria-disabled', 'true'));
+            dialog.querySelectorAll('button').forEach(button => { button.setAttribute('aria-disabled', 'true'); button.style.pointerEvents = 'none'; });
             const button = document.createElement('button');
             button.dataset.logTarget = 'dialog-above-bar';
             button.textContent = '옵션 창 후보';

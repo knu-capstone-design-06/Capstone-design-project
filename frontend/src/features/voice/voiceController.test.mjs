@@ -25,6 +25,53 @@ function setup(results, options = {}) {
   return { api, calls, controller, delivered };
 }
 
+test('인식 테스트는 세션·해석 요청 없이 짧은 말과 낮은 신뢰도도 표시하고 마이크를 닫는다', async () => {
+  const { calls, controller, delivered } = setup([], { recognitionOnly: true });
+  controller.setContext({ sessionId: '', screenId: 'menu' });
+  try {
+    assert.equal(controller.setEnabled(true), true);
+    FakeRecognition.last().partial('네');
+    assert.equal(controller.getSnapshot().partialText, '네');
+    FakeRecognition.last().final(['네', .01]);
+    await tick();
+    assert.equal(controller.getSnapshot().lastTranscript, '네');
+    assert.equal(controller.getSnapshot().phase, 'idle');
+    assert.equal(controller.getSnapshot().lastResult, null);
+    assert.equal(controller.getSnapshot().error, null);
+    assert.deepEqual(calls, []);
+    assert.deepEqual(delivered, []);
+    assert.equal(FakeRecognition.last().stopped, 1);
+    assert.equal(controller.listen(), true);
+    FakeRecognition.last().final(['아메리카노 두 잔', .9]);
+    assert.equal(controller.getSnapshot().lastTranscript, '아메리카노 두 잔');
+    assert.deepEqual(calls, []);
+  } finally { controller.dispose(); }
+});
+
+test('인식 테스트도 권한 오류를 알리고 끄기·세션 변경 후 늦은 결과를 버린다', () => {
+  const { calls, controller } = setup([], { recognitionOnly: true });
+  try {
+    controller.setEnabled(true);
+    FakeRecognition.last().fail('not-allowed');
+    assert.equal(controller.getSnapshot().error, 'not_allowed');
+    assert.equal(controller.listen(), true);
+    const previous = FakeRecognition.last();
+    controller.setEnabled(false);
+    previous.final(['늦게 온 말', .9]);
+    assert.equal(controller.getSnapshot().lastTranscript, '');
+    assert.equal(controller.getSnapshot().phase, 'idle');
+    controller.setEnabled(true);
+    const oldSession = FakeRecognition.last();
+    oldSession.partial('이전 세션');
+    controller.setContext({ sessionId: 'session-new', screenId: 'menu' });
+    oldSession.final(['이전 세션 문장', .9]);
+    assert.equal(oldSession.aborted, 1);
+    assert.equal(controller.getSnapshot().lastTranscript, '');
+    assert.equal(controller.getSnapshot().partialText, '');
+    assert.deepEqual(calls, []);
+  } finally { controller.dispose(); }
+});
+
 test('음성 모드를 켜면 바로 듣고, 확실한 결과는 넘긴 뒤 마이크를 닫는다', async () => {
   const { calls, controller, delivered } = setup([status('processing'), status('completed', { tool_calls: [addAmericano] })]);
   assert.equal(controller.setEnabled(true), true);
