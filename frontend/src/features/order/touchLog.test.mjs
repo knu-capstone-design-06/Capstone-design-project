@@ -2,6 +2,131 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createTouchLog, distanceToRect, logLimit, touchLogKey } from './touchLog.ts';
 import { summarizeTouchLog } from './touchLogSummary.ts';
+import { measureTouchPilot } from './touchLogFeatures.ts';
+
+function pilotLog() {
+  const saved = { version: 1, sessionId: 'current', serverSessionId: 'server', startedAt: 0, events: [] };
+  const emit = (ms, kind, data = null, visitId = 'visit-1', screen = 'menu', sessionId = 'current') => {
+    const id = `pilot-${saved.events.length}`;
+    saved.events.push({ ...context(), id, sessionId, serverSessionId: 'server', occurredAt: new Date(ms).toISOString(), elapsedMs: ms, visitId, screen, kind, data });
+    return id;
+  };
+  return { saved, emit };
+}
+
+test('로컬 최근 구간은 관측한 0과 미측정 null을 구별하고 이전 세션 입력을 제외한다', () => {
+  const { saved, emit } = pilotLog();
+  emit(0, 'pointer_start', { target: null }, 'old', 'menu', 'previous');
+  emit(1000, 'screen_enter', { visibility: 'visible' });
+  assert.equal(measureTouchPilot(saved, 1500).features.tap_count, null);
+  assert.deepEqual(measureTouchPilot(saved, 4000).features, { tap_count: 0, miss_tap_count: 0, repeat_tap_count: 0, back_count: 0, dwell_ms: 3000 });
+  emit(4100, 'pointer_start', { target: null });
+  emit(4200, 'pointer_start', {});
+  const measured = measureTouchPilot(saved, 5000).features;
+  assert.equal(measured.tap_count, 2);
+  assert.equal(measured.miss_tap_count, null);
+});
+
+test('전경 화면 이동은 최근 구간의 뒤로가기를 보존하고 방문 체류는 새로 계산한다', () => {
+  const { saved, emit } = pilotLog();
+  emit(0, 'screen_enter', { visibility: 'visible' }, 'review', 'review');
+  emit(4500, 'screen_leave', { to: 'menu' }, 'review', 'review');
+  emit(4500, 'screen_enter', { from: 'review', visibility: 'visible' }, 'menu', 'menu');
+  const result = measureTouchPilot(saved, 6000, 2000, { repeatMs: null, repeatPx: null, dwellMode: 'foreground_visit' });
+  assert.equal(result.features.back_count, 1);
+  assert.equal(result.features.dwell_ms, 1500);
+  assert.equal(result.sinceLastInputMs, null);
+});
+
+test('전경 체류는 백그라운드·페이지 중단을 제외하고 관측이 끊긴 최근 구간은 미산출이다', () => {
+  const { saved, emit } = pilotLog();
+  const policy = { repeatMs: null, repeatPx: null, dwellMode: 'foreground_visit' };
+  emit(0, 'screen_enter', { visibility: 'visible' });
+  emit(2000, 'visibility_change', { visibility: 'hidden' });
+  emit(4000, 'visibility_change', { visibility: 'visible' });
+  const early = measureTouchPilot(saved, 4500, 2000, policy);
+  assert.equal(early.features.tap_count, null);
+  assert.equal(early.features.dwell_ms, 2500);
+  emit(5000, 'pointer_start', { target: null });
+  assert.equal(measureTouchPilot(saved, 7000, 2000, policy).features.dwell_ms, 5000);
+  assert.equal(measureTouchPilot(saved, 7000, 2000, { ...policy, dwellMode: 'since_last_input' }).features.dwell_ms, 2000);
+  emit(7500, 'screen_leave', { reason: 'pagehide' });
+  emit(7500, 'session_suspend', { reason: 'pagehide' });
+  assert.equal(measureTouchPilot(saved, 9000, 2000, policy).features.dwell_ms, 5500);
+  assert.equal(measureTouchPilot(saved, 9000, 2000, policy).features.tap_count, null);
+});
+
+test('이전 로그의 전경 정보 누락과 시계 역행을 체류 0으로 채우지 않는다', () => {
+  const { saved, emit } = pilotLog();
+  const policy = { repeatMs: null, repeatPx: null, dwellMode: 'foreground_visit' };
+  emit(0, 'screen_enter');
+  assert.equal(measureTouchPilot(saved, 5000, 2000, policy).features.dwell_ms, null);
+  emit(6000, 'pointer_start', { target: null });
+  assert.equal(measureTouchPilot(saved, 5000).observed, false);
+  emit(4000, 'pointer_start', { target: null });
+  assert.equal(measureTouchPilot(saved, 7000).features.tap_count, null);
+});
+
+test('명시한 파일럿 기준으로 추가 반복 누름만 세고 취소·스크롤·다른 대상·방문은 이어 붙이지 않는다', () => {
+  const { saved, emit } = pilotLog();
+  const policy = { repeatMs: 800, repeatPx: 24, dwellMode: null };
+  emit(0, 'screen_enter', { visibility: 'visible' });
+  function press(ms, x, targetId = 'options-increase', cancelled = false) {
+    const id = emit(ms, 'pointer_start', { start: { x, y: 10 }, pointerType: 'touch', isPrimary: true,
+      target: { id: targetId, kind: 'button', disabled: false } });
+    emit(ms + 10, 'pointer_end', { inputId: id, cancelled, maxObservedDistance: 0 });
+    return id;
+  }
+  press(3000, 0); press(3800, 24);
+  assert.equal(measureTouchPilot(saved, 4000, 2000, policy).features.repeat_tap_count, 1);
+  press(4000, 24, 'options-decrease');
+  press(4100, 24, 'options-decrease', true);
+  press(4200, 24, 'options-decrease');
+  const last = press(4300, 24, 'options-decrease');
+  emit(4400, 'scroll', { inputCandidates: [last] });
+  assert.equal(measureTouchPilot(saved, 4500, 2000, policy).features.repeat_tap_count, 1);
+  assert.equal(measureTouchPilot(saved, 4500, 2000, { ...policy, repeatPx: 16 }).features.repeat_tap_count, 0);
+  assert.equal(measureTouchPilot(saved, 4500, 2000, { ...policy, repeatMs: 500 }).features.repeat_tap_count, 0);
+});
+
+test('구간 직전 반복 후보의 주 포인터·종료 정보가 없으면 반복이나 0으로 추정하지 않는다', () => {
+  for (const missing of ['isPrimary', 'end']) {
+    const { saved, emit } = pilotLog();
+    emit(0, 'screen_enter', { visibility: 'visible' });
+    const input = { start: { x: 10, y: 10 }, pointerType: 'touch', isPrimary: true, target: null };
+    const prior = emit(2900, 'pointer_start', missing === 'isPrimary' ? { ...input, isPrimary: undefined } : input);
+    if (missing !== 'end') emit(2910, 'pointer_end', { inputId: prior, cancelled: false, maxObservedDistance: 0 });
+    const next = emit(3100, 'pointer_start', input);
+    emit(3110, 'pointer_end', { inputId: next, cancelled: false, maxObservedDistance: 0 });
+    const result = measureTouchPilot(saved, 5000).features;
+    assert.equal(result.tap_count, 1);
+    assert.equal(result.repeat_tap_count, null, missing);
+    // 선행 기록이 반복 시간 범위 밖이면 현재 구간의 관측한 0을 유지합니다.
+    assert.equal(measureTouchPilot(saved, 5000, 2000, { repeatMs: 100, repeatPx: 24, dwellMode: null }).features.repeat_tap_count, 0);
+  }
+});
+
+test('잘못된 이동 거리나 종료 후 중단 기록을 정상 반복 후보로 세지 않는다', () => {
+  for (const distance of [-1, NaN, Infinity]) {
+    const { saved, emit } = pilotLog();
+    emit(0, 'screen_enter', { visibility: 'visible' });
+    const input = { start: { x: 10, y: 10 }, pointerType: 'touch', isPrimary: true, target: null };
+    const first = emit(3100, 'pointer_start', input);
+    emit(3110, 'pointer_end', { inputId: first, cancelled: false, maxObservedDistance: distance });
+    const second = emit(3200, 'pointer_start', input);
+    emit(3210, 'pointer_end', { inputId: second, cancelled: false, maxObservedDistance: 0 });
+    assert.equal(measureTouchPilot(saved, 5000).features.repeat_tap_count, null);
+  }
+  const { saved, emit } = pilotLog();
+  emit(0, 'screen_enter', { visibility: 'visible' });
+  const input = { start: { x: 10, y: 10 }, pointerType: 'touch', isPrimary: true, target: null };
+  const first = emit(3100, 'pointer_start', input);
+  emit(3110, 'pointer_end', { inputId: first, cancelled: false, maxObservedDistance: 0 });
+  emit(3120, 'pointer_interrupted', { inputId: first });
+  const second = emit(3200, 'pointer_start', input);
+  emit(3210, 'pointer_end', { inputId: second, cancelled: false, maxObservedDistance: 0 });
+  assert.equal(measureTouchPilot(saved, 5000).features.repeat_tap_count, 0);
+});
 
 const context = () => ({ screen: 'menu', visitId: 'visit-1', settings: { largeButton: false } });
 function memoryStorage() {

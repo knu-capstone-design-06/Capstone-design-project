@@ -4,8 +4,10 @@ import type { LogContext, Point, Rect, SavedLog } from './touchLog.ts';
 import { summarizeTouchLog } from './touchLogSummary.ts';
 import type { RawTouchSummary } from './touchLogSummary.ts';
 import type { Settings } from './model.ts';
+import { measureTouchPilot } from './touchLogFeatures.ts';
+import type { TouchPilotPolicy } from './touchLogFeatures.ts';
 
-type DraftInspector = { read: () => SavedLog; summarize: () => RawTouchSummary; exportJson: () => void; status: () => string | null };
+type DraftInspector = { read: () => SavedLog; summarize: () => RawTouchSummary; features: (policy?: TouchPilotPolicy) => ReturnType<typeof measureTouchPilot>; exportJson: () => void; status: () => string | null };
 declare global { interface Window { kioskTouchLogDraft?: DraftInspector } }
 type Gesture = {
   id: string; context: LogContext; start: Point; last: Point; maxDistance: number;
@@ -69,7 +71,7 @@ export function useTouchLog(screen: string, category: string, productId: string 
       }
       context.current = { screen, visitId: crypto.randomUUID(), settings: { ...settings } };
       tracker.current.record(context.current, 'session_start', { reason: 'page_load', server_session_id: null });
-      tracker.current.record(context.current, 'screen_enter');
+      tracker.current.record(context.current, 'screen_enter', { visibility: document.visibilityState });
       previous.current = { screen, category, productId, settings: { ...settings } };
     }
     const recorder = tracker.current;
@@ -102,7 +104,7 @@ export function useTouchLog(screen: string, category: string, productId: string 
         .filter(candidate => candidate !== null);
       const minimum = candidates.length ? Math.min(...candidates.map(candidate => candidate.distance)) : null;
       const id = record('pointer_start', {
-        start, target,
+        start, target, pointerType: event.pointerType || 'unknown', isPrimary: event.isPrimary,
         nearestCandidates: candidates.filter(candidate => candidate.distance === minimum),
       });
       gestures.set(event.pointerId, { id, context: structuredClone(context.current), start, last: start, maxDistance: 0, cancelled: false });
@@ -153,12 +155,17 @@ export function useTouchLog(screen: string, category: string, productId: string 
     function pageShow(event: PageTransitionEvent) {
       if (event.persisted) {
         context.current = { ...context.current, visitId: crypto.randomUUID() };
-        record('session_resume', { reason: 'bfcache' }); record('screen_enter', null);
+        record('session_resume', { reason: 'bfcache' }); record('screen_enter', { visibility: document.visibilityState });
       }
+    }
+    function visibilityChange() {
+      record('visibility_change', { visibility: document.visibilityState });
+      if (document.visibilityState !== 'visible') interrupt();
     }
     const inspector: DraftInspector = {
       read: () => recorder.read(), status: () => recorder.getWarning(),
       summarize: () => summarizeTouchLog(recorder.read()),
+      features: policy => measureTouchPilot(recorder.read(), Date.now(), 2000, policy),
       exportJson() {
         const url = URL.createObjectURL(new Blob([JSON.stringify(recorder.read(), null, 2)], { type: 'application/json' }));
         const link = document.createElement('a'); link.href = url; link.download = 'touch-log-draft.json'; link.click();
@@ -171,6 +178,7 @@ export function useTouchLog(screen: string, category: string, productId: string 
     document.addEventListener('pointerup', end, true);
     document.addEventListener('pointercancel', end, true);
     document.addEventListener('scroll', scroll, true);
+    document.addEventListener('visibilitychange', visibilityChange);
     document.addEventListener('touchend', touchEnd, { passive: true });
     document.addEventListener('touchcancel', touchEnd, { passive: true });
     window.addEventListener('pagehide', pageHide);
@@ -179,6 +187,7 @@ export function useTouchLog(screen: string, category: string, productId: string 
       document.removeEventListener('pointerdown', down, true); document.removeEventListener('pointermove', move, true);
       document.removeEventListener('pointerup', end, true); document.removeEventListener('pointercancel', end, true);
       document.removeEventListener('scroll', scroll, true);
+      document.removeEventListener('visibilitychange', visibilityChange);
       document.removeEventListener('touchend', touchEnd); document.removeEventListener('touchcancel', touchEnd);
       window.removeEventListener('pagehide', pageHide); window.removeEventListener('pageshow', pageShow);
       if (window.kioskTouchLogDraft === inspector) delete window.kioskTouchLogDraft;
@@ -197,13 +206,13 @@ export function useTouchLog(screen: string, category: string, productId: string 
       recorder.newSession(serverSessionId);
       context.current = { screen, visitId: crypto.randomUUID(), settings: { ...settings } };
       recorder.record(context.current, 'session_start', { reason: 'server_session_change', server_session_id: serverSessionId });
-      recorder.record(context.current, 'screen_enter');
+      recorder.record(context.current, 'screen_enter', { visibility: document.visibilityState });
       prior.screen = screen;
     }
     if (prior.screen !== screen) {
       recorder.record(context.current, 'screen_leave', { to: screen });
       context.current = { screen, visitId: crypto.randomUUID(), settings: { ...settings } };
-      recorder.record(context.current, 'screen_enter', { from: prior.screen });
+      recorder.record(context.current, 'screen_enter', { from: prior.screen, visibility: document.visibilityState });
     }
     if (prior.category !== category) recorder.record(context.current, 'category_change', { from: prior.category, to: category });
     if (prior.productId !== productId) {
