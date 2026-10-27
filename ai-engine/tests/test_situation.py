@@ -1,7 +1,7 @@
 """Events and situation layers (app/modules/vision/events.py, situation.py) on synthetic observation windows.
 
 Standard library only: the two layers need no numpy, OpenCV or MediaPipe, so these tests also run with
-ai-server/requirements.txt alone. No photos, videos or runs/.
+ai-engine/requirements.txt alone. No photos, videos or runs/.
 
 Every PilotParams value here (P) is made for these synthetic frames (10 frames per second) and is not a proposal: the
 pilot values come from the team's self-recording (vision README, '상황 층').

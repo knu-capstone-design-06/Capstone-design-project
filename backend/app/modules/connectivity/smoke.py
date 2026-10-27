@@ -91,8 +91,8 @@ def run(base_url: str, timeout: float) -> None:
         raise SmokeError("/health: unexpected backend response")
 
     connectivity = _request_json(base, "/api/v1/connectivity", 200, timeout)
-    if connectivity.get("backend") != "ok" or connectivity.get("ai_server") != "ok":
-        raise SmokeError("/api/v1/connectivity: AI server is not reachable")
+    if connectivity.get("backend") != "ok" or connectivity.get("ai_engine") != "ok":
+        raise SmokeError("/api/v1/connectivity: ai-engine is not reachable")
 
     session = _request_json(base, "/api/v1/sessions", 201, timeout, {})
     session_id = session.get("session_id")

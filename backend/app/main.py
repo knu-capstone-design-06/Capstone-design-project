@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from app.common.config.settings import Settings, get_settings
-from app.infrastructure.external.ai_client import AiServerClient
+from app.infrastructure.external.ai_client import AiEngineClient
 from app.infrastructure.external.openai_client import OpenAiClient, create_openai_http
 from app.modules.connectivity.router import router as connectivity_router
 from app.modules.ordering.catalog import PRODUCTS
@@ -33,13 +33,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         async with httpx.AsyncClient(
-            base_url=settings.ai_server_url,
-            timeout=settings.ai_server_timeout_seconds,
+            base_url=settings.ai_engine_url,
+            timeout=settings.ai_engine_timeout_seconds,
             trust_env=False,
             follow_redirects=False,
         ) as http, AsyncExitStack() as stack:
-            app.state.ai_server_client = AiServerClient(
-                http, settings.ai_server_timeout_seconds
+            app.state.ai_engine_client = AiEngineClient(
+                http, settings.ai_engine_timeout_seconds
             )
             session_repository = SessionRepository()
             app.state.session_service = SessionService(session_repository)
@@ -61,7 +61,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             try:
                 yield
             finally:
-                del app.state.ai_server_client
+                del app.state.ai_engine_client
                 del app.state.session_service
                 del app.state.voice_service
 

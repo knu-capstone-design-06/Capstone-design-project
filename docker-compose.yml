@@ -1,4 +1,4 @@
-# frontend·backend·ai-server를 함께 띄웁니다. ai-server는 Docker 내부 네트워크에서만 접근합니다.
+# frontend·backend·ai-engine을 함께 띄웁니다. ai-engine은 Docker 내부 네트워크에서만 접근합니다.
 # frontend는 127.0.0.1:8080에서 화면을 제공하고 /backend/ 요청을 backend로 전달합니다.
 services:
   frontend:
@@ -16,16 +16,16 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     environment:
-      AI_SERVER_URL: http://ai-server:8001
+      AI_ENGINE_URL: http://ai-engine:8001
       # Voice interpretation. Set in the shell or the root .env (not committed); empty = development stub.
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-}
       OPENAI_TIMEOUT_SECONDS: ${OPENAI_TIMEOUT_SECONDS:-}
     depends_on:
-      ai-server:
+      ai-engine:
         condition: service_healthy
 
-  ai-server:
-    build: ./ai-server
+  ai-engine:
+    build: ./ai-engine
     expose:
       - "8001"
