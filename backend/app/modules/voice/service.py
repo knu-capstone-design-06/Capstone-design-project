@@ -3,6 +3,7 @@ import logging
 from collections.abc import Callable, Iterable
 from uuid import UUID
 
+from app.modules.ordering.repository import OrderingRepository
 from app.modules.voice.exceptions import VoiceRequestNotFound, VoiceSessionNotFound
 from app.modules.voice.interpreter import VoiceInterpreter
 from app.modules.voice.repository import VoiceRepository
@@ -46,11 +47,13 @@ class VoiceService:
     def __init__(
         self, session_exists: Callable[[str], bool], repository: VoiceRepository,
         interpreter: VoiceInterpreter, menu_provider: Callable[[], list[MenuItem]],
+        ordering: OrderingRepository,
     ):
         self._session_exists = session_exists
         self._repository = repository
         self._interpreter = interpreter
         self._menu_provider = menu_provider
+        self._ordering = ordering
 
     def accept(
         self, session_id: str, key: UUID, request: VoiceRequestCreate
@@ -59,7 +62,13 @@ class VoiceService:
         if not self._session_exists(session_id):
             raise VoiceSessionNotFound()
         fingerprint = hashlib.sha256(request.model_dump_json().encode()).hexdigest()
-        record, created = self._repository.accept(session_id, key, fingerprint)
+        # Match the order commit's lock so a new voice request cannot slip in
+        # between the completion check and insertion. Existing keys replay first.
+        with self._ordering.lock:
+            record, created = self._repository.accept(
+                session_id, key, fingerprint,
+                is_completed=lambda: self._ordering.is_completed(session_id),
+            )
         accepted = VoiceRequestAccepted(
             request_id=record.request_id, accepted_at=record.accepted_at
         )

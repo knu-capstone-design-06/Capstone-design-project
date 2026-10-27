@@ -5,7 +5,9 @@ from datetime import datetime, timedelta, timezone
 from threading import Lock
 from uuid import UUID, uuid4
 
-from app.modules.voice.exceptions import IdempotencyKeyReused, RequestInProgress
+from app.modules.voice.exceptions import (
+    IdempotencyKeyReused, RequestInProgress, VoiceSessionCompleted,
+)
 from app.modules.voice.schemas import (
     ToolCall, VoiceErrorResponse, VoiceRequestStatus, VoiceStatus, VoiceTurn,
 )
@@ -70,7 +72,8 @@ class VoiceRepository:
             self._history.pop(session_id, None)
 
     def accept(
-        self, session_id: str, key: UUID, fingerprint: str
+        self, session_id: str, key: UUID, fingerprint: str,
+        is_completed: Callable[[], bool] | None = None,
     ) -> tuple[VoiceRecord, bool]:
         """Return (record, created). Replays with the same key do not create a request."""
         with self._lock:
@@ -82,6 +85,8 @@ class VoiceRepository:
                 if existing.fingerprint != fingerprint:
                     raise IdempotencyKeyReused()
                 return existing, False
+            if is_completed is not None and is_completed():
+                raise VoiceSessionCompleted()
             if any(
                 r.session_id == session_id and r.status in ACTIVE_STATUSES
                 for r in self._records.values()

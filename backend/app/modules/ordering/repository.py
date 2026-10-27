@@ -33,6 +33,11 @@ class OrderingRepository:
             ))
         return self.states[session_id]
 
+    def is_completed(self, session_id: str) -> bool:
+        with self.lock:
+            state = self.states.get(session_id)
+            return state.completed if state is not None else False
+
     def replay(self, session_id: str, key: str) -> Replay | None:
         return self.replays.get((session_id, key))
 

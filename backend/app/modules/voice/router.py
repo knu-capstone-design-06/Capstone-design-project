@@ -35,7 +35,7 @@ class VoiceRoute(APIRoute):
 
 
 router = APIRouter(prefix="/api/v1/sessions", tags=["voice"], route_class=VoiceRoute)
-ERRORS = {status: {"model": VoiceErrorResponse} for status in (404, 409, 422)}
+ERRORS = {status: {"model": VoiceErrorResponse} for status in (404, 409, 410, 422)}
 
 
 def get_voice_service(request: Request) -> VoiceService:

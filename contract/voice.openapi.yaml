@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Voice API
-  version: 0.3.0
+  version: 0.3.1
   description: |
     음성 요청을 backend로 전달하는 API 명세입니다. (상태: 팀 검토 전 제안)
     근거 문서: docs/Voice-MCP-Implementation.md
@@ -50,9 +50,14 @@ paths:
         해석에는 판매 중인 상품 목록(product_id·이름·허용 온도)을 함께 넘기고, 목록에 없는 상품·온도는 실패로 처리합니다.
         - 한 세션에서 처리 중인 음성 요청은 1개만 허용합니다. 처리 중에 새 요청이 오면 409입니다.
         - 같은 `Idempotency-Key`로 재시도하면 새로 접수하지 않고 처음 접수 결과를 반환합니다.
+        - 주문 완료 뒤 새 키의 요청은 410 session_expired입니다. 보관 중인 동일 키·동일 본문은 완료 뒤에도 기존 202를 재생하고,
+          동일 키·다른 본문은 409 idempotency_key_reused입니다. 완료 검사는 재전송 검사 뒤, 처리 중 요청 검사 앞에서 합니다.
+        - 완료 직전에 접수된 요청의 해석은 끝까지 진행하고, 기록이 남아 있으면 아래 GET으로 결과를 조회할 수 있습니다.
+          해석 결과 자체가 완료된 Cart·주문을 변경하지는 않습니다.
         - 외부 AI 장애·판매 메뉴 미연결은 접수(202) 뒤 상태 조회의 failed(`ai_unavailable`)로 알립니다. 접수 단계에서 503을 돌려주지 않습니다.
-        - 요청 기록과 `Idempotency-Key`는 접수 후 1시간(제안값) 보관합니다. 지난 요청은 조회하면 404이고, 같은 키로 보내면 새 요청으로 접수합니다.
-          대화 맥락도 마지막 발화 후 1시간이 지나면 지웁니다.
+        - 요청 기록과 `Idempotency-Key`는 접수 후 1시간(제안값)이 지나면 다음 음성 접수 시 정리합니다.
+          정리된 요청은 조회하면 404이며, 완료 세션에서 정리된 키는 새 요청으로 보아 410입니다.
+          유휴 대화 맥락은 마지막으로 기록된 교환 후 1시간이 지나면 다음 음성 접수 시 지웁니다.
       operationId: createVoiceRequest
       parameters:
         - $ref: "#/components/parameters/SessionId"
@@ -105,6 +110,12 @@ paths:
                   value: { code: request_in_progress, detail: 이전 음성 요청을 처리하고 있습니다. }
                 key_reused:
                   value: { code: idempotency_key_reused, detail: 같은 키로 다른 요청을 보냈습니다. }
+        "410":
+          description: 주문을 완료한 세션의 새 음성 요청
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VoiceErrorResponse" }
+              example: { code: session_expired, detail: 새 이용 세션을 시작해 주세요. }
         "422":
           description: 요청 형식 오류 (빈 텍스트, 범위 밖 신뢰도 등)
           content:
@@ -117,6 +128,8 @@ paths:
       description: |
         알림 채널을 쓰지 못할 때(연결 끊김, 개발 중 확인)의 대안입니다. 1초 이상 간격으로 조회합니다.
         장바구니 내용은 장바구니 조회 API로 다시 확인합니다.
+        주문 완료 전에 접수된 요청은 완료 뒤에도 기록이 남아 있는 동안 조회할 수 있습니다.
+        주문 완료가 음성 요청의 보관 기간을 연장하지는 않습니다.
       operationId: getVoiceRequest
       parameters:
         - $ref: "#/components/parameters/SessionId"
@@ -353,6 +366,7 @@ components:
           enum:
             - invalid_request
             - session_not_found
+            - session_expired
             - voice_request_not_found
             - request_in_progress
             - idempotency_key_reused

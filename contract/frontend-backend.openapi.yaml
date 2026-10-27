@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Frontend ↔ Backend API
-  version: 0.4.0
+  version: 0.4.1
   x-order-api-status: draft
   description: |
     React 키오스크(frontend)와 FastAPI backend 사이의 API 명세입니다.
@@ -64,7 +64,9 @@ paths:
         Cart 조회 실패 후 재연결도 새 세션을 요청하며 기존 세션을 재사용하거나 자동 종료하지 않습니다.
         첫 시연에서는 한 세션에 모의 주문 한 건만 만들고 새 주문은 새 세션에서 시작합니다.
         주문 완료 뒤 Cart 조회·새 변경은 410 session_expired이며, 이미 성공한 동일 키·동일 요청의 재전송은 원래 성공 응답을 반환합니다.
-        주문 완료 뒤 특징·음성 요청, 세션 만료·복원·접근 및 인증 정책은 별도 합의가 필요합니다.
+        주문 완료 뒤 새 특징 전송과 새 음성 요청 접수는 410 session_expired로 거절합니다.
+        기존 음성 요청의 결과 조회와 보관 중인 동일 키·동일 요청의 접수 응답 재전송은 허용합니다.
+        세션의 시간 만료·복원·접근 및 인증 정책은 공개 배포 전 별도 합의가 필요합니다.
       responses:
         "201":
           description: 생성됨
@@ -83,6 +85,9 @@ paths:
         frontend가 1~3초 구간마다 터치 통계와 비전 특징을 보냅니다.
         backend는 ai-engine으로 불편 상태를 판단하고, 지원 방식을 결정해 돌려줍니다.
         ai-engine 호출이 실패하면 ai_available=false, states=null, model_version=null, preset=none으로 응답합니다.
+        주문 완료 세션의 새 요청은 ai-engine 호출 전에 410 session_expired로 거절합니다.
+        처리 중 주문이 완료되면 늦게 도착한 AI 결과도 410으로 버립니다.
+        프론트는 주문 완료 뒤 주기 전송을 멈추고 이미 보낸 요청의 늦은 결과를 화면에 적용하지 않습니다.
       operationId: sendFeatureWindow
       x-frontend-status: client-only
       x-backend-status: implemented
@@ -123,6 +128,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
               example: { detail: session not found }
+        "410":
+          description: 주문을 완료한 세션의 새 특징 전송 또는 처리 중 완료된 세션
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example: { detail: session_expired }
         "422":
           description: 요청 형식 오류
 
