@@ -21,7 +21,7 @@
 | 사건 | `events.py` | 관측값 줄을 사건으로 묶음(8종, 아래 '상황 층'). 고개를 한 번 돌린 것은 사건 하나. 창 길이 · 횟수 · 각도 · 품질 하한은 모두 `PilotParams`(기본값 없음, `[파일럿]`) |
 | 상황 | `situation.py` | 상황 태그 규칙 3개 구현, 값은 `[파일럿]`. 창마다 한 줄(근거 사건 · 품질 · 확신 정보 · 대안)을 내고 검사 규칙으로 확인함. 재생 · 실시간 실행기가 창마다 부름(`run.py` · 엔드포인트는 부르지 않음) |
 | 판단 | `judgment/rule_table_v0.py` · `judgment/jev_stub.py` | 장면 3-1 · 3-2 · 4-1 · 4-2의 규칙표 v0: 창마다 지원 하나 · 출력 형태 · 전이를 냄. Jev 질문은 만들어 기록만 함(그림자 모드, 아래 '판단 층 규칙표 v0') |
-| 전달 | `contract_view.py` | 창 결과를 기존 계약 형식(`AnalyzeResponse` · `SupportDecision`)과 명세에 없는 칸을 담은 `extension`으로 바꿈. 다른 서비스로 보내는 길은 아직 없음(`contract/`에서 정함) |
+| 전달 | `contract_view.py` | 창 결과의 `support`는 `SupportDecision` 형식을 유지하고, 관측 가능 여부·모델 버전·상황·결정 정보는 `extension`에 담음. 불편 상태 점수가 없어 `AnalyzeResponse`는 만들지 않음. 다른 서비스로 보내는 길은 아직 없음(`contract/`에서 정함) |
 | 출력 | `render.py` · `run.py` | 점 · 선을 그린 화면 · 모아 보기 · 그래프 · 처리 시간 통계 / 파일 · 카메라 실행, 결과 폴더 저장, `--show` 창, `--replot` |
 | 출력 | `chain.py` · `replay.py` · `live.py` | 프레임에서 창까지 잇는 공용 파이프라인, 녹화 재생(창마다 JSONL 한 줄), 웹캠 실시간(창마다 콘솔 한 줄, `--no-window`) |
 
@@ -38,8 +38,8 @@
 |---|---|
 | 뼈대 | 병합됨(PR #32 관측·측정, PR #35 상황 층) |
 | 상황 규칙 | 상황 태그 3개의 규칙 · 사건 8종 · 출력 형식을 구현했습니다(PR #35, 2026-10-12 병합; 아래 '상황 층'). 태그 이름과 표시 문구는 아래 '상황 태그 3개 요약' 표와 같고 팀 어휘 확정 전입니다. 기준값 13개는 모두 `[파일럿]`이고 기본값 없이 값 묶음 파일로 넣습니다. 값 묶음이 없으면 `unknown`(이유 `no_value_bundle`)을 냅니다 |
-| 실행 파이프라인 | 재생 · 실시간 실행기, 선택 열, 터치 로그 정렬, 판단 층 규칙표 v0, 계약 형식 변환(2026-10-22, 아래 '실행 파이프라인'). 엔드포인트에는 연결하지 않았습니다 |
-| 서버 연결 | 없음. 창 결과는 기존 계약 형식과 `extension`으로 바꿀 수 있고(아래 '계약과의 관계'), 명세에 칸을 더하는 일은 추가형 제안입니다 |
+| 실행 파이프라인 | 재생 · 실시간 실행기, 선택 열, 터치 로그 정렬, 판단 층 규칙표 v0, `SupportDecision` 형식과 `extension` 출력(2026-10-22, 아래 '실행 파이프라인'). 엔드포인트에는 연결하지 않았습니다 |
+| 서버 연결 | 없음. 창 결과는 `SupportDecision` 형식의 `support`와 재생 파일용 `extension`으로 기록합니다. 불편 상태 점수가 없어 `AnalyzeResponse`는 만들지 않으며, 명세 확장은 추가형 제안입니다(아래 '계약과의 관계') |
 | 처리 시간 | 아래 '처리 시간' 절. 실행 파이프라인 전체는 이 노트북의 논리 CPU 1개에서 한 프레임 p50 42~49 ms입니다 |
 | 학습 | GPU 서버(GPU 1장, 팀 계정 공유)에서 머리 탐지기(Open Images 'Human head', YOLOX-Nano)를 학습했고(2026-10-12 끝), 머리 방향 분류기(AI Hub 「안내 로봇 인터랙션 멀티모달」 머리 크롭, ResNet-18)를 학습했습니다(2026-10-14 끝). 두 모델은 2026-10-22에 ONNX로 바꿨습니다(`models/README.md`). AI Hub 「사람 행동 인식 로봇 자율 행동 데이터」로 다가옴·사용·떠남 구간 모델을 파일럿 학습했습니다. 숫자는 발표 자료에서 다룹니다 |
 | 데이터 규칙 | AI Hub 데이터는 승인받은 사람만 열람합니다(팀원 각자 신청). 원본 프레임은 저장소·발표에 넣지 않고 집계 숫자만 쓰며, 결과물에는 NIA 출처 문구를 붙입니다 |
@@ -71,7 +71,7 @@
 segment_s마다 ─ situation.assess([t − window_s, t]) + 모름 이유
               ─ 구간 (t − segment_s, t]의 터치 횟수 · measurable · 화면 · 고개 방향
               ─ judgment/rule_table_v0.py: 지원 하나 · 형태 · 전이 (Jev 질문은 기록만)
-              ─ contract_view.py: AnalyzeResponse · SupportDecision 모양 + extension
+              ─ contract_view.py: SupportDecision 형식의 support + extension (관측 가능 여부 포함)
 ```
 
 - 창 끝 뒤의 줄은 어느 단계도 읽지 않습니다. 창마다 창 끝 시각 이하의 관측 줄과 터치 기록만으로 계산합니다. 사용자 반응(수락 · 거절) · 세션 신호 · 실시간 지연은 재현하지 않습니다.
@@ -147,10 +147,11 @@ segment_s마다 ─ situation.assess([t − window_s, t]) + 모름 이유
              "active": [], "refused": [], "withdrawn": []},
  "session_reset": false,
  "jev": {"kind": "fit", "answer": null, "shadow": true, "applied": false, "decided_by": "rule_placeholder"},
- "contract": {"analyze_response": {"session_id": "example", "measurable": true, "states": null,
-                                   "model_version": "vision-situation-rules_v1+rule_table_v0-shadow"},
-              "support": {"preset": "none", "requires_confirmation": false, "decided_by": "rule_placeholder"},
-              "extension": {"situation": {"...": "..."}, "decision_meta": {"...": "..."}}},
+ "contract": {"support": {"preset": "none", "requires_confirmation": false, "decided_by": "rule_placeholder"},
+              "extension": {"measurement": {"measurable": true,
+                                            "basis": "A tap or back in the segment, or a face seen in the segment (team placeholder)."},
+                            "model_version": "vision-situation-rules_v1+rule_table_v0-shadow",
+                            "situation": {"...": "..."}, "decision_meta": {"...": "..."}}},
  "ms_window": 0.7}
 ```
 
@@ -191,7 +192,9 @@ JP §0-2 · §0-3과 장면 표, tree 표 3-가 · 3-나 · §4에서 장면 4�
 ### 계약과의 관계 (추가형 제안, 명세는 그대로)
 
 - `contract/backend-ai.openapi.yaml`(0.2.0)과 `contract/frontend-backend.openapi.yaml`은 바꾸지 않았습니다.
-- 창 결과는 기존 형식으로 바꿀 수 있습니다: `analyze_response` = `AnalyzeResponse`(`session_id` · `measurable` · `states` · `model_version`), `support` = `SupportDecision`(`preset` · `requires_confirmation` · `decided_by`). `states`는 불편 상태 모델이 이 파이프라인에 없어 `null`이고, `decided_by`는 그림자 모드라 늘 `rule_placeholder`입니다. 지원과 `UIPreset`의 대응은 JP §2-5 표를 따랐습니다(알림 = `step_guide`, 큰 버튼 묻기 = `large_button` · 확인 필요, 강조 · 기다림 = `none`).
+- 불편 상태 모델이 이 파이프라인에 없어 상태 점수를 만들지 않습니다. 백엔드 `AnalyzeResponse`는 `measurable=true`일 때 비어 있지 않은 `states`를 요구하므로 `analyze_response` 키를 출력에서 뺐습니다. `measurable=false` · `states=null`은 백엔드 모델에서 유효하지만, 센서 관측이 있는 창도 이 응답으로 표시하지 않습니다.
+- `support`는 기존 `SupportDecision` 형식(`preset` · `requires_confirmation` · `decided_by`)을 유지합니다. `decided_by`는 그림자 모드라 늘 `rule_placeholder`입니다. 지원과 `UIPreset`의 대응은 JP §2-5 표를 따랐습니다(알림 = `step_guide`, 큰 버튼 묻기 = `large_button` · 확인 필요, 강조 · 기다림 = `none`).
+- 계약 변환 출력에서 센서 관측 가능 여부는 `extension.measurement`의 `measurable`과 `basis`에만 담고, 파이프라인 버전은 `extension.model_version`에 둡니다. `basis`는 팀 자리표시자와 같은 기준인 ‘구간에 누름이나 되돌아감이 있거나 얼굴이 한 번이라도 보임’을 설명합니다. 창 기록 자체의 `measurable`은 내부 판단용으로 유지하며, 불편 상태 점수 산출 여부를 뜻하지 않습니다. 센서 관측 가능 여부와 상태 점수 산출 여부를 계약에서 분리하는 안은 다음 팀 회의에 추가형 변경으로 제안할 예정입니다.
 - 명세에 없는 칸(상황 태그 · 표시 문구 · 근거 사건 ID · 모름 이유 · 대안 · 품질, 결정의 지원 · 형태 · 전이 · 범위 · 정책 · Jev 종류, 실행 칸 `steps_left` · `target_id` · `message_id` · `session_signal`)은 `extension`에 담았습니다. 실행 칸은 JP §2-5의 `decision_meta`를 따른 `[설계 제안]`입니다: 3-1 알림은 `cart_progress` · `steps_left_notice`(지연 책임 안내는 `delay_responsibility_notice`), 4-2 강조는 옵션 창이 열린 메뉴 화면이면 `cart-add`, 장바구니 화면이면 `cart:*:decrease`(줄마다 다른 '−' 버튼 ID의 패턴), 그 밖은 비움(자주 찾는 메뉴 줄 · 검색은 화면에 아직 없음)이고, 문구 ID는 문구가 정해지기 전이라 비웁니다. 이 칸을 응답의 선택 칸으로 더하는 것은 추가형 제안이고, 화면이 실제로 읽게 하려면 형식과 뜻을 팀이 정해야 합니다(2026-10-14 회의 안건 V04 · 6). `extension`은 재생 파일의 출력이지 기존 API의 응답이 아닙니다.
 - 요청 쪽 `TouchFeatures`는 `tap_count` · `miss_tap_count` · `back_count`만 채울 수 있습니다. `repeat_tap_count` · `dwell_ms`는 기준이 정해지지 않아 `null`이라, 지금 창 결과로 `FeatureWindowRequest`를 완전히 만들 수는 없습니다.
 
@@ -446,7 +449,7 @@ out, events = assess(rows, t_end, params, landmarker_num_faces=1)  # 창 = [t_en
 - 추론까지: 테스트 안에서 만든 빈 화면 프레임으로 MediaPipe 모델을 실제로 돌려 CSV 열 구성, '못 봄' 상태, 처리 시간 기록을 확인합니다(모델 파일 필요).
 - 그 밖: 연속 구간 계산, 고개 각도 분해, 실측 초당 장수 공식.
 - 녹화 클립의 시각 파일(`<영상>.times.csv`): 완전한 파일만 받아들이고, 번호가 빠지거나 시각이 되돌아가면 오류로 멈추는지 봅니다(3개). 눈 사이 거리가 0인 기준 프레임이면 비율이 빈칸이 되는지도 봅니다.
-- 실행 파이프라인(`tests/test_vision_chain.py`, 55개; 환경 변수가 없으면 54개 실행): 값과 출처(기본값 · 범위 · 값 묶음 파일), H1 후처리(letterbox · 격자 · 디코딩 · NMS, 점수 거르기 순서가 결과를 바꾸지 않음, ONNX 대신 가짜 세션으로 전체 호출), P1 입력(정사각 크롭 · 회색 바깥 · RGB · 정규화), 선택 열(주 사용자 · 동행자 · 뒤 사람 · 어깨 · 입 움직임 기준선), 터치 로그(시계 파일 · 시작 오프셋 · 누름 · 버튼 밖 · 빗나감 뒤 바로 고침 · 되돌아감 · 관측 구간 · 세션 · 1,000개 잘림 · 옵션 창 상태), 규칙표 v0(장면 4개의 여는 조건 · 고개 방향 게이트 · 미룸의 전제 · 순서 · 교체 · 기다림의 신호와 재진입 · 유지 결정의 내용 · 실행 칸 · 무응답 · 거절 · 범위, 규칙표에 숫자가 없음), 창 판단(`WindowJudge`: 고른 뒤 멈춤 · 얼굴 없는 몸 · 세션 초기화 · 새 세션은 그 세션의 관측 줄만 읽음 · 취소되거나 저장되지 않은 '담기' 누름은 지원을 거두지 않음), 모름 이유(열 결측 · 센서 실패 · 동점 · 근거 부족, 모든 `unknown` 창에 이유가 있음), 창 기록이 전체 기록과 같은 결과를 내는지, 가짜 추론 결과로 돌린 재생(두리번 태그가 나오고 4-2 강조가 열리는지, 계약 형식 검사: `UIPreset` · `decided_by` 목록과 팀 pydantic `AnalyzeResponse`), 창 없는 실시간(가짜 카메라), 그린 영상으로 돌린 실제 모델 재생(창 1초 · 2초 · 남은 0.9초, 머리 상자 0: 도형이라 H1 → P1 경로는 안 돎)을 봅니다. 사람 머리 사진으로 H1 → P1을 확인하는 테스트는 환경 변수 `VISION_TEST_HEAD_IMAGE`에 사진 경로를 줄 때만 돌고, 사진은 저장소에 두지도 보여 주지도 않습니다. 숫자는 합성 입력용이고 기준값 제안이 아닙니다. ONNX 파일이나 MediaPipe가 없으면 그 테스트만 건너뜁니다.
+- 실행 파이프라인(`tests/test_vision_chain.py`, 56개; 필요한 패키지·파일에 따라 일부 건너뜀): 값과 출처(기본값 · 범위 · 값 묶음 파일), H1 후처리(letterbox · 격자 · 디코딩 · NMS, 점수 거르기 순서가 결과를 바꾸지 않음, ONNX 대신 가짜 세션으로 전체 호출), P1 입력(정사각 크롭 · 회색 바깥 · RGB · 정규화), 선택 열(주 사용자 · 동행자 · 뒤 사람 · 어깨 · 입 움직임 기준선), 터치 로그(시계 파일 · 시작 오프셋 · 누름 · 버튼 밖 · 빗나감 뒤 바로 고침 · 되돌아감 · 관측 구간 · 세션 · 1,000개 잘림 · 옵션 창 상태), 규칙표 v0(장면 4개의 여는 조건 · 고개 방향 게이트 · 미룸의 전제 · 순서 · 교체 · 기다림의 신호와 재진입 · 유지 결정의 내용 · 실행 칸 · 무응답 · 거절 · 범위, 규칙표에 숫자가 없음), 창 판단(`WindowJudge`: 고른 뒤 멈춤 · 얼굴 없는 몸 · 세션 초기화 · 새 세션은 그 세션의 관측 줄만 읽음 · 취소되거나 저장되지 않은 '담기' 누름은 지원을 거두지 않음), 모름 이유(열 결측 · 센서 실패 · 동점 · 근거 부족, 모든 `unknown` 창에 이유가 있음), 창 기록이 전체 기록과 같은 결과를 내는지, 가짜 추론 결과로 돌린 재생(두리번 태그가 나오고 4-2 강조가 열리는지, 출력 검사: `SupportDecision` 형식과 `extension`의 관측 가능 여부·모델 버전, `analyze_response` 제외), 창 없는 실시간(가짜 카메라), 그린 영상으로 돌린 실제 모델 재생(창 1초 · 2초 · 남은 0.9초, 머리 상자 0: 도형이라 H1 → P1 경로는 안 돎)을 봅니다. 사람 머리 사진으로 H1 → P1을 확인하는 테스트는 환경 변수 `VISION_TEST_HEAD_IMAGE`에 사진 경로를 줄 때만 돌고, 사진은 저장소에 두지도 보여 주지도 않습니다. 숫자는 합성 입력용이고 기준값 제안이 아닙니다. ONNX 파일이나 MediaPipe가 없으면 그 테스트만 건너뜁니다. 별도 교차 검사(`ContractViewTests`)는 백엔드 파일을 경로로 불러와 `measurable=true` · `states=null`의 거부와 `measurable=false` · `states=null`의 허용을 확인합니다. 이 검사는 GPU·ONNX·OpenCV 없이 돌며, 백엔드 파일이나 pydantic v2 등 import에 필요한 항목이 없으면 이유를 남기고 건너뜁니다.
 - 사진 · 사람이 나온 영상 · `runs/`는 쓰지 않습니다(재생 시험의 영상은 테스트가 도형을 그려 만듦). 필요한 패키지나 모델 파일이 없으면 그 테스트만 건너뛰므로, 서버 패키지만 깔린 환경의 `python -m unittest discover -s tests`에는 영향이 없습니다.
 
 ## V 모델 추적표 (실행 파이프라인, 2026-10-22)
@@ -461,7 +464,7 @@ out, events = assess(rows, t_end, params, landmarker_num_faces=1)  # 창 = [t_en
 | V4 | 터치 로그를 영상 시간에 맞춰 센다 | `touch.py` | `TouchTests` | `windows.jsonl`의 `touch` · `screen`, `meta.json`의 `touch.anchor` |
 | V5 | 창마다 상황 태그 · 근거 사건 ID · 모름 이유 · 대안 | `chain.py`(`WindowJudge`, `unknown_reasons`), `situation.py` | `UnknownReasonTests`, `HistoryTests`, `ReplayWithFakePerceptionTests` | `windows.jsonl`의 `situation` |
 | V6 | 판단 층 규칙표 v0(장면 4개)와 Jev 그림자 기록 | `judgment/` | `RuleTableTests`, `WindowJudgeTests` | `windows.jsonl`의 `decision` · `session` · `jev` |
-| V7 | 기존 계약 형식으로 바꾸고, 없는 칸은 `extension`에 | `contract_view.py` | `test_contract_view_fits_the_existing_contract`(`UIPreset` · `decided_by` 목록, 팀 pydantic `AnalyzeResponse`) | `windows.jsonl`의 `contract` |
+| V7 | `support` 형식 유지, 관측 가능 여부는 `extension`에, `AnalyzeResponse` 제외 | `contract_view.py` | `test_contract_view_fits_the_existing_contract`(`support`·확장 데이터 검사), `test_backend_analyze_response_requires_state_scores`(백엔드 검증 조건) | `windows.jsonl`의 `contract` |
 | V8 | 녹화 재생과 웹캠 실시간 | `replay.py`, `live.py` | `ReplaySmokeTests`(그린 영상 + 실제 모델; 남은 구간 창, 머리 상자 0), `LiveTests`(창 없음, 가짜 카메라) | `replay`의 마지막 콘솔 줄, `live`의 창마다 한 줄 |
 | V9 | 재료가 빠지면 모름으로 | 모든 층 | `test_without_touch_log_or_values_the_tags_stay_unknown_with_reasons`, `test_missing_sources_leave_their_columns_missing` | `unknown_reason`의 코드 |
 | V10 | 처리 시간을 잰다 | `replay.py`(`meta.json`의 `timing_ms`) | 같은 조건 3번(위 '처리 시간') | '처리 시간'의 표 |
