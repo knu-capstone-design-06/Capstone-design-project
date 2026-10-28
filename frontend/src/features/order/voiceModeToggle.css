@@ -1,6 +1,7 @@
 .voice-mode-control { margin-bottom: 28px; }
 .voice-mode-toggle { width: 100%; display: flex; align-items: center; gap: 18px; padding: 20px 24px; border: 2px solid #b9c3bd; border-radius: 18px; background: #fffefb; color: #45554d; text-align: left; transition: background .2s, border-color .2s, box-shadow .2s; }
 .voice-mode-toggle:hover { background: #f0f3ef; border-color: #7e9185; }
+.voice-mode-toggle:disabled { cursor: not-allowed; opacity: .7; }
 .voice-mode-icon { display: grid; place-items: center; flex-shrink: 0; width: 52px; height: 52px; border-radius: 16px; background: #e9ede8; }
 .voice-mode-icon svg { width: 28px; height: 28px; }
 .voice-mode-mute { stroke-width: 2.4; }
@@ -17,9 +18,17 @@
 .voice-mode-control[data-enabled=true] .voice-mode-switch { justify-content: flex-start; background: #21683f; border-color: #21683f; color: #fff; }
 .voice-mode-control[data-enabled=true] .voice-mode-knob { transform: translateX(52px); }
 .voice-mode-preview { margin: 9px 4px 0; font-size: .75em; line-height: 1.6; color: #45554d; }
+.voice-mode-transcript { margin: 12px 4px 0; padding: 12px 16px; border: 1px solid #b9c3bd; border-radius: 12px; background: #fffefb; line-height: 1.6; overflow-wrap: anywhere; }
+.voice-mode-transcript span { display: block; color: #45554d; font-size: .8em; }
+.voice-mode-transcript strong { display: block; font-weight: 700; }
+.voice-mode-feedback { margin: 12px 4px 0; padding: 12px 16px; border-radius: 12px; background: #eaf5ed; color: #174d30; line-height: 1.6; overflow-wrap: anywhere; }
+.voice-mode-listen { margin: 12px 4px 0; padding: 12px 20px; min-height: 48px; border: 2px solid #267548; border-radius: 12px; background: #fffefb; color: #174d30; font: inherit; font-weight: 700; }
+.voice-mode-listen:hover { background: #eaf5ed; }
 .large-text .voice-mode-copy strong { font-size: 23px; }
 .large-text .voice-mode-status, .large-text .voice-mode-preview { font-size: 18px; }
+.large-text .voice-mode-transcript, .large-text .voice-mode-feedback, .large-text .voice-mode-listen { font-size: 20px; }
 .large-button .voice-mode-toggle { padding: 24px; min-height: 104px; }
+.large-button .voice-mode-listen { min-height: 64px; padding: 16px 24px; }
 @keyframes voice-mode-pulse { 0% { box-shadow: 0 0 0 0 #26754850; } 75%, 100% { box-shadow: 0 0 0 7px #26754800; } }
 @media (max-width: 520px) {
   .voice-mode-toggle, .large-button .voice-mode-toggle { gap: 12px; padding: 16px; flex-wrap: wrap; }

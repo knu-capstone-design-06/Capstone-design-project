@@ -9,6 +9,7 @@ import { createSampleOrderApi } from './sampleOrderApi.ts';
 import { useTouchLog } from './useTouchLog.ts';
 import { TouchLogPanel } from './TouchLogPanel.tsx';
 import { VoiceModeToggle } from './VoiceModeToggle.tsx';
+import { createVoiceApi, VoiceController } from '../voice/index.ts';
 import './order.css';
 
 const supportLabels: Record<keyof Settings, string> = { largeText: '큰 글씨', largeButton: '큰 버튼', simpleScreen: '간편 화면', stepGuide: '단계별 안내', lowScreen: '낮은 화면' };
@@ -19,6 +20,7 @@ export function OrderPage() {
     if (import.meta.env.DEV) console.warn('주문 응답 검증 실패 필드:', fields);
   }));
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
+  const [voiceController] = useState(() => new VoiceController({ api: createVoiceApi() }));
   const [settings, setSettings] = useState(() => {
     try { return readSettings(localStorage.getItem(settingsStorageKey) ?? localStorage.getItem('kiosk-sample-order-v1')); }
     catch { return { ...initialSettings }; }
@@ -37,6 +39,14 @@ export function OrderPage() {
   const opener = useRef<HTMLButtonElement | null>(null);
   const touchLog = useTouchLog(screen, category === 'all' ? '전체' : categoryLabels[category], selected?.product_id ?? null, settings, state.session?.session_id ?? null);
   useEffect(() => { void controller.initialize(); }, [controller]);
+  useEffect(() => {
+    voiceController.setEnabled(false);
+    voiceController.setContext({ sessionId: state.session?.session_id ?? '', screenId: 'menu_list' });
+  }, [voiceController, state.session?.session_id]);
+  useEffect(() => {
+    if (screen !== 'menu' || (state.status !== 'ready' && state.status !== 'saving') || state.order || sampleMode) voiceController.setEnabled(false);
+  }, [voiceController, screen, state.status, state.order]);
+  useEffect(() => () => voiceController.dispose(), [voiceController]);
   useEffect(() => { try { localStorage.setItem(settingsStorageKey, JSON.stringify(settings)); } catch { setStorageWarning(true); } }, [settings]);
   useEffect(() => { heading.current?.focus(); }, [screen]);
   useEffect(() => { if (selected) dialog.current?.showModal(); else if (dialog.current?.open) dialog.current.close(); }, [selected]);
@@ -71,9 +81,14 @@ export function OrderPage() {
     if (await controller.retry()) closeOptions();
   }
   async function startNewOrder() {
+    voiceController.setEnabled(false);
     closeOptions();
     setScreen('menu'); setOrderNumber(''); setCategory('all');
     await controller.startNewOrder();
+  }
+  function openReview() {
+    voiceController.setEnabled(false);
+    setScreen('review');
   }
   async function restartAfterUncertain() {
     if (!controller.abandonPending()) return;
@@ -108,7 +123,7 @@ export function OrderPage() {
     {supportOpen && <section id="support-panel" className="support-panel" aria-label="화면 도움 설정"><div><h2>편한 화면으로 주문해 주세요</h2><p>설정을 바꿔도 담은 메뉴는 그대로예요.</p></div><div className="support-options">{(Object.keys(supportLabels) as (keyof Settings)[]).map(key => <button data-log-target={`support:${key}`} key={key} aria-pressed={settings[key]} onClick={() => setSettings(current => ({ ...current, [key]: !current[key] }))}>{settings[key] ? '✓ ' : ''}{supportLabels[key]}</button>)}<button data-log-target="support:combinedEnlargement" aria-pressed={combinedEnlargement} onClick={toggleCombinedEnlargement}>{combinedEnlargement ? '✓ ' : ''}큰 글씨 + 큰 버튼 (테스트)</button><button data-log-target="support-reset" onClick={() => setSettings({ ...initialSettings })}>기본 화면</button></div></section>}
     <main>
       {!selected && feedback}
-      {screen !== 'complete' && <VoiceModeToggle key={state.session?.session_id ?? 'connecting'} />}
+      {screen === 'menu' && <VoiceModeToggle controller={voiceController} ready={(state.status === 'ready' || state.status === 'saving') && state.session !== null && state.order === null} sampleMode={sampleMode} />}
       <div className="cart-notice" role="status" aria-live="polite" hidden={!state.notice || screen !== 'menu'}>{state.notice}<button data-log-target="notice-close" aria-label="안내 닫기" onClick={() => controller.clearNotice()}>✕</button></div>
       <nav className="steps" aria-label="주문 단계">{['메뉴 선택', '주문 확인', '주문 완료'].map((label, index) => <span key={label} aria-current={index === ['menu', 'review', 'complete'].indexOf(screen) ? 'step' : undefined}><b>0{index + 1}</b> {label}</span>)}</nav>
       {storageWarning && <p role="alert">화면 설정을 기억하지 못했어요. 새로고침하면 기본 화면으로 돌아갈 수 있어요.</p>}
@@ -126,7 +141,7 @@ export function OrderPage() {
     </main><footer className="footer"><span>온기 카페</span><span>천천히 골라도 괜찮아요.</span></footer>
     <section className="order-actions" aria-label="주문 진행"><div className="order-actions-inner">
       {screen === 'complete' ? <div className="order-actions-summary"><p>실제 결제 없음 · 샘플 주문이에요.</p>{screenHeightButton}</div> : <div><div className="order-actions-summary"><div className="total"><span>총 주문 금액 · {count}개</span><strong>{money(sum)}</strong></div>{screenHeightButton}</div><p>{screen === 'menu' ? '담은 메뉴를 다음 화면에서 확인할 수 있어요.' : '실제 결제 없이 샘플 주문을 완료해요.'}</p></div>}
-      <button data-log-target={screen === 'complete' ? 'new-order' : screen === 'menu' ? 'review-open' : 'simulate-payment'} className="primary order-confirm" disabled={screen === 'complete' ? busy : !count || writeDisabled} onClick={() => screen === 'complete' ? void startNewOrder() : screen === 'menu' ? setScreen('review') : void controller.checkout()}>{screen === 'complete' ? '새 주문 시작' : screen === 'menu' ? '주문 확인' : '샘플 주문 완료'} <span aria-hidden="true">→</span></button>
+      <button data-log-target={screen === 'complete' ? 'new-order' : screen === 'menu' ? 'review-open' : 'simulate-payment'} className="primary order-confirm" disabled={screen === 'complete' ? busy : !count || writeDisabled} onClick={() => screen === 'complete' ? void startNewOrder() : screen === 'menu' ? openReview() : void controller.checkout()}>{screen === 'complete' ? '새 주문 시작' : screen === 'menu' ? '주문 확인' : '샘플 주문 완료'} <span aria-hidden="true">→</span></button>
     </div></section>
     <dialog ref={dialog} className="options-dialog" onCancel={event => { event.preventDefault(); closeOptions(); }} onClick={event => { if (event.target === event.currentTarget) closeOptions(); }} aria-labelledby="option-title">
       {selected && <><div className="dialog-heading"><h2 id="option-title">{selected.name}</h2><button data-log-target="options-close" aria-label="옵션 창 닫기" onClick={closeOptions}>✕</button></div><p>{selected.temperatures.length ? '원하는 옵션을 골라 주세요.' : '원하는 수량을 골라 주세요.'}</p>{feedback}
