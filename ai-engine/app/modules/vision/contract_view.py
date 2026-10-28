@@ -1,17 +1,18 @@
-"""One window record -> the existing contract shapes plus an `extension` dict (a proposal, not a contract change).
+"""One window record -> SupportDecision shape plus an `extension` dict (a proposal, not a contract change).
 
 contract/backend-ai.openapi.yaml 0.2.0 (AnalyzeResponse) and contract/frontend-backend.openapi.yaml
 (FeatureWindowResponse.support = SupportDecision) stay as they are (AGENTS.md section 2). What they cannot carry yet -
 the situation tag, its evidence, why it is unknown, the alternatives, and the rule table's decision meta - goes into
 `extension`, which the vision README proposes as an additive optional field (JP 2-5 `decision_meta`; the 2026-10-14
-agenda V04 '상황 태그를 실을 명세 칸').
+agenda V04: a contract field for situation tags).
 
-  analyze_response  {session_id, measurable, states, model_version}: measurable as the team placeholder defines it
-                    (app/inference/placeholder.py: a tap or back in the segment, or a face); states = None because
-                    no discomfort-state model exists in this chain
+No AnalyzeResponse is emitted: this chain has no discomfort-state model, while the backend requires nonempty
+states when measurable=true. Sensor measurability and the pipeline version are proposal-only extension data.
   support           {preset, requires_confirmation, decided_by}: UIPreset and the confirmation flag of the rule table's
                     support (JP 2-5 table); decided_by 'rule_placeholder' (shadow mode: Jev never changes the screen)
-  extension         {situation: {...}, decision_meta: {...}}; decision_meta also carries the execution fields of
+  extension         {measurement: {measurable, basis}, model_version, situation: {...}, decision_meta: {...}};
+                    measurement follows the team placeholder (a tap or back in the segment, or a face).
+                    decision_meta also carries the execution fields of
                     JP 2-5 (steps_left, target_id, message_id) and session_signal ({name: hold_timer} on the 3-2 wait)
 """
 from __future__ import annotations
@@ -24,11 +25,12 @@ def to_contract(record: dict, session_id: str) -> dict:
     d = record["decision"]
     sit = record["situation"]
     return {
-        "analyze_response": {"session_id": session_id, "measurable": bool(record["measurable"]), "states": None,
-                             "model_version": MODEL_VERSION},
         "support": {"preset": d["preset"], "requires_confirmation": bool(d["requires_confirmation"]),
                     "decided_by": DECIDED_BY},
         "extension": {
+            "measurement": {"measurable": bool(record["measurable"]),
+                            "basis": "A tap or back in the segment, or a face seen in the segment (team placeholder)."},
+            "model_version": MODEL_VERSION,
             "situation": {"tag": sit["name"], "display_text": sit["display_text"], "evidence_ids": sit["evidence_ids"],
                           "confidence": sit["confidence"], "alternatives": sit["alternatives"],
                           "unknown_reason": sit["unknown_reason"], "quality": sit["quality"], "source": sit["source"]},

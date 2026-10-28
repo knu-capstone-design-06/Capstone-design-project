@@ -1083,6 +1083,7 @@ class ReplayWithFakePerceptionTests(unittest.TestCase):
         self.assertTrue(all(r["situation"]["unknown_reason"] == [{"code": "no_value_bundle"}] for r in recs))
 
     def test_contract_view_fits_the_existing_contract(self):
+        from app.modules.vision.contract_view import MODEL_VERSION
         sched = [fake_inference(y) for y in yaw_schedule()]
         _, recs, _ = self.run_replay(sched)
         with open(CONTRACT_FB, encoding="utf-8") as f:
@@ -1093,23 +1094,56 @@ class ReplayWithFakePerceptionTests(unittest.TestCase):
         decided = {p.strip() for p in decided.split(",")}
         for r in recs:
             c = r["contract"]
-            self.assertEqual(set(c), {"analyze_response", "support", "extension"})
+            self.assertEqual(set(c), {"support", "extension"})
+            self.assertEqual(set(c["support"]), {"preset", "requires_confirmation", "decided_by"})
             self.assertIn(c["support"]["preset"], presets)
             self.assertIn(c["support"]["decided_by"], decided)
             self.assertIsInstance(c["support"]["requires_confirmation"], bool)
-            self.assertEqual(c["analyze_response"]["session_id"], "t1")
+            self.assertIs(c["extension"]["measurement"]["measurable"], r["measurable"])
+            self.assertEqual(c["extension"]["measurement"]["basis"],
+                             "A tap or back in the segment, or a face seen in the segment (team placeholder).")
+            self.assertEqual(c["extension"]["model_version"], MODEL_VERSION)
             self.assertLessEqual({"steps_left", "target_id", "message_id", "session_signal"},   # JP 2-5 execution
                                  set(c["extension"]["decision_meta"]))
-        if HAS_PYDANTIC:
-            from app.modules.analyze.schemas import AnalyzeResponse
-            for r in recs:
-                AnalyzeResponse.model_validate(r["contract"]["analyze_response"])
 
     def test_measurable_follows_the_team_placeholder(self):
         sched = [fake_inference(face=False, body=True) for _ in range(30)]
         _, recs, _ = self.run_replay(sched)
         self.assertTrue(all(r["measurable"] is False for r in recs))      # no tap, no back, no face
+        self.assertTrue(all(r["contract"]["extension"]["measurement"]["measurable"] is False for r in recs))
+        self.assertTrue(all("analyze_response" not in r["contract"] for r in recs))
         self.assertTrue(all(r["decision"]["transition"] == "none" for r in recs))
+
+
+@unittest.skipUnless(HAS_PYDANTIC, "pydantic not installed")
+class ContractViewTests(unittest.TestCase):
+    def test_backend_analyze_response_requires_state_scores(self):
+        # Load the backend file without importing its app package over ai-engine's.
+        repo_root = os.path.dirname(AI_ENGINE_DIR)
+        path = os.path.join(repo_root, "backend", "app", "infrastructure", "external", "ai_schemas.py")
+        if not os.path.isfile(path):
+            self.skipTest("backend ai_schemas.py not available")
+        try:
+            from pydantic import ValidationError, model_validator
+        except ImportError as exc:
+            self.skipTest(f"backend schemas require pydantic v2: {exc}")
+        spec = importlib.util.spec_from_file_location("vision_test_backend_ai_schemas", path)
+        if spec is None or spec.loader is None:
+            self.skipTest("backend schemas cannot be loaded by file path")
+        schemas = importlib.util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(schemas)
+        except ImportError as exc:
+            self.skipTest(f"backend schema imports unavailable in this environment: {exc}")
+        from app.modules.vision.contract_view import MODEL_VERSION
+        # A sensor-measurable window has no state scores in this chain.
+        payload = {"session_id": "t1", "measurable": True, "states": None, "model_version": MODEL_VERSION}
+        with self.assertRaisesRegex(ValidationError, "measurable=true requires nonempty states"):
+            schemas.AnalyzeResponse.model_validate(payload)
+        # This validates as an envelope, but does not represent observed sensor data.
+        response = schemas.AnalyzeResponse.model_validate({**payload, "measurable": False})
+        self.assertFalse(response.measurable)
+        self.assertIsNone(response.states)
 
 
 @unittest.skipUnless(HAS_CV2, SKIP)
