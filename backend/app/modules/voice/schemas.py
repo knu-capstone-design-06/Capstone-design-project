@@ -11,7 +11,7 @@ VoiceStatus = Literal[
 ]
 VoiceAction = Literal["cart_updated", "ui_changed", "confirmation_required"]
 VoiceErrorCode = Literal[
-    "invalid_request", "session_not_found", "voice_request_not_found",
+    "invalid_request", "session_not_found", "session_expired", "voice_request_not_found",
     "request_in_progress", "idempotency_key_reused", "ai_unavailable",
 ]
 

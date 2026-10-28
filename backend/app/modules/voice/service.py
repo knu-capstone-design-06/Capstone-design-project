@@ -62,12 +62,11 @@ class VoiceService:
         if not self._session_exists(session_id):
             raise VoiceSessionNotFound()
         fingerprint = hashlib.sha256(request.model_dump_json().encode()).hexdigest()
-        # Match the order commit's lock so a new voice request cannot slip in
-        # between the completion check and insertion. Existing keys replay first.
-        with self._ordering.lock:
+        # Keep completion stable through insertion; existing keys replay first.
+        with self._ordering.completion_guard(session_id) as completed:
             record, created = self._repository.accept(
                 session_id, key, fingerprint,
-                is_completed=lambda: self._ordering.is_completed(session_id),
+                is_completed=lambda: completed,
             )
         accepted = VoiceRequestAccepted(
             request_id=record.request_id, accepted_at=record.accepted_at

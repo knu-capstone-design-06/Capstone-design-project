@@ -406,7 +406,7 @@ components:
             "session_expired":
               "value":
                 "code": "session_expired"
-                "detail": "이용 세션이 만료되었습니다."
+                "detail": "새 이용 세션을 시작해 주세요."
                 "cart": null
     "OrderConflict":
       "description": "상태 충돌 응답의 제안입니다. 버전 충돌은 최신 Cart를 표시하고 사용자 재조작을 기다립니다. 주문 실패 시 주문 생성·Cart 비우기를 하지 않는 방향입니다. price_changed는 후순위 동적 가격 변경 예시입니다. 처리 중 중복에 409와 Retry-After를 제공하는 방향은 검토 중이며 구체적인 오류 코드는 합의 후 추가합니다."
@@ -454,12 +454,26 @@ components:
               "value":
                 "code": "quantity_limit_exceeded"
                 "detail": "장바구니 항목의 수량 한도를 초과했습니다."
-                "cart": null
+                "cart":
+                  "session_id": "session-1"
+                  "version": 1
+                  "currency": "KRW"
+                  "items": [{"item_id":"item-1","product_id":"americano","name":"아메리카노","temperature":"iced","quantity":20,"unit_price":3500,"line_amount":70000}]
+                  "total_quantity": 20
+                  "total_amount": 70000
+                  "updated_at": "2026-10-07T05:01:00Z"
             "empty_cart":
               "value":
                 "code": "empty_cart"
                 "detail": "빈 장바구니로 주문할 수 없습니다."
-                "cart": null
+                "cart":
+                  "session_id": "session-1"
+                  "version": 0
+                  "currency": "KRW"
+                  "items": []
+                  "total_quantity": 0
+                  "total_amount": 0
+                  "updated_at": "2026-10-07T05:00:00Z"
             "idempotency_key_reused":
               "value":
                 "code": "idempotency_key_reused"

@@ -15,7 +15,7 @@ from app.modules.voice.interpreter import OpenAiVoiceInterpreter, StubVoiceInter
 from app.modules.voice.exceptions import VoiceSessionCompleted
 from app.modules.voice.repository import HISTORY_TURNS, VoiceRepository
 from app.modules.voice.schemas import (
-    MenuItem, VoiceInterpretation, VoiceRequestCreate, VoiceTurn,
+    MenuItem, VoiceErrorResponse, VoiceInterpretation, VoiceRequestCreate, VoiceTurn,
 )
 
 BODY = {
@@ -248,6 +248,11 @@ class VoiceApiTests(unittest.TestCase):
         self.assertEqual(new.json(), {
             "code": "session_expired", "detail": "새 이용 세션을 시작해 주세요.",
         })
+        self.assertEqual(VoiceErrorResponse.model_validate(new.json()).code,
+                         "session_expired")
+        response_schema = self.client.get("/openapi.json").json()["components"]["schemas"]
+        self.assertIn("session_expired",
+                      response_schema["VoiceErrorResponse"]["properties"]["code"]["enum"])
 
     def test_completed_session_returns_410_before_in_progress_for_new_key(self):
         service = self.client.app.state.voice_service
