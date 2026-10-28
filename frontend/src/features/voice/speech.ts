@@ -60,6 +60,7 @@ export function createSpeechCapture(
 ): SpeechCapture {
   const { lang = 'ko-KR', maxAlternatives = 5, silenceMs = 8_000 } = options;
   let recognition: RecognitionLike | null = null;
+  let acceptingResults = false;
   let reason: SpeechEndReason = 'stopped';
   let timer: ReturnType<typeof setTimeout> | null = null;
 
@@ -69,7 +70,7 @@ export function createSpeechCapture(
   }
   function armTimer() {
     clearTimer();
-    timer = setTimeout(() => { reason = 'silence'; recognition?.abort(); }, silenceMs);
+    timer = setTimeout(() => { reason = 'silence'; acceptingResults = false; recognition?.abort(); }, silenceMs);
   }
 
   return {
@@ -78,10 +79,11 @@ export function createSpeechCapture(
       if (recognition) return;
       const current = factory();
       recognition = current;
+      acceptingResults = true;
       reason = 'stopped';
       Object.assign(current, { lang, maxAlternatives, continuous: false, interimResults: true });
       current.onresult = event => {
-        if (recognition !== current) return;
+        if (recognition !== current || !acceptingResults) return;
         armTimer();
         let partial = '';
         for (let index = event.resultIndex; index < event.results.length; index += 1) {
@@ -94,6 +96,7 @@ export function createSpeechCapture(
           })).filter(item => item.text);
           if (!alternatives.length) continue;
           reason = 'final';
+          acceptingResults = false;
           clearTimer();
           handlers.onFinal({ text: alternatives[0].text, alternatives });
           current.stop();
@@ -128,9 +131,9 @@ export function createSpeechCapture(
       const current = recognition;
       if (!current) return;
       clearTimer();
-      recognition = null;
+      acceptingResults = false;
+      reason = 'stopped';
       current.abort();
-      handlers.onEnd?.('stopped');
     },
   };
 }

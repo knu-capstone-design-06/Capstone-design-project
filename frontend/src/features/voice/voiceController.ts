@@ -10,6 +10,8 @@ export type VoiceSnapshot = {
   enabled: boolean;
   phase: VoicePhase;
   partialText: string;
+  /** 마지막으로 Chrome이 확정 인식한 문장. 모드를 끄거나 세션이 바뀌면 지웁니다. */
+  lastTranscript: string;
   lastResult: VoiceRequestStatus | null;
   error: VoiceInputError | null;
 };
@@ -61,6 +63,8 @@ export class VoiceController {
   private state: VoiceSnapshot;
   private listeners = new Set<() => void>();
   private capture: SpeechCapture | null = null;
+  // Chrome의 stop/abort 뒤 onend가 올 때까지 다음 인식 시작을 기다립니다.
+  private pendingListen: boolean | null = null;
   private processing: AbortController | null = null;
   private context = { sessionId: '', screenId: '' };
   // 확인·질문 결과 뒤 대답을 기다리는 중. 마이크가 닫혀도 다음 결과가 나올 때까지 유지합니다.
@@ -75,7 +79,7 @@ export class VoiceController {
     this.pollIntervalMs = options.pollIntervalMs ?? POLL_INTERVAL_MS;
     this.pollTimeoutMs = options.pollTimeoutMs ?? POLL_TIMEOUT_MS;
     this.createKey = options.createKey ?? (() => crypto.randomUUID());
-    this.state = { supported: this.recognition !== null, enabled: false, phase: 'idle', partialText: '', lastResult: null, error: null };
+    this.state = { supported: this.recognition !== null, enabled: false, phase: 'idle', partialText: '', lastTranscript: '', lastResult: null, error: null };
   }
   getSnapshot = () => this.state;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
@@ -86,7 +90,11 @@ export class VoiceController {
 
   /** 세션이 바뀌면 진행 중인 듣기·처리를 버립니다. screen_id는 다음 발화부터 적용됩니다. */
   setContext(context: { sessionId: string; screenId: string }) {
-    if (context.sessionId !== this.context.sessionId) { this.halt(); this.awaitingAnswer = false; }
+    if (context.sessionId !== this.context.sessionId) {
+      this.halt();
+      this.awaitingAnswer = false;
+      this.set({ lastTranscript: '', lastResult: null, error: null });
+    }
     this.context = { ...context };
   }
 
@@ -95,11 +103,11 @@ export class VoiceController {
     if (!enabled) {
       this.halt();
       this.awaitingAnswer = false;
-      this.set({ enabled: false });
+      this.set({ enabled: false, lastTranscript: '', lastResult: null, error: null });
       return true;
     }
     if (!this.recognition) { this.set({ error: 'not_supported' }); return false; }
-    if (!this.state.enabled) this.set({ enabled: true, error: null });
+    if (!this.state.enabled) this.set({ enabled: true, lastTranscript: '', lastResult: null, error: null });
     return this.listen();
   }
 
@@ -114,6 +122,7 @@ export class VoiceController {
     if (this.state.phase === 'listening') return true;
     if (this.state.phase !== 'idle') return false;
     if (!this.context.sessionId.trim()) { this.set({ error: 'no_session' }); return false; }
+    if (this.capture) { this.pendingListen = answering; return true; }
     const capture = createSpeechCapture(this.recognition, {
       onPartial: text => { if (this.capture === capture) this.set({ partialText: text }); },
       onFinal: result => { if (this.capture === capture) this.accept(result, answering); },
@@ -122,6 +131,9 @@ export class VoiceController {
         if (this.capture !== capture) return;
         this.capture = null;
         if (this.state.phase === 'listening') this.set({ phase: 'idle', partialText: '' });
+        const pending = this.pendingListen;
+        this.pendingListen = null;
+        if (pending !== null) this.open(pending);
       },
     }, { silenceMs: this.silenceMs });
     this.capture = capture;
@@ -136,12 +148,11 @@ export class VoiceController {
   }
 
   private halt() {
-    const capture = this.capture;
-    this.capture = null;
-    capture?.abort();
+    this.pendingListen = null;
     this.processing?.abort();
     this.processing = null;
     if (this.state.phase !== 'idle' || this.state.partialText) this.set({ phase: 'idle', partialText: '' });
+    this.capture?.abort();
   }
 
   /** 짧거나 신뢰도가 아주 낮은 인식은 주변 소리로 보고 보내지 않습니다. 대답을 기다릴 때는 한 글자도 받습니다. */
@@ -155,7 +166,7 @@ export class VoiceController {
     if (this.looksLikeNoise(result, answering)) return;
     const controller = new AbortController();
     this.processing = controller;
-    this.set({ phase: 'processing', partialText: result.text });
+    this.set({ phase: 'processing', partialText: result.text, lastTranscript: result.text });
     const { sessionId, screenId } = this.context;
     void this.process(sessionId, { text: result.text, alternatives: result.alternatives, screen_id: screenId }, controller.signal);
   }
@@ -172,6 +183,18 @@ export class VoiceController {
     this.processing = null;
     if (typeof outcome === 'string') {
       this.set({ phase: 'idle', partialText: '', error: outcome });
+      return;
+    }
+    if (outcome.status === 'ignored') {
+      // 주변 대화는 이전 질문과 대답 대기를 덮어쓰지 않습니다. 재청취는 사용자가 시작합니다.
+      this.set({ phase: 'idle', partialText: '', lastTranscript: '', lastResult: this.awaitingAnswer ? this.state.lastResult : null, error: null });
+      this.onResult(outcome);
+      return;
+    }
+    if (outcome.status === 'failed') {
+      // 서버도 실패한 발화를 대화 맥락에 넣지 않으므로 이전 질문과 대답 대기를 유지합니다.
+      this.set({ phase: 'idle', partialText: '', lastResult: this.awaitingAnswer ? this.state.lastResult : outcome, error: 'request_failed' });
+      this.onResult(outcome);
       return;
     }
     // 구독자·onResult가 세션을 바꾸거나 모드를 끄면 그 초기화가 남도록, 알리기 전에 대기 상태를 정합니다.
