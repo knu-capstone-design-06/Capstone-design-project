@@ -62,7 +62,7 @@ MCP 방식에서는 상태 변경이 프론트의 요청에서 시작하지 않�
 - `alternatives`는 Chrome 인식 후보와 신뢰도입니다(`maxAlternatives`). OpenAI 해석 시 맥락으로 함께 씁니다.
 - 상태 조회는 SSE가 준비되기 전이나 연결이 끊겼을 때 음성 기능을 확인하는 용도입니다.
 - 실패하면 `{ code, detail }`을 반환합니다. 예: `request_in_progress`, `ai_unavailable`
-- 프롬프트·지침은 파일로 관리하고, 실험에 쓴 버전을 기록합니다. 현재는 `prompts/interpret_v2.md`입니다.
+- 프롬프트·지침은 파일로 관리하고, 실험에 쓴 버전을 기록합니다. 현재는 `prompts/interpret_v3.md`입니다.
 
 ### 3.2 MCP 서버·도구 (Decision AI + Back-end)
 
