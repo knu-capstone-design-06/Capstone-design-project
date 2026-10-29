@@ -12,6 +12,12 @@ class VoiceSessionNotFound(VoiceError):
     detail = "세션을 찾을 수 없습니다."
 
 
+class VoiceSessionCompleted(VoiceError):
+    status_code = 410
+    code = "session_expired"
+    detail = "새 이용 세션을 시작해 주세요."
+
+
 class VoiceRequestNotFound(VoiceError):
     status_code = 404
     code = "voice_request_not_found"

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.infrastructure.external.ai_client import AiEngineClient, get_ai_engine_client
-from app.modules.sessions.exceptions import SessionNotFound
+from app.modules.sessions.exceptions import SessionCompleted, SessionNotFound
 from app.modules.sessions.schemas import (
     FeatureWindowRequest, FeatureWindowResponse, SessionCreateResponse,
 )
@@ -20,7 +20,8 @@ def create_session(service: SessionService = Depends(get_session_service)):
 
 
 @router.post("/{session_id}/features", response_model=FeatureWindowResponse,
-             responses={404: {"description": "session not found"}})
+             responses={404: {"description": "session not found"},
+                        410: {"description": "session expired"}})
 async def features(
     session_id: str, window: FeatureWindowRequest,
     service: SessionService = Depends(get_session_service),
@@ -30,3 +31,5 @@ async def features(
         return await service.analyze(session_id, window, ai)
     except SessionNotFound:
         raise HTTPException(status_code=404, detail="session not found") from None
+    except SessionCompleted:
+        raise HTTPException(status_code=410, detail="session_expired") from None
