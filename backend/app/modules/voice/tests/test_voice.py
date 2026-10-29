@@ -203,6 +203,16 @@ class VoiceApiTests(unittest.TestCase):
                 self.assertEqual(body["status"], "failed", bad)
                 self.assertEqual(body["tool_calls"], [])
 
+    def test_drink_without_temperature_becomes_temperature_question(self):
+        for reply_text in (None, "담을까요?"):  # completed and proposals alike
+            self.interpreter.result = interpretation(
+                call("add_cart_item", "americano", None, 2), reply_text=reply_text)
+            body = self.status(self.post().json()["request_id"]).json()
+            self.assertEqual(body["status"], "needs_clarification")
+            self.assertEqual(body["tool_calls"], [])
+            self.assertIn("아메리카노", body["reply_text"])
+            self.assertIsNone(body["error"])
+
     def test_ai_unavailable_and_crash_become_failed(self):
         for result in (None, RuntimeError("boom")):
             self.interpreter.result = result
