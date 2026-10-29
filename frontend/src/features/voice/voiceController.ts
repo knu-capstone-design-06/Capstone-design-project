@@ -82,7 +82,7 @@ export class VoiceController {
   private readonly createKey: () => string;
   private readonly silenceMs: number;
   private readonly autoOffSilences: number;
-  // 마이크가 무음으로 연달아 닫힌 횟수. 말을 받거나 손님이 다시 듣기를 누르면 0으로 돌아갑니다.
+  // 마이크가 무음으로 연달아 닫힌 횟수. 말을 받거나 모드를 켜거나 세션이 바뀌면 0으로 돌아갑니다.
   private silentEnds = 0;
   private state: VoiceSnapshot;
   private listeners = new Set<() => void>();
@@ -149,7 +149,6 @@ export class VoiceController {
 
   /** 모드가 켜져 있고 쉬는 중일 때 한 문장을 듣습니다(예: 부르는 쪽의 마이크 버튼). */
   listen(): boolean {
-    this.silentEnds = 0;
     return this.open(this.awaitingAnswer);
   }
 
