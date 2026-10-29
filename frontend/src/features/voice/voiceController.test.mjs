@@ -491,6 +491,18 @@ test('410이어도 session_expired가 아니면 일반 요청 실패로 둔다',
   assert.equal(controller.getSnapshot().error, 'request_failed');
 });
 
+test('마이크가 무음으로 두 번 연달아 닫히면 음성 모드를 저절로 끈다', () => {
+  const { controller } = setup([status('completed')]);
+  controller.setEnabled(true);
+  FakeRecognition.last().fail('no-speech');
+  assert.deepEqual([controller.getSnapshot().enabled, controller.getSnapshot().autoOff], [true, null], '한 번은 그대로 둠');
+  controller.listen();
+  FakeRecognition.last().fail('no-speech');
+  const snapshot = controller.getSnapshot();
+  assert.deepEqual([snapshot.enabled, snapshot.phase, snapshot.autoOff], [false, 'idle', 'silence']);
+  assert.equal(controller.listen(), false, '꺼진 뒤에는 마이크를 열지 않음');
+});
+
 test('음성 API는 같은 출처 경로와 중복 방지 키로 요청하고 오류 형식을 ApiError로 넘긴다', async () => {
   const requests = [];
   const api = createVoiceApi('/backend/', async (url, init) => {
