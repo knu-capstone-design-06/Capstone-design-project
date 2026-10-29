@@ -15,6 +15,12 @@ from app.modules.voice.schemas import (
 logger = logging.getLogger(__name__)
 
 FALLBACK_REPLY = "지금은 음성 주문이 어려워요. 화면을 눌러 주문해 주세요."
+# Answers that accept a proposal but cannot pick an option such as a temperature.
+BARE_YES = {"네", "넵", "예", "응", "어", "그래", "그래요", "좋아요", "맞아요"}
+
+
+def is_bare_yes(text: str) -> bool:
+    return "".join(ch for ch in text if ch.isalnum()) in BARE_YES
 
 
 def menu_from_products(products: Iterable[object]) -> list[MenuItem]:
@@ -113,7 +119,11 @@ class VoiceService:
                 )
                 return
             history = self._repository.history(session_id)
-            result = await self._interpreter.interpret(request, menu, history)
+            if history and history[-1].result.status == "needs_clarification" and is_bare_yes(request.text):
+                # "네" cannot answer "아이스, 따뜻한 것 중 무엇으로?"; ask again instead of guessing.
+                result = history[-1].result
+            else:
+                result = await self._interpreter.interpret(request, menu, history)
             if result is not None:
                 result = ask_for_missing_temperature(result, menu)
             if result is not None and not matches_menu(result, menu):
