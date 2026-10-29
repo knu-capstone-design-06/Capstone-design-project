@@ -384,7 +384,7 @@ class PromptVersionTests(unittest.TestCase):
     def test_current_prompt_explains_every_status(self):
         from app.modules.voice import interpreter
 
-        self.assertEqual(interpreter.PROMPT_VERSION, "interpret_v2")
+        self.assertEqual(interpreter.PROMPT_VERSION, "interpret_v3")
         prompt = interpreter._PROMPT_PATH.read_text(encoding="utf-8")
         for status in ("completed", "needs_confirmation", "needs_clarification", "ignored"):
             self.assertIn(f"- {status}:", prompt)
