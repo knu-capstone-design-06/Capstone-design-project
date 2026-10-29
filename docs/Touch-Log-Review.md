@@ -266,4 +266,4 @@ node --test frontend/src/features/order/touchLog.browser.test.mjs
 - [`TouchLogPanel.tsx`](../frontend/src/features/order/TouchLogPanel.tsx)의 개발 창에서 반복 시간·거리와 체류 정의를 바꿔 비교할 수 있습니다. ‘마지막 누름 이후 경과’ 비교 모드는 성공 여부를 판정하지 않으며, 미구현인 ‘마지막 성공 조작 이후 시간’을 대신하지 않습니다. 개발 창의 500ms 갱신은 화면 표시 주기이며 수집·전송 주기가 아닙니다. 개발 창 입력은 수집 대상에서 제외합니다.
 - 별도 파일럿 내보내기는 정책·집계 시각 구간·세션 ID·관측 여부·산출 값을 포함한 `touch-features-pilot.json`이며 버전은 `touch-pilot-v1`입니다. 원시 `touch-log-draft.json`과 서버 계약은 유지하며 자동 통계 전송·지원 판단은 연결하지 않습니다.
 
-세부 정의·파일·실행 방법과 PR #55 UI 반영 범위는 [주문 기능 README](../frontend/src/features/order/README.md#2026-10-25-로컬-파일럿-터치-집계와-pr-55-반영)에 기록합니다. 이번 구현 변경은 로컬 작업 트리에 두며 푸시하지 않습니다.
+세부 정의·파일·실행 방법과 PR #55 UI 반영 범위는 [주문 기능 README](../frontend/src/features/order/README.md#2026-10-25-로컬-파일럿-터치-집계와-pr-55-반영)에 기록합니다. 이 로컬 파일럿 구현은 PR #58에서 게시합니다. 정식 기준과 서버 전송은 팀 합의 대상으로 유지합니다.

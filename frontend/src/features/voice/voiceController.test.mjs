@@ -280,6 +280,30 @@ function deferredRecognition() {
   }();
 }
 
+test('stop·abort 요청 뒤에도 실제 onend 전까지 microphoneActive를 유지한다', () => {
+  for (const close of ['stop', 'abort']) {
+    const { controller, calls } = setup([], { recognitionOnly: true, recognition: deferredRecognition() });
+    let recognition;
+    try {
+      assert.equal(controller.getSnapshot().microphoneActive, false);
+      controller.setEnabled(true);
+      recognition = FakeRecognition.last();
+      assert.equal(controller.getSnapshot().microphoneActive, true);
+      if (close === 'abort') controller.setEnabled(false);
+      else recognition.final(['확인', .9]);
+      assert.equal(recognition[close === 'abort' ? 'aborted' : 'stopped'], 1);
+      assert.equal(controller.getSnapshot().microphoneActive, true, `${close} 요청은 실제 종료가 아님`);
+      recognition.finish();
+      assert.equal(controller.getSnapshot().microphoneActive, false);
+      assert.equal(controller.getSnapshot().phase, 'idle');
+      assert.deepEqual(calls, []);
+    } finally {
+      controller.dispose();
+      recognition?.finish();
+    }
+  }
+});
+
 test('빠른 질문 응답이 와도 이전 마이크의 onend 뒤에만 다시 듣는다', async () => {
   const { controller } = setup([status('needs_clarification', { reply_text: '온도를 골라 주세요.' })], { recognition: deferredRecognition() });
   controller.setEnabled(true);
