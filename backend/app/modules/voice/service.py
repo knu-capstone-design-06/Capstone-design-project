@@ -69,18 +69,24 @@ def require_named_products(
     result: VoiceInterpretation, request: VoiceRequestCreate, history: list[VoiceTurn],
     menu: list[MenuItem],
 ) -> VoiceInterpretation:
-    """Without an open question, send tool inputs only if the customer named some menu item.
+    """Send tool inputs only if some menu item was named in this conversation.
 
-    A short answer such as "네" or "따뜻한 걸로요" with nothing to answer must not
-    become an order the model made up. A word of a product name in this utterance,
-    its recognition alternatives or earlier utterances ("하나 더") counts as named.
+    A short answer such as "네" or "따뜻한 걸로요" must not become an order the
+    model made up. Named means a word of a product name appears in what the customer
+    said (this utterance, its recognition alternatives, earlier utterances such as
+    the base of "하나 더") or in the question the kiosk asked about it ("카페 라떼는
+    아이스, 따뜻한 것 중 무엇으로 할까요?"). A general "어떤 메뉴를 주문할까요?"
+    names nothing, so the answer to it still has to name a product.
     """
-    if not result.tool_calls or (history and history[-1].result.status in PENDING):
+    if not result.tool_calls:
         return result
     if any(call.arguments.product_id not in {item.product_id for item in menu} for call in result.tool_calls):
         return result  # matches_menu rejects unknown products
-    said = [_compact(request.text), *(_compact(item.text) for item in request.alternatives),
-            *(_compact(turn.request.text) for turn in history)]
+    said = [_compact(request.text), *(_compact(item.text) for item in request.alternatives)]
+    for turn in history:
+        said.append(_compact(turn.request.text))
+        if turn.result.reply_text:
+            said.append(_compact(turn.result.reply_text))
     words = {_compact(word) for item in menu for word in item.name.split()}
     if any(len(word) >= 2 and word in text for word in words for text in said):
         return result
