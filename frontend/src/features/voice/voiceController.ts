@@ -4,6 +4,8 @@ import type { RecognitionFactory, SpeechCapture, SpeechErrorCode, SpeechResult }
 import type { VoiceApi, VoiceRequestStatus, VoiceStatus } from './voiceApi.ts';
 
 export type VoicePhase = 'idle' | 'listening' | 'processing';
+/** 음성 모드가 저절로 꺼진 이유. silence: 마이크가 무음으로 연달아 닫힘. */
+export type VoiceAutoOffReason = 'silence';
 /** session_expired: 주문을 마친 세션이라 backend가 새 음성 요청을 410으로 거절했습니다. */
 export type VoiceInputError = SpeechErrorCode | 'no_session' | 'request_failed' | 'session_expired' | 'timeout';
 export type VoiceSnapshot = {
@@ -18,6 +20,8 @@ export type VoiceSnapshot = {
   lastTranscript: string;
   lastResult: VoiceRequestStatus | null;
   error: VoiceInputError | null;
+  /** 쓰지 않아 저절로 꺼졌을 때 그 이유. 다시 켜거나 세션이 바뀌면 지웁니다. */
+  autoOff: VoiceAutoOffReason | null;
 };
 export type VoiceControllerOptions = {
   api: VoiceApi;
@@ -28,6 +32,8 @@ export type VoiceControllerOptions = {
   /** 결과가 정해질 때마다 불립니다. 장바구니 반영·MCP 실행은 부르는 쪽이 합니다. */
   onResult?: (result: VoiceRequestStatus) => void;
   silenceMs?: number;
+  /** 마이크가 무음으로 이 횟수만큼 연달아 닫히면 음성 모드를 끕니다. 0이면 끄지 않습니다. */
+  autoOffSilences?: number;
   minConfidence?: number;
   pollIntervalMs?: number;
   pollTimeoutMs?: number;
@@ -37,6 +43,8 @@ export type VoiceControllerOptions = {
 // 제안값입니다. docs/Voice-MCP-Implementation.md의 미정 항목을 참고합니다.
 export const VOICE_SILENCE_MS = 8_000;
 export const VOICE_MIN_CONFIDENCE = 0.3;
+// 손님이 떠났거나 음성을 쓰지 않는 것으로 봅니다. 다음 손님이 켜진 음성 모드를 이어받지 않게 합니다.
+export const VOICE_AUTO_OFF_SILENCES = 2;
 // 계약(contract/voice.openapi.yaml)의 상태 조회 간격 1초 이상을 따릅니다.
 const POLL_INTERVAL_MS = 1_000;
 const POLL_TIMEOUT_MS = 15_000;
@@ -73,6 +81,9 @@ export class VoiceController {
   private readonly pollTimeoutMs: number;
   private readonly createKey: () => string;
   private readonly silenceMs: number;
+  private readonly autoOffSilences: number;
+  // 마이크가 무음으로 연달아 닫힌 횟수. 말을 받거나 손님이 다시 듣기를 누르면 0으로 돌아갑니다.
+  private silentEnds = 0;
   private state: VoiceSnapshot;
   private listeners = new Set<() => void>();
   private capture: SpeechCapture | null = null;
@@ -93,11 +104,12 @@ export class VoiceController {
     this.recognition = options.recognition === undefined ? findRecognition() : options.recognition;
     this.onResult = options.onResult ?? (() => {});
     this.silenceMs = options.silenceMs ?? VOICE_SILENCE_MS;
+    this.autoOffSilences = options.autoOffSilences ?? VOICE_AUTO_OFF_SILENCES;
     this.minConfidence = options.minConfidence ?? VOICE_MIN_CONFIDENCE;
     this.pollIntervalMs = options.pollIntervalMs ?? POLL_INTERVAL_MS;
     this.pollTimeoutMs = options.pollTimeoutMs ?? POLL_TIMEOUT_MS;
     this.createKey = options.createKey ?? (() => crypto.randomUUID());
-    this.state = { supported: this.recognition !== null, enabled: false, microphoneActive: false, phase: 'idle', partialText: '', lastTranscript: '', lastResult: null, error: null };
+    this.state = { supported: this.recognition !== null, enabled: false, microphoneActive: false, phase: 'idle', partialText: '', lastTranscript: '', lastResult: null, error: null, autoOff: null };
   }
   getSnapshot = () => this.state;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
@@ -112,7 +124,8 @@ export class VoiceController {
       this.halt();
       this.awaitingAnswer = false;
       this.sessionExpired = false;
-      this.set({ lastTranscript: '', lastResult: null, error: null });
+      this.silentEnds = 0;
+      this.set({ lastTranscript: '', lastResult: null, error: null, autoOff: null });
     }
     this.context = { ...context };
   }
@@ -122,16 +135,21 @@ export class VoiceController {
     if (!enabled) {
       this.halt();
       this.awaitingAnswer = false;
-      this.set({ enabled: false, lastTranscript: '', lastResult: null, error: null });
+      this.silentEnds = 0;
+      this.set({ enabled: false, lastTranscript: '', lastResult: null, error: null, autoOff: null });
       return true;
     }
     if (!this.recognition) { this.set({ error: 'not_supported' }); return false; }
-    if (!this.state.enabled) this.set({ enabled: true, lastTranscript: '', lastResult: null, error: null });
+    if (!this.state.enabled) {
+      this.silentEnds = 0;
+      this.set({ enabled: true, lastTranscript: '', lastResult: null, error: null, autoOff: null });
+    }
     return this.listen();
   }
 
   /** 모드가 켜져 있고 쉬는 중일 때 한 문장을 듣습니다(예: 부르는 쪽의 마이크 버튼). */
   listen(): boolean {
+    this.silentEnds = 0;
     return this.open(this.awaitingAnswer);
   }
 
@@ -148,19 +166,31 @@ export class VoiceController {
       onPartial: text => { if (live()) this.set({ partialText: text }); },
       onFinal: result => { if (live()) this.accept(result, answering); },
       onError: code => { if (live()) this.set({ error: code }); },
-      onEnd: () => {
+      onEnd: reason => {
         if (this.capture !== capture) return;
         this.capture = null;
         this.set({ microphoneActive: false, ...(this.state.phase === 'listening' ? { phase: 'idle', partialText: '' } : {}) });
         const pending = this.pendingListen;
         this.pendingListen = null;
-        if (pending !== null) this.open(pending);
+        if (pending !== null) { this.open(pending); return; }
+        if (reason === 'silence' && !this.cancelled.has(capture)) {
+          this.silentEnds += 1;
+          if (this.autoOffSilences > 0 && this.silentEnds >= this.autoOffSilences) this.turnOffUnused('silence');
+        }
       },
     }, { silenceMs: this.silenceMs });
     this.capture = capture;
     this.set({ phase: 'listening', microphoneActive: true, partialText: '', error: null });
     capture.start();
     return true;
+  }
+
+  /** 쓰지 않는 음성 모드를 끕니다. 손님이 끈 것과 같이 정리하고 이유만 남깁니다. */
+  private turnOffUnused(reason: VoiceAutoOffReason) {
+    this.halt();
+    this.awaitingAnswer = false;
+    this.silentEnds = 0;
+    this.set({ enabled: false, lastTranscript: '', lastResult: null, error: null, autoOff: reason });
   }
 
   dispose() {
@@ -188,11 +218,13 @@ export class VoiceController {
 
   private accept(result: SpeechResult, answering: boolean) {
     if (this.recognitionOnly) {
+      this.silentEnds = 0;
       // 인식 테스트에서는 짧은 말·낮은 신뢰도도 그대로 확인합니다. onend까지 마이크 종료를 기다립니다.
       this.set({ partialText: '', lastTranscript: result.text, lastResult: null, error: null });
       return;
     }
     if (this.looksLikeNoise(result, answering)) return;
+    this.silentEnds = 0;
     const controller = new AbortController();
     this.processing = controller;
     this.set({ phase: 'processing', partialText: result.text, lastTranscript: result.text });
