@@ -230,6 +230,16 @@ class VoiceApiTests(unittest.TestCase):
         self.assertEqual(previous[0].request.text, "아메리카노 하나")
         self.assertEqual(previous[0].result.status, "needs_clarification")
 
+    def test_bare_yes_after_a_question_repeats_the_question(self):
+        question = "카페 라떼는 아이스, 따뜻한 것 중 무엇으로 할까요?"
+        self.interpreter.result = interpretation(reply_text=question)
+        self.say("카페라떼 하나요")
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "hot", 1))
+        body = self.status(self.say("네.")).json()
+        self.assertEqual(body["status"], "needs_clarification")
+        self.assertEqual(body["reply_text"], question)
+        self.assertEqual(self.interpreter.calls, 1, "질문을 다시 할 때는 OpenAI를 부르지 않음")
+
     def test_ai_unavailable_and_crash_become_failed(self):
         for result in (None, RuntimeError("boom")):
             self.interpreter.result = result
