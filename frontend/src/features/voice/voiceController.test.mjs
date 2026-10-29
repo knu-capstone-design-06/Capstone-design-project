@@ -379,6 +379,23 @@ test('요청 실패와 해석 지연은 오류로 남기고 다시 듣지 않는
   assert.deepEqual([slow.controller.getSnapshot().phase, slow.controller.getSnapshot().error], ['idle', 'timeout']);
 });
 
+test('주문을 마친 세션의 410은 따로 알리고 이전 질문의 대답 대기를 푼다', async () => {
+  const { api, calls, controller } = setup([status('needs_confirmation', { tool_calls: [addAmericano], reply_text: '아이스 아메리카노 2잔 담을까요?' })]);
+  controller.setEnabled(true);
+  FakeRecognition.last().final(['아메리카노 두 잔', 0.5]);
+  await tick(20);
+  api.submit = async () => { throw new ApiError(410, { code: 'session_expired', detail: '새 이용 세션을 시작해 주세요.' }); };
+  FakeRecognition.last().final(['네', 0.9]);
+  await tick(20);
+  const snapshot = controller.getSnapshot();
+  assert.deepEqual([snapshot.phase, snapshot.error, snapshot.lastResult], ['idle', 'session_expired', null]);
+  assert.equal(FakeRecognition.instances.length, 2, '끝난 세션에서는 마이크를 다시 열지 않음');
+  assert.equal(calls.length, 1);
+  controller.listen();
+  FakeRecognition.last().final(['네', 0.9]);
+  assert.equal(controller.getSnapshot().phase, 'idle', '대답 대기가 풀려 한 글자는 보내지 않고 거름');
+});
+
 test('음성 API는 같은 출처 경로와 중복 방지 키로 요청하고 오류 형식을 ApiError로 넘긴다', async () => {
   const requests = [];
   const api = createVoiceApi('/backend/', async (url, init) => {
