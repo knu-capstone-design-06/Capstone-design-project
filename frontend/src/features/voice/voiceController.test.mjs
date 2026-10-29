@@ -557,6 +557,19 @@ test('듣는 중이거나 대답을 다시 듣는 동안에는 시간 기준으�
   controller.dispose();
 });
 
+test('다시 듣기를 시작하면 시간을 처음부터 다시 잰다', async () => {
+  const { controller } = setup([status('completed')], { autoOffMs: 50, autoOffSilences: 0 });
+  controller.setEnabled(true);
+  FakeRecognition.last().fail('no-speech');
+  await tick(30);
+  controller.listen();
+  FakeRecognition.last().fail('no-speech');
+  await tick(30);
+  assert.equal(controller.getSnapshot().enabled, true);
+  await tick(50);
+  assert.equal(controller.getSnapshot().enabled, false);
+});
+
 test('음성 API는 같은 출처 경로와 중복 방지 키로 요청하고 오류 형식을 ApiError로 넘긴다', async () => {
   const requests = [];
   const api = createVoiceApi('/backend/', async (url, init) => {
