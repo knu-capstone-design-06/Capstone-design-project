@@ -10,6 +10,7 @@ const errorCopy: Record<VoiceInputError, string> = {
   failed: '음성을 듣지 못했어요. 다시 말하거나 화면을 눌러 주문해 주세요.',
   no_session: '주문 준비가 끝나면 음성 입력을 사용할 수 있어요.',
   request_failed: '음성 요청을 처리하지 못했어요. 다시 말하거나 화면을 눌러 주문해 주세요.',
+  session_expired: '이미 주문을 마쳤어요. 새로 주문하려면 처음부터 다시 주문해 주세요.',
   timeout: '음성 응답이 늦어지고 있어요. 화면을 눌러 주문해 주세요.',
 };
 

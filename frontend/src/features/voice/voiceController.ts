@@ -1,9 +1,11 @@
+import { ApiError } from '../../shared/api/index.ts';
 import { createSpeechCapture, findRecognition } from './speech.ts';
 import type { RecognitionFactory, SpeechCapture, SpeechErrorCode, SpeechResult } from './speech.ts';
 import type { VoiceApi, VoiceRequestStatus, VoiceStatus } from './voiceApi.ts';
 
 export type VoicePhase = 'idle' | 'listening' | 'processing';
-export type VoiceInputError = SpeechErrorCode | 'no_session' | 'request_failed' | 'timeout';
+/** session_expired: 주문을 마친 세션이라 backend가 새 음성 요청을 410으로 거절했습니다. */
+export type VoiceInputError = SpeechErrorCode | 'no_session' | 'request_failed' | 'session_expired' | 'timeout';
 export type VoiceSnapshot = {
   supported: boolean;
   /** 음성 모드. 켜져 있어도 마이크는 phase가 listening일 때만 열립니다. */
@@ -37,6 +39,12 @@ const POLL_TIMEOUT_MS = 15_000;
 const SETTLED = new Set<VoiceStatus>(['completed', 'needs_confirmation', 'needs_clarification', 'ignored', 'failed']);
 // 손님의 대답이 필요한 결과에서는 마이크를 다시 엽니다.
 const ASKS_USER = new Set<VoiceStatus>(['needs_confirmation', 'needs_clarification']);
+
+function isSessionExpired(error: unknown): boolean {
+  if (!(error instanceof ApiError) || error.status !== 410) return false;
+  const body = error.body;
+  return typeof body === 'object' && body !== null && 'code' in body && body.code === 'session_expired';
+}
 
 function wait(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -182,11 +190,17 @@ export class VoiceController {
     try {
       const accepted = await this.api.submit(sessionId, body, this.createKey(), signal);
       outcome = await this.poll(sessionId, accepted.request_id, signal);
-    } catch {
-      outcome = 'request_failed';
+    } catch (error) {
+      outcome = isSessionExpired(error) ? 'session_expired' : 'request_failed';
     }
     if (signal.aborted || this.processing?.signal !== signal) return;
     this.processing = null;
+    if (outcome === 'session_expired') {
+      // 끝난 세션의 질문에는 더 대답할 수 없으므로 대기를 풀고, 새 주문은 부르는 쪽이 안내합니다.
+      this.awaitingAnswer = false;
+      this.set({ phase: 'idle', partialText: '', lastResult: null, error: outcome });
+      return;
+    }
     if (typeof outcome === 'string') {
       this.set({ phase: 'idle', partialText: '', error: outcome });
       return;
