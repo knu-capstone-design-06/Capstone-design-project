@@ -149,9 +149,13 @@ class VoiceService:
                 )
                 return
             history = self._repository.history(session_id)
-            if history and history[-1].result.status == "needs_clarification" and is_bare_yes(request.text):
+            last = history[-1].result if history else None
+            if last is not None and last.status == "needs_clarification" and is_bare_yes(request.text):
                 # "네" cannot answer "아이스, 따뜻한 것 중 무엇으로?"; ask again instead of guessing.
-                result = history[-1].result
+                result = last
+            elif (last is None or last.status not in PENDING) and is_bare_yes(request.text):
+                # Nothing was proposed, so "네" must not repeat or invent an order.
+                result = VoiceInterpretation(status="needs_clarification", tool_calls=[], reply_text=ASK_MENU_REPLY)
             else:
                 result = await self._interpreter.interpret(request, menu, history)
             if result is not None:
