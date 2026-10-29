@@ -23,9 +23,11 @@ defaults:
   run:
     shell: bash
 
+# timeout-minutes는 멈춘 job을 끊는 상한입니다(GitHub 기본값 360분).
+# 2026-10-29 PR #60 실행에서 job마다 1분 안팎이 걸렸습니다.
 jobs:
   frontend:
-    # 단위 테스트 6개 파일(pnpm test)과 TypeScript 검사·배포 빌드(pnpm build)
+    # package.json의 test(단위 테스트)와 build(TypeScript 검사·배포 빌드)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -64,9 +66,10 @@ jobs:
       - run: python -m unittest discover -s app/modules -p 'test_*.py' -v
 
   ai-engine:
-    # ai-engine/README.md의 테스트 명령. 비전 패키지와 MediaPipe 모델 파일까지 받아 비전 테스트도 건너뛰지 않고 돌립니다.
+    # ai-engine/README.md의 테스트 명령. 비전 패키지와 MediaPipe 모델 파일까지 받아 비전 테스트도 돌립니다.
+    # ONNX 모델 파일이 필요한 테스트는 파일이 저장소 밖에 있어 건너뜁니다(app/modules/vision/models/README.md).
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: ai-engine
@@ -94,7 +97,7 @@ jobs:
     # 세 이미지를 빌드해 Compose로 띄우고, frontend의 /backend/ 프록시를 거쳐 backend를 호출합니다.
     needs: [frontend, backend, ai-engine]
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     env:
       # docker-compose.yml이 이 값을 backend 컨테이너에 넘깁니다. 값은 GitHub가 로그에서 가립니다.
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -107,7 +110,8 @@ jobs:
         run: docker compose up -d --wait
       - name: 화면과 연결 확인
         run: |
-          curl -fsS http://127.0.0.1:8080/ | grep -q 'id="root"'
+          page=$(curl -fsS http://127.0.0.1:8080/)
+          grep -q 'id="root"' <<< "$page"
           # backend의 연결 확인 스크립트: health, backend → ai-engine 연결, 세션 생성, 특징 전송
           cd backend && python3 -m app.modules.connectivity.smoke --base-url "$BASE_URL"
       - name: backend 컨테이너가 받은 키 확인 (값은 출력하지 않음)
