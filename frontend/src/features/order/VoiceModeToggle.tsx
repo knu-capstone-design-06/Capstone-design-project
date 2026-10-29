@@ -65,6 +65,6 @@ export function VoiceModeToggle({ controller, ready, sampleMode }: {
       : '켜면 마이크로 한 문장을 듣고 닫아요. Chrome에서 마이크 권한을 허용해 주세요.'}</p>
     {voice.enabled && voice.lastTranscript && <p className="voice-mode-transcript"><span>Chrome이 인식한 말</span><strong>{voice.lastTranscript}</strong></p>}
     {voice.enabled && detail && <p className="voice-mode-feedback" role="status" aria-live="polite">{detail}</p>}
-    {voice.enabled && voice.phase === 'idle' && <button type="button" className="voice-mode-listen" data-log-target="voice-listen" onClick={() => controller.listen()}>다시 말하기</button>}
+    {voice.enabled && voice.phase === 'idle' && voice.error !== 'session_expired' && <button type="button" className="voice-mode-listen" data-log-target="voice-listen" onClick={() => controller.listen()}>다시 말하기</button>}
   </section>;
 }
