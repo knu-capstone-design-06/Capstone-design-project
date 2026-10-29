@@ -181,7 +181,7 @@ MCP 서버는 외부 AI의 도구 호출을 backend 호출로 바꿔 주는 역�
 
 ## 7. 현재 구현 상태와 MCP 자동 제어까지 남은 작업
 
-- 작성일: 2026-10-12 (수정: 2026-10-13, ignored와 frontend 음성 입력 추가)
+- 작성일: 2026-10-12 (수정: 2026-10-13 ignored와 frontend 음성 입력 추가, 2026-10-29 메뉴 화면 연결·주문 완료 세션 처리 반영)
 
 ### 7.1 지금 되는 것
 
@@ -206,6 +206,8 @@ frontend 음성 입력 (`frontend/src/features/voice/`, 화면 요소 없음)
 - 신뢰도 0.3 미만 인식은 주변 소리로 보고 보내지 않습니다. Chrome이 신뢰도를 0으로 주면 "모름"(null)으로 보냅니다.
 - 한 글자 인식은 첫 발화에서는 보내지 않고, 확인·질문에 대한 대답("네", "응")에서는 보냅니다. 대답 대기 상태는 마이크가 무음으로 닫힌 뒤 `listen()`으로 다시 열어도 유지되고, 다음 해석 결과가 나오거나 세션이 바뀌거나 음성 모드를 끄면 지워집니다.
 - 모드를 언제 켤지(판단 모델의 `voice_guide`, 손님의 버튼), 결과로 장바구니를 다시 불러오거나 MCP를 실행하는 일, 문구 표시는 부르는 쪽이 합니다. `onResult` 콜백과 `useVoiceInput` 훅으로 상태를 받습니다.
+- 끈 마이크(모드 끄기·세션 변경)가 Chrome의 `onend` 전에 늦게 보낸 인식 결과와 오류는 무시합니다.
+- 주문을 마친 세션의 410 `session_expired`는 일반 실패와 구분해 `session_expired` 오류로 알리고 대답 대기를 풉니다. 세션이 바뀔 때까지 마이크를 다시 열지 않고, 메뉴 화면은 다시 말하기 버튼을 숨깁니다.
 - 테스트: `frontend/`에서 `npm test`에 포함됩니다(프론트 담당 제안). 음성만 돌릴 때는 `node --test src/features/voice/*.test.mjs`.
 
 방식: 일반적인 MCP처럼 AI가 도구를 하나씩 호출하며 반복하지 않고, OpenAI 한 번 호출로 실행할 도구 목록을 정한 뒤 검증해서 MCP가 차례로 실행합니다. 도구 입력 형식은 MCP 도구와 같게 맞춰 두었으므로 나중에 반복 호출 방식으로 바꿔도 도구 정의는 그대로 씁니다.
@@ -219,7 +221,7 @@ frontend 음성 입력 (`frontend/src/features/voice/`, 화면 요소 없음)
 | 3 | (선택) 해석할 때 현재 장바구니도 전달: 터치로 담은 상품까지 "하나 더", "라떼 빼 줘"를 정확히 해석 | Decision AI | 1 |
 | 4 | `tool_calls` 실행부(MCP 도구): 상품+온도로 `item_id` 조회, `expected_version` 채움, 요청별 `Idempotency-Key` 생성, 말한 순서대로 실행 | Decision AI + Back-end | 1 |
 | 5 | 실행 결과를 `actions`(`cart_updated` 등)와 SSE 알림으로 전달 | Back-end + Front-end | 4, 3.4 |
-| 6 | 프론트 화면 연결: `features/voice`의 `VoiceController`를 주문 화면에 붙이고(세션·`screen_id` 전달), `voice_guide`나 버튼으로 모드 켜기, `reply_text` 표시, 확인 UI. 인식·요청·상태 조회는 구현함 | Front-end | 판단 모델 결과 수신 |
+| 6 | 프론트 화면 연결: 메뉴 화면의 음성 모드 버튼·다시 말하기·인식 문장과 `reply_text` 표시는 완료(PR #53). `voice_guide`로 모드 자동 켜기, 확인·취소 버튼, 메뉴 외 화면은 남음 | Front-end | 판단 모델 결과 수신 |
 | 7 | 실행 환경: CORS의 `Idempotency-Key`·메서드 허용은 PR #40에서 반영됨. 배포 출처를 `CORS_ORIGINS`에 넣을지는 배포 구성에서 정함. Compose의 키 전달은 반영함 | Back-end·infra | — |
 | 8 | 실제 키로 프롬프트 검증, 실험에 쓴 프롬프트 버전(현재 `interpret_v2`, v1은 ignored 없음)·모델 기록 | Decision AI | 2 |
 
@@ -232,8 +234,8 @@ frontend 음성 입력 (`frontend/src/features/voice/`, 화면 요소 없음)
 - [ ] **대화 기록 보관**: 세션별 최근 10턴·1시간 보관(제안값), 인식 문장을 서버 메모리에 보관하는 것을 실험 동의 안내에 넣을지. 세션 종료 API가 생기면 그때 바로 지울지
 - [ ] **확인 문장 길이**: 최대 60자(제안값)
 - [ ] **마이크 여는 시간·거르는 기준**: 무음 8초, 신뢰도 0.3 미만 버림(제안값, `voiceController.ts`의 `VOICE_SILENCE_MS`·`VOICE_MIN_CONFIDENCE`). 실제 키오스크 소음 환경에서 조정
-- [ ] **주문을 마친 세션의 음성 요청**: 주문 API는 완료 세션을 410 `session_expired`로 거절합니다. 음성 요청도 접수 단계에서 거절할지, 해석은 하고 도구 실행 때 실패로 둘지
-- [ ] **`screen_id` 값**: 프론트 화면 상태는 `menu`·`review`·`complete`인데 계약 예시는 `menu_list`. 어느 값을 보낼지
+- [x] **주문을 마친 세션의 음성 요청**: 접수 단계에서 410 `session_expired`로 거절합니다(주문 정책 PR #51 리뷰에서 합의, backend 구현은 PR #56). 같은 키·같은 본문 재전송은 원래 202를 돌려주고, 상태 조회는 막지 않습니다. frontend는 `session_expired` 오류로 구분해 대답 대기를 풀고 새 주문을 안내합니다
+- [ ] **`screen_id` 값**: 메뉴 화면은 지금 `menu_list`를 보냅니다(PR #53). 터치 로그는 `menu`를 쓰고, 계약 설명은 "터치 로그와 같은 값"이라 서로 어긋납니다. 어느 쪽으로 맞출지
 
 ## 8. 2026-10-25 프론트 추가 기능 (PR #58)
 

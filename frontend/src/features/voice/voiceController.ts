@@ -1,9 +1,11 @@
+import { ApiError } from '../../shared/api/index.ts';
 import { createSpeechCapture, findRecognition } from './speech.ts';
 import type { RecognitionFactory, SpeechCapture, SpeechErrorCode, SpeechResult } from './speech.ts';
 import type { VoiceApi, VoiceRequestStatus, VoiceStatus } from './voiceApi.ts';
 
 export type VoicePhase = 'idle' | 'listening' | 'processing';
-export type VoiceInputError = SpeechErrorCode | 'no_session' | 'request_failed' | 'timeout';
+/** session_expired: 주문을 마친 세션이라 backend가 새 음성 요청을 410으로 거절했습니다. */
+export type VoiceInputError = SpeechErrorCode | 'no_session' | 'request_failed' | 'session_expired' | 'timeout';
 export type VoiceSnapshot = {
   supported: boolean;
   /** 음성 모드. 켜져 있어도 마이크는 phase가 listening일 때만 열립니다. */
@@ -42,6 +44,12 @@ const SETTLED = new Set<VoiceStatus>(['completed', 'needs_confirmation', 'needs_
 // 손님의 대답이 필요한 결과에서는 마이크를 다시 엽니다.
 const ASKS_USER = new Set<VoiceStatus>(['needs_confirmation', 'needs_clarification']);
 
+function isSessionExpired(error: unknown): boolean {
+  if (!(error instanceof ApiError) || error.status !== 410) return false;
+  const body = error.body;
+  return typeof body === 'object' && body !== null && 'code' in body && body.code === 'session_expired';
+}
+
 function wait(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) { reject(signal.reason); return; }
@@ -70,10 +78,14 @@ export class VoiceController {
   private capture: SpeechCapture | null = null;
   // Chrome의 stop/abort 뒤 onend가 올 때까지 다음 인식 시작을 기다립니다.
   private pendingListen: boolean | null = null;
+  // 끈 마이크. Chrome은 abort 뒤에도 onend 전까지 결과·오류를 보낼 수 있어 onend만 받습니다.
+  private readonly cancelled = new WeakSet<SpeechCapture>();
   private processing: AbortController | null = null;
   private context = { sessionId: '', screenId: '' };
   // 확인·질문 결과 뒤 대답을 기다리는 중. 마이크가 닫혀도 다음 결과가 나올 때까지 유지합니다.
   private awaitingAnswer = false;
+  // backend가 이 세션의 새 음성 요청을 410으로 거절함. 세션이 바뀔 때까지 다시 듣지 않습니다.
+  private sessionExpired = false;
 
   constructor(options: VoiceControllerOptions) {
     this.api = options.api;
@@ -99,6 +111,7 @@ export class VoiceController {
     if (context.sessionId !== this.context.sessionId) {
       this.halt();
       this.awaitingAnswer = false;
+      this.sessionExpired = false;
       this.set({ lastTranscript: '', lastResult: null, error: null });
     }
     this.context = { ...context };
@@ -128,11 +141,13 @@ export class VoiceController {
     if (this.state.phase === 'listening') return true;
     if (this.state.phase !== 'idle') return false;
     if (!this.recognitionOnly && !this.context.sessionId.trim()) { this.set({ error: 'no_session' }); return false; }
+    if (this.sessionExpired) { this.set({ error: 'session_expired' }); return false; }
     if (this.capture) { this.pendingListen = answering; return true; }
+    const live = () => this.capture === capture && !this.cancelled.has(capture);
     const capture = createSpeechCapture(this.recognition, {
-      onPartial: text => { if (this.capture === capture) this.set({ partialText: text }); },
-      onFinal: result => { if (this.capture === capture) this.accept(result, answering); },
-      onError: code => { if (this.capture === capture) this.set({ error: code }); },
+      onPartial: text => { if (live()) this.set({ partialText: text }); },
+      onFinal: result => { if (live()) this.accept(result, answering); },
+      onError: code => { if (live()) this.set({ error: code }); },
       onEnd: () => {
         if (this.capture !== capture) return;
         this.capture = null;
@@ -158,7 +173,10 @@ export class VoiceController {
     this.processing?.abort();
     this.processing = null;
     if (this.state.phase !== 'idle' || this.state.partialText) this.set({ phase: 'idle', partialText: '' });
-    this.capture?.abort();
+    if (this.capture) {
+      this.cancelled.add(this.capture);
+      this.capture.abort();
+    }
   }
 
   /** 짧거나 신뢰도가 아주 낮은 인식은 주변 소리로 보고 보내지 않습니다. 대답을 기다릴 때는 한 글자도 받습니다. */
@@ -187,11 +205,18 @@ export class VoiceController {
     try {
       const accepted = await this.api.submit(sessionId, body, this.createKey(), signal);
       outcome = await this.poll(sessionId, accepted.request_id, signal);
-    } catch {
-      outcome = 'request_failed';
+    } catch (error) {
+      outcome = isSessionExpired(error) ? 'session_expired' : 'request_failed';
     }
     if (signal.aborted || this.processing?.signal !== signal) return;
     this.processing = null;
+    if (outcome === 'session_expired') {
+      // 끝난 세션의 질문에는 더 대답할 수 없으므로 대기를 풀고, 새 주문은 부르는 쪽이 안내합니다.
+      this.awaitingAnswer = false;
+      this.sessionExpired = true;
+      this.set({ phase: 'idle', partialText: '', lastResult: null, error: outcome });
+      return;
+    }
     if (typeof outcome === 'string') {
       this.set({ phase: 'idle', partialText: '', error: outcome });
       return;
