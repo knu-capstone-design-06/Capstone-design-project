@@ -85,6 +85,9 @@ jobs:
         run: pip install -r app/modules/vision/requirements.txt
       - name: MediaPipe 모델 파일 받기 (스크립트가 SHA-256을 확인)
         run: python app/modules/vision/models/download_models.py
+      - name: MediaPipe가 여는 OpenGL ES·EGL 라이브러리 설치
+        # Linux용 mediapipe는 delegate를 지정하지 않은 CPU 추론에서도 libGLESv2.so.2를 불러옵니다. runner 이미지에는 없습니다.
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgles2 libegl1
       - run: python -m unittest discover -s tests -v
 
   compose-smoke:
