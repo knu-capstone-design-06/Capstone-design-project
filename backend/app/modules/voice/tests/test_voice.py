@@ -194,7 +194,6 @@ class VoiceApiTests(unittest.TestCase):
         for bad in (
             call("add_cart_item", "mocha", "iced", 1),     # not on menu
             call("add_cart_item", "latte", "hot", 1),      # unavailable
-            call("add_cart_item", "americano", None, 1),   # temperature required
             call("add_cart_item", "sandwich", "hot", 1),   # no temperature for food
             call("remove_cart_item", "latte", "iced"),     # temperature not allowed
         ):

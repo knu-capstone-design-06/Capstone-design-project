@@ -26,6 +26,30 @@ def menu_from_products(products: Iterable[object]) -> list[MenuItem]:
     ]
 
 
+def ask_for_missing_temperature(result: VoiceInterpretation, menu: list[MenuItem]) -> VoiceInterpretation:
+    """Turn a drink without a temperature into a question instead of a failure.
+
+    The model sometimes sends temperature null for products sold iced and hot even
+    though the prompt says to ask. A single allowed temperature is filled in.
+    """
+    products = {item.product_id: item for item in menu}
+    calls = []
+    for call in result.tool_calls:
+        item = products.get(call.arguments.product_id)
+        if item is None or call.arguments.temperature is not None or not item.temperatures:
+            calls.append(call)
+            continue
+        if len(item.temperatures) > 1:
+            return VoiceInterpretation(
+                status="needs_clarification", tool_calls=[],
+                reply_text=f"{item.name}, 따뜻한 것과 아이스 중 무엇으로 할까요?",
+            )
+        calls.append(call.model_copy(update={
+            "arguments": call.arguments.model_copy(update={"temperature": item.temperatures[0]}),
+        }))
+    return result.model_copy(update={"tool_calls": calls})
+
+
 def matches_menu(result: VoiceInterpretation, menu: list[MenuItem]) -> bool:
     """Reject tool inputs naming unknown products, unavailable additions or invalid temperatures."""
     products = {item.product_id: item for item in menu}
@@ -90,6 +114,8 @@ class VoiceService:
                 return
             history = self._repository.history(session_id)
             result = await self._interpreter.interpret(request, menu, history)
+            if result is not None:
+                result = ask_for_missing_temperature(result, menu)
             if result is not None and not matches_menu(result, menu):
                 logger.warning("voice interpretation rejected (not on menu)")
                 result = None
