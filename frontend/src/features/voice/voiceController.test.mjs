@@ -277,6 +277,16 @@ test('빠르게 OFF→ON해도 이전 abort 종료를 기다리고 늦은 발화
   FakeRecognition.last().finish();
 });
 
+test('음성 모드를 끈 뒤 이전 마이크가 늦게 보낸 오류는 남기지 않는다', () => {
+  const { controller } = setup([status('completed')], { recognition: deferredRecognition() });
+  controller.setEnabled(true);
+  const first = FakeRecognition.last();
+  controller.setEnabled(false);
+  first.onerror?.({ error: 'network' });
+  first.finish();
+  assert.deepEqual([controller.getSnapshot().enabled, controller.getSnapshot().phase, controller.getSnapshot().error], [false, 'idle', null]);
+});
+
 test('대답을 기다리지 않을 때 한 글자이거나 신뢰도가 아주 낮은 인식은 서버로 보내지 않는다', async () => {
   const { calls, controller } = setup([status('completed')]);
   controller.setEnabled(true);
