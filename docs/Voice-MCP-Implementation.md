@@ -225,7 +225,7 @@ frontend 음성 입력 (`frontend/src/features/voice/`, 화면 요소 없음)
 | 5 | 실행 결과를 `actions`(`cart_updated` 등)와 SSE 알림으로 전달 | Back-end + Front-end | 4, 3.4 |
 | 6 | 프론트 화면 연결: 메뉴 화면의 음성 모드 버튼·다시 말하기·인식 문장과 `reply_text` 표시는 완료(PR #53). `voice_guide`로 모드 자동 켜기, 확인·취소 버튼, 메뉴 외 화면은 남음 | Front-end | 판단 모델 결과 수신 |
 | 7 | 실행 환경: CORS의 `Idempotency-Key`·메서드 허용은 PR #40에서 반영됨. 배포 출처를 `CORS_ORIGINS`에 넣을지는 배포 구성에서 정함. Compose의 키 전달은 반영함 | Back-end·infra | — |
-| 8 | 실제 키로 프롬프트 검증, 실험에 쓴 프롬프트 버전(현재 `interpret_v2`, v1은 ignored 없음)·모델 기록 | Decision AI | 2 |
+| 8 | 실제 키 검증은 1차 완료(2026-10-29, `gpt-4o-mini`, `interpret_v3`). 실험 전 최종 프롬프트 버전(v1은 ignored 없음, v2는 온도 규칙 약함)·모델 기록은 남음 | Decision AI | 2 |
 
 ### 7.3 결정이 필요한 항목
 
