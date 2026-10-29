@@ -546,6 +546,17 @@ test('켜진 채 마이크도 처리도 없이 시간이 지나면 음성 모드
   assert.deepEqual([controller.getSnapshot().enabled, controller.getSnapshot().autoOff], [false, 'idle']);
 });
 
+test('듣는 중이거나 대답을 다시 듣는 동안에는 시간 기준으로 끄지 않는다', async () => {
+  const { controller } = setup([status('needs_clarification', { reply_text: '온도를 골라 주세요.' })], { autoOffMs: 30 });
+  controller.setEnabled(true);
+  await tick(60);
+  assert.deepEqual([controller.getSnapshot().enabled, controller.getSnapshot().phase], [true, 'listening'], '첫 듣기 중');
+  FakeRecognition.last().final(['카페라떼 하나요', 0.9]);
+  await tick(60);
+  assert.deepEqual([controller.getSnapshot().enabled, controller.getSnapshot().phase], [true, 'listening'], '질문 뒤 다시 듣는 중');
+  controller.dispose();
+});
+
 test('음성 API는 같은 출처 경로와 중복 방지 키로 요청하고 오류 형식을 ApiError로 넘긴다', async () => {
   const requests = [];
   const api = createVoiceApi('/backend/', async (url, init) => {
