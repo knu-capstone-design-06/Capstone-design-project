@@ -233,4 +233,4 @@ frontend 음성 입력 (`frontend/src/features/voice/`, 화면 요소 없음)
 - [ ] **확인 문장 길이**: 최대 60자(제안값)
 - [ ] **마이크 여는 시간·거르는 기준**: 무음 8초, 신뢰도 0.3 미만 버림(제안값, `voiceController.ts`의 `VOICE_SILENCE_MS`·`VOICE_MIN_CONFIDENCE`). 실제 키오스크 소음 환경에서 조정
 - [x] **주문을 마친 세션의 음성 요청**: 접수 단계에서 410 `session_expired`로 거절합니다(주문 정책 PR #51 리뷰에서 합의, backend 구현은 PR #56). 같은 키·같은 본문 재전송은 원래 202를 돌려주고, 상태 조회는 막지 않습니다. frontend는 `session_expired` 오류로 구분해 대답 대기를 풀고 새 주문을 안내합니다
-- [ ] **`screen_id` 값**: 프론트 화면 상태는 `menu`·`review`·`complete`인데 계약 예시는 `menu_list`. 어느 값을 보낼지
+- [ ] **`screen_id` 값**: 메뉴 화면은 지금 `menu_list`를 보냅니다(PR #53). 터치 로그는 `menu`를 쓰고, 계약 설명은 "터치 로그와 같은 값"이라 서로 어긋납니다. 어느 쪽으로 맞출지
