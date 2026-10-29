@@ -219,7 +219,7 @@ frontend 음성 입력 (`frontend/src/features/voice/`, 화면 요소 없음)
 | 3 | (선택) 해석할 때 현재 장바구니도 전달: 터치로 담은 상품까지 "하나 더", "라떼 빼 줘"를 정확히 해석 | Decision AI | 1 |
 | 4 | `tool_calls` 실행부(MCP 도구): 상품+온도로 `item_id` 조회, `expected_version` 채움, 요청별 `Idempotency-Key` 생성, 말한 순서대로 실행 | Decision AI + Back-end | 1 |
 | 5 | 실행 결과를 `actions`(`cart_updated` 등)와 SSE 알림으로 전달 | Back-end + Front-end | 4, 3.4 |
-| 6 | 프론트 화면 연결: `features/voice`의 `VoiceController`를 주문 화면에 붙이고(세션·`screen_id` 전달), `voice_guide`나 버튼으로 모드 켜기, `reply_text` 표시, 확인 UI. 인식·요청·상태 조회는 구현함 | Front-end | 판단 모델 결과 수신 |
+| 6 | 프론트 화면 연결: 메뉴 화면의 음성 모드 버튼·다시 말하기·인식 문장과 `reply_text` 표시는 완료(PR #53). `voice_guide`로 모드 자동 켜기, 확인·취소 버튼, 메뉴 외 화면은 남음 | Front-end | 판단 모델 결과 수신 |
 | 7 | 실행 환경: CORS의 `Idempotency-Key`·메서드 허용은 PR #40에서 반영됨. 배포 출처를 `CORS_ORIGINS`에 넣을지는 배포 구성에서 정함. Compose의 키 전달은 반영함 | Back-end·infra | — |
 | 8 | 실제 키로 프롬프트 검증, 실험에 쓴 프롬프트 버전(현재 `interpret_v2`, v1은 ignored 없음)·모델 기록 | Decision AI | 2 |
 
