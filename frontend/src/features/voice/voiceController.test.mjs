@@ -570,6 +570,15 @@ test('다시 듣기를 시작하면 시간을 처음부터 다시 잰다', async
   assert.equal(controller.getSnapshot().enabled, false);
 });
 
+test('손님이 끄면 시간 기준 꺼짐 이유를 남기지 않는다', async () => {
+  const { controller } = setup([status('completed')], { autoOffMs: 30 });
+  controller.setEnabled(true);
+  FakeRecognition.last().fail('no-speech');
+  controller.setEnabled(false);
+  await tick(60);
+  assert.deepEqual([controller.getSnapshot().enabled, controller.getSnapshot().autoOff], [false, null]);
+});
+
 test('음성 API는 같은 출처 경로와 중복 방지 키로 요청하고 오류 형식을 ApiError로 넘긴다', async () => {
   const requests = [];
   const api = createVoiceApi('/backend/', async (url, init) => {
