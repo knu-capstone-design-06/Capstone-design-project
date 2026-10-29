@@ -503,6 +503,18 @@ test('마이크가 무음으로 두 번 연달아 닫히면 음성 모드를 저
   assert.equal(controller.listen(), false, '꺼진 뒤에는 마이크를 열지 않음');
 });
 
+test('말을 받으면 무음 횟수를 다시 센다', async () => {
+  const { controller } = setup([status('completed')]);
+  controller.setEnabled(true);
+  FakeRecognition.last().fail('no-speech');
+  controller.listen();
+  FakeRecognition.last().final(['아이스 아메리카노 두 잔', 0.9]);
+  await tick(20);
+  controller.listen();
+  FakeRecognition.last().fail('no-speech');
+  assert.deepEqual([controller.getSnapshot().enabled, controller.getSnapshot().autoOff], [true, null]);
+});
+
 test('음성 API는 같은 출처 경로와 중복 방지 키로 요청하고 오류 형식을 ApiError로 넘긴다', async () => {
   const requests = [];
   const api = createVoiceApi('/backend/', async (url, init) => {
