@@ -4,8 +4,8 @@ import type { RecognitionFactory, SpeechCapture, SpeechErrorCode, SpeechResult }
 import type { VoiceApi, VoiceRequestStatus, VoiceStatus } from './voiceApi.ts';
 
 export type VoicePhase = 'idle' | 'listening' | 'processing';
-/** 음성 모드가 저절로 꺼진 이유. silence: 마이크가 무음으로 연달아 닫힘. */
-export type VoiceAutoOffReason = 'silence';
+/** 음성 모드가 저절로 꺼진 이유. silence: 마이크가 무음으로 연달아 닫힘. idle: 켜진 채 한동안 쓰지 않음. */
+export type VoiceAutoOffReason = 'silence' | 'idle';
 /** session_expired: 주문을 마친 세션이라 backend가 새 음성 요청을 410으로 거절했습니다. */
 export type VoiceInputError = SpeechErrorCode | 'no_session' | 'request_failed' | 'session_expired' | 'timeout';
 export type VoiceSnapshot = {
@@ -34,6 +34,8 @@ export type VoiceControllerOptions = {
   silenceMs?: number;
   /** 마이크가 무음으로 이 횟수만큼 연달아 닫히면 음성 모드를 끕니다. 0이면 끄지 않습니다. */
   autoOffSilences?: number;
+  /** 마이크와 처리가 모두 쉬는 상태가 이 시간(ms) 동안 이어지면 음성 모드를 끕니다. 0이면 끄지 않습니다. */
+  autoOffMs?: number;
   minConfidence?: number;
   pollIntervalMs?: number;
   pollTimeoutMs?: number;
@@ -45,6 +47,7 @@ export const VOICE_SILENCE_MS = 8_000;
 export const VOICE_MIN_CONFIDENCE = 0.3;
 // 손님이 떠났거나 음성을 쓰지 않는 것으로 봅니다. 다음 손님이 켜진 음성 모드를 이어받지 않게 합니다.
 export const VOICE_AUTO_OFF_SILENCES = 2;
+export const VOICE_AUTO_OFF_MS = 30_000;
 // 계약(contract/voice.openapi.yaml)의 상태 조회 간격 1초 이상을 따릅니다.
 const POLL_INTERVAL_MS = 1_000;
 const POLL_TIMEOUT_MS = 15_000;
@@ -82,6 +85,8 @@ export class VoiceController {
   private readonly createKey: () => string;
   private readonly silenceMs: number;
   private readonly autoOffSilences: number;
+  private readonly autoOffMs: number;
+  private idleTimer: ReturnType<typeof setTimeout> | null = null;
   // 마이크가 무음으로 연달아 닫힌 횟수. 말을 받거나 모드를 켜거나 세션이 바뀌면 0으로 돌아갑니다.
   private silentEnds = 0;
   private state: VoiceSnapshot;
@@ -105,6 +110,7 @@ export class VoiceController {
     this.onResult = options.onResult ?? (() => {});
     this.silenceMs = options.silenceMs ?? VOICE_SILENCE_MS;
     this.autoOffSilences = options.autoOffSilences ?? VOICE_AUTO_OFF_SILENCES;
+    this.autoOffMs = options.autoOffMs ?? VOICE_AUTO_OFF_MS;
     this.minConfidence = options.minConfidence ?? VOICE_MIN_CONFIDENCE;
     this.pollIntervalMs = options.pollIntervalMs ?? POLL_INTERVAL_MS;
     this.pollTimeoutMs = options.pollTimeoutMs ?? POLL_TIMEOUT_MS;
@@ -174,10 +180,12 @@ export class VoiceController {
         if (pending !== null) { this.open(pending); return; }
         if (reason === 'silence' && !this.cancelled.has(capture)) {
           this.silentEnds += 1;
-          if (this.autoOffSilences > 0 && this.silentEnds >= this.autoOffSilences) this.turnOffUnused('silence');
+          if (this.autoOffSilences > 0 && this.silentEnds >= this.autoOffSilences) { this.turnOffUnused('silence'); return; }
         }
+        if (!this.processing) this.armIdle();
       },
     }, { silenceMs: this.silenceMs });
+    this.clearIdle();
     this.capture = capture;
     this.set({ phase: 'listening', microphoneActive: true, partialText: '', error: null });
     capture.start();
@@ -192,12 +200,28 @@ export class VoiceController {
     this.set({ enabled: false, lastTranscript: '', lastResult: null, error: null, autoOff: reason });
   }
 
+  /** 마이크도 처리도 없이 쉬는 동안만 시간을 잽니다. 듣기를 시작하면 다시 잽니다. */
+  private armIdle() {
+    this.clearIdle();
+    if (this.autoOffMs <= 0 || !this.state.enabled) return;
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = null;
+      if (this.state.enabled && this.state.phase === 'idle' && !this.capture && !this.processing) this.turnOffUnused('idle');
+    }, this.autoOffMs);
+  }
+
+  private clearIdle() {
+    if (this.idleTimer !== null) clearTimeout(this.idleTimer);
+    this.idleTimer = null;
+  }
+
   dispose() {
     this.halt();
     this.listeners.clear();
   }
 
   private halt() {
+    this.clearIdle();
     this.pendingListen = null;
     this.processing?.abort();
     this.processing = null;
@@ -228,7 +252,8 @@ export class VoiceController {
     this.processing = controller;
     this.set({ phase: 'processing', partialText: result.text, lastTranscript: result.text });
     const { sessionId, screenId } = this.context;
-    void this.process(sessionId, { text: result.text, alternatives: result.alternatives, screen_id: screenId }, controller.signal);
+    void this.process(sessionId, { text: result.text, alternatives: result.alternatives, screen_id: screenId }, controller.signal)
+      .finally(() => { if (!this.processing && !this.capture) this.armIdle(); });
   }
 
   private async process(sessionId: string, body: Parameters<VoiceApi['submit']>[1], signal: AbortSignal) {
