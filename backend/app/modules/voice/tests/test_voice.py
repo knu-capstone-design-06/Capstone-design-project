@@ -248,6 +248,13 @@ class VoiceApiTests(unittest.TestCase):
         self.assertEqual(body["status"], "completed")
         self.assertEqual(self.interpreter.calls, 2)
 
+    def test_first_bare_answer_in_a_session_sends_no_tool_calls(self):
+        self.interpreter.result = interpretation(ADD_AMERICANO)  # the model made one up
+        body = self.status(self.say("네")).json()
+        self.assertEqual(body["status"], "needs_clarification")
+        self.assertEqual(body["tool_calls"], [])
+        self.assertEqual(body["reply_text"], "어떤 메뉴를 주문할까요?")
+
     def test_ai_unavailable_and_crash_become_failed(self):
         for result in (None, RuntimeError("boom")):
             self.interpreter.result = result
