@@ -27,9 +27,9 @@ test('손상된 저장 설정과 boolean이 아닌 값은 기본 설정으로 �
 
 test('낮은 화면 설정을 복원하고 이전 저장 형식에서는 기본 높이를 사용한다', () => {
   const oldSettings = { largeText: true, largeButton: false, simpleScreen: false, stepGuide: true };
-  assert.deepEqual(readSettings(JSON.stringify(oldSettings)), { ...oldSettings, lowScreen: false });
-  assert.deepEqual(readSettings(JSON.stringify({ ...oldSettings, lowScreen: true })), { ...oldSettings, lowScreen: true });
-  assert.deepEqual(readSettings(JSON.stringify({ ...oldSettings, lowScreen: 'true' })), { ...oldSettings, lowScreen: false });
+  assert.deepEqual(readSettings(JSON.stringify(oldSettings)), { ...oldSettings, lowScreen: false, highContrast: false });
+  assert.deepEqual(readSettings(JSON.stringify({ ...oldSettings, lowScreen: true })), { ...oldSettings, lowScreen: true, highContrast: false });
+  assert.deepEqual(readSettings(JSON.stringify({ ...oldSettings, lowScreen: 'true' })), { ...oldSettings, lowScreen: false, highContrast: false });
 });
 
 const emptyCart = (session = 'session-1') => ({ session_id: session, version: 0, currency: 'KRW', items: [], total_quantity: 0, total_amount: 0, updated_at: '2026-10-09T00:00:00Z' });
@@ -55,6 +55,22 @@ test('초기화 중 중복 호출은 상품·세션 요청을 한 번만 실행�
   await Promise.all([controller.initialize(), controller.initialize()]);
   assert.equal(calls, 1);
   assert.equal(controller.getSnapshot().status, 'ready');
+});
+
+test('확인한 처음으로 동작은 새 서버 세션을 만들고 미확정 요청은 버리지 않는다', async () => {
+  const controller = fixture();
+  await controller.initialize();
+  const previous = controller.getSnapshot().session.session_id;
+  assert.equal(await controller.restartCurrentOrder(), true);
+  assert.notEqual(controller.getSnapshot().session.session_id, previous);
+  assert.equal(controller.getSnapshot().cart.total_quantity, 0);
+  const uncertain = fixture({ addCartItem: async () => { throw new TypeError('response lost'); } });
+  await uncertain.initialize();
+  await uncertain.addItem({ product_id: 'americano', temperature: 'iced', quantity: 1 });
+  const session = uncertain.getSnapshot().session.session_id;
+  assert.equal(await uncertain.restartCurrentOrder(), false);
+  assert.equal(uncertain.getSnapshot().session.session_id, session);
+  assert.equal(uncertain.getSnapshot().status, 'uncertain');
 });
 
 test('주문 API가 없는 서버에서는 연결 대기를 표시하고 로컬 상품·Cart로 대체하지 않는다', async () => {

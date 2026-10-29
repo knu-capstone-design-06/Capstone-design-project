@@ -12,9 +12,10 @@ from app.common.config.settings import Settings
 from app.infrastructure.external.openai_client import OpenAiClient
 from app.main import create_app
 from app.modules.voice.interpreter import OpenAiVoiceInterpreter, StubVoiceInterpreter
+from app.modules.voice.exceptions import VoiceSessionCompleted
 from app.modules.voice.repository import HISTORY_TURNS, VoiceRepository
 from app.modules.voice.schemas import (
-    MenuItem, VoiceInterpretation, VoiceRequestCreate, VoiceTurn,
+    MenuItem, VoiceErrorResponse, VoiceInterpretation, VoiceRequestCreate, VoiceTurn,
 )
 
 BODY = {
@@ -93,6 +94,17 @@ class VoiceApiTests(unittest.TestCase):
         return self.client.get(
             f"/api/v1/sessions/{session_id or self.session_id}/voice/requests/{request_id}"
         )
+
+    def complete_order(self):
+        base = f"/api/v1/sessions/{self.session_id}"
+        added = self.client.post(f"{base}/cart/items", json={
+            "product_id": "americano", "temperature": "iced",
+            "quantity": 1, "expected_version": 0,
+        }, headers={"Idempotency-Key": str(uuid4())})
+        self.assertEqual(added.status_code, 200)
+        ordered = self.client.post(f"{base}/orders", json={"expected_version": 1},
+                                   headers={"Idempotency-Key": str(uuid4())})
+        self.assertEqual(ordered.status_code, 201)
 
     def test_accepts_and_returns_tool_calls_without_claiming_changes(self):
         response = self.post()
@@ -217,6 +229,43 @@ class VoiceApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.json()["code"], "idempotency_key_reused")
 
+    def test_completed_session_replays_old_voice_request_but_rejects_new_one(self):
+        key = str(uuid4())
+        first = self.post(key=key)
+        self.assertEqual(first.status_code, 202)
+        self.complete_order()
+
+        replay = self.post(key=key)
+        self.assertEqual(replay.status_code, 202)
+        self.assertEqual(replay.json(), first.json())
+        self.assertEqual(self.interpreter.calls, 1)
+        self.assertEqual(self.status(first.json()["request_id"]).status_code, 200)
+        changed = self.post(body={**BODY, "text": "라떼 하나"}, key=key)
+        self.assertEqual((changed.status_code, changed.json()["code"]),
+                         (409, "idempotency_key_reused"))
+        new = self.post()
+        self.assertEqual(new.status_code, 410)
+        self.assertEqual(new.json(), {
+            "code": "session_expired", "detail": "새 이용 세션을 시작해 주세요.",
+        })
+        self.assertEqual(VoiceErrorResponse.model_validate(new.json()).code,
+                         "session_expired")
+        response_schema = self.client.get("/openapi.json").json()["components"]["schemas"]
+        self.assertIn("session_expired",
+                      response_schema["VoiceErrorResponse"]["properties"]["code"]["enum"])
+
+    def test_completed_session_returns_410_before_in_progress_for_new_key(self):
+        service = self.client.app.state.voice_service
+        old_key = uuid4()
+        old, _ = service.accept(self.session_id, old_key,
+                                VoiceRequestCreate.model_validate(BODY))
+        self.complete_order()
+        self.assertEqual(self.post().status_code, 410)
+        replay = self.post(key=str(old_key))
+        self.assertEqual(replay.status_code, 202)
+        self.assertEqual(replay.json(), old.model_dump(mode="json"))
+        self.assertEqual(self.status(old.request_id).json()["status"], "accepted")
+
     def test_second_request_while_processing_is_rejected(self):
         # Simulate an unfinished request by accepting without running the background task.
         service = self.client.app.state.voice_service
@@ -294,6 +343,14 @@ class RetentionTests(unittest.TestCase):
         self.now += timedelta(hours=2)
         self.accept(session_id="s2")
         self.repository.update(record.request_id, "completed")  # must not raise
+        self.assertIsNone(self.repository.get("s1", record.request_id))
+
+    def test_expired_key_in_completed_session_is_treated_as_new_request(self):
+        key = uuid4()
+        record, _ = self.repository.accept("s1", key, "fingerprint")
+        self.now += timedelta(hours=1, seconds=1)
+        with self.assertRaises(VoiceSessionCompleted):
+            self.repository.accept("s1", key, "fingerprint", is_completed=lambda: True)
         self.assertIsNone(self.repository.get("s1", record.request_id))
 
 

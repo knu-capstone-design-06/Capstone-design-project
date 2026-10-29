@@ -42,7 +42,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 http, settings.ai_engine_timeout_seconds
             )
             session_repository = SessionRepository()
-            app.state.session_service = SessionService(session_repository)
+            app.state.session_service = SessionService(
+                session_repository, app.state.ordering_repository
+            )
             openai = None
             if settings.openai_api_key is not None:
                 openai_http = await stack.enter_async_context(create_openai_http(
@@ -57,6 +59,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 build_voice_interpreter(openai),
                 # Same demo catalog the ordering API sells.
                 menu_provider=lambda: menu_from_products(PRODUCTS),
+                ordering=app.state.ordering_repository,
             )
             try:
                 yield

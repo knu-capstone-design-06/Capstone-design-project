@@ -10,6 +10,8 @@ export type VoiceSnapshot = {
   supported: boolean;
   /** 음성 모드. 켜져 있어도 마이크는 phase가 listening일 때만 열립니다. */
   enabled: boolean;
+  /** stop/abort 후 실제 onend까지 유지합니다. 화면 읽기와 마이크의 중첩을 막습니다. */
+  microphoneActive: boolean;
   phase: VoicePhase;
   partialText: string;
   /** 마지막으로 Chrome이 확정 인식한 문장. 모드를 끄거나 세션이 바뀌면 지웁니다. */
@@ -19,6 +21,8 @@ export type VoiceSnapshot = {
 };
 export type VoiceControllerOptions = {
   api: VoiceApi;
+  /** 개발 샘플의 인식 확인용. 세션 없이 동작하며 서버 요청·결과 콜백을 실행하지 않습니다. */
+  recognitionOnly?: boolean;
   /** 기본값은 브라우저의 SpeechRecognition입니다. 없으면 음성 모드를 켤 수 없습니다. */
   recognition?: RecognitionFactory | null;
   /** 결과가 정해질 때마다 불립니다. 장바구니 반영·MCP 실행은 부르는 쪽이 합니다. */
@@ -61,6 +65,7 @@ function wait(ms: number, signal: AbortSignal): Promise<void> {
  */
 export class VoiceController {
   private readonly api: VoiceApi;
+  private readonly recognitionOnly: boolean;
   private readonly recognition: RecognitionFactory | null;
   private readonly onResult: (result: VoiceRequestStatus) => void;
   private readonly minConfidence: number;
@@ -84,6 +89,7 @@ export class VoiceController {
 
   constructor(options: VoiceControllerOptions) {
     this.api = options.api;
+    this.recognitionOnly = options.recognitionOnly ?? false;
     this.recognition = options.recognition === undefined ? findRecognition() : options.recognition;
     this.onResult = options.onResult ?? (() => {});
     this.silenceMs = options.silenceMs ?? VOICE_SILENCE_MS;
@@ -91,7 +97,7 @@ export class VoiceController {
     this.pollIntervalMs = options.pollIntervalMs ?? POLL_INTERVAL_MS;
     this.pollTimeoutMs = options.pollTimeoutMs ?? POLL_TIMEOUT_MS;
     this.createKey = options.createKey ?? (() => crypto.randomUUID());
-    this.state = { supported: this.recognition !== null, enabled: false, phase: 'idle', partialText: '', lastTranscript: '', lastResult: null, error: null };
+    this.state = { supported: this.recognition !== null, enabled: false, microphoneActive: false, phase: 'idle', partialText: '', lastTranscript: '', lastResult: null, error: null };
   }
   getSnapshot = () => this.state;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
@@ -134,7 +140,7 @@ export class VoiceController {
     if (!this.state.enabled || !this.recognition) return false;
     if (this.state.phase === 'listening') return true;
     if (this.state.phase !== 'idle') return false;
-    if (!this.context.sessionId.trim()) { this.set({ error: 'no_session' }); return false; }
+    if (!this.recognitionOnly && !this.context.sessionId.trim()) { this.set({ error: 'no_session' }); return false; }
     if (this.sessionExpired) { this.set({ error: 'session_expired' }); return false; }
     if (this.capture) { this.pendingListen = answering; return true; }
     const live = () => this.capture === capture && !this.cancelled.has(capture);
@@ -145,14 +151,14 @@ export class VoiceController {
       onEnd: () => {
         if (this.capture !== capture) return;
         this.capture = null;
-        if (this.state.phase === 'listening') this.set({ phase: 'idle', partialText: '' });
+        this.set({ microphoneActive: false, ...(this.state.phase === 'listening' ? { phase: 'idle', partialText: '' } : {}) });
         const pending = this.pendingListen;
         this.pendingListen = null;
         if (pending !== null) this.open(pending);
       },
     }, { silenceMs: this.silenceMs });
     this.capture = capture;
-    this.set({ phase: 'listening', partialText: '', error: null });
+    this.set({ phase: 'listening', microphoneActive: true, partialText: '', error: null });
     capture.start();
     return true;
   }
@@ -181,6 +187,11 @@ export class VoiceController {
   }
 
   private accept(result: SpeechResult, answering: boolean) {
+    if (this.recognitionOnly) {
+      // 인식 테스트에서는 짧은 말·낮은 신뢰도도 그대로 확인합니다. onend까지 마이크 종료를 기다립니다.
+      this.set({ partialText: '', lastTranscript: result.text, lastResult: null, error: null });
+      return;
+    }
     if (this.looksLikeNoise(result, answering)) return;
     const controller = new AbortController();
     this.processing = controller;

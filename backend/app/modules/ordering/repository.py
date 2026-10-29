@@ -1,5 +1,7 @@
 """Atomic process-local ordering state; replaced by DB storage in a later PR."""
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from threading import RLock
@@ -32,6 +34,18 @@ class OrderingRepository:
                 total_amount=0, updated_at=datetime.now(timezone.utc),
             ))
         return self.states[session_id]
+
+    def is_completed(self, session_id: str) -> bool:
+        with self.lock:
+            state = self.states.get(session_id)
+            return state.completed if state is not None else False
+
+    @contextmanager
+    def completion_guard(self, session_id: str) -> Iterator[bool]:
+        """Keep completion state stable while a related request is accepted."""
+        with self.lock:
+            state = self.states.get(session_id)
+            yield state.completed if state is not None else False
 
     def replay(self, session_id: str, key: str) -> Replay | None:
         return self.replays.get((session_id, key))

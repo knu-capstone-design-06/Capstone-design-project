@@ -1,8 +1,8 @@
-.touch-log-tools { position: fixed; right: 16px; bottom: 190px; z-index: 100; width: min(380px, calc(100vw - 32px)); color: #213c34; font: 13px/1.5 system-ui, sans-serif; }
+.touch-log-tools { position: fixed; right: 16px; bottom: calc(var(--order-actions-measured-height, 174px) + 16px); z-index: 100; width: min(380px, calc(100vw - 32px)); color: #213c34; font: 13px/1.5 system-ui, sans-serif; }
 .touch-log-tools button { min-height: 36px; padding: 7px 11px; font-size: 12px; border-radius: 8px; }
 .touch-log-launcher { display: block; margin-left: auto; background: #173e34; color: white; box-shadow: 0 4px 16px #173e3426; }
 .touch-log-launcher:hover { background: #27574a; }
-.touch-log-panel { background: #fffefb; border: 1px solid #cad6ce; border-radius: 14px; padding: 16px; margin-bottom: 8px; box-shadow: 0 12px 40px #173e3426; max-height: min(620px, calc(100dvh - 250px)); overflow-y: auto; overscroll-behavior: contain; }
+.touch-log-panel { background: #fffefb; border: 1px solid #cad6ce; border-radius: 14px; padding: 16px; margin-bottom: 8px; box-shadow: 0 12px 40px #173e3426; max-height: min(620px, max(120px, calc(100dvh - var(--order-actions-measured-height, 174px) - 76px))); overflow-y: auto; overscroll-behavior: contain; }
 .touch-log-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
 .touch-log-heading span { font-size: 11px; color: #64746b; }
 .touch-log-heading h2 { margin: 2px 0 0; font-size: 19px; }
@@ -24,6 +24,10 @@
 .touch-log-visits th, .touch-log-visits td { padding: 5px 3px; border-bottom: 1px solid #dce4dc; text-align: right; }
 .touch-log-visits th:first-child { text-align: left; }
 .touch-log-panel h3 { font-size: 12px; margin: 0 0 6px; }
+.touch-log-pilot { border-block: 1px solid #cad6ce; padding: 12px 0; margin-bottom: 12px; }
+.touch-log-policy { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin: 8px 0; }
+.touch-log-policy label { display: grid; gap: 4px; font-size: 12px; }
+.touch-log-policy input, .touch-log-policy select { width: 100%; min-width: 0; font: inherit; padding: 6px; color: #213c34; background: white; }
 .touch-log-events { list-style: none; margin: 0; padding: 0; max-height: 200px; overflow-y: auto; overscroll-behavior: contain; }
 .touch-log-events button { display: flex; width: 100%; justify-content: space-between; align-items: center; gap: 8px; border-color: transparent; text-align: left; background: transparent; }
 .touch-log-events button[aria-pressed="true"] { background: #e7efe8; border-color: #b5c7b9; color: #213c34; }
@@ -32,5 +36,3 @@
 .touch-log-detail { margin-top: 12px; border-top: 1px solid #dce4dc; padding-top: 10px; }
 .touch-log-detail summary { cursor: pointer; font-size: 12px; }
 .touch-log-detail pre { margin: 8px 0 0; padding: 10px; border-radius: 8px; background: #f0f3ef; max-height: 200px; overflow: auto; font-size: 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
-@media (max-width: 760px) { .touch-log-tools { bottom: 254px; } .touch-log-panel { max-height: min(620px, calc(100dvh - 314px)); } }
-@media (max-width: 760px) { .kiosk.large-button ~ .touch-log-tools { bottom: 286px; } .kiosk.large-button ~ .touch-log-tools .touch-log-panel { max-height: min(620px, calc(100dvh - 346px)); } }
