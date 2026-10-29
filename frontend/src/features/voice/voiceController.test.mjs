@@ -527,6 +527,14 @@ test('저절로 꺼진 뒤 다시 켜거나 세션이 바뀌면 꺼진 이유를
   assert.equal(controller.getSnapshot().autoOff, null);
 });
 
+test('autoOffSilences가 0이면 무음으로 끄지 않는다', () => {
+  const { controller } = setup([status('completed')], { autoOffSilences: 0 });
+  controller.setEnabled(true);
+  for (let i = 0; i < 3; i += 1) { FakeRecognition.last().fail('no-speech'); controller.listen(); }
+  assert.equal(controller.getSnapshot().enabled, true);
+  controller.dispose();
+});
+
 test('음성 API는 같은 출처 경로와 중복 방지 키로 요청하고 오류 형식을 ApiError로 넘긴다', async () => {
   const requests = [];
   const api = createVoiceApi('/backend/', async (url, init) => {
