@@ -396,6 +396,15 @@ test('주문을 마친 세션의 410은 따로 알리고 이전 질문의 대답
   assert.equal(controller.getSnapshot().phase, 'idle', '대답 대기가 풀려 한 글자는 보내지 않고 거름');
 });
 
+test('410이어도 session_expired가 아니면 일반 요청 실패로 둔다', async () => {
+  const { api, controller } = setup([status('completed')]);
+  api.submit = async () => { throw new ApiError(410, { detail: 'gone' }); };
+  controller.setEnabled(true);
+  FakeRecognition.last().final(['아메리카노 주세요', 0.9]);
+  await tick(20);
+  assert.equal(controller.getSnapshot().error, 'request_failed');
+});
+
 test('음성 API는 같은 출처 경로와 중복 방지 키로 요청하고 오류 형식을 ApiError로 넘긴다', async () => {
   const requests = [];
   const api = createVoiceApi('/backend/', async (url, init) => {
