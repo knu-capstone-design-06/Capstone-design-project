@@ -390,6 +390,14 @@ class PromptVersionTests(unittest.TestCase):
             self.assertIn(f"- {status}:", prompt)
 
 
+    def test_current_prompt_asks_temperature_and_does_not_invent_answers(self):
+        from app.modules.voice import interpreter
+
+        prompt = interpreter._PROMPT_PATH.read_text(encoding="utf-8")
+        self.assertIn("temperature를 null로 두지 않는다", prompt)
+        self.assertIn("상품을 지어내지 않는다", prompt)
+
+
 class MenuFromProductsTests(unittest.TestCase):
     def test_ordering_catalog_becomes_interpreter_menu(self):
         from app.modules.ordering.catalog import PRODUCTS
