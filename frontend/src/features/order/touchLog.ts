@@ -3,7 +3,7 @@ export const touchLogKey = 'kiosk-touch-log-draft-v1';
 export const logLimit = 1000;
 export type Point = { x: number; y: number };
 export type Rect = { x: number; y: number; width: number; height: number };
-export type LogContext = { screen: string; visitId: string; settings: unknown };
+export type LogContext = { screen: string; visitId: string; settings: unknown; voiceMode?: boolean };
 export type LogEvent = LogContext & {
   id: string; sessionId: string; serverSessionId: string | null; occurredAt: string; elapsedMs: number;
   kind: string; data: unknown;

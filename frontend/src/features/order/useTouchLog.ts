@@ -4,12 +4,16 @@ import type { LogContext, Point, Rect, SavedLog } from './touchLog.ts';
 import { summarizeTouchLog } from './touchLogSummary.ts';
 import type { RawTouchSummary } from './touchLogSummary.ts';
 import type { Settings } from './model.ts';
+import { measureTouchPilot } from './touchLogFeatures.ts';
+import type { TouchPilotPolicy } from './touchLogFeatures.ts';
+import type { TouchLogObservation } from './touchLogObservation.ts';
 
-type DraftInspector = { read: () => SavedLog; summarize: () => RawTouchSummary; exportJson: () => void; status: () => string | null };
+type DraftInspector = { read: () => SavedLog; summarize: () => RawTouchSummary; features: (policy?: TouchPilotPolicy) => ReturnType<typeof measureTouchPilot>; exportJson: () => void; status: () => string | null };
 declare global { interface Window { kioskTouchLogDraft?: DraftInspector } }
 type Gesture = {
   id: string; context: LogContext; start: Point; last: Point; maxDistance: number;
   cancelled: boolean;
+  pointerId: number; startedAt: number; overlappingInputIds: Set<string>;
 };
 const selector = 'button, a[href]';
 function rectOf(element: HTMLElement): Rect {
@@ -49,11 +53,12 @@ function targetInfo(element: HTMLElement) {
   };
 }
 
-export function useTouchLog(screen: string, category: string, productId: string | null, settings: Settings, serverSessionId: string | null) {
+export function useTouchLog(screen: string, category: string, productId: string | null, settings: Settings, serverSessionId: string | null, observation: TouchLogObservation) {
   const root = useRef<HTMLDivElement>(null);
   const tracker = useRef<ReturnType<typeof createTouchLog> | null>(null);
-  const context = useRef<LogContext>({ screen, visitId: '', settings });
+  const context = useRef<LogContext>({ screen, visitId: '', settings, voiceMode: observation.voice.enabled });
   const previous = useRef<{ screen: string; category: string; productId: string | null; settings: Settings } | null>(null);
+  const previousObservation = useRef<TouchLogObservation | null>(null);
   const interruptGestures = useRef<() => void>(() => {});
 
   // effect에서 초기화하고 StrictMode 재설정에서도 세션·방문을 유지합니다.
@@ -67,16 +72,20 @@ export function useTouchLog(screen: string, category: string, productId: string 
         tracker.current.record(last ?? { screen, visitId: '', settings }, 'session_end', { reason: 'page_reload' });
         tracker.current.newSession();
       }
-      context.current = { screen, visitId: crypto.randomUUID(), settings: { ...settings } };
+      context.current = { screen, visitId: crypto.randomUUID(), settings: { ...settings }, voiceMode: observation.voice.enabled };
       tracker.current.record(context.current, 'session_start', { reason: 'page_load', server_session_id: null });
-      tracker.current.record(context.current, 'screen_enter');
+      tracker.current.record(context.current, 'screen_enter', { visibility: document.visibilityState });
       previous.current = { screen, category, productId, settings: { ...settings } };
     }
     const recorder = tracker.current;
     const gestures = new Map<number, Gesture>();
     const cancelled = new Map<number, Gesture>();
     const interrupt = () => {
-      for (const gesture of gestures.values()) recorder.record(gesture.context, 'pointer_interrupted', { inputId: gesture.id, lastObserved: gesture.last });
+      for (const gesture of gestures.values()) recorder.record(gesture.context, 'pointer_interrupted', {
+        inputId: gesture.id, lastObserved: gesture.last, pointerId: gesture.pointerId,
+        durationMs: Math.max(0, performance.now() - gesture.startedAt),
+        maxObservedDistance: gesture.maxDistance, overlappingInputIds: [...gesture.overlappingInputIds],
+      });
       gestures.clear(); cancelled.clear();
     };
     interruptGestures.current = interrupt;
@@ -84,6 +93,7 @@ export function useTouchLog(screen: string, category: string, productId: string 
     const point = (event: PointerEvent) => ({ x: event.clientX, y: event.clientY });
     function down(event: PointerEvent) {
       if (!root.current?.contains(event.target as Node)) return;
+      const startedAt = performance.now();
       // 이전 취소 입력을 다음 제스처와 연결하지 않습니다.
       if (!gestures.size) cancelled.clear();
       const scope = root.current.querySelector<HTMLDialogElement>('dialog[open]') ?? root.current;
@@ -102,10 +112,14 @@ export function useTouchLog(screen: string, category: string, productId: string 
         .filter(candidate => candidate !== null);
       const minimum = candidates.length ? Math.min(...candidates.map(candidate => candidate.distance)) : null;
       const id = record('pointer_start', {
-        start, target,
+        start, target, pointerType: event.pointerType || 'unknown', isPrimary: event.isPrimary,
+        pointerId: event.pointerId, overlappingInputIds: [...gestures.values()].map(gesture => gesture.id),
         nearestCandidates: candidates.filter(candidate => candidate.distance === minimum),
       });
-      gestures.set(event.pointerId, { id, context: structuredClone(context.current), start, last: start, maxDistance: 0, cancelled: false });
+      const overlappingInputIds = new Set([...gestures.values()].map(gesture => gesture.id));
+      for (const gesture of gestures.values()) gesture.overlappingInputIds.add(id);
+      gestures.set(event.pointerId, { id, context: structuredClone(context.current), start, last: start, maxDistance: 0,
+        cancelled: false, pointerId: event.pointerId, startedAt, overlappingInputIds });
     }
     function move(event: PointerEvent) {
       const gesture = gestures.get(event.pointerId);
@@ -122,6 +136,8 @@ export function useTouchLog(screen: string, category: string, productId: string 
         inputId: gesture.id, start: gesture.start,
         end: gesture.cancelled ? null : gesture.last, lastObserved: gesture.last,
         maxObservedDistance: gesture.maxDistance, cancelled: gesture.cancelled,
+        pointerId: gesture.pointerId, durationMs: Math.max(0, performance.now() - gesture.startedAt),
+        overlappingInputIds: [...gesture.overlappingInputIds],
       });
       gestures.delete(event.pointerId);
       if (gesture.cancelled) cancelled.set(event.pointerId, gesture);
@@ -153,12 +169,17 @@ export function useTouchLog(screen: string, category: string, productId: string 
     function pageShow(event: PageTransitionEvent) {
       if (event.persisted) {
         context.current = { ...context.current, visitId: crypto.randomUUID() };
-        record('session_resume', { reason: 'bfcache' }); record('screen_enter', null);
+        record('session_resume', { reason: 'bfcache' }); record('screen_enter', { visibility: document.visibilityState });
       }
+    }
+    function visibilityChange() {
+      record('visibility_change', { visibility: document.visibilityState });
+      if (document.visibilityState !== 'visible') interrupt();
     }
     const inspector: DraftInspector = {
       read: () => recorder.read(), status: () => recorder.getWarning(),
       summarize: () => summarizeTouchLog(recorder.read()),
+      features: policy => measureTouchPilot(recorder.read(), Date.now(), 2000, policy),
       exportJson() {
         const url = URL.createObjectURL(new Blob([JSON.stringify(recorder.read(), null, 2)], { type: 'application/json' }));
         const link = document.createElement('a'); link.href = url; link.download = 'touch-log-draft.json'; link.click();
@@ -171,6 +192,7 @@ export function useTouchLog(screen: string, category: string, productId: string 
     document.addEventListener('pointerup', end, true);
     document.addEventListener('pointercancel', end, true);
     document.addEventListener('scroll', scroll, true);
+    document.addEventListener('visibilitychange', visibilityChange);
     document.addEventListener('touchend', touchEnd, { passive: true });
     document.addEventListener('touchcancel', touchEnd, { passive: true });
     window.addEventListener('pagehide', pageHide);
@@ -179,6 +201,7 @@ export function useTouchLog(screen: string, category: string, productId: string 
       document.removeEventListener('pointerdown', down, true); document.removeEventListener('pointermove', move, true);
       document.removeEventListener('pointerup', end, true); document.removeEventListener('pointercancel', end, true);
       document.removeEventListener('scroll', scroll, true);
+      document.removeEventListener('visibilitychange', visibilityChange);
       document.removeEventListener('touchend', touchEnd); document.removeEventListener('touchcancel', touchEnd);
       window.removeEventListener('pagehide', pageHide); window.removeEventListener('pageshow', pageShow);
       if (window.kioskTouchLogDraft === inspector) delete window.kioskTouchLogDraft;
@@ -195,15 +218,16 @@ export function useTouchLog(screen: string, category: string, productId: string 
       recorder.record(context.current, 'screen_leave', { reason: 'server_session_change' });
       recorder.record(context.current, 'session_end', { reason: 'server_session_change' });
       recorder.newSession(serverSessionId);
-      context.current = { screen, visitId: crypto.randomUUID(), settings: { ...settings } };
+      context.current = { screen, visitId: crypto.randomUUID(), settings: { ...settings }, voiceMode: observation.voice.enabled };
+      previousObservation.current = null;
       recorder.record(context.current, 'session_start', { reason: 'server_session_change', server_session_id: serverSessionId });
-      recorder.record(context.current, 'screen_enter');
+      recorder.record(context.current, 'screen_enter', { visibility: document.visibilityState });
       prior.screen = screen;
     }
     if (prior.screen !== screen) {
       recorder.record(context.current, 'screen_leave', { to: screen });
-      context.current = { screen, visitId: crypto.randomUUID(), settings: { ...settings } };
-      recorder.record(context.current, 'screen_enter', { from: prior.screen });
+      context.current = { screen, visitId: crypto.randomUUID(), settings: { ...settings }, voiceMode: observation.voice.enabled };
+      recorder.record(context.current, 'screen_enter', { from: prior.screen, visibility: document.visibilityState });
     }
     if (prior.category !== category) recorder.record(context.current, 'category_change', { from: prior.category, to: category });
     if (prior.productId !== productId) {
@@ -214,8 +238,17 @@ export function useTouchLog(screen: string, category: string, productId: string 
       recorder.record(context.current, 'ui_settings_change', { before: prior.settings, after: settings });
     }
     context.current.settings = { ...settings };
+    context.current.voiceMode = observation.voice.enabled;
+    for (const key of ['order', 'selection', 'voice'] as const) {
+      const before = previousObservation.current?.[key] ?? null;
+      const after = observation[key];
+      if (previousObservation.current === null || JSON.stringify(before) !== JSON.stringify(after)) {
+        recorder.record(context.current, `${key}_state_change`, { before, after });
+      }
+    }
+    previousObservation.current = structuredClone(observation);
     previous.current = { screen, category, productId, settings: { ...settings } };
-  }, [screen, category, productId, settings, serverSessionId]);
+  }, [screen, category, productId, settings, serverSessionId, observation]);
 
   return { root };
 }

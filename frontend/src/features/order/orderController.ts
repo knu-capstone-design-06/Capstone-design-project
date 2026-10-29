@@ -73,6 +73,13 @@ export class OrderController {
     return this.initialize();
   }
 
+  // 화면에서 초기화를 확인한 경우에만 호출합니다. 미확정 요청은 버리지 않습니다.
+  restartCurrentOrder(): Promise<boolean> {
+    if (this.pending || this.state.status !== 'ready' || this.state.order) return Promise.resolve(false);
+    this.set({ session: null });
+    return this.initialize();
+  }
+
   addItem(input: Omit<CartItemCreateRequest, 'expected_version'>): Promise<boolean> {
     const payload = { ...input };
     return this.write('cart', (session, cart, key) => this.api.addCartItem(session, { ...payload, expected_version: cart.version }, key), orderCopy.added);
