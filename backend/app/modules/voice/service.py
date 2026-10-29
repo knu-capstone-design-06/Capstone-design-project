@@ -42,8 +42,9 @@ def ask_for_missing_temperature(result: VoiceInterpretation, menu: list[MenuItem
     calls = []
     for call in result.tool_calls:
         item = products.get(call.arguments.product_id)
-        if item is None or call.arguments.temperature is not None or not item.temperatures:
-            calls.append(call)
+        if (item is None or call.arguments.temperature is not None or not item.temperatures
+                or (isinstance(call, AddCartItemCall) and not item.available)):
+            calls.append(call)  # left for matches_menu, which rejects unsold additions
             continue
         if len(item.temperatures) > 1:
             return VoiceInterpretation(
