@@ -5,7 +5,7 @@ import './voiceModeToggle.css';
 
 const errorCopy: Record<VoiceInputError, string> = {
   not_supported: '이 브라우저에서는 음성 입력을 사용할 수 없어요. 화면을 눌러 주문해 주세요.',
-  not_allowed: '마이크를 사용할 수 없어요. Chrome의 마이크 권한을 확인해 주세요.',
+  not_allowed: '마이크를 사용할 수 없어요. 마이크 사용을 허용하거나 화면을 눌러 주문해 주세요.',
   network: '음성 인식 연결에 문제가 생겼어요. 다시 말하거나 화면을 눌러 주문해 주세요.',
   failed: '음성을 듣지 못했어요. 다시 말하거나 화면을 눌러 주문해 주세요.',
   no_session: '주문 준비가 끝나면 음성 입력을 사용할 수 있어요.',
@@ -31,18 +31,20 @@ export function VoiceModeToggle({ controller, ready, sampleMode }: {
 }) {
   const voice = useVoiceInput(controller);
   const hintId = useId();
-  const canUse = ready && voice.supported && !sampleMode;
+  const recognitionTest = import.meta.env.DEV && sampleMode;
+  const canUse = ready && voice.supported && (!sampleMode || recognitionTest);
   const result = voice.enabled && voice.lastResult;
   const question = result && (result.status === 'needs_confirmation' || result.status === 'needs_clarification');
   const detail = voice.error ? errorCopy[voice.error]
     : voice.phase === 'processing' ? '음성을 확인하고 있어요.'
     : question ? `${resultCopy(result)}${voice.phase === 'listening' ? (voice.partialText ? ` 듣는 중: ${voice.partialText}` : ' 답변을 듣고 있어요.') : ''}`
     : voice.phase === 'listening' ? (voice.partialText ? `듣는 중: ${voice.partialText}` : '듣고 있어요. 말씀해 주세요.')
+    : recognitionTest && voice.lastTranscript ? '인식을 마쳤어요. 다시 말하기로 한 번 더 시험할 수 있어요.'
     : result ? resultCopy(result) : '';
 
   return <section className="voice-mode-control" data-enabled={voice.enabled} aria-label="음성 모드 설정">
     <button type="button" className="voice-mode-toggle" role="switch" aria-checked={voice.enabled}
-      aria-label="음성 모드" aria-describedby={hintId} data-log-target="voice-mode-toggle"
+      aria-label={recognitionTest ? '음성 인식 테스트' : '음성 모드'} aria-describedby={hintId} data-log-target="voice-mode-toggle"
       disabled={!canUse} onClick={() => controller.setEnabled(!voice.enabled)}>
       <span className="voice-mode-icon" aria-hidden="true">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -51,18 +53,18 @@ export function VoiceModeToggle({ controller, ready, sampleMode }: {
           {!voice.enabled && <path className="voice-mode-mute" d="M3 3l18 18" />}
         </svg>
       </span>
-      <span className="voice-mode-copy"><strong>음성 모드</strong>
-        <span className="voice-mode-status" aria-hidden="true">
+      <span className="voice-mode-copy"><strong>{recognitionTest ? '음성 인식 테스트' : '음성 모드'}</strong>
+        {voice.enabled && <span className="voice-mode-status" aria-hidden="true">
           <span className="voice-mode-dot" aria-hidden="true" />{voice.enabled ? '켜짐 · 다시 누르면 꺼져요' : '꺼짐 · 누르면 켜져요'}
-        </span>
+        </span>}
       </span>
-      <span className="voice-mode-switch" aria-hidden="true"><span>{voice.enabled ? 'ON' : 'OFF'}</span><span className="voice-mode-knob" /></span>
+      <span className="voice-mode-switch" aria-hidden="true">{voice.enabled ? '켜짐' : '꺼짐'}</span>
     </button>
-    <p className="voice-mode-preview" id={hintId}>{sampleMode ? '개발용 샘플에서는 음성 요청을 사용할 수 없어요.'
-      : !voice.supported ? '이 브라우저에서는 음성 입력을 사용할 수 없어요. 화면을 눌러 주문해 주세요.'
+    <p className="voice-mode-preview" id={hintId} hidden={!recognitionTest && !voice.enabled && canUse}>{!voice.supported ? '이 브라우저에서는 음성 입력을 사용할 수 없어요. 음성 인식을 지원하는 Chrome에서 열어 주세요.'
       : !ready ? '주문 준비가 끝나면 음성 모드를 켤 수 있어요.'
-      : '켜면 마이크로 한 문장을 듣고 닫아요. Chrome에서 마이크 권한을 허용해 주세요.'}</p>
-    {voice.enabled && voice.lastTranscript && <p className="voice-mode-transcript"><span>Chrome이 인식한 말</span><strong>{voice.lastTranscript}</strong></p>}
+      : recognitionTest ? '말한 문장만 표시하는 테스트입니다. 주문은 바뀌지 않습니다.'
+      : '켜면 한 문장을 듣고 마이크를 닫아요. 마이크 사용을 허용해 주세요.'}</p>
+    {voice.enabled && voice.lastTranscript && <p className="voice-mode-transcript"><span>인식한 말</span><strong>{voice.lastTranscript}</strong></p>}
     {voice.enabled && detail && <p className="voice-mode-feedback" role="status" aria-live="polite">{detail}</p>}
     {voice.enabled && voice.phase === 'idle' && <button type="button" className="voice-mode-listen" data-log-target="voice-listen" onClick={() => controller.listen()}>다시 말하기</button>}
   </section>;

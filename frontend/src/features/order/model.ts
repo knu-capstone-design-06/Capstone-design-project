@@ -1,7 +1,7 @@
 import type { ProductCategory, Temperature } from '../../shared/api/index.ts';
 
-export type Settings = { largeText: boolean; largeButton: boolean; simpleScreen: boolean; stepGuide: boolean; lowScreen: boolean };
-export const initialSettings: Settings = { largeText: false, largeButton: false, simpleScreen: false, stepGuide: false, lowScreen: false };
+export type Settings = { largeText: boolean; largeButton: boolean; simpleScreen: boolean; stepGuide: boolean; lowScreen: boolean; highContrast: boolean };
+export const initialSettings: Settings = { largeText: false, largeButton: false, simpleScreen: false, stepGuide: false, lowScreen: false, highContrast: false };
 export const settingsStorageKey = 'kiosk-ui-settings-v1';
 export const MAX_QUANTITY = 20;
 export const money = (amount: number) => `${amount.toLocaleString('ko-KR')}원`;

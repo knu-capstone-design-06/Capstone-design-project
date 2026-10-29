@@ -42,9 +42,11 @@ async function noOverflow(page) {
 
 async function bottomAction(page, target) {
   const button = page.locator(`[data-log-target="${target}"]`);
+  await button.scrollIntoViewIfNeeded();
   const bounds = await button.boundingBox(), viewport = page.viewportSize();
+  const bar = await page.locator('.order-actions').boundingBox();
   assert(bounds && viewport);
-  assert(bounds.y >= viewport.height * .75, '주요 버튼은 화면 하단에 배치');
+  assert(bar && Math.abs(bar.y + bar.height - viewport.height) < 2 && bounds.y >= bar.y, '주요 버튼은 하단 고정 영역 안에 배치');
   assert(bounds.x >= 0 && bounds.x + bounds.width <= viewport.width);
   assert(bounds.y + bounds.height <= viewport.height);
   assert(await button.evaluate(element => {
@@ -89,7 +91,7 @@ test('세로·가로 화면과 독립 접근성 설정에서 전체 주문·설�
           await click(page, 'cart:americano:핫:remove');
           await page.waitForFunction(() => document.querySelector('.total')?.innerText.includes('12,500원'));
           await noOverflow(page); await bottomAction(page, 'review-open');
-          if (settings.includes('largeText')) assert.equal(await page.locator('.product-info strong').first().evaluate(element => getComputedStyle(element).fontSize), '21px');
+          if (settings.includes('largeText')) assert(await page.locator('.product-info strong').first().evaluate(element => parseFloat(getComputedStyle(element).fontSize) >= 56), '큰 글씨에서 기본 28px의 두 배 이상');
           if (settings.includes('largeButton')) assert((await page.locator('[data-log-target="review-open"]').boundingBox()).height >= 88);
           await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
           await bottomAction(page, 'review-open');
