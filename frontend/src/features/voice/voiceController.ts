@@ -79,6 +79,8 @@ export class VoiceController {
   private context = { sessionId: '', screenId: '' };
   // 확인·질문 결과 뒤 대답을 기다리는 중. 마이크가 닫혀도 다음 결과가 나올 때까지 유지합니다.
   private awaitingAnswer = false;
+  // backend가 이 세션의 새 음성 요청을 410으로 거절함. 세션이 바뀔 때까지 다시 듣지 않습니다.
+  private sessionExpired = false;
 
   constructor(options: VoiceControllerOptions) {
     this.api = options.api;
@@ -103,6 +105,7 @@ export class VoiceController {
     if (context.sessionId !== this.context.sessionId) {
       this.halt();
       this.awaitingAnswer = false;
+      this.sessionExpired = false;
       this.set({ lastTranscript: '', lastResult: null, error: null });
     }
     this.context = { ...context };
@@ -132,6 +135,7 @@ export class VoiceController {
     if (this.state.phase === 'listening') return true;
     if (this.state.phase !== 'idle') return false;
     if (!this.context.sessionId.trim()) { this.set({ error: 'no_session' }); return false; }
+    if (this.sessionExpired) { this.set({ error: 'session_expired' }); return false; }
     if (this.capture) { this.pendingListen = answering; return true; }
     const live = () => this.capture === capture && !this.cancelled.has(capture);
     const capture = createSpeechCapture(this.recognition, {
@@ -198,6 +202,7 @@ export class VoiceController {
     if (outcome === 'session_expired') {
       // 끝난 세션의 질문에는 더 대답할 수 없으므로 대기를 풀고, 새 주문은 부르는 쪽이 안내합니다.
       this.awaitingAnswer = false;
+      this.sessionExpired = true;
       this.set({ phase: 'idle', partialText: '', lastResult: null, error: outcome });
       return;
     }
