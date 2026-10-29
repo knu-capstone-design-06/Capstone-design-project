@@ -65,6 +65,8 @@ export class VoiceController {
   private capture: SpeechCapture | null = null;
   // Chrome의 stop/abort 뒤 onend가 올 때까지 다음 인식 시작을 기다립니다.
   private pendingListen: boolean | null = null;
+  // 끈 마이크. Chrome은 abort 뒤에도 onend 전까지 결과·오류를 보낼 수 있어 onend만 받습니다.
+  private readonly cancelled = new WeakSet<SpeechCapture>();
   private processing: AbortController | null = null;
   private context = { sessionId: '', screenId: '' };
   // 확인·질문 결과 뒤 대답을 기다리는 중. 마이크가 닫혀도 다음 결과가 나올 때까지 유지합니다.
@@ -123,10 +125,11 @@ export class VoiceController {
     if (this.state.phase !== 'idle') return false;
     if (!this.context.sessionId.trim()) { this.set({ error: 'no_session' }); return false; }
     if (this.capture) { this.pendingListen = answering; return true; }
+    const live = () => this.capture === capture && !this.cancelled.has(capture);
     const capture = createSpeechCapture(this.recognition, {
-      onPartial: text => { if (this.capture === capture) this.set({ partialText: text }); },
-      onFinal: result => { if (this.capture === capture) this.accept(result, answering); },
-      onError: code => { if (this.capture === capture) this.set({ error: code }); },
+      onPartial: text => { if (live()) this.set({ partialText: text }); },
+      onFinal: result => { if (live()) this.accept(result, answering); },
+      onError: code => { if (live()) this.set({ error: code }); },
       onEnd: () => {
         if (this.capture !== capture) return;
         this.capture = null;
@@ -152,7 +155,10 @@ export class VoiceController {
     this.processing?.abort();
     this.processing = null;
     if (this.state.phase !== 'idle' || this.state.partialText) this.set({ phase: 'idle', partialText: '' });
-    this.capture?.abort();
+    if (this.capture) {
+      this.cancelled.add(this.capture);
+      this.capture.abort();
+    }
   }
 
   /** 짧거나 신뢰도가 아주 낮은 인식은 주변 소리로 보고 보내지 않습니다. 대답을 기다릴 때는 한 글자도 받습니다. */
