@@ -56,6 +56,36 @@ def ask_for_missing_temperature(result: VoiceInterpretation, menu: list[MenuItem
     return result.model_copy(update={"tool_calls": calls})
 
 
+ASK_MENU_REPLY = "어떤 메뉴를 주문할까요?"
+PENDING = {"needs_confirmation", "needs_clarification"}
+
+
+def _compact(text: str) -> str:
+    return "".join(ch for ch in text if ch.isalnum())
+
+
+def require_named_products(
+    result: VoiceInterpretation, request: VoiceRequestCreate, history: list[VoiceTurn],
+    menu: list[MenuItem],
+) -> VoiceInterpretation:
+    """Without an open question, send tool inputs only if the customer named some menu item.
+
+    A short answer such as "네" or "따뜻한 걸로요" with nothing to answer must not
+    become an order the model made up. A word of a product name in this utterance,
+    its recognition alternatives or earlier utterances ("하나 더") counts as named.
+    """
+    if not result.tool_calls or (history and history[-1].result.status in PENDING):
+        return result
+    if any(call.arguments.product_id not in {item.product_id for item in menu} for call in result.tool_calls):
+        return result  # matches_menu rejects unknown products
+    said = [_compact(request.text), *(_compact(item.text) for item in request.alternatives),
+            *(_compact(turn.request.text) for turn in history)]
+    words = {_compact(word) for item in menu for word in item.name.split()}
+    if any(len(word) >= 2 and word in text for word in words for text in said):
+        return result
+    return VoiceInterpretation(status="needs_clarification", tool_calls=[], reply_text=ASK_MENU_REPLY)
+
+
 def matches_menu(result: VoiceInterpretation, menu: list[MenuItem]) -> bool:
     """Reject tool inputs naming unknown products, unavailable additions or invalid temperatures."""
     products = {item.product_id: item for item in menu}
@@ -125,6 +155,7 @@ class VoiceService:
             else:
                 result = await self._interpreter.interpret(request, menu, history)
             if result is not None:
+                result = require_named_products(result, request, history, menu)
                 result = ask_for_missing_temperature(result, menu)
             if result is not None and not matches_menu(result, menu):
                 logger.warning("voice interpretation rejected (not on menu)")
