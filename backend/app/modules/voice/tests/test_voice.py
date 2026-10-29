@@ -427,6 +427,18 @@ class RetentionTests(unittest.TestCase):
         self.assertIsNone(self.repository.get("s1", record.request_id))
 
 
+class MissingTemperatureTests(unittest.TestCase):
+    def test_sold_out_drink_without_temperature_is_still_rejected(self):
+        from app.modules.voice.service import ask_for_missing_temperature, matches_menu
+
+        menu = [MenuItem(product_id="americano", name="아메리카노", available=False,
+                         temperatures=["iced", "hot"])]
+        result = ask_for_missing_temperature(
+            interpretation(call("add_cart_item", "americano", None, 1)), menu)
+        self.assertEqual(result.status, "completed")
+        self.assertFalse(matches_menu(result, menu))
+
+
 class PromptVersionTests(unittest.TestCase):
     def test_current_prompt_explains_every_status(self):
         from app.modules.voice import interpreter
