@@ -255,6 +255,12 @@ class VoiceApiTests(unittest.TestCase):
         self.assertEqual(body["tool_calls"], [])
         self.assertEqual(body["reply_text"], "어떤 메뉴를 주문할까요?")
 
+    def test_temperature_only_answer_without_a_question_sends_no_tool_calls(self):
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "hot", 1))
+        body = self.status(self.say("따뜻한 걸로요")).json()
+        self.assertEqual(body["status"], "needs_clarification")
+        self.assertEqual(body["tool_calls"], [])
+
     def test_ai_unavailable_and_crash_become_failed(self):
         for result in (None, RuntimeError("boom")):
             self.interpreter.result = result
