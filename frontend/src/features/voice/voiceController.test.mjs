@@ -536,6 +536,16 @@ test('autoOffSilences가 0이면 무음으로 끄지 않는다', () => {
   controller.dispose();
 });
 
+test('켜진 채 마이크도 처리도 없이 시간이 지나면 음성 모드를 저절로 끈다', async () => {
+  const { controller } = setup([status('completed')], { autoOffMs: 30 });
+  controller.setEnabled(true);
+  FakeRecognition.last().final(['아이스 아메리카노 두 잔', 0.9]);
+  await tick(10);
+  assert.equal(controller.getSnapshot().enabled, true, '결과 직후에는 켜져 있음');
+  await tick(60);
+  assert.deepEqual([controller.getSnapshot().enabled, controller.getSnapshot().autoOff], [false, 'idle']);
+});
+
 test('음성 API는 같은 출처 경로와 중복 방지 키로 요청하고 오류 형식을 ApiError로 넘긴다', async () => {
   const requests = [];
   const api = createVoiceApi('/backend/', async (url, init) => {
