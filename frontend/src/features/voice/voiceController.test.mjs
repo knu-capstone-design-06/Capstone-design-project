@@ -18,7 +18,8 @@ function setup(results, options = {}) {
     async get() { const next = queue.length > 1 ? queue.shift() : queue[0]; if (next instanceof Error) throw next; return next; },
   };
   const controller = new VoiceController({
-    api, recognition: factory, pollIntervalMs: 1, pollTimeoutMs: 200,
+    // 시간 기준 꺼짐은 따로 시험합니다. 기본 30초 타이머가 테스트를 붙잡지 않게 끕니다.
+    api, recognition: factory, pollIntervalMs: 1, pollTimeoutMs: 200, autoOffMs: 0,
     createKey: () => `key-${calls.length + 1}`, onResult: result => delivered.push(result), ...options,
   });
   controller.setContext({ sessionId: 'session-1', screenId: 'menu' });
