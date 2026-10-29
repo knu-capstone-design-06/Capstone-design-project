@@ -3,3 +3,6 @@ runs/
 models/*.task
 models/*.tflite
 models/*.part
+# ONNX models made by tools/export_onnx.py from the H1 / P1 checkpoints, and its export record (AGENTS.md section 5).
+models/*.onnx
+models/onnx_export.json

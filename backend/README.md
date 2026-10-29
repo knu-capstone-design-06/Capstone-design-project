@@ -30,7 +30,7 @@ API 문서: http://127.0.0.1:8000/docs
 
 ## 주문 API 명세 반영 상태
 
-[프론트엔드 ↔ 백엔드 OpenAPI](../contract/frontend-backend.openapi.yaml) 0.4.0의 상품 조회, 세션 장바구니 조회·추가·수량 변경·삭제, 모의 주문 확정 6개 API를 구현했습니다. 첫 시연의 고정 17개 상품·현재 가격·옵션·항목별 최대 20개, 실제 결제·재고 차감 없는 모의 주문, 한 세션 한 주문·새 주문 새 세션은 채택됐습니다. 계약 문서의 `draft` 표시는 미정 정책의 팀 리뷰가 끝날 때까지 유지합니다. FastAPI `/docs`에는 현재 등록된 여섯 경로가 표시됩니다.
+[프론트엔드 ↔ 백엔드 OpenAPI](../contract/frontend-backend.openapi.yaml) 0.4.1의 상품 조회, 세션 장바구니 조회·추가·수량 변경·삭제, 모의 주문 확정 6개 API를 구현했습니다. 첫 시연의 고정 17개 상품·현재 가격·옵션·항목별 최대 20개, 실제 결제·재고 차감 없는 모의 주문, 한 세션 한 주문·새 주문 새 세션은 채택됐습니다. 계약 문서의 `draft` 표시는 미정 정책의 팀 리뷰가 끝날 때까지 유지합니다. FastAPI `/docs`에는 현재 등록된 여섯 경로가 표시됩니다.
 
 설계 이유·미정 정책은 [주문 API 검토 문서](../docs/Product-Cart-Order-API-Draft.md)를 확인합니다. 상품 목록은 프론트 개발 샘플의 17개 메뉴와 가격을 서버의 고정 시연 데이터로 옮겼습니다. 가격·옵션·수량을 서버가 검증하고, 세션별 Cart 버전과 `Idempotency-Key`의 성공 결과를 같은 프로세스의 잠금 아래 저장합니다. 모의 주문은 항목·금액 스냅샷을 반환하고 Cart를 비우며 같은 키 재시도에는 원래 주문 응답을 반환합니다. 신규 API의 검증 오류는 `OrderApiError` 형식이고 기존 API 오류 형식은 유지합니다.
 
@@ -48,7 +48,9 @@ API 문서: http://127.0.0.1:8000/docs
 
 [PR #36](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/36)에서 음성 요청 접수 `POST /api/v1/sessions/{session_id}/voice/requests`와 상태 조회 `GET /api/v1/sessions/{session_id}/voice/requests/{request_id}`를 병합했습니다. [PR #42](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/42)에서 주문 카탈로그를 음성 메뉴에 연결하고 `ignored` 상태를 추가했습니다. 세션별 대화 맥락을 사용해 OpenAI 해석 결과를 `tool_calls`로 만들지만, 도구를 실행하거나 장바구니를 변경하지 않으므로 `actions`는 비어 있습니다. `OPENAI_API_KEY`가 없으면 개발용 응답을 사용하며, 터치 주문과 백엔드 기동은 가능합니다.
 
-도구 실행·장바구니 변경, 주문 완료 세션의 음성 처리 정책, 실제 OpenAI 키를 사용한 검증은 별도 작업입니다. 음성 요청 형식은 [음성 OpenAPI](../contract/voice.openapi.yaml)를 확인합니다.
+도구 실행·장바구니 변경과 실제 OpenAI 키를 사용한 검증은 별도 작업입니다. 음성 요청 형식은 [음성 OpenAPI](../contract/voice.openapi.yaml)를 확인합니다.
+
+주문 완료 세션의 **새 음성 요청**은 410 `{ "code": "session_expired", "detail": "새 이용 세션을 시작해 주세요." }`로 거절합니다. 완료 전에 접수한 요청의 같은 키·같은 본문은 기록이 남아 있으면 기존 202를 재생하고, 같은 키·다른 본문은 409입니다. 기존 요청의 GET은 주문 완료만으로 막지 않으며, 음성 기록의 기존 1시간 정리 규칙을 따릅니다. 음성 해석은 여전히 Cart를 변경하지 않습니다.
 
 ## 환경변수
 
@@ -116,7 +118,7 @@ async def analyze_window(ai: AiEngineClient, window: AnalyzeRequest):
 - 호출자의 취소는 상위로 전달합니다. 로그에는 오류 종류만 기록합니다.
 - 시간 필드는 시간대가 있는 날짜·시간이어야 하며 종료 시각이 시작 시각보다 뒤여야 합니다.
 - `TouchFeatures`, `VisionFeatures`, `StateScores`의 현재 형식은
-  `contract/frontend-backend.openapi.yaml`(0.4.0, 기존 0.1.0 형식 유지)에 정의돼 있습니다. 다만 비전
+  `contract/frontend-backend.openapi.yaml`(0.4.1, 기존 0.1.0 형식 유지)에 정의돼 있습니다. 다만 비전
   세부 특징과 터치 통계 계산 기준에는 팀 검토 항목이 남아 있습니다.
   연결 API는 `modules/sessions/schemas.py`에서 입력 필드와 반환 점수 5개·범위·타입을 검증합니다.
   내부 전송 클라이언트의 `JsonObject`는 그대로 유지하므로 직접 사용하는 다른 호출자는 별도의 의미 검증이 필요합니다.
@@ -152,6 +154,7 @@ python -m unittest discover -s app/modules -p 'test_*.py' -v
 세션은 단일 프로세스 메모리에만 보관하며 재시작하면 초기화됩니다.
 세션 만료·정리·영속 저장은 아직 없으므로 장기 운영 또는 여러 worker/인스턴스에 사용하지 않습니다.
 터치 원시 로그의 통계 계산과 비전 추출은 구현하지 않고 계약에 정의된 특징만 전달합니다.
+주문 완료 세션의 새 특징 요청은 AI 호출 전에 410 `{ "detail": "session_expired" }`로 거절합니다. AI 호출 중 주문이 완료된 경우에도 결과를 반환하지 않고 410으로 처리합니다. 프론트가 이미 수신한 늦은 결과의 화면 적용 차단은 특징 전송 연결 시 함께 확인해야 합니다.
 AI 측정 불가는 ai_available=true, states=null입니다. 통신 오류·타임아웃·잘못된 AI 응답은
 ai_available=false, states=null, model_version=null입니다. 모든 경우 support는
 `{"preset":"none","requires_confirmation":false,"decided_by":"rule_placeholder"}`로 화면을 유지합니다.
@@ -193,7 +196,7 @@ Invoke-RestMethod -Method Post "$base/api/v1/sessions/$($session.session_id)/fea
 팀과 결정하고 이후 구현할 사항:
 - 프론트 요청 타임아웃은 15초입니다. 최종 시간과 시간 초과 후 처리 중 응답·재시도 정책은 백엔드 담당자와 합의할 항목입니다.
 - 처리 중 중복 요청의 오류·간격, 실패 결과와 성공 키의 보관 기간, DB 전환 시 원자적 저장
-- 완료 후 특징·음성 요청, 서버 주문번호의 형식·보관 범위, 세션 만료·복원
+- 서버 주문번호의 장기 보관 범위, 세션 시간 만료·복원, 프론트의 늦은 특징·음성 결과 화면 적용 차단
 - 공개 주소의 세션 접근·인증·쿠키 및 배포 정책
 
 복원·장기 보관·정밀 만료·동적 가격 변경은 첫 시연 후순위 방향입니다. 프론트 담당자와 검토한 방향이며 팀 전체 합의는 아직 확인되지 않았습니다. 세부 서버 정책은 담당자가 결정·구현하고 계약에는 합의 후 반영합니다.

@@ -4,12 +4,15 @@ from datetime import datetime
 import json
 import unittest
 from unittest.mock import patch
+from uuid import uuid4
 
 import httpx
 from fastapi.testclient import TestClient
 
 from app.common.config.settings import Settings
 from app.main import create_app
+from app.modules.sessions.exceptions import SessionCompleted
+from app.modules.sessions.schemas import FeatureWindowRequest
 
 AsyncClient = httpx.AsyncClient
 
@@ -88,6 +91,39 @@ class ConnectionTests(unittest.TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json(), {"detail": "session not found"})
         self.assertEqual(self.calls, [])
+
+    def test_completed_session_rejects_new_features_before_ai_call(self):
+        session = self.session()["session_id"]
+        base = f"/api/v1/sessions/{session}"
+        added = self.client.post(f"{base}/cart/items", json={
+            "product_id": "americano", "temperature": "iced",
+            "quantity": 1, "expected_version": 0,
+        }, headers={"Idempotency-Key": str(uuid4())})
+        self.assertEqual(added.status_code, 200)
+        ordered = self.client.post(f"{base}/orders", json={"expected_version": 1},
+                                   headers={"Idempotency-Key": str(uuid4())})
+        self.assertEqual(ordered.status_code, 201)
+
+        response = self.features(session)
+        self.assertEqual(response.status_code, 410)
+        self.assertEqual(response.json(), {"detail": "session_expired"})
+        self.assertEqual(self.calls, [])
+
+    def test_feature_result_arriving_after_order_completion_is_rejected(self):
+        session = self.session()["session_id"]
+        service = self.app.state.session_service
+        ordering = self.app.state.ordering_repository
+
+        class CompletingAi:
+            async def analyze(self, request):
+                with ordering.lock:
+                    ordering.state(session).completed = True
+                return None
+
+        with self.assertRaises(SessionCompleted):
+            asyncio.run(service.analyze(
+                session, FeatureWindowRequest.model_validate(WINDOW), CompletingAi(),
+            ))
 
     def test_measurement_and_transport_failure_differ(self):
         session = self.session()["session_id"]
