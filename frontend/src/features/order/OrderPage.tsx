@@ -7,6 +7,7 @@ import { OrderController } from './orderController.ts';
 import { orderCopy } from './copy.ts';
 import { createSampleOrderApi } from './sampleOrderApi.ts';
 import { useTouchLog } from './useTouchLog.ts';
+import { captureTouchLogObservation } from './touchLogObservation.ts';
 import { TouchLogPanel } from './TouchLogPanel.tsx';
 import { VoiceModeToggle } from './VoiceModeToggle.tsx';
 import { ReadAloudControls } from './ReadAloudControls.tsx';
@@ -23,6 +24,7 @@ export function OrderPage() {
   }));
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const [voiceController] = useState(() => new VoiceController({ api: createVoiceApi(), recognitionOnly: sampleMode }));
+  const voice = useSyncExternalStore(voiceController.subscribe, voiceController.getSnapshot);
   const [settings, setSettings] = useState(() => {
     try { return readSettings(localStorage.getItem(settingsStorageKey) ?? localStorage.getItem('kiosk-sample-order-v1')); }
     catch { return { ...initialSettings }; }
@@ -43,7 +45,8 @@ export function OrderPage() {
   const restartTrigger = useRef<HTMLButtonElement>(null);
   const actionsRef = useRef<HTMLElement>(null);
   const opener = useRef<HTMLButtonElement | null>(null);
-  const touchLog = useTouchLog(screen, category === 'all' ? '전체' : categoryLabels[category], selected?.product_id ?? null, settings, state.session?.session_id ?? null);
+  const observation = captureTouchLogObservation(state, selected ? { productId: selected.product_id, temperature, quantity } : null, voice);
+  const touchLog = useTouchLog(screen, category === 'all' ? '전체' : categoryLabels[category], selected?.product_id ?? null, settings, state.session?.session_id ?? null, observation);
   useEffect(() => { void controller.initialize(); }, [controller]);
   useEffect(() => {
     voiceController.setEnabled(false);

@@ -14,6 +14,7 @@ const labels: Record<string, string> = {
   category_change: '분류 변경', options_open: '옵션 열기', options_close: '옵션 닫기',
   ui_settings_change: 'UI 설정 변경', session_start: '세션 시작', session_resume: '세션 재개',
   visibility_change: '전경·백그라운드 변경',
+  order_state_change: '주문·장바구니 상태 변경', selection_state_change: '옵션·수량 선택 변경', voice_state_change: '음성 모드 상태 변경',
   session_suspend: '세션 일시 중단', session_end: '세션 종료',
 };
 

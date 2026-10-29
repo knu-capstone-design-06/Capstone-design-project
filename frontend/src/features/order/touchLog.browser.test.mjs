@@ -9,6 +9,99 @@ const url = process.env.TOUCH_LOG_BROWSER_URL ?? 'http://127.0.0.1:5173';
 const channel = process.env.PLAYWRIGHT_CHANNEL ?? 'msedge';
 const launchOptions = { headless: true, ...(channel === 'default' ? {} : { channel }) };
 
+test('선택·수량 정정·저장 전후 장바구니를 구분하고 새 세션의 상태 기준선을 분리한다', async t => {
+  const browser = await chromium.launch(launchOptions);
+  try {
+    for (const enlarged of [false, true]) for (const lowScreen of [false, true]) {
+      await t.test(`${enlarged ? '200' : '100'}-${lowScreen ? 'low' : 'normal'}`, async () => {
+        const page = await browser.newPage({ viewport: { width: 1080, height: 1920 } });
+        let releaseAdd = () => {};
+        try {
+          await page.route('https://fonts.googleapis.com/**', route => route.abort());
+          await page.addInitScript(({ enlarged, lowScreen }) => localStorage.setItem('kiosk-ui-settings-v1', JSON.stringify({ largeText: enlarged, largeButton: enlarged, lowScreen })), { enlarged, lowScreen });
+          const first = `observation-${enlarged}-${lowScreen}`, next = `${first}-next`;
+          const fixture = await installOrderResponses(page, [
+            ...bootstrap(first),
+            mutation(first, '/cart/items', cartResponse(first, 1, [iced(2)])),
+            mutation(first, '/cart/items/item-iced', cartResponse(first, 2, [iced()]), { method: 'PATCH' }),
+            ...bootstrap(next),
+          ]);
+          const heldAdd = new Promise(resolve => { releaseAdd = resolve; });
+          await page.route('**/cart/items', async route => { await heldAdd; await route.fallback(); });
+          await page.goto(url);
+          const click = id => page.locator(`[data-log-target="${id}"]`).click();
+          await page.locator('[data-log-target="product:americano"]:not([disabled])').waitFor();
+          await click('product:americano');
+          await click('options-increase');
+          await page.waitForFunction(() => window.kioskTouchLogDraft.read().events.some(event => event.kind === 'selection_state_change' && event.data.after?.quantity === 2));
+          await click('cart-add');
+          await page.waitForFunction(() => window.kioskTouchLogDraft.read().events.some(event => event.kind === 'order_state_change' && event.data.after.status === 'saving'));
+          let events = await page.evaluate(() => window.kioskTouchLogDraft.read().events);
+          const pending = events.filter(event => event.kind === 'order_state_change').at(-1).data.after;
+          assert.equal(pending.status, 'saving');
+          assert.equal(pending.cart.totalQuantity, 0);
+          releaseAdd();
+          await page.locator('dialog[open]').waitFor({ state: 'hidden' });
+          await click('cart:americano:아이스:decrease');
+          await page.waitForFunction(() => window.kioskTouchLogDraft.read().events.some(event => event.kind === 'order_state_change' && event.data.after.cart?.version === 2));
+          events = await page.evaluate(() => window.kioskTouchLogDraft.read().events);
+          const quantities = events.filter(event => event.kind === 'order_state_change' && event.data.after.status === 'ready').map(event => event.data.after.cart.totalQuantity);
+          assert.deepEqual(quantities, [0, 2, 1]);
+          const correction = events.find(event => event.kind === 'order_state_change' && event.data.after.cart?.version === 2);
+          assert.equal(correction.data.before.cart.items[0].quantity, 2);
+          assert.equal(correction.data.after.cart.items[0].quantity, 1);
+          assert.equal(events.filter(event => event.kind === 'selection_state_change').at(-1).data.after, null);
+          await click('order-restart'); await click('order-restart-confirm');
+          await page.waitForFunction(id => window.kioskTouchLogDraft.read().serverSessionId === id, next);
+          const log = await page.evaluate(() => window.kioskTouchLogDraft.read());
+          const firstState = log.events.find(event => event.sessionId === log.sessionId && event.kind === 'order_state_change');
+          assert.equal(firstState.data.before, null);
+          fixture.verify();
+        } finally { releaseAdd(); await page.close(); }
+      });
+    }
+  } finally { await browser.close(); }
+});
+
+test('동시 접촉의 연결·지속 시간과 취소·중단을 기록하며 누름 수를 중복 집계하지 않는다', async () => {
+  const browser = await chromium.launch(launchOptions);
+  try {
+    const page = await browser.newPage({ viewport: { width: 1080, height: 1920 } });
+    await page.route('https://fonts.googleapis.com/**', route => route.abort());
+    const fixture = await installOrderResponses(page, bootstrap('pointer-observation'));
+    await page.goto(url);
+    await page.locator('[data-log-target="product:americano"]:not([disabled])').waitFor();
+    await page.evaluate(() => {
+      const root = document.querySelector('.kiosk');
+      const emit = (type, pointerId, x, isPrimary) => root.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId, pointerType: 'touch', isPrimary, clientX: x, clientY: 120 }));
+      emit('pointerdown', 901, 50, true);
+      emit('pointerdown', 902, 100, false);
+      emit('pointermove', 901, 70, true);
+      emit('pointerup', 901, 70, true);
+      emit('pointercancel', 902, 100, false);
+      emit('pointerdown', 903, 150, true);
+      window.dispatchEvent(new PageTransitionEvent('pagehide'));
+    });
+    const log = await page.evaluate(() => window.kioskTouchLogDraft.read());
+    const first = log.events.find(event => event.kind === 'pointer_start' && event.data.pointerId === 901);
+    const second = log.events.find(event => event.kind === 'pointer_start' && event.data.pointerId === 902);
+    assert.deepEqual(second.data.overlappingInputIds, [first.id]);
+    const end = log.events.find(event => event.kind === 'pointer_end' && event.data.inputId === first.id);
+    assert.deepEqual(end.data.overlappingInputIds, [second.id]);
+    assert.equal(end.data.maxObservedDistance, 20);
+    assert(end.data.durationMs >= 0);
+    const cancelled = log.events.find(event => event.kind === 'pointer_end' && event.data.pointerId === 902);
+    assert.equal(cancelled.data.cancelled, true); assert.equal(cancelled.data.end, null);
+    assert(cancelled.data.durationMs >= 0);
+    const interrupted = log.events.find(event => event.kind === 'pointer_interrupted' && event.data.pointerId === 903);
+    assert(interrupted.data.durationMs >= 0);
+    const summary = await page.evaluate(() => window.kioskTouchLogDraft.summarize());
+    assert.equal(summary.counts.presses, 3); assert.equal(summary.counts.releases, 1);
+    assert.equal(summary.counts.cancellations, 1); assert.equal(summary.counts.interruptions, 1);
+    fixture.verify();
+  } finally { await browser.close(); }
+});
+
 test('원시 요약의 대상·종료 기록과 재방문 표시를 확인하고 새 세션은 이전 입력을 제외한다', async () => {
   const browser = await chromium.launch(launchOptions);
   try {

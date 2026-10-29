@@ -46,6 +46,7 @@ function repeatCount(events: LogEvent[], from: number, policy: TouchPilotPolicy)
     return hasInputDetails(e) && d.isPrimary === true
       && point(d.start) && (d.target === null || (typeof target.id === 'string' && target.disabled === false))
       && end?.cancelled === false && typeof end.maxObservedDistance === 'number' && end.maxObservedDistance <= repeatPx
+      && !(Array.isArray(end.overlappingInputIds) && end.overlappingInputIds.length)
       && !scrolled.has(e.id) && !interrupted.has(e.id);
   };
   for (const e of events) {

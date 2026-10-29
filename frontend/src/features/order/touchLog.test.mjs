@@ -3,6 +3,28 @@ import test from 'node:test';
 import { createTouchLog, distanceToRect, logLimit, touchLogKey } from './touchLog.ts';
 import { summarizeTouchLog } from './touchLogSummary.ts';
 import { measureTouchPilot } from './touchLogFeatures.ts';
+import { captureTouchLogObservation } from './touchLogObservation.ts';
+
+test('주문·옵션·음성 관측은 필요한 필드만 복사하고 인식문·서버 오류 상세를 보관하지 않는다', () => {
+  const order = { status: 'ready', order: null, message: '서버 오류 상세', cart: {
+    version: 2, total_quantity: 3, items: [{ item_id: 'item', product_id: 'coffee', temperature: 'hot', quantity: 3, name: '상품명', unit_price: 3500 }],
+  } };
+  const selection = { productId: 'coffee', temperature: 'iced', quantity: 2 };
+  const voice = { enabled: true, microphoneActive: true, phase: 'listening', partialText: '개인적인 발화', lastTranscript: '마지막 인식문', lastResult: { reply_text: '서버 응답' } };
+  const observed = captureTouchLogObservation(order, selection, voice);
+  assert.deepEqual(observed, {
+    order: { status: 'ready', completed: false, feedbackVisible: true,
+      cart: { version: 2, totalQuantity: 3, items: [{ itemId: 'item', productId: 'coffee', temperature: 'hot', quantity: 3 }] } },
+    selection, voice: { enabled: true, microphoneActive: true, phase: 'listening' },
+  });
+  observed.order.cart.items[0].quantity = 9;
+  observed.selection.quantity = 9;
+  observed.voice.enabled = false;
+  assert.equal(order.cart.items[0].quantity, 3);
+  assert.equal(selection.quantity, 2);
+  assert.equal(voice.enabled, true);
+  assert.equal(captureTouchLogObservation({ ...order, order: {}, cart: null, message: '' }, null, voice).order.completed, true);
+});
 
 function pilotLog() {
   const saved = { version: 1, sessionId: 'current', serverSessionId: 'server', startedAt: 0, events: [] };
@@ -36,6 +58,19 @@ test('전경 화면 이동은 최근 구간의 뒤로가기를 보존하고 방�
   assert.equal(result.features.back_count, 1);
   assert.equal(result.features.dwell_ms, 1500);
   assert.equal(result.sinceLastInputMs, null);
+});
+
+test('동시 입력이 관측된 주 포인터를 단일 반복 누름 후보로 세지 않는다', () => {
+  const { saved, emit } = pilotLog();
+  emit(0, 'screen_enter', { visibility: 'visible' });
+  const data = { start: { x: 20, y: 20 }, target: { id: 'same', kind: 'button', disabled: false }, pointerType: 'touch', isPrimary: true };
+  const first = emit(2200, 'pointer_start', data);
+  emit(2250, 'pointer_end', { inputId: first, cancelled: false, maxObservedDistance: 0, overlappingInputIds: [] });
+  const second = emit(2400, 'pointer_start', data);
+  emit(2600, 'pointer_end', { inputId: second, cancelled: false, maxObservedDistance: 0, overlappingInputIds: ['secondary-contact'] });
+  assert.equal(measureTouchPilot(saved, 3000).features.repeat_tap_count, 0);
+  saved.events.at(-1).data.overlappingInputIds = [];
+  assert.equal(measureTouchPilot(saved, 3000).features.repeat_tap_count, 1);
 });
 
 test('전경 체류는 백그라운드·페이지 중단을 제외하고 관측이 끊긴 최근 구간은 미산출이다', () => {

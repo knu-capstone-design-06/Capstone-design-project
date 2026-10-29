@@ -48,6 +48,9 @@ test('개발 샘플에서 짧은 말도 인식하고 다시 듣기·오류·화�
     await toggle.click();
     await page.evaluate(() => window.voiceFakes.at(-1).partial('아이스 아메리카노'));
     assert.match(await page.locator('.voice-mode-feedback').innerText(), /아이스 아메리카노/);
+    const speakingLog = await page.evaluate(() => window.kioskTouchLogDraft.read());
+    assert(speakingLog.events.some(event => event.kind === 'voice_state_change' && event.data.after.enabled && event.data.after.microphoneActive));
+    assert(!JSON.stringify(speakingLog).includes('아이스 아메리카노'));
     await page.evaluate(() => window.voiceFakes.at(-1).final('네'));
     await page.locator('[data-log-target="voice-listen"]').waitFor();
     assert.match(await page.locator('.voice-mode-transcript').innerText(), /인식한 말\s+네/);
@@ -69,6 +72,10 @@ test('개발 샘플에서 짧은 말도 인식하고 다시 듣기·오류·화�
     await page.locator('[data-log-target="review-back"]').click();
     assert.equal(await toggle.getAttribute('aria-checked'), 'false');
     assert.equal(await page.locator('.voice-mode-transcript').count(), 0);
+    const voiceLog = await page.evaluate(() => window.kioskTouchLogDraft.read());
+    assert.equal(voiceLog.events.filter(event => event.kind === 'voice_state_change').at(-1).data.after.enabled, false);
+    assert(voiceLog.events.some(event => event.kind === 'pointer_start' && event.voiceMode === true));
+    assert(!JSON.stringify(voiceLog).includes('아메리카노 두 잔'));
     assert.deepEqual(fixture.requests, []);
     fixture.verify(); assert.deepEqual(errors, []);
     await screenshot(page, 'sample-recognition-test');
