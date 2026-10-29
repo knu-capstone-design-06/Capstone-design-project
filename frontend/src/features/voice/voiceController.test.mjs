@@ -287,6 +287,22 @@ test('음성 모드를 끈 뒤 이전 마이크가 늦게 보낸 오류는 남�
   assert.deepEqual([controller.getSnapshot().enabled, controller.getSnapshot().phase, controller.getSnapshot().error], [false, 'idle', null]);
 });
 
+test('새 세션에서는 이전 세션 마이크가 늦게 보낸 오류를 남기지 않는다', () => {
+  const { controller } = setup([status('completed')], { recognition: deferredRecognition() });
+  controller.setEnabled(true);
+  const first = FakeRecognition.last();
+  controller.setEnabled(false);
+  controller.setContext({ sessionId: 'session-2', screenId: 'menu' });
+  controller.setEnabled(true);
+  first.onerror?.({ error: 'not-allowed' });
+  assert.equal(controller.getSnapshot().error, null);
+  first.finish();
+  assert.equal(FakeRecognition.instances.length, 2);
+  assert.deepEqual([controller.getSnapshot().phase, controller.getSnapshot().error], ['listening', null]);
+  controller.dispose();
+  FakeRecognition.last().finish();
+});
+
 test('대답을 기다리지 않을 때 한 글자이거나 신뢰도가 아주 낮은 인식은 서버로 보내지 않는다', async () => {
   const { calls, controller } = setup([status('completed')]);
   controller.setEnabled(true);
