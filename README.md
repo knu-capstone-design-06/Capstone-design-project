@@ -428,7 +428,7 @@ Compose의 frontend는 Nginx의 `/backend/` 프록시로 backend를 호출합니
 `main`으로 가는 PR과 `main`에 병합될 때마다 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)이 실행됩니다. Actions 탭의 `CI`에서 직접 실행할 수도 있습니다.
 
 - `frontend`: `pnpm test`와 `pnpm build`
-- `backend`·`ai-engine`: 각 README의 `unittest` 명령. ai-engine은 비전 패키지와 MediaPipe 모델 파일까지 받아 비전 테스트도 실행합니다.
+- `backend`·`ai-engine`: 각 README의 `unittest` 명령. ai-engine은 비전 패키지와 MediaPipe 모델 파일까지 받아 비전 테스트도 실행합니다. ONNX 모델 파일이 필요한 테스트는 파일이 저장소 밖에 있어 건너뜁니다.
 - `compose-smoke`: 앞의 세 job이 통과하면 Compose로 세 서비스를 띄우고, frontend의 `/backend/` 프록시를 거쳐 연결 확인 스크립트(`backend/app/modules/connectivity/smoke.py`)와 음성 요청 1건을 보냅니다.
 
 `compose-smoke`는 OpenAI 키를 저장소 secret `OPENAI_API_KEY`에서 읽습니다. 등록 위치는 Settings → Secrets and variables → Actions의 Repository secrets입니다. secret이 없거나 fork에서 올린 PR이면 같은 요청을 backend의 개발용 응답으로 확인합니다. secret은 GitHub Actions 실행에만 전달되고 각자의 PC에는 전달되지 않습니다. 로컬에서 Compose로 띄울 때는 지금처럼 셸 환경변수나 루트 `.env`에 키를 넣습니다.
