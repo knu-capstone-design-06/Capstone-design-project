@@ -193,7 +193,7 @@ backend 음성 해석 (`backend/app/modules/voice/`)
   - 메뉴에 없는 상품·품절 상품 담기·허용되지 않은 온도는 서버가 거르고 실패로 처리합니다.
   - 아이스·따뜻한 것을 모두 파는 음료에 온도가 빠지면 실패 대신 온도를 묻습니다(`needs_clarification`). 허용 온도가 하나뿐이면 그 온도로 채웁니다.
   - 질문 뒤 "네"처럼 고르지 않은 대답이 오면 OpenAI를 부르지 않고 같은 질문을 다시 합니다. 확인 제안(`needs_confirmation`) 뒤의 "네"는 그대로 수락으로 해석합니다.
-- `OPENAI_API_KEY`가 없으면 OpenAI를 호출하지 않고 개발용 응답을 돌려줍니다. 메뉴는 주문 API와 같은 시연 카탈로그(17개)를 씁니다. 판매 메뉴가 비어 있으면 OpenAI를 호출하지 않고 `failed`(`ai_unavailable`)로 알립니다. 실제 키로는 아직 확인하지 않았습니다.
+- `OPENAI_API_KEY`가 없으면 OpenAI를 호출하지 않고 개발용 응답을 돌려줍니다. 메뉴는 주문 API와 같은 시연 카탈로그(17개)를 씁니다. 판매 메뉴가 비어 있으면 OpenAI를 호출하지 않고 `failed`(`ai_unavailable`)로 알립니다. 2026-10-29에 실제 키(`gpt-4o-mini`, `interpret_v3`)로 주요 문장을 확인했습니다(PR 본문의 결과 표).
 - 키 설정: `backend/`에서 직접 실행하면 `backend/.env`, Docker Compose로 실행하면 셸 환경변수나 루트 `.env`(커밋하지 않음)의 `OPENAI_API_KEY`를 씁니다.
 - 브라우저 frontend는 기본으로 같은 출처 프록시(`/backend/`)로 호출합니다. backend CORS는 `Idempotency-Key`를 허용하므로 `CORS_ORIGINS`에 넣은 출처에서는 직접 호출도 됩니다(PR #40).
 - 요청 기록·`Idempotency-Key`는 접수 후 1시간, 대화 맥락은 마지막 발화 후 1시간 보관합니다(제안값, `repository.py`의 `RETENTION`).
