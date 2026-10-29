@@ -1,0 +1,155 @@
+# 세 서비스의 테스트·빌드와 Docker Compose 실행을 확인합니다.
+# compose-smoke는 저장소 secret OPENAI_API_KEY를 backend 컨테이너에 넘겨 음성 해석을 한 번 호출합니다.
+# secret이 없으면(등록 전이거나 fork에서 올린 PR) 같은 요청을 backend의 개발용 응답으로 확인합니다.
+# secret 등록 위치: Settings → Secrets and variables → Actions → Repository secrets, 이름 OPENAI_API_KEY
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# 같은 PR이나 브랜치에 새 커밋이 올라오면 앞선 실행을 취소합니다.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  frontend:
+    # 단위 테스트 6개 파일(pnpm test)과 TypeScript 검사·배포 빌드(pnpm build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10 # frontend/Dockerfile의 pnpm@10
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ^22.18.0 # frontend/Dockerfile의 node:22, frontend/README.md의 "Node.js 22.18 이상"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      - run: pnpm build
+
+  backend:
+    # backend/README.md의 테스트 명령 2개. 이 job에는 secret을 넘기지 않으며, 테스트는 가짜 HTTP 응답만 씁니다.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12" # backend/Dockerfile의 python:3.12-slim
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install -r requirements.txt
+      - run: python -m unittest discover -s tests -v
+      - run: python -m unittest discover -s app/modules -p 'test_*.py' -v
+
+  ai-engine:
+    # ai-engine/README.md의 테스트 명령. 비전 패키지와 MediaPipe 모델 파일까지 받아 비전 테스트도 건너뛰지 않고 돌립니다.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: ai-engine
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12" # ai-engine/Dockerfile의 python:3.12-slim
+          cache: pip
+          cache-dependency-path: |
+            ai-engine/requirements.txt
+            ai-engine/app/modules/vision/requirements.txt
+      - name: 서버 패키지 설치
+        run: pip install -r requirements.txt
+      - name: 비전 패키지 설치 (app/modules/vision/requirements.txt)
+        run: pip install -r app/modules/vision/requirements.txt
+      - name: MediaPipe 모델 파일 받기 (스크립트가 SHA-256을 확인)
+        run: python app/modules/vision/models/download_models.py
+      - run: python -m unittest discover -s tests -v
+
+  compose-smoke:
+    # 세 이미지를 빌드해 Compose로 띄우고, frontend의 /backend/ 프록시를 거쳐 backend를 호출합니다.
+    needs: [frontend, backend, ai-engine]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # docker-compose.yml이 이 값을 backend 컨테이너에 넘깁니다. 값은 GitHub가 로그에서 가립니다.
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      BASE_URL: http://127.0.0.1:8080/backend
+    steps:
+      - uses: actions/checkout@v7
+      - name: 이미지 빌드
+        run: docker compose build
+      - name: 세 서비스 실행 (각 Dockerfile의 HEALTHCHECK가 healthy가 될 때까지 기다림)
+        run: docker compose up -d --wait
+      - name: 화면과 연결 확인
+        run: |
+          curl -fsS http://127.0.0.1:8080/ | grep -q 'id="root"'
+          # backend의 연결 확인 스크립트: health, backend → ai-engine 연결, 세션 생성, 특징 전송
+          cd backend && python3 -m app.modules.connectivity.smoke --base-url "$BASE_URL"
+      - name: backend 컨테이너가 받은 키 확인 (값은 출력하지 않음)
+        run: |
+          in_container=$(docker compose exec -T backend python -c "import os; print('set' if os.environ.get('OPENAI_API_KEY') else 'unset')")
+          on_runner=$([ -n "$OPENAI_API_KEY" ] && echo set || echo unset)
+          echo "OPENAI_API_KEY: runner=$on_runner, backend container=$in_container"
+          [ "$in_container" = "$on_runner" ]
+      - name: 음성 요청 1건
+        run: |
+          # 요청 본문은 contract/voice.openapi.yaml의 예시 no_alternatives입니다.
+          session_id=$(curl -fsS -X POST "$BASE_URL/api/v1/sessions" | jq -er .session_id)
+          accepted=$(curl -sS --fail-with-body -X POST "$BASE_URL/api/v1/sessions/$session_id/voice/requests" \
+            -H 'Content-Type: application/json' \
+            -H "Idempotency-Key: $(cat /proc/sys/kernel/random/uuid)" \
+            -d '{"text": "라떼 하나", "alternatives": [], "screen_id": "menu_list"}') || { echo "$accepted"; exit 1; }
+          echo "접수: $accepted"
+          request_id=$(jq -er .request_id <<< "$accepted")
+          # 계약대로 1초 간격으로 상태를 조회합니다. backend는 OpenAI 호출이 10초(OPENAI_TIMEOUT_SECONDS 기본값)를
+          # 넘으면 failed로 기록하므로, 그 세 배인 30초가 지나도 접수·처리 중이면 멈춘 것으로 봅니다.
+          for _ in $(seq 30); do
+            sleep 1
+            result=$(curl -fsS "$BASE_URL/api/v1/sessions/$session_id/voice/requests/$request_id")
+            status=$(jq -r .status <<< "$result")
+            case "$status" in accepted|processing) ;; *) break ;; esac
+          done
+          jq . <<< "$result"
+          echo "$result" > "$RUNNER_TEMP/voice.json"
+          case "$status" in accepted|processing) echo "::error::30초 안에 처리가 끝나지 않았습니다 (status=$status)"; exit 1 ;; esac
+      - name: 개발용 응답 확인 (secret 없음)
+        if: env.OPENAI_API_KEY == ''
+        run: |
+          echo "::notice title=OPENAI_API_KEY 없음::이 실행에는 저장소 secret OPENAI_API_KEY가 없어(미등록이거나 fork에서 올린 PR) backend의 개발용 응답으로 확인했습니다. OpenAI는 호출하지 않았습니다."
+          # 개발용 응답(StubVoiceInterpreter)은 tool_calls 없는 추가 질문입니다.
+          jq -e '.status == "needs_clarification" and .tool_calls == [] and .error == null and (.reply_text | length > 0)' "$RUNNER_TEMP/voice.json"
+      - name: OpenAI 응답 확인 (secret 있음)
+        if: env.OPENAI_API_KEY != ''
+        run: |
+          # 해석 결과는 실행마다 달라질 수 있어 상태만 봅니다. OpenAI 호출이 실패하면 failed(ai_unavailable)가 됩니다.
+          jq -e '.status | IN("completed", "needs_confirmation", "needs_clarification", "ignored")' "$RUNNER_TEMP/voice.json"
+      - name: 실패 시 서비스 로그
+        if: failure()
+        run: |
+          docker compose ps -a
+          docker compose logs --no-color --timestamps
+      - name: 정리
+        if: always()
+        run: docker compose down -v
