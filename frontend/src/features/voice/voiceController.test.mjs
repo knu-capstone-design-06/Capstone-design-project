@@ -515,6 +515,18 @@ test('말을 받으면 무음 횟수를 다시 센다', async () => {
   assert.deepEqual([controller.getSnapshot().enabled, controller.getSnapshot().autoOff], [true, null]);
 });
 
+test('저절로 꺼진 뒤 다시 켜거나 세션이 바뀌면 꺼진 이유를 지운다', () => {
+  const { controller } = setup([status('completed')], { autoOffSilences: 1 });
+  controller.setEnabled(true);
+  FakeRecognition.last().fail('no-speech');
+  assert.equal(controller.getSnapshot().autoOff, 'silence');
+  controller.setEnabled(true);
+  assert.deepEqual([controller.getSnapshot().enabled, controller.getSnapshot().autoOff], [true, null]);
+  FakeRecognition.last().fail('no-speech');
+  controller.setContext({ sessionId: 'session-2', screenId: 'menu' });
+  assert.equal(controller.getSnapshot().autoOff, null);
+});
+
 test('음성 API는 같은 출처 경로와 중복 방지 키로 요청하고 오류 형식을 ApiError로 넘긴다', async () => {
   const requests = [];
   const api = createVoiceApi('/backend/', async (url, init) => {
