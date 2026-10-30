@@ -187,7 +187,7 @@ class VoiceApiTests(unittest.TestCase):
             call("remove_cart_item", "latte", "hot"),  # unavailable items can still leave the cart
         ]
         self.interpreter.result = interpretation(*valid)
-        request_id = self.post().json()["request_id"]
+        request_id = self.say("샌드위치 세 개로 바꾸고 라떼는 빼 주세요")
         self.assertEqual(self.status(request_id).json()["tool_calls"], valid)
 
     def test_tool_calls_off_menu_are_rejected(self):
@@ -215,7 +215,7 @@ class VoiceApiTests(unittest.TestCase):
 
     def test_single_allowed_temperature_is_filled_in(self):
         self.interpreter.result = interpretation(call("remove_cart_item", "latte", None))
-        body = self.status(self.post().json()["request_id"]).json()
+        body = self.status(self.say("라떼 빼 주세요")).json()
         self.assertEqual(body["status"], "completed")
         self.assertEqual(body["tool_calls"], [call("remove_cart_item", "latte", "hot")])
 

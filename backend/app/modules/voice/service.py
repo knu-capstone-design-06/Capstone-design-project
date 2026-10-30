@@ -69,32 +69,38 @@ def require_named_products(
     result: VoiceInterpretation, request: VoiceRequestCreate, history: list[VoiceTurn],
     menu: list[MenuItem],
 ) -> VoiceInterpretation:
-    """Send tool inputs only if some menu item was named in this conversation.
+    """Send tool inputs only for products named in this conversation.
 
     A short answer such as "네" or "따뜻한 걸로요" must not become an order the
-    model made up. Named means a word of a product name appears in what the customer
-    said (this utterance, its recognition alternatives, earlier utterances such as
-    the base of "하나 더") or in the question the kiosk asked about it ("카페 라떼는
-    아이스, 따뜻한 것 중 무엇으로 할까요?"). A general "어떤 메뉴를 주문할까요?"
-    names nothing, so the answer to it still has to name a product.
+    model made up, nor swap in another product. A product is named when a word of its
+    name appears in what the customer said (this utterance, its recognition
+    alternatives, earlier utterances such as the base of "하나 더") or in a question
+    the kiosk asked about it ("카페 라떼는 아이스, 따뜻한 것 중 무엇으로 할까요?").
+    A general "어떤 메뉴를 주문할까요?" names nothing. Words shared by several
+    names (e.g. "라떼") still count for each of them.
     """
     if not result.tool_calls:
         return result
-    if any(call.arguments.product_id not in {item.product_id for item in menu} for call in result.tool_calls):
-        return result  # matches_menu rejects unknown products
     said = [_compact(request.text), *(_compact(item.text) for item in request.alternatives)]
     for turn in history:
         said.append(_compact(turn.request.text))
         if turn.result.reply_text:
             said.append(_compact(turn.result.reply_text))
-    words = {_compact(word) for item in menu for word in item.name.split()}
-    if any(len(word) >= 2 and word in text for word in words for text in said):
-        return result
-    return VoiceInterpretation(status="needs_clarification", tool_calls=[], reply_text=ASK_MENU_REPLY)
+    names = {item.product_id: item.name for item in menu}
+    for call in result.tool_calls:
+        words = [_compact(word) for word in names.get(call.arguments.product_id, "").split()]
+        if not any(len(word) >= 2 and word in text for word in words for text in said):
+            return VoiceInterpretation(status="needs_clarification", tool_calls=[], reply_text=ASK_MENU_REPLY)
+    return result
 
 
-def matches_menu(result: VoiceInterpretation, menu: list[MenuItem]) -> bool:
-    """Reject tool inputs naming unknown products, unavailable additions or invalid temperatures."""
+def matches_menu(
+    result: VoiceInterpretation, menu: list[MenuItem], allow_missing_temperature: bool = False,
+) -> bool:
+    """Reject tool inputs naming unknown products, unavailable additions or invalid temperatures.
+
+    allow_missing_temperature lets a drink without a temperature through, to be asked later.
+    """
     products = {item.product_id: item for item in menu}
     for call in result.tool_calls:
         item = products.get(call.arguments.product_id)
@@ -103,6 +109,8 @@ def matches_menu(result: VoiceInterpretation, menu: list[MenuItem]) -> bool:
         if isinstance(call, AddCartItemCall) and not item.available:
             return False
         temperature = call.arguments.temperature
+        if temperature is None and item.temperatures and allow_missing_temperature:
+            continue
         if (temperature is None) != (not item.temperatures):
             return False
         if temperature is not None and temperature not in item.temperatures:
@@ -165,7 +173,12 @@ class VoiceService:
                 result = VoiceInterpretation(status="needs_clarification", tool_calls=[], reply_text=ASK_MENU_REPLY)
             else:
                 result = await self._interpreter.interpret(request, menu, history)
+            if result is not None and not matches_menu(result, menu, allow_missing_temperature=True):
+                logger.warning("voice interpretation rejected (not on menu)")
+                result = None
             if result is not None:
+                # Check named products before asking about a temperature, so the kiosk
+                # never asks about a drink the customer did not mention.
                 result = require_named_products(result, request, history, menu)
                 result = ask_for_missing_temperature(result, menu)
             if result is not None and not matches_menu(result, menu):
