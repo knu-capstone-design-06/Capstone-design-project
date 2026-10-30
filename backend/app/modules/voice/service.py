@@ -1,5 +1,6 @@
 import hashlib
 import logging
+from collections import Counter
 from collections.abc import Callable, Iterable
 from uuid import UUID
 
@@ -72,12 +73,12 @@ def require_named_products(
     """Send tool inputs only for products named in this conversation.
 
     A short answer such as "네" or "따뜻한 걸로요" must not become an order the
-    model made up, nor swap in another product. A product is named when a word of its
-    name appears in what the customer said (this utterance, its recognition
-    alternatives, earlier utterances such as the base of "하나 더") or in a question
-    the kiosk asked about it ("카페 라떼는 아이스, 따뜻한 것 중 무엇으로 할까요?").
-    A general "어떤 메뉴를 주문할까요?" names nothing. Words shared by several
-    names (e.g. "라떼") still count for each of them.
+    model made up, nor swap in another product. A product is named when its full name
+    or a word only its name has appears in what the customer said (this utterance,
+    its recognition alternatives, earlier utterances such as the base of "하나 더")
+    or in a question the kiosk asked about it ("카페 라떼는 아이스, 따뜻한 것 중
+    무엇으로 할까요?"). A word several names share ("라떼") is not enough; the
+    kiosk asks which one. A general "어떤 메뉴를 주문할까요?" names nothing.
     """
     if not result.tool_calls:
         return result
@@ -86,11 +87,17 @@ def require_named_products(
         said.append(_compact(turn.request.text))
         if turn.result.reply_text:
             said.append(_compact(turn.result.reply_text))
+    words = {item.product_id: [w for w in map(_compact, item.name.split()) if len(w) >= 2] for item in menu}
+    uses = Counter(word for item_words in words.values() for word in set(item_words))
     names = {item.product_id: item.name for item in menu}
     for call in result.tool_calls:
-        words = [_compact(word) for word in names.get(call.arguments.product_id, "").split()]
-        if not any(len(word) >= 2 and word in text for word in words for text in said):
-            return VoiceInterpretation(status="needs_clarification", tool_calls=[], reply_text=ASK_MENU_REPLY)
+        product_id = call.arguments.product_id
+        keys = [_compact(names.get(product_id, "")), *(w for w in words.get(product_id, []) if uses[w] == 1)]
+        if any(key and key in text for key in keys for text in said):
+            continue
+        shared = [w for w in words.get(product_id, []) if uses[w] > 1 and any(w in text for text in said)]
+        reply = f"{max(shared, key=len)} 중 어떤 메뉴로 할까요?" if shared else ASK_MENU_REPLY
+        return VoiceInterpretation(status="needs_clarification", tool_calls=[], reply_text=reply)
     return result
 
 
