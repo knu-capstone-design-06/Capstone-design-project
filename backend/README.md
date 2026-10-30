@@ -46,7 +46,7 @@ API 문서: http://127.0.0.1:8000/docs
 
 ## 음성 API 상태
 
-[PR #36](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/36)에서 음성 요청 접수 `POST /api/v1/sessions/{session_id}/voice/requests`와 상태 조회 `GET /api/v1/sessions/{session_id}/voice/requests/{request_id}`를 병합했습니다. [PR #42](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/42)에서 주문 카탈로그를 음성 메뉴에 연결하고 `ignored` 상태를 추가했습니다. 세션별 대화 맥락을 사용해 OpenAI 해석 결과를 `tool_calls`로 만들지만, 도구를 실행하거나 장바구니를 변경하지 않으므로 `actions`는 비어 있습니다. `OPENAI_API_KEY`가 없으면 개발용 응답을 사용하며, 터치 주문과 백엔드 기동은 가능합니다.
+[PR #36](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/36)에서 음성 요청 접수 `POST /api/v1/sessions/{session_id}/voice/requests`와 상태 조회 `GET /api/v1/sessions/{session_id}/voice/requests/{request_id}`를 병합했습니다. [PR #42](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/42)에서 주문 카탈로그를 음성 메뉴에 연결하고 `ignored` 상태를 추가했습니다. 세션별 대화 맥락을 사용해 OpenAI 해석 결과를 `tool_calls`로 만듭니다. 기본 설정에서는 도구를 실행하지 않아 `actions`가 비어 있고, `VOICE_EXECUTE_TOOLS=true`면 `completed`의 `tool_calls`를 주문 서비스로 반영한 뒤 `actions: ["cart_updated"]`를 돌려줍니다(`app/modules/voice/executor.py`). `OPENAI_API_KEY`가 없으면 개발용 응답을 사용하며, 터치 주문과 백엔드 기동은 가능합니다.
 
 도구 실행·장바구니 변경과 실제 OpenAI 키를 사용한 검증은 별도 작업입니다. 음성 요청 형식은 [음성 OpenAPI](../contract/voice.openapi.yaml)를 확인합니다.
 
@@ -66,6 +66,7 @@ API 문서: http://127.0.0.1:8000/docs
 | OPENAI_API_KEY | 미설정 | 서버 전용 비밀값 |
 | OPENAI_MODEL | gpt-4o-mini | 모델 이름 |
 | OPENAI_TIMEOUT_SECONDS | 10 | 양의 유한한 초 단위 숫자 |
+| VOICE_EXECUTE_TOOLS | false | true면 completed 음성 결과의 tool_calls를 장바구니에 반영 |
 
 예: `CORS_ORIGINS=["http://localhost:5173","http://127.0.0.1:5173"]`. 실제 프론트 출처에 맞춰 설정하며 경로나 와일드카드는 허용하지 않습니다. CORS는 GET·POST·PATCH·DELETE를 허용합니다. 기본 허용 출처는 localhost이므로 127.0.0.1에서 직접 교차 출처 요청을 보낼 때는 위 설정이 필요합니다. CORS는 사용자 인증 기능이 아닙니다.
 
