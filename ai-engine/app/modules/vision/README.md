@@ -57,7 +57,7 @@
 
 - 층: 관찰(이 모듈의 CSV 열) → 상황 태그(위 표) → 판단 층(지원 선택). 표정은 근거 하나로만 쓰고 혼자 쓰지 않습니다. 감정 이름과 결제 수단은 태그에 넣지 않습니다.
 - 고개를 크게 돌린 구간은 각도 대신 '얼굴 점 사라짐 + 몸 점 남음' 패턴을 근거로 씁니다(`look_back` 사건으로 구현, 아래 '사건 8종'). 근거: AFLW2000-3D 2,000장 평가에서 고개를 좌우로 60\~90° 돌린 얼굴은 얼굴 점이 37.7 %에서만 나왔습니다(저장소 밖 측정, 2026-10-08, 평가 전용 데이터).
-- 전달 형식: `VisionFeatures`에 선택 칸(관측값 14개 + `situations[]`)을 더하는 추가형 제안입니다. 전달 형식은 2026-10-14 팀 회의의 검토 안건이고, 기존 4칸은 그대로입니다.
+- 전달 형식: `VisionFeatures`에 창마다의 관측 요약 값 8개를 선택 칸으로 더하고, 상황 태그는 `extension.situation`에 싣는 추가형 제안입니다(아래 '계약과의 관계'). 처음 제안(관측값 14개 + `situations[]`, 2026-10-10)을 지금 출력에 맞췄습니다. 전달 형식은 2026-10-14 팀 회의의 검토 안건이고, 기존 4칸은 그대로입니다.
 - AI Hub 71827 관련 숫자는 과학기술정보통신부의 재원으로 한국지능정보사회진흥원의 지원을 받아 구축된 「사람 행동 인식 로봇 자율 행동 데이터」(AI 허브, aihub.or.kr)를 활용한 분석 결과입니다. 원본 영상과 프레임은 공개하지 않습니다.
 
 ## 실행 파이프라인 (2026-10-22)
@@ -224,6 +224,13 @@ JP §0-2 · §0-3과 장면 표, tree 표 3-가 · 3-나 · §4에서 장면 4�
 
 - `extension.situation`은 창 기록의 `situation`에서 근거 사건의 관찰 값(`evidence`)과 창 구간(`window_s`)을 빼고 `name`을 `tag`로 옮긴 것입니다.
 - `extension.decision_meta`는 창 기록의 `decision`에서 `support`로 옮긴 `preset` · `requires_confirmation`과 Jev 질문(`jev_request`) · 단서(`cues`) · 사유(`reason`)를 빼고, Jev 종류(`jev_kind`)와 그림자 모드 표시(`jev`; Jev 질문이 없는 창은 `null`)를 더한 것입니다.
+
+요청 쪽 제안(`VisionFeatures` 선택 칸): 위 `contract`에는 관측값이 없습니다. 관측값은 창마다 창 기록의 `vision` 칸에 담깁니다(`chain.vision_summary`, 위 '창 한 줄').
+
+- 제안: `VisionFeatures`에 `vision`의 값 8개를 선택 칸으로 더합니다. `frames`(구간의 프레임 수) · `face_seen_ratio` · `body_seen_ratio`(얼굴 · 몸을 본 프레임 비율) · `head_count_max`(머리 상자 수의 최댓값) · `people_behind_max`(뒤에 선 사람 수의 최댓값) · `companion_frames`(동행자 상자가 있는 프레임 수) · `mouth_motion_max`(입 움직임의 최댓값) · `facing_screen`(위 '창 한 줄')입니다. 값은 구간 (t − `segment_s`, t]의 요약입니다. `frames`와 `companion_frames`는 개수라 늘 숫자이고, 나머지는 프레임이 없거나 그 열이 없으면 `null`입니다. `companion_frames`는 머리 탐지기가 없어도 0이라 '동행자 없음'과 구분되지 않습니다.
+- 기존 4칸(`face_detected` · `face_size_ratio` · `assistive_device` · `confidence`)은 그대로 둡니다. 이 모듈은 아직 그 4칸을 채우지 않고, 필수 칸 `face_detected` · `confidence`를 무엇으로 채울지는 정하지 않았습니다(2026-10-14 안건 V04).
+- 처음 제안(관측값 14개 + `situations[]`, 2026-10-10)은 프레임 한 장의 값을 보내는 안이었습니다. 지금 출력에 맞춰 관측값은 창 요약으로 바꾸고, 상황 태그는 판단과 함께 `extension.situation`에 둡니다. 프레임마다의 값은 재생의 `rows.csv`에 남습니다. P1의 `head_dir_*`는 관측만 하는 열이라 제안에 넣지 않았습니다.
+- 명세 변경(`VisionFeatures` 선택 칸, 응답의 `extension` 칸)은 이 README와 따로, 목적 하나만 담은 PR로 올립니다(AGENTS.md 1장). `contract/`는 공용 영역이라 새 칸 추가도 PR 리뷰를 거치고, 그 형식을 쓰는 코드와 샘플을 같은 때 맞추거나 맞출 일정을 그 PR 본문에 적습니다(AGENTS.md 2장).
 
 ### [파일럿] 값과 출처 (`params.py`)
 
