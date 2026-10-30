@@ -9,7 +9,7 @@ from app.modules.voice.exceptions import (
     IdempotencyKeyReused, RequestInProgress, VoiceSessionCompleted,
 )
 from app.modules.voice.schemas import (
-    ToolCall, VoiceErrorResponse, VoiceRequestStatus, VoiceStatus, VoiceTurn,
+    ToolCall, VoiceAction, VoiceErrorResponse, VoiceRequestStatus, VoiceStatus, VoiceTurn,
 )
 
 ACTIVE_STATUSES = {"accepted", "processing"}
@@ -32,7 +32,7 @@ class VoiceRecord:
     status: VoiceStatus = "accepted"
     reply_text: str | None = None
     tool_calls: list[ToolCall] = field(default_factory=list)
-    actions: list[str] = field(default_factory=list)
+    actions: list[VoiceAction] = field(default_factory=list)
     error: VoiceErrorResponse | None = None
 
     def to_status(self) -> VoiceRequestStatus:
@@ -110,6 +110,7 @@ class VoiceRepository:
     def update(
         self, request_id: str, status: VoiceStatus, reply_text: str | None = None,
         tool_calls: list[ToolCall] | None = None, error: VoiceErrorResponse | None = None,
+        actions: list[VoiceAction] | None = None,
     ) -> None:
         with self._lock:
             record = self._records.get(request_id)
@@ -118,6 +119,7 @@ class VoiceRepository:
             record.status = status
             record.reply_text = reply_text
             record.tool_calls = list(tool_calls or [])
+            record.actions = list(actions or [])
             record.error = error
 
     def history(self, session_id: str) -> list[VoiceTurn]:
