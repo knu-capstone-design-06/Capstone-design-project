@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Voice API
-  version: 0.3.1
+  version: 0.4.0
   description: |
     음성 요청을 backend로 전달하는 API 명세입니다. (상태: 팀 검토 전 제안)
     근거 문서: docs/Voice-MCP-Implementation.md
@@ -13,8 +13,11 @@ info:
 
     처리 원칙
     - 음성 요청(voice/requests)은 접수만 하고 바로 응답합니다. backend가 OpenAI API로 맥락을 해석해
-      MCP 장바구니 도구의 입력(tool_calls)으로 바꿉니다. 이 API는 도구를 실행하지 않습니다.
-      MCP 도구가 tool_calls를 실행해 장바구니를 바꾸고, 그 결과는 알림 채널로 전달합니다(알림 채널은
+      MCP 장바구니 도구의 입력(tool_calls)으로 바꿉니다.
+    - 도구 실행은 backend 설정 `VOICE_EXECUTE_TOOLS`로 켭니다(기본 꺼짐, 0.4.0). 꺼져 있으면 tool_calls만 돌려주고
+      장바구니는 바뀌지 않습니다. 켜면 completed의 tool_calls를 backend 안에서 주문 서비스로 말한 순서대로 반영하고
+      `actions: [cart_updated]`를 돌려줍니다. 여러 도구 중 하나라도 거절되면 아무것도 바꾸지 않고 failed로 그 주문 오류
+      코드를 알립니다(실행 위치 결정 2026-10-29, PR #62 논의). 실행 결과는 알림 채널로도 전달할 예정입니다(알림 채널은
       docs/Voice-MCP-Implementation.md 3.4가 SSE를 제안했고 README 기술 스택 표는 'SSE 또는 WebSocket'으로 적혀 있으며,
       채널과 명세는 팀 회의에서 정합니다).
     - tool_calls는 손님에게 보이는 문장이 아닙니다. 손님에게 보이는 문장은 확인·질문·실패 안내(reply_text)뿐이며,
@@ -158,6 +161,17 @@ paths:
                         arguments: { product_id: americano, temperature: iced, quantity: 2 }
                     actions: []
                     error: null
+                completed_and_applied:
+                  summary: VOICE_EXECUTE_TOOLS=true에서 tool_calls를 장바구니에 반영함. 프론트는 장바구니를 다시 조회
+                  value:
+                    request_id: vr_01J9Z3K8
+                    status: completed
+                    reply_text: null
+                    tool_calls:
+                      - tool: add_cart_item
+                        arguments: { product_id: americano, temperature: iced, quantity: 2 }
+                    actions: [cart_updated]
+                    error: null
                 needs_confirmation:
                   summary: 애매해서 이해한 내용을 확인 (tool_calls는 제안, 아직 실행하지 않음)
                   value:
@@ -194,6 +208,15 @@ paths:
                     tool_calls: []
                     actions: []
                     error: { code: ai_unavailable, detail: 외부 AI 응답 시간 초과 }
+                execution_failed:
+                  summary: VOICE_EXECUTE_TOOLS=true에서 도구 입력이 거절됨. 장바구니는 바뀌지 않았고 프론트는 다시 조회
+                  value:
+                    request_id: vr_01J9Z3KD
+                    status: failed
+                    reply_text: 장바구니에 그 상품이 없어요. 화면을 확인해 주세요.
+                    tool_calls: []
+                    actions: []
+                    error: { code: cart_item_not_found, detail: 장바구니 항목을 찾을 수 없습니다. }
         "404":
           description: 없는 세션 또는 요청
           content:
@@ -291,7 +314,8 @@ components:
           type: array
           description: |
             이 요청으로 발생한 알림 이벤트 종류 (docs/Voice-MCP-Implementation.md 3.4의 event 이름).
-            이 API는 도구를 실행하지 않으므로 현재는 항상 빈 배열입니다.
+            backend 설정 VOICE_EXECUTE_TOOLS가 꺼져 있으면(기본) 항상 빈 배열입니다. 켜져 있으면 completed의
+            tool_calls가 장바구니에 반영된 뒤에만 cart_updated가 들어가고, 프론트는 장바구니를 다시 조회합니다.
           items:
             type: string
             enum: [cart_updated, ui_changed, confirmation_required]
@@ -372,7 +396,16 @@ components:
             - request_in_progress
             - idempotency_key_reused
             - ai_unavailable
-          description: frontend 분기용 오류 코드
+            - cart_version_conflict
+            - product_not_found
+            - product_unavailable
+            - cart_item_not_found
+            - quantity_limit_exceeded
+            - invalid_option
+          description: |
+            frontend 분기용 오류 코드. cart_version_conflict 아래 여섯 개는 VOICE_EXECUTE_TOOLS=true에서 도구 입력이
+            주문 서비스에 거절됐을 때의 주문 오류 코드(frontend-backend.openapi.yaml과 같은 뜻)이며, 이때 장바구니는
+            바뀌지 않았습니다. session_expired는 접수 410과 실행 중 완료된 세션 양쪽에 쓰입니다.
         detail:
           type: string
           description: 오류 설명. 내부 예외·키·외부 API 응답 원문은 넣지 않습니다.
