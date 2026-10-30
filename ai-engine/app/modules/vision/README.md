@@ -198,6 +198,33 @@ JP §0-2 · §0-3과 장면 표, tree 표 3-가 · 3-나 · §4에서 장면 4�
 - 명세에 없는 칸(상황 태그 · 표시 문구 · 근거 사건 ID · 모름 이유 · 대안 · 품질, 결정의 지원 · 형태 · 전이 · 범위 · 정책 · Jev 종류, 실행 칸 `steps_left` · `target_id` · `message_id` · `session_signal`)은 `extension`에 담았습니다. 실행 칸은 JP §2-5의 `decision_meta`를 따른 `[설계 제안]`입니다: 3-1 알림은 `cart_progress` · `steps_left_notice`(지연 책임 안내는 `delay_responsibility_notice`), 4-2 강조는 옵션 창이 열린 메뉴 화면이면 `cart-add`, 장바구니 화면이면 `cart:*:decrease`(줄마다 다른 '−' 버튼 ID의 패턴), 그 밖은 비움(자주 찾는 메뉴 줄 · 검색은 화면에 아직 없음)이고, 문구 ID는 문구가 정해지기 전이라 비웁니다. 이 칸을 응답의 선택 칸으로 더하는 것은 추가형 제안이고, 화면이 실제로 읽게 하려면 형식과 뜻을 팀이 정해야 합니다(2026-10-14 회의 안건 V04 · 6). `extension`은 재생 파일의 출력이지 기존 API의 응답이 아닙니다.
 - 요청 쪽 `TouchFeatures`는 `tap_count` · `miss_tap_count` · `back_count`만 채울 수 있습니다. `repeat_tap_count` · `dwell_ms`는 기준이 정해지지 않아 `null`이라, 지금 창 결과로 `FeatureWindowRequest`를 완전히 만들 수는 없습니다.
 
+위 '창 한 줄'의 창(t = 4.0)에서 `contract_view.to_contract`가 낸 `contract`를 줄이지 않고 옮기면 다음과 같습니다. 숫자는 합성 입력과 기본값(`[파일럿]` 포함)의 값이고 기준값이 아닙니다.
+
+```json
+{"support": {"preset": "none", "requires_confirmation": false, "decided_by": "rule_placeholder"},
+ "extension": {
+   "measurement": {"measurable": true,
+                   "basis": "A tap or back in the segment, or a face seen in the segment (team placeholder)."},
+   "model_version": "vision-situation-rules_v1+rule_table_v0-shadow",
+   "situation": {"tag": "looking_around", "display_text": "무언가를 찾는 듯함",
+                 "evidence_ids": ["dwell_no_touch@0", "yaw_sweep_offscreen@10", "yaw_sweep_offscreen@24"],
+                 "confidence": {"events": 3, "quality_ok": true}, "alternatives": [], "unknown_reason": [],
+                 "quality": {"face_visible_ratio": 1.0, "track_conf": 1.0}, "source": "rules_v1"},
+   "decision_meta": {"decision_id": "d0001", "withdrawn_id": null, "support": "highlight_next_action", "scene": "4-2",
+                     "action": "apply", "intervention": "바로 적용", "transition": "open",
+                     "scope": ["screen", "menu", 1.0], "rank": 7, "withdraw_on": "cart_progress",
+                     "policy": {"kind": "fit", "ask_jev": true, "lowered_action": "wait", "raised_action": null,
+                                "T_LOWER": null, "T_AID": null, "T_CHOICE": null, "default_choice": null,
+                                "choice_actions": null, "jev_deadline": "next_segment", "no_response_s": 10.0},
+                     "meta": {"t": 4.0, "tag": "looking_around", "tag_since": 3.0, "screen": "menu",
+                              "screen_since": 1.0, "situation_known": true},
+                     "steps_left": 2, "target_id": null, "message_id": null, "session_signal": null,
+                     "jev_kind": "fit", "jev": {"shadow": true, "applied": false, "answer": null}}}}
+```
+
+- `extension.situation`은 창 기록의 `situation`에서 근거 사건의 관찰 값(`evidence`)과 창 구간(`window_s`)을 빼고 `name`을 `tag`로 옮긴 것입니다.
+- `extension.decision_meta`는 창 기록의 `decision`에서 `support`로 옮긴 `preset` · `requires_confirmation`과 Jev 질문(`jev_request`) · 단서(`cues`) · 사유(`reason`)를 빼고, Jev 종류(`jev_kind`)와 그림자 모드 표시(`jev`; Jev 질문이 없는 창은 `null`)를 더한 것입니다.
+
 ### [파일럿] 값과 출처 (`params.py`)
 
 실행 파이프라인이 새로 쓰는 값입니다. 모두 기본값이 있고, 값마다 출처 문장이 코드(`PilotParams` 필드의 `source`)와 `meta.json`에 함께 있습니다. `[파일럿]` 값 11개는 표준도 측정 자료도 없는 시작값이라, 촬영(2026-10-28) 전에 출처나 공개 데이터로 바꾸거나 값 묶음 여러 개로 결과를 나란히 보입니다.
