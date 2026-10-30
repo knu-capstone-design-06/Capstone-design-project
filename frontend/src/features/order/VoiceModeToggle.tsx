@@ -67,6 +67,7 @@ export function VoiceModeToggle({ controller, ready, sampleMode }: {
       : '켜면 한 문장을 듣고 마이크를 닫아요. 마이크 사용을 허용해 주세요.'}</p>
     {voice.enabled && voice.lastTranscript && <p className="voice-mode-transcript"><span>인식한 말</span><strong>{voice.lastTranscript}</strong></p>}
     {voice.enabled && detail && <p className="voice-mode-feedback" role="status" aria-live="polite">{detail}</p>}
+    {!voice.enabled && voice.autoOff && <p className="voice-mode-feedback" role="status" aria-live="polite">한동안 말씀이 없어 음성 모드를 껐어요. 다시 쓰려면 버튼을 눌러 주세요.</p>}
     {voice.enabled && voice.phase === 'idle' && voice.error !== 'session_expired' && <button type="button" className="voice-mode-listen" data-log-target="voice-listen" onClick={() => controller.listen()}>다시 말하기</button>}
   </section>;
 }

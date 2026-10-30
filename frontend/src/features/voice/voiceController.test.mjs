@@ -18,7 +18,8 @@ function setup(results, options = {}) {
     async get() { const next = queue.length > 1 ? queue.shift() : queue[0]; if (next instanceof Error) throw next; return next; },
   };
   const controller = new VoiceController({
-    api, recognition: factory, pollIntervalMs: 1, pollTimeoutMs: 200,
+    // 시간 기준 꺼짐은 따로 시험합니다. 기본 30초 타이머가 테스트를 붙잡지 않게 끕니다.
+    api, recognition: factory, pollIntervalMs: 1, pollTimeoutMs: 200, autoOffMs: 0,
     createKey: () => `key-${calls.length + 1}`, onResult: result => delivered.push(result), ...options,
   });
   controller.setContext({ sessionId: 'session-1', screenId: 'menu' });
@@ -489,6 +490,93 @@ test('410이어도 session_expired가 아니면 일반 요청 실패로 둔다',
   FakeRecognition.last().final(['아메리카노 주세요', 0.9]);
   await tick(20);
   assert.equal(controller.getSnapshot().error, 'request_failed');
+});
+
+test('마이크가 무음으로 두 번 연달아 닫히면 음성 모드를 저절로 끈다', () => {
+  const { controller } = setup([status('completed')]);
+  controller.setEnabled(true);
+  FakeRecognition.last().fail('no-speech');
+  assert.deepEqual([controller.getSnapshot().enabled, controller.getSnapshot().autoOff], [true, null], '한 번은 그대로 둠');
+  controller.listen();
+  FakeRecognition.last().fail('no-speech');
+  const snapshot = controller.getSnapshot();
+  assert.deepEqual([snapshot.enabled, snapshot.phase, snapshot.autoOff], [false, 'idle', 'silence']);
+  assert.equal(controller.listen(), false, '꺼진 뒤에는 마이크를 열지 않음');
+});
+
+test('말을 받으면 무음 횟수를 다시 센다', async () => {
+  const { controller } = setup([status('completed')]);
+  controller.setEnabled(true);
+  FakeRecognition.last().fail('no-speech');
+  controller.listen();
+  FakeRecognition.last().final(['아이스 아메리카노 두 잔', 0.9]);
+  await tick(20);
+  controller.listen();
+  FakeRecognition.last().fail('no-speech');
+  assert.deepEqual([controller.getSnapshot().enabled, controller.getSnapshot().autoOff], [true, null]);
+});
+
+test('저절로 꺼진 뒤 다시 켜거나 세션이 바뀌면 꺼진 이유를 지운다', () => {
+  const { controller } = setup([status('completed')], { autoOffSilences: 1 });
+  controller.setEnabled(true);
+  FakeRecognition.last().fail('no-speech');
+  assert.equal(controller.getSnapshot().autoOff, 'silence');
+  controller.setEnabled(true);
+  assert.deepEqual([controller.getSnapshot().enabled, controller.getSnapshot().autoOff], [true, null]);
+  FakeRecognition.last().fail('no-speech');
+  controller.setContext({ sessionId: 'session-2', screenId: 'menu' });
+  assert.equal(controller.getSnapshot().autoOff, null);
+});
+
+test('autoOffSilences가 0이면 무음으로 끄지 않는다', () => {
+  const { controller } = setup([status('completed')], { autoOffSilences: 0 });
+  controller.setEnabled(true);
+  for (let i = 0; i < 3; i += 1) { FakeRecognition.last().fail('no-speech'); controller.listen(); }
+  assert.equal(controller.getSnapshot().enabled, true);
+  controller.dispose();
+});
+
+test('켜진 채 마이크도 처리도 없이 시간이 지나면 음성 모드를 저절로 끈다', async () => {
+  const { controller } = setup([status('completed')], { autoOffMs: 30 });
+  controller.setEnabled(true);
+  FakeRecognition.last().final(['아이스 아메리카노 두 잔', 0.9]);
+  await tick(10);
+  assert.equal(controller.getSnapshot().enabled, true, '결과 직후에는 켜져 있음');
+  await tick(60);
+  assert.deepEqual([controller.getSnapshot().enabled, controller.getSnapshot().autoOff], [false, 'idle']);
+});
+
+test('듣는 중이거나 대답을 다시 듣는 동안에는 시간 기준으로 끄지 않는다', async () => {
+  const { controller } = setup([status('needs_clarification', { reply_text: '온도를 골라 주세요.' })], { autoOffMs: 30 });
+  controller.setEnabled(true);
+  await tick(60);
+  assert.deepEqual([controller.getSnapshot().enabled, controller.getSnapshot().phase], [true, 'listening'], '첫 듣기 중');
+  FakeRecognition.last().final(['카페라떼 하나요', 0.9]);
+  await tick(60);
+  assert.deepEqual([controller.getSnapshot().enabled, controller.getSnapshot().phase], [true, 'listening'], '질문 뒤 다시 듣는 중');
+  controller.dispose();
+});
+
+test('다시 듣기를 시작하면 시간을 처음부터 다시 잰다', async () => {
+  const { controller } = setup([status('completed')], { autoOffMs: 50, autoOffSilences: 0 });
+  controller.setEnabled(true);
+  FakeRecognition.last().fail('no-speech');
+  await tick(30);
+  controller.listen();
+  FakeRecognition.last().fail('no-speech');
+  await tick(30);
+  assert.equal(controller.getSnapshot().enabled, true);
+  await tick(50);
+  assert.equal(controller.getSnapshot().enabled, false);
+});
+
+test('손님이 끄면 시간 기준 꺼짐 이유를 남기지 않는다', async () => {
+  const { controller } = setup([status('completed')], { autoOffMs: 30 });
+  controller.setEnabled(true);
+  FakeRecognition.last().fail('no-speech');
+  controller.setEnabled(false);
+  await tick(60);
+  assert.deepEqual([controller.getSnapshot().enabled, controller.getSnapshot().autoOff], [false, null]);
 });
 
 test('음성 API는 같은 출처 경로와 중복 방지 키로 요청하고 오류 형식을 ApiError로 넘긴다', async () => {
