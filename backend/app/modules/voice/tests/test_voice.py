@@ -470,6 +470,11 @@ class NamedProductTests(unittest.TestCase):
         result = self.check("따뜻한 바닐라 라떼 두 잔", call("add_cart_item", "vanilla", "hot", 2))
         self.assertEqual(result.status, "completed")
 
+    def test_shared_word_does_not_let_another_latte_through(self):
+        result = self.check("따뜻한 바닐라 라떼 두 잔", call("add_cart_item", "latte", "hot", 2))
+        self.assertEqual(result.status, "needs_clarification")
+        self.assertEqual(result.tool_calls, [])
+
 
 class PromptVersionTests(unittest.TestCase):
     def test_current_prompt_explains_every_status(self):
