@@ -454,6 +454,23 @@ class MissingTemperatureTests(unittest.TestCase):
         self.assertFalse(matches_menu(result, menu))
 
 
+class NamedProductTests(unittest.TestCase):
+    LATTES = [
+        MenuItem(product_id="latte", name="카페 라떼", available=True, temperatures=["iced", "hot"]),
+        MenuItem(product_id="vanilla", name="바닐라 라떼", available=True, temperatures=["iced", "hot"]),
+    ]
+
+    def check(self, text, *tool_calls, history=()):
+        from app.modules.voice.service import require_named_products
+
+        request = VoiceRequestCreate(text=text, alternatives=[], screen_id="menu_list")
+        return require_named_products(interpretation(*tool_calls), request, list(history), self.LATTES)
+
+    def test_full_name_keeps_the_named_latte(self):
+        result = self.check("따뜻한 바닐라 라떼 두 잔", call("add_cart_item", "vanilla", "hot", 2))
+        self.assertEqual(result.status, "completed")
+
+
 class PromptVersionTests(unittest.TestCase):
     def test_current_prompt_explains_every_status(self):
         from app.modules.voice import interpreter
