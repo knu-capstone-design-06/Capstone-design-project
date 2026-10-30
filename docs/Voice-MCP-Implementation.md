@@ -229,7 +229,7 @@ frontend 음성 입력 (`frontend/src/features/voice/`, 화면 요소 없음)
 |---|---|---|---|
 | 1 | ~~상품 조회·장바구니 추가·수량 변경·삭제 서비스~~ 완료(PR #40, 메모리 저장, 계약 `draft`) | Back-end | — |
 | 2 | ~~음성 해석에 실제 메뉴 연결~~ 완료: `main.py`가 주문 카탈로그(`menu_from_products(PRODUCTS)`)를 넘김. 상품을 DB로 옮기면 그 조회로 바꿈 | Decision AI | 1 |
-| 3 | (선택) 해석할 때 현재 장바구니도 전달: 터치로 담은 상품까지 "하나 더", "라떼 빼 줘"를 정확히 해석 | Decision AI | 1 |
+| 3 | 해석할 때 현재 장바구니도 전달: 터치로 담은 상품까지 "하나 더", "라떼 빼 줘"를 정확히 해석. 실행부를 켠 실제 키 검증(2026-10-30)에서 아메리카노 2잔 뒤 "하나 더요"에 모델이 `update_cart_item`(3잔으로) 대신 `add_cart_item`(3잔 더)을 내 5잔이 됐으므로, 실행부 기본값을 켜기 전에 필요 | Decision AI | 1 |
 | 4 | ~~`tool_calls` 실행부(MCP 도구): 상품+온도로 `item_id` 조회, `expected_version` 채움, 요청별 `Idempotency-Key` 생성, 말한 순서대로 실행~~ 완료(`voice/executor.py`, `VOICE_EXECUTE_TOOLS`로 켬). 기본값을 켜는 시점과 확인 버튼 수락은 7.3 | Decision AI + Back-end | 1 |
 | 5 | 실행 결과를 `actions`(`cart_updated`)로 전달은 완료. SSE 알림과 프론트의 장바구니 재조회·"담았어요" 문구는 남음 | Back-end + Front-end | 4, 3.4 |
 | 6 | 프론트 화면 연결: 메뉴 화면의 음성 모드 버튼·다시 말하기·인식 문장과 `reply_text` 표시는 완료(PR #53). `voice_guide`로 모드 자동 켜기, 확인·취소 버튼, 메뉴 외 화면은 남음 | Front-end | 판단 모델 결과 수신 |
