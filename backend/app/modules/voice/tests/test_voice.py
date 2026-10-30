@@ -475,6 +475,11 @@ class NamedProductTests(unittest.TestCase):
         self.assertEqual(result.status, "needs_clarification")
         self.assertEqual(result.tool_calls, [])
 
+    def test_only_a_shared_word_asks_which_one(self):
+        result = self.check("따뜻한 라떼 두 잔", call("add_cart_item", "vanilla", "hot", 2))
+        self.assertEqual(result.status, "needs_clarification")
+        self.assertEqual(result.reply_text, "라떼 중 어떤 메뉴로 할까요?")
+
 
 class PromptVersionTests(unittest.TestCase):
     def test_current_prompt_explains_every_status(self):
