@@ -425,6 +425,46 @@ class ToolExecutionApiTests(VoiceApiCase):
                          [("americano", "iced", 2)])
         self.assertEqual(cart["version"], 1)
 
+    def test_proposal_waits_and_the_customers_yes_runs_it_once(self):
+        self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
+        proposed = self.status(self.say("아이스 아메리카노 두 개")).json()
+        self.assertEqual(proposed["status"], "needs_confirmation")
+        self.assertEqual(proposed["actions"], [])
+        self.assertEqual(self.cart()["items"], [])
+        self.interpreter.result = interpretation(ADD_AMERICANO)
+        key = str(uuid4())
+        accepted = self.post(body={**BODY, "text": "네", "alternatives": []}, key=key).json()
+        self.assertEqual(self.status(accepted["request_id"]).json()["actions"], ["cart_updated"])
+        self.assertEqual(self.cart()["total_quantity"], 2)
+        # A replayed key returns the stored result and does not run the tools again.
+        replay = self.post(body={**BODY, "text": "네", "alternatives": []}, key=key).json()
+        self.assertEqual(replay["request_id"], accepted["request_id"])
+        self.assertEqual(self.cart()["total_quantity"], 2)
+
+    def test_refused_tool_input_fails_with_the_ordering_code_and_keeps_the_cart(self):
+        self.post()
+        self.interpreter.result = interpretation(call("update_cart_item", "sandwich", None, 3))
+        body = self.status(self.say("샌드위치 세 개로 바꿔 주세요")).json()
+        self.assertEqual(body["status"], "failed")
+        self.assertEqual(body["error"]["code"], "cart_item_not_found")
+        self.assertEqual(body["tool_calls"], [])
+        self.assertEqual(body["actions"], [])
+        self.assertTrue(body["reply_text"])
+        self.assertEqual(self.cart()["total_quantity"], 2)
+        # A failed execution stays out of the context like any other failure.
+        self.say("다음")
+        self.assertEqual([t.request.text for t in self.interpreter.histories[-1]], [BODY["text"]])
+
+    def test_touch_change_between_interpretation_and_execution_is_still_applied(self):
+        # The executor reads the cart version inside the ordering lock, so a touch
+        # change made before the voice request does not cause a version conflict.
+        self.client.post(f"/api/v1/sessions/{self.session_id}/cart/items", json={
+            "product_id": "sandwich", "temperature": None, "quantity": 1, "expected_version": 0,
+        }, headers={"Idempotency-Key": str(uuid4())})
+        body = self.status(self.post().json()["request_id"]).json()
+        self.assertEqual(body["actions"], ["cart_updated"])
+        self.assertEqual(self.cart()["total_quantity"], 3)
+
 
 class RetentionTests(unittest.TestCase):
     def setUp(self):
