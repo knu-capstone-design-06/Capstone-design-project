@@ -67,7 +67,11 @@ class FakeInterpreter:
         return self.result
 
 
-class VoiceApiTests(unittest.TestCase):
+class VoiceApiCase(unittest.TestCase):
+    """App with a fake interpreter and the small MENU; SETTINGS overrides defaults."""
+
+    SETTINGS: dict = {}
+
     def setUp(self):
         self.interpreter = FakeInterpreter()
         for target, value in (("app.main.build_voice_interpreter", self.interpreter),
@@ -75,7 +79,7 @@ class VoiceApiTests(unittest.TestCase):
             patcher = patch(target, return_value=value)
             patcher.start()
             self.addCleanup(patcher.stop)
-        app = create_app(Settings(_env_file=None, openai_api_key=None))
+        app = create_app(Settings(_env_file=None, openai_api_key=None, **self.SETTINGS))
         self.client = self.enterContext(TestClient(app))
         self.session_id = self.client.post("/api/v1/sessions").json()["session_id"]
 
@@ -106,6 +110,11 @@ class VoiceApiTests(unittest.TestCase):
                                    headers={"Idempotency-Key": str(uuid4())})
         self.assertEqual(ordered.status_code, 201)
 
+    def cart(self):
+        return self.client.get(f"/api/v1/sessions/{self.session_id}/cart").json()
+
+
+class VoiceApiTests(VoiceApiCase):
     def test_accepts_and_returns_tool_calls_without_claiming_changes(self):
         response = self.post()
         self.assertEqual(response.status_code, 202)
@@ -118,6 +127,7 @@ class VoiceApiTests(unittest.TestCase):
             "reply_text": None, "tool_calls": [ADD_AMERICANO], "actions": [], "error": None,
         })
         self.assertEqual(self.interpreter.menus, [MENU])
+        self.assertEqual(self.cart()["items"], [])  # the default does not execute tool_calls
 
     def test_needs_clarification_is_reported(self):
         question = "라떼는 아이스, 따뜻한 것 중 무엇으로 할까요?"
@@ -398,6 +408,22 @@ class VoiceApiTests(unittest.TestCase):
     def test_null_confidence_is_allowed(self):
         body = {**BODY, "alternatives": [{"text": "라떼", "confidence": None}]}
         self.assertEqual(self.post(body=body).status_code, 202)
+
+
+class ToolExecutionApiTests(VoiceApiCase):
+    """VOICE_EXECUTE_TOOLS=true: completed results change the cart through the ordering API."""
+
+    SETTINGS = {"voice_execute_tools": True}
+
+    def test_completed_result_changes_the_cart_and_reports_cart_updated(self):
+        body = self.status(self.post().json()["request_id"]).json()
+        self.assertEqual(body["status"], "completed")
+        self.assertEqual(body["tool_calls"], [ADD_AMERICANO])
+        self.assertEqual(body["actions"], ["cart_updated"])
+        cart = self.cart()
+        self.assertEqual([(i["product_id"], i["temperature"], i["quantity"]) for i in cart["items"]],
+                         [("americano", "iced", 2)])
+        self.assertEqual(cart["version"], 1)
 
 
 class RetentionTests(unittest.TestCase):
