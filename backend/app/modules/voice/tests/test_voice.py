@@ -519,6 +519,32 @@ class ToolExecutionTests(unittest.TestCase):
         self.assertEqual(cart.version, 4)
         self.assertEqual(self.lines(self.service.cart("s1")), [("sandwich", None, 1)])
 
+    def test_one_refused_tool_input_changes_nothing(self):
+        from app.modules.voice.executor import ToolExecutionFailed
+
+        self.execute(call("add_cart_item", "americano", "iced", 1))
+        before = self.service.cart("s1")
+        with self.assertRaises(ToolExecutionFailed) as raised:
+            self.execute(call("add_cart_item", "latte", "hot", 1),
+                         call("remove_cart_item", "cake", None), request_id="vr_2")
+        self.assertEqual(raised.exception.error.code, "cart_item_not_found")
+        self.assertTrue(raised.exception.reply_text)
+        self.assertEqual(self.service.cart("s1"), before)
+        self.assertFalse([key for _, key in self.repository.replays if key.startswith("voice:vr_2")])
+
+    def test_quantity_limit_and_completed_session_are_reported(self):
+        from app.modules.ordering.schemas import OrderRequest
+        from app.modules.voice.executor import ToolExecutionFailed
+
+        self.execute(call("add_cart_item", "americano", "iced", 19))
+        with self.assertRaises(ToolExecutionFailed) as raised:
+            self.execute(call("add_cart_item", "americano", "iced", 2), request_id="vr_2")
+        self.assertEqual(raised.exception.error.code, "quantity_limit_exceeded")
+        self.service.create_order("s1", "order-key", OrderRequest(expected_version=1))
+        with self.assertRaises(ToolExecutionFailed) as raised:
+            self.execute(call("add_cart_item", "americano", "iced", 1), request_id="vr_3")
+        self.assertEqual(raised.exception.error.code, "session_expired")
+
 
 class PromptVersionTests(unittest.TestCase):
     def test_current_prompt_explains_every_status(self):
