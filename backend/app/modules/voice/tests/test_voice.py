@@ -489,6 +489,37 @@ class NamedProductTests(unittest.TestCase):
         self.assertEqual(result.status, "completed")
 
 
+class ToolExecutionTests(unittest.TestCase):
+    """The executor runs tool inputs through the real ordering service and repository."""
+
+    def setUp(self):
+        from app.modules.ordering.repository import OrderingRepository
+        from app.modules.ordering.service import OrderingService
+        from app.modules.voice.executor import OrderingCartExecutor
+
+        self.repository = OrderingRepository()
+        self.service = OrderingService(lambda session_id: True, self.repository)
+        self.executor = OrderingCartExecutor(self.service, self.repository)
+
+    def execute(self, *tool_calls, request_id="vr_1"):
+        return self.executor.execute("s1", request_id, interpretation(*tool_calls).tool_calls)
+
+    @staticmethod
+    def lines(cart):
+        return [(item.product_id, item.temperature, item.quantity) for item in cart.items]
+
+    def test_applies_tool_inputs_in_spoken_order(self):
+        cart = self.execute(
+            call("add_cart_item", "americano", "iced", 2),
+            call("update_cart_item", "americano", "iced", 3),
+            call("add_cart_item", "sandwich", None, 1),
+            call("remove_cart_item", "americano", "iced"),
+        )
+        self.assertEqual(self.lines(cart), [("sandwich", None, 1)])
+        self.assertEqual(cart.version, 4)
+        self.assertEqual(self.lines(self.service.cart("s1")), [("sandwich", None, 1)])
+
+
 class PromptVersionTests(unittest.TestCase):
     def test_current_prompt_explains_every_status(self):
         from app.modules.voice import interpreter
