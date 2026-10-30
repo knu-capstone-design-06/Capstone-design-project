@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     openai_api_key: SecretStr | None = None
     openai_model: str = "gpt-4o-mini"
     openai_timeout_seconds: float = Field(default=10.0, gt=0, allow_inf_nan=False)
+    # Off: voice results return tool_calls only. On: completed tool_calls change the cart.
+    voice_execute_tools: bool = False
 
     @field_validator("ai_engine_url")
     @classmethod

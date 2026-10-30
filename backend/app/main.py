@@ -13,9 +13,11 @@ from app.modules.connectivity.router import router as connectivity_router
 from app.modules.ordering.catalog import PRODUCTS
 from app.modules.ordering.repository import OrderingRepository
 from app.modules.ordering.router import router as ordering_router
+from app.modules.ordering.service import OrderingService
 from app.modules.sessions.repository import SessionRepository
 from app.modules.sessions.router import router as sessions_router
 from app.modules.sessions.service import SessionService
+from app.modules.voice.executor import OrderingCartExecutor
 from app.modules.voice.interpreter import build_voice_interpreter
 from app.modules.voice.repository import VoiceRepository
 from app.modules.voice.router import router as voice_router
@@ -54,12 +56,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 openai = OpenAiClient(
                     openai_http, settings.openai_model, settings.openai_timeout_seconds
                 )
+            executor = None
+            if settings.voice_execute_tools:
+                # Voice changes the cart through the same service as touch ordering.
+                executor = OrderingCartExecutor(
+                    OrderingService(session_repository.exists, app.state.ordering_repository),
+                    app.state.ordering_repository,
+                )
             app.state.voice_service = VoiceService(
                 session_repository.exists, VoiceRepository(),
                 build_voice_interpreter(openai),
                 # Same demo catalog the ordering API sells.
                 menu_provider=lambda: menu_from_products(PRODUCTS),
                 ordering=app.state.ordering_repository,
+                executor=executor,
             )
             try:
                 yield
