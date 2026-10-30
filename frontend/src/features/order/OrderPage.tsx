@@ -11,9 +11,12 @@ import { captureTouchLogObservation } from './touchLogObservation.ts';
 import { TouchLogPanel } from './TouchLogPanel.tsx';
 import { VoiceModeToggle } from './VoiceModeToggle.tsx';
 import { ReadAloudControls } from './ReadAloudControls.tsx';
+import { KioskModeBar } from './KioskModeBar.tsx';
+import { KioskClock } from './KioskClock.tsx';
 import { createVoiceApi, VoiceController } from '../voice/index.ts';
 import './order.css';
 import './orderAccessibility.css';
+import './kioskReference.css';
 
 const supportLabels: Record<keyof Settings, string> = { largeText: '큰 글씨 (200%)', largeButton: '큰 버튼', simpleScreen: '간편 화면', stepGuide: '단계별 안내', lowScreen: '낮은 화면', highContrast: '고대비' };
 const sampleMode = import.meta.env.DEV && import.meta.env.VITE_ORDER_SAMPLE === 'true';
@@ -102,6 +105,10 @@ export function OrderPage() {
   function toggleScreenHeight() {
     setSettings(current => ({ ...current, lowScreen: !current.lowScreen }));
   }
+  function useStandardMode() {
+    voiceController.setEnabled(false);
+    setSettings(current => ({ ...initialSettings, lowScreen: current.lowScreen }));
+  }
   function closeOptions() { setSelected(null); opener.current?.focus(); }
   function closeRestart() { setRestartOpen(false); restartTrigger.current?.focus(); }
   async function addSelected() {
@@ -150,8 +157,19 @@ export function OrderPage() {
 
   const screenHeightButton = <button data-log-target="screen-height-toggle" className="screen-height-toggle" data-active={settings.lowScreen} onClick={toggleScreenHeight}>{settings.lowScreen ? '기본 높이' : '낮은 화면'}</button>;
 
-  return <>{settings.lowScreen && <div className="low-screen-banner" aria-hidden="true"><strong>온기 카페</strong><p>메뉴와 버튼을 아래로 내렸어요.</p></div>}<div ref={touchLog.root} className={`kiosk ${settings.largeText ? 'large-text' : ''} ${settings.largeButton ? 'large-button' : ''} ${settings.simpleScreen ? 'simple-screen' : ''} ${settings.lowScreen ? 'low-screen' : ''} ${settings.highContrast ? 'high-contrast' : ''}`}>
-    <header className="header"><a data-log-target="menu-home" className="brand" href="#" onClick={event => { event.preventDefault(); if (screen !== 'complete') setScreen('menu'); }}>온기 카페</a><span className="sample-badge">{sampleMode ? '개발용 샘플' : '샘플 주문'} · 실제 결제 없음</span><button data-log-target="support-toggle" className="support-trigger" aria-expanded={supportOpen} aria-controls="support-panel" onClick={() => setSupportOpen(!supportOpen)}>화면 도움 {supportOpen ? '닫기' : '열기'}</button></header>
+  return <><button type="button" className={`screen-position-pad ${settings.lowScreen ? 'is-lowered' : ''} ${settings.highContrast ? 'is-contrast' : ''}`}
+    data-log-target="screen-position-pad" aria-label={settings.lowScreen ? '화면 위로 올리기' : '화면 아래로 내리기'} onClick={toggleScreenHeight}>
+    <span>{settings.lowScreen ? '화면 위로 올리기' : '화면 아래로 내리기'}<span className="screen-position-arrow" aria-hidden="true">{settings.lowScreen ? '⌃' : '⌄'}</span></span>
+  </button><div ref={touchLog.root} className={`kiosk ${settings.largeText ? 'large-text' : ''} ${settings.largeButton ? 'large-button' : ''} ${settings.simpleScreen ? 'simple-screen' : ''} ${settings.lowScreen ? 'low-screen' : ''} ${settings.highContrast ? 'high-contrast' : ''}`}>
+    <header className="header">
+      <div className="kiosk-identity"><div><a data-log-target="menu-home" className="brand" href="#" onClick={event => { event.preventDefault(); if (screen !== 'complete') setScreen('menu'); }}>온기 카페</a><span className="sample-badge">{sampleMode ? '개발용 샘플' : '샘플 주문'} · 실제 결제 없음</span></div><KioskClock /></div>
+      <div className="kiosk-toolbar"><KioskModeBar settings={settings} voiceEnabled={voice.enabled}
+        voiceReady={screen === 'menu' && (state.status === 'ready' || state.status === 'saving') && !!state.session && !state.order && voice.supported}
+        onStandard={useStandardMode} onSetting={key => { setSettings(current => ({ ...current, [key]: !current[key] })); }}
+        onVoice={() => voiceController.setEnabled(!voice.enabled)} />
+        <button data-log-target="support-toggle" className="support-trigger" aria-expanded={supportOpen} aria-controls="support-panel" onClick={() => setSupportOpen(!supportOpen)}>화면 도움 {supportOpen ? '닫기' : '열기'}</button>
+      </div>
+    </header>
     <section id="support-panel" className="support-panel" hidden={!supportOpen} aria-label="화면 도움 설정">
       <div><h2>편한 화면으로 주문해 주세요</h2><p>설정을 바꿔도 담은 메뉴는 그대로예요.</p></div>
       <div className="support-options">
@@ -163,17 +181,17 @@ export function OrderPage() {
     </section>
     <main>
       {!selected && feedback}
-      {screen === 'menu' && <VoiceModeToggle controller={voiceController} ready={(state.status === 'ready' || state.status === 'saving') && state.session !== null && state.order === null} sampleMode={sampleMode} />}
       <div className="cart-notice" role="status" aria-live="polite" hidden={!state.notice || screen !== 'menu'}>{state.notice}<button data-log-target="notice-close" aria-label="안내 닫기" onClick={() => controller.clearNotice()}>✕</button></div>
       <nav className="steps" aria-label="주문 단계">{['메뉴 선택', '주문 확인', '주문 완료'].map((label, index) => <span key={label} aria-current={index === ['menu', 'review', 'complete'].indexOf(screen) ? 'step' : undefined}><b>{index + 1}</b> {label}</span>)}</nav>
       {storageWarning && <p role="alert">화면 설정을 기억하지 못했어요. 새로고침하면 기본 화면으로 돌아갈 수 있어요.</p>}
       {settings.stepGuide && <div className="guide" role="status">{screen === 'menu' ? <><p>① 메뉴를 골라 옵션과 수량을 정해 주세요.</p><p>② 담은 뒤 화면 아래에서 주문을 확인해 주세요.</p></> : screen === 'review' ? <><p>① 담은 메뉴와 수량을 확인해 주세요.</p><p>② 화면 아래에서 샘플 주문을 완료해 주세요.</p></> : <p>주문번호를 확인한 뒤 새 주문을 시작해 주세요.</p>}</div>}
       {screen === 'complete' ? <section className="complete"><h1 ref={heading} tabIndex={-1}>샘플 주문이 끝났어요</h1><p>샘플 주문번호</p><strong className="order-number">{orderNumber}</strong><p>실제 결제나 매장 주문은 진행되지 않았어요.</p></section> : <>
         <section className="intro"><h1 ref={heading} tabIndex={-1}>{screen === 'menu' ? '메뉴를 골라 주세요' : '담은 메뉴를 확인해 주세요'}</h1></section>
+      {screen === 'menu' && <VoiceModeToggle controller={voiceController} ready={(state.status === 'ready' || state.status === 'saving') && state.session !== null && state.order === null} sampleMode={sampleMode} />}
         <div className="order-layout"><section className="menu-section" aria-label={screen === 'menu' ? '상품 목록' : '주문 내역'}>
           {screen === 'menu' ? <><div className="categories" aria-label="상품 분류">{(['all', 'coffee', 'drink', 'food'] as const).map(value => <button data-log-target={`category:${value === 'all' ? '전체' : categoryLabels[value]}`} key={value} aria-pressed={category === value} onClick={() => setCategory(value)}>{value === 'all' ? '전체' : categoryLabels[value]}</button>)}</div><div className="product-grid">
             {state.products.filter(product => category === 'all' || product.category === category).map(product => <button data-log-target={`product:${product.product_id}`} className="product" key={product.product_id} disabled={writeDisabled || !product.available} onClick={event => { opener.current = event.currentTarget; setSelected(product); setTemperature(product.temperatures[0] ?? null); setQuantity(1); }}>
-              <span className="product-info"><span className="product-category">{categoryLabels[product.category]}</span><strong>{product.name}</strong><span className="description">{product.description}</span><span className="product-price">{money(product.unit_price)}</span>{!product.available && <span>품절</span>}</span>
+              <span className="product-info"><strong>{product.name}</strong><span className="product-identity"><span className="product-mark" aria-hidden="true"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{product.category === 'food' ? <><path d="m3 12 3-6h12l3 6-3 6H6Z" /><path d="m8 7 2 4m4-4 2 4" /></> : <><path d="M5 8h12v6a5 5 0 0 1-5 5h-2a5 5 0 0 1-5-5ZM17 9h2a3 3 0 0 1 0 6h-2M4 22h16M8 2v2m4-2v2" /></>}</svg></span><span className="product-category">{categoryLabels[product.category]}</span></span><span className="description">{product.description}</span><span className="product-price">{money(product.unit_price)}</span>{!product.available && <span>품절</span>}</span>
             </button>)}
           </div></> : <section className="review-card"><h2>주문 내역</h2>{count ? <ul>{cartRows}</ul> : <p>아직 담은 메뉴가 없어요. 메뉴를 먼저 골라 주세요.</p>}<button data-log-target="review-back" className="secondary" onClick={() => setScreen('menu')}>← 메뉴 더 고르기</button></section>}
         </section><aside className="cart"><div className="cart-heading"><h2>{screen === 'menu' ? '담은 메뉴' : '주문 요약'}</h2><span>{count}개</span></div>{screen === 'menu' ? (count ? <ul>{cartRows}</ul> : <div className="empty-cart"><span aria-hidden="true">＋</span><p>메뉴를 담아 주세요</p><span>선택한 메뉴가 여기에 보여요.</span></div>) : <p className="cart-summary">담은 메뉴 {count}개를 확인해 주세요.<br />실제 결제는 진행되지 않아요.</p>}</aside></div>
