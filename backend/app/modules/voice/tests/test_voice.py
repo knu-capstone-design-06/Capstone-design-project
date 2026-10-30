@@ -480,6 +480,14 @@ class NamedProductTests(unittest.TestCase):
         self.assertEqual(result.status, "needs_clarification")
         self.assertEqual(result.reply_text, "라떼 중 어떤 메뉴로 할까요?")
 
+    def test_answer_to_a_question_about_that_latte_is_kept(self):
+        question = VoiceTurn(
+            request=VoiceRequestCreate(text="카페라떼 하나요", alternatives=[], screen_id="menu_list"),
+            result=interpretation(reply_text="카페 라떼는 아이스, 따뜻한 것 중 무엇으로 할까요?"),
+        )
+        result = self.check("아이스로요", call("add_cart_item", "latte", "iced", 1), history=[question])
+        self.assertEqual(result.status, "completed")
+
 
 class PromptVersionTests(unittest.TestCase):
     def test_current_prompt_explains_every_status(self):
