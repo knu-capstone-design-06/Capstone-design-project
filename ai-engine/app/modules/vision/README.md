@@ -1,6 +1,6 @@
 # 비전 관측 뼈대 (`app/modules/vision/`)
 
-카메라나 영상 파일의 프레임마다 MediaPipe 3종(얼굴 점 Face Landmarker · 얼굴 검출 Face Detector short-range · 몸 점 Pose Landmarker lite)을 돌려 관측값과 단계별 처리 시간을 CSV로 남기고, 점 · 선을 그린 영상과 그래프를 만드는 뼈대입니다. **2026-10-22부터 녹화 재생 · 웹캠 실시간 실행기(`replay.py` · `live.py`)가 머리 탐지기 · 머리 방향 분류기 · 선택 열 · 터치 로그 · 상황 태그 규칙 3개 · 판단 층 규칙표 v0(장면 3-1 · 3-2 · 4-1 · 4-2, Jev는 질문만 기록)를 창마다 끝까지 잇습니다**(아래 '실행 파이프라인'). 엔드포인트(`app.main`)에는 아직 등록하지 않았습니다. 상황 규칙의 기준값 13개는 기본값 없이 값 묶음 파일로 넣고, 실행 파이프라인이 새로 쓰는 값은 출처와 함께 `params.py`에 있습니다(출처가 없는 값은 `[파일럿]`).
+카메라나 영상 파일의 프레임마다 MediaPipe 3종(얼굴 점 Face Landmarker · 얼굴 검출 Face Detector short-range · 몸 점 Pose Landmarker lite)을 돌려 관측값과 단계별 처리 시간을 CSV로 남기고, 점 · 선을 그린 영상과 그래프를 만드는 뼈대입니다. **2026-10-22부터 녹화 재생 · 웹캠 실시간 실행기(`replay.py` · `live.py`)가 머리 탐지기 · 카메라 시점 분류기 · 선택 열 · 터치 로그 · 상황 태그 규칙 3개 · 판단 층 규칙표 v0(장면 3-1 · 3-2 · 4-1 · 4-2, Jev는 질문만 기록)를 창마다 끝까지 잇습니다**(아래 '실행 파이프라인'). 엔드포인트(`app.main`)에는 아직 등록하지 않았습니다. 상황 규칙의 기준값 13개는 기본값 없이 값 묶음 파일로 넣고, 실행 파이프라인이 새로 쓰는 값은 출처와 함께 `params.py`에 있습니다(출처가 없는 값은 `[파일럿]`).
 
 **어디서 돌리나** — 설계안(2026-10-15): 카메라가 연결된 키오스크 PC에서 로컬 프로세스로 돌립니다(영상이 기기 밖으로 나가지 않음). FastAPI · 서버 의존성이 없는 일반 Python 코드라 ai-engine 컨테이너 안에서도 돌 수 있습니다. GPU 서버는 학습 · 평가에만 쓰고 내보낸 모델(ONNX)은 키오스크 PC의 CPU에서 돌립니다. 관측값은 같은 PC의 프론트엔드가 특징 창의 `vision` 칸으로 backend에 보냅니다(루트 README '구성별 책임').
 
@@ -15,9 +15,9 @@
 | 입력 | `sources.py` | 프레임 입력: 영상 파일 · 이미지 폴더 · 웹캠(`--camera`일 때만 엶). 프레임마다 시각을 붙임 |
 | 입력 | `touch.py` | 터치 로그(주문 화면 개발 모드의 JSON 내보내기)를 영상 시간축에 놓고 누름 · 버튼 밖 누름 · 빗나감 뒤 바로 고침 · 되돌아감을 세며, 관측 구간 · 세션 · 1,000개 잘림을 처리함. 세는 방법은 `[설계 제안]`(아래 '터치 로그') |
 | 추론 | `app/inference/vision.py` | MediaPipe 3종 모델 불러오기와 프레임별 추론만(AGENTS.md: 직접 실행하는 모델의 로딩 · 추론 코드는 `app/inference/`에). 결과를 단순한 배열(`FrameInference`)로 넘김. 이 폴더의 `inference.py`는 같은 이름을 다시 내보내는 호환용. blendshape는 `MediaPipeModels(blendshapes=True)`일 때만 냄(결정 목록 2026-10-10 §16: 기본 꺼짐; 실행기는 `--blendshapes`로 켬) |
-| 추론 | `app/inference/head.py` · `app/inference/head_direction.py` | H1 머리 탐지기(YOLOX-Nano)와 P1 머리 방향 분류기(ResNet-18)를 ONNX Runtime으로 CPU에서 돌림(스레드 기본 1). ONNX 파일은 `tools/export_onnx.py`가 만듦. 자리는 같은 AGENTS.md 문장(모델 로딩 · 추론 코드는 `app/inference/`)을 따름 |
+| 추론 | `app/inference/head.py` · `app/inference/head_direction.py` | H1 머리 탐지기(YOLOX-Nano)와 P1 카메라 시점 분류기(ResNet-18, AI Hub 70 '촬영방향' 라벨로 학습)를 ONNX Runtime으로 CPU에서 돌림(스레드 기본 1). ONNX 파일은 `tools/export_onnx.py`가 만듦. 자리는 같은 AGENTS.md 문장(모델 로딩 · 추론 코드는 `app/inference/`)을 따름 |
 | 관측값 | `features.py` | 추론 결과로 관측값 계산(아래 CSV 열): 기하 · 연속 구간 · 밝기와 선명도. MediaPipe 없이도 돌아감 |
-| 관측값 | `columns.py` | 규칙이 쓰는 선택 열을 만듦(아래 '선택 열'): 뒤에 선 사람 수 · 동행자 상자 · 어깨 위치 · 입 움직임 · 주 사용자 머리 방향 확률 |
+| 관측값 | `columns.py` | 규칙이 쓰는 선택 열을 만듦(아래 '선택 열'): 뒤에 선 사람 수 · 동행자 상자 · 어깨 위치 · 입 움직임 · 주 사용자 머리의 P1 카메라 시점 확률(관측만) |
 | 사건 | `events.py` | 관측값 줄을 사건으로 묶음(8종, 아래 '상황 층'). 고개를 한 번 돌린 것은 사건 하나. 창 길이 · 횟수 · 각도 · 품질 하한은 모두 `PilotParams`(기본값 없음, `[파일럿]`) |
 | 상황 | `situation.py` | 상황 태그 규칙 3개 구현, 값은 `[파일럿]`. 창마다 한 줄(근거 사건 · 품질 · 확신 정보 · 대안)을 내고 검사 규칙으로 확인함. 재생 · 실시간 실행기가 창마다 부름(`run.py` · 엔드포인트는 부르지 않음) |
 | 판단 | `judgment/rule_table_v0.py` · `judgment/jev_stub.py` | 장면 3-1 · 3-2 · 4-1 · 4-2의 규칙표 v0: 창마다 지원 하나 · 출력 형태 · 전이를 냄. Jev 질문은 만들어 기록만 함(그림자 모드, 아래 '판단 층 규칙표 v0') |
@@ -41,7 +41,7 @@
 | 실행 파이프라인 | 재생 · 실시간 실행기, 선택 열, 터치 로그 정렬, 판단 층 규칙표 v0, `SupportDecision` 형식과 `extension` 출력(2026-10-22, 아래 '실행 파이프라인'). 엔드포인트에는 연결하지 않았습니다 |
 | 서버 연결 | 없음. 창 결과는 `SupportDecision` 형식의 `support`와 재생 파일용 `extension`으로 기록합니다. 불편 상태 점수가 없어 `AnalyzeResponse`는 만들지 않으며, 명세 확장은 추가형 제안입니다(아래 '계약과의 관계') |
 | 처리 시간 | 아래 '처리 시간' 절. 실행 파이프라인 전체는 이 노트북의 논리 CPU 1개에서 한 프레임 p50 42~49 ms입니다 |
-| 학습 | GPU 서버(GPU 1장, 팀 계정 공유)에서 머리 탐지기(Open Images 'Human head', YOLOX-Nano)를 학습했고(2026-10-12 끝), 머리 방향 분류기(AI Hub 「안내 로봇 인터랙션 멀티모달」 머리 크롭, ResNet-18)를 학습했습니다(2026-10-14 끝). 두 모델은 2026-10-22에 ONNX로 바꿨습니다(`models/README.md`). AI Hub 「사람 행동 인식 로봇 자율 행동 데이터」로 다가옴·사용·떠남 구간 모델을 파일럿 학습했습니다. 숫자는 발표 자료에서 다룹니다 |
+| 학습 | GPU 서버(GPU 1장, 팀 계정 공유)에서 머리 탐지기(Open Images 'Human head', YOLOX-Nano)를 학습했고(2026-10-12 끝), 카메라 시점 분류기(AI Hub 「안내 로봇 인터랙션 멀티모달」 머리 크롭과 '촬영방향' 라벨, ResNet-18)를 학습했습니다(2026-10-14 끝). 두 모델은 2026-10-22에 ONNX로 바꿨습니다(`models/README.md`). AI Hub 「사람 행동 인식 로봇 자율 행동 데이터」로 다가옴·사용·떠남 구간 모델을 파일럿 학습했습니다. 숫자는 발표 자료에서 다룹니다 |
 | 데이터 규칙 | AI Hub 데이터는 승인받은 사람만 열람합니다(팀원 각자 신청). 원본 프레임은 저장소·발표에 넣지 않고 집계 숫자만 쓰며, 결과물에는 NIA 출처 문구를 붙입니다 |
 | 검토 문서 | `docs/Vision-Review.md`(관측값 후보·상황 태그 형식·팀 결정 항목 V01\~V16)는 아직 저장소에 없습니다(초안은 저장소 밖) |
 
@@ -66,7 +66,7 @@
 
 ```
 프레임 ─ MediaPipe 3종 + blendshape ─ features.Observer 한 줄 ─────────┐
-       └ H1 머리 상자 ─ 주 사용자 · 동행자 · 뒤 사람 ─ P1 머리 방향 ──┤ columns.py: 선택 열
+       └ H1 머리 상자 ─ 주 사용자 · 동행자 · 뒤 사람 ─ P1 카메라 시점 ─┤ columns.py: 선택 열
 터치 로그 ─ touch.py: 영상 시간축, 직전 줄 이후의 누름 · 버튼 밖 누름 ───┘
 segment_s마다 ─ situation.assess([t − window_s, t]) + 모름 이유
               ─ 구간 (t − segment_s, t]의 터치 횟수 · measurable · 화면 · 고개 방향
@@ -75,7 +75,7 @@ segment_s마다 ─ situation.assess([t − window_s, t]) + 모름 이유
 ```
 
 - 창 끝 뒤의 줄은 어느 단계도 읽지 않습니다. 창마다 창 끝 시각 이하의 관측 줄과 터치 기록만으로 계산합니다. 사용자 반응(수락 · 거절) · 세션 신호 · 실시간 지연은 재현하지 않습니다.
-- 빠진 재료는 결측으로 남깁니다. ONNX 파일이 없으면 머리 상자 · 방향 열이, blendshape를 켜지 않으면(`--blendshapes`, 기본 꺼짐) `mouth_motion`이, 터치 로그가 없으면 터치 열이 비고, 그 단서가 필요한 태그는 `unknown`이 됩니다. 왜 모르는지는 창 결과의 `unknown_reason`에 적힙니다.
+- 빠진 재료는 결측으로 남깁니다. ONNX 파일이 없으면 머리 상자 · P1 카메라 시점 열이, blendshape를 켜지 않으면(`--blendshapes`, 기본 꺼짐) `mouth_motion`이, 터치 로그가 없으면 터치 열이 비고, 그 단서가 필요한 태그는 `unknown`이 됩니다. 왜 모르는지는 창 결과의 `unknown_reason`에 적힙니다.
 - 창 하나에 필요한 줄은 `window_s + 2 × gap_s`초어치입니다. 실시간은 이만큼만 기억하고, 재생도 창마다 이만큼만 넘깁니다(테스트로 전체 기록과 같은 결과임을 확인함).
 
 ### 재생 (녹화 + 터치 로그)
@@ -87,7 +87,7 @@ segment_s마다 ─ situation.assess([t − window_s, t]) + 모름 이유
 - 녹화 옆의 `S1a_P2_1.mp4.times.csv`(프레임마다 잡은 시각)와 `S1a_P2_1.mp4.clock.json`(첫 프레임의 노트북 시각)을 저절로 읽습니다. 둘 다 시제품 `record_clip.py`가 만드는 파일입니다(촬영 대본 §4).
 - 시계 파일이 없으면 `--start-offset`에 터치 로그 첫 기록이 영상의 몇 초인지 넣습니다(휴대폰 시계 · 손뼉으로 찾은 값). 둘 다 없으면 오류로 멈춥니다. `--touch-log`를 빼면 터치 열 없이 돌아갑니다.
 - `--step 2`(두 장마다 한 장) · `--width 640`은 `run.py`와 같습니다. `--max-seconds`로 앞부분만 돌릴 수 있습니다. `--threads`는 ONNX Runtime 스레드 수이고 기본값은 1입니다. `--blendshapes`는 blendshape를 켭니다(기본 꺼짐, 결정 목록 2026-10-10 §16). `--no-heads`는 머리 탐지기를 일부러 빼고 돌립니다. 터치 로그에 경고(1,000개 잘림)가 있으면 시작할 때 출력합니다.
-- 결과: `windows.jsonl`(창마다 한 줄, 아래), `rows.csv`(프레임마다 한 줄: 'CSV 열' + 선택 열 + 처리 시간), `meta.json`(입력 · 값 묶음과 값마다의 출처 · 모델 해시 · 패키지 판 · 처리 시간 p50 · p95 · 태그와 결정의 개수 · 얼굴 · 머리 상자 · 머리 방향이 있는 프레임 수 · 세션 초기화 횟수 · 마지막 창의 길이). 영상과 그림은 만들지 않습니다.
+- 결과: `windows.jsonl`(창마다 한 줄, 아래), `rows.csv`(프레임마다 한 줄: 'CSV 열' + 선택 열 + 처리 시간), `meta.json`(입력 · 값 묶음과 값마다의 출처 · 모델 해시 · 패키지 판 · 처리 시간 p50 · p95 · 태그와 결정의 개수 · 얼굴 · 머리 상자 · P1 확률이 있는 프레임 수 · 세션 초기화 횟수 · 마지막 창의 길이). 영상과 그림은 만들지 않습니다.
 
 ### 실시간 (웹캠)
 
@@ -236,13 +236,13 @@ JP §0-2 · §0-3과 장면 표, tree 표 3-가 · 3-나 · §4에서 장면 4�
 
 ### 실행 파이프라인 전체 (이 저장소, 2026-10-22)
 
-`replay.py`의 프레임 한 장 처리(MediaPipe 3종 + blendshape(켠 조건; 지금은 `--blendshapes`를 줘야 같은 조건) + 관측값 + H1 머리 탐지 + P1 머리 방향 + 선택 열)와 창 하나의 판단(상황 + 규칙표)을 같은 조건으로 3번 쟀습니다. 조건: 개발 노트북(i5-1340P), Windows 11, Python 3.12.10, mediapipe 0.10.33, onnxruntime 1.30.0, 프로세스를 논리 CPU 1개(CPU 2)에 고정 · 보통 우선순위, ONNX Runtime 스레드 1, OpenCV 스레드 1, 첫 프레임 제외. 입력: 시제품 `samples/was_ist_ein_vlog_360p.mov`(웹캠 앞 한 사람, CC BY-SA 3.0)의 앞 30초를 `--step 2 --width 640`(640×360, 초당 12.5장, 376장)으로 돌렸고, 얼굴은 371장에서 보였습니다. 결과 파일은 숫자만 보고 지웠습니다.
+`replay.py`의 프레임 한 장 처리(MediaPipe 3종 + blendshape(켠 조건; 지금은 `--blendshapes`를 줘야 같은 조건) + 관측값 + H1 머리 탐지 + P1 카메라 시점 + 선택 열)와 창 하나의 판단(상황 + 규칙표)을 같은 조건으로 3번 쟀습니다. 조건: 개발 노트북(i5-1340P), Windows 11, Python 3.12.10, mediapipe 0.10.33, onnxruntime 1.30.0, 프로세스를 논리 CPU 1개(CPU 2)에 고정 · 보통 우선순위, ONNX Runtime 스레드 1, OpenCV 스레드 1, 첫 프레임 제외. 입력: 시제품 `samples/was_ist_ein_vlog_360p.mov`(웹캠 앞 한 사람, CC BY-SA 3.0)의 앞 30초를 `--step 2 --width 640`(640×360, 초당 12.5장, 376장)으로 돌렸고, 얼굴은 371장에서 보였습니다. 결과 파일은 숫자만 보고 지웠습니다.
 
 | 단계 | p50 (ms) | p95 (ms) |
 |---|---|---|
 | MediaPipe 3종 + 관측값 계산(`ms_total`) | 21.4~24.9 | 23.7~29.1 |
 | H1 머리 탐지: 전처리 · 추론 · 후처리(`ms_heads`) | 16.1~19.0 | 18.4~21.8 |
-| P1 머리 방향, 주 사용자 1명(`ms_head_dir`) | 4.0~4.6 | 4.7~5.5 |
+| P1 카메라 시점, 주 사용자 1명(`ms_head_dir`) | 4.0~4.6 | 4.7~5.5 |
 | 프레임 한 장 전체, 벽시계(`ms_chain`) | 42.1~49.0 | 50.7~58.8 |
 | 창 하나의 판단, 1초에 한 번(`ms_window`; 시험용 값 묶음, 창 6초) | 0.62~0.74 | 0.68~0.80 |
 
@@ -459,7 +459,7 @@ out, events = assess(rows, t_end, params, landmarker_num_faces=1)  # 창 = [t_en
 | # | 요구 | 코드 | 검사 | 결과에서 보는 것 |
 |---|---|---|---|---|
 | V1 | 머리 상자를 키오스크 PC의 CPU에서 찾는다(H1) | `app/inference/head.py`, `tools/export_onnx.py` | 변환 확인(ONNX와 PyTorch의 출력 차이 · NMS 뒤 상자, `models/onnx_export.json`), `HeadPostprocessTests`, `OnnxModelTests` | `models/README.md` 표의 크기 · 해시, '처리 시간'의 `ms_heads` |
-| V2 | 주 사용자 머리의 방향 확률(P1) | `app/inference/head_direction.py` | 변환 확인(logits 차이, 입력 변환과 torchvision의 차이), `HeadDirectionInputTests`, `OnnxModelTests` | `rows.csv`의 `head_dir_*` |
+| V2 | 주 사용자 머리의 카메라 시점 확률(P1, 관측만) | `app/inference/head_direction.py` | 변환 확인(logits 차이, 입력 변환과 torchvision의 차이), `HeadDirectionInputTests`, `OnnxModelTests` | `rows.csv`의 `head_dir_*` |
 | V3 | 규칙이 쓰는 선택 열(뒤 사람 · 동행자 · 어깨 · 입 움직임) | `columns.py`, `chain.py` | `ColumnsTests`, `FrameChainTests` | `rows.csv`의 선택 열, `windows.jsonl`의 `vision` |
 | V4 | 터치 로그를 영상 시간에 맞춰 센다 | `touch.py` | `TouchTests` | `windows.jsonl`의 `touch` · `screen`, `meta.json`의 `touch.anchor` |
 | V5 | 창마다 상황 태그 · 근거 사건 ID · 모름 이유 · 대안 | `chain.py`(`WindowJudge`, `unknown_reasons`), `situation.py` | `UnknownReasonTests`, `HistoryTests`, `ReplayWithFakePerceptionTests` | `windows.jsonl`의 `situation` |
@@ -521,4 +521,4 @@ out, events = assess(rows, t_end, params, landmarker_num_faces=1)  # 창 = [t_en
 - AFLW2000-3D: 비상업 연구 전용. 사진은 어디에도 띄우지 않고 숫자만 씁니다. 제품 경로에 쓰지 않습니다.
 - Open Images: 주석 CC BY 4.0, 사진 CC BY 2.0(사진마다 표기 확인). 사진을 쓰면 저작자 · 제목 · 주소 · 라이선스 주소와 변경 표시가 필요합니다. 지금은 발표 · 보고서에 넣지 않습니다(넣을지는 비전 담당 결정).
 - 연구 전용 가중치(ImageNet ResNet-50 · ResNet-18)로 낸 숫자는 '연구 숫자'로만 적고 제품 성능처럼 쓰지 않습니다.
-- 머리 방향 분류기(P1)는 ImageNet 가중치 없이 무작위 초기값에서 AI Hub 70으로 학습해서 제품 경로에 쓸 수 있고, 쓸 때 NIA 출처 문구를 붙입니다(`models/README.md`). 머리 탐지기(H1)는 Open Images 주석 출처와 YOLOX Apache-2.0 고지를 함께 둡니다.
+- 카메라 시점 분류기(P1)는 ImageNet 가중치 없이 무작위 초기값에서 AI Hub 70으로 학습해서 제품 경로에 쓸 수 있고, 쓸 때 NIA 출처 문구를 붙입니다(`models/README.md`). 머리 탐지기(H1)는 Open Images 주석 출처와 YOLOX Apache-2.0 고지를 함께 둡니다.
