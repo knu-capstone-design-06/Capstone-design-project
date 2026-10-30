@@ -6,6 +6,7 @@ from uuid import UUID
 
 from app.modules.ordering.repository import OrderingRepository
 from app.modules.voice.exceptions import VoiceRequestNotFound, VoiceSessionNotFound
+from app.modules.voice.executor import CartExecutor, ToolExecutionFailed
 from app.modules.voice.interpreter import VoiceInterpreter
 from app.modules.voice.repository import VoiceRepository
 from app.modules.voice.schemas import (
@@ -129,13 +130,15 @@ class VoiceService:
     def __init__(
         self, session_exists: Callable[[str], bool], repository: VoiceRepository,
         interpreter: VoiceInterpreter, menu_provider: Callable[[], list[MenuItem]],
-        ordering: OrderingRepository,
+        ordering: OrderingRepository, executor: CartExecutor | None = None,
     ):
         self._session_exists = session_exists
         self._repository = repository
         self._interpreter = interpreter
         self._menu_provider = menu_provider
         self._ordering = ordering
+        # None: tool_calls are returned as MCP inputs only and the cart is not changed.
+        self._executor = executor
 
     def accept(
         self, session_id: str, key: UUID, request: VoiceRequestCreate
@@ -202,12 +205,31 @@ class VoiceService:
                 error=VoiceErrorResponse(code="ai_unavailable", detail="외부 AI를 사용할 수 없습니다."),
             )
             return
+        actions = []
+        if result.status == "completed" and self._executor is not None:
+            # A proposal (needs_confirmation) is not run; the customer's "네" comes back
+            # as a completed result and is run then.
+            try:
+                self._executor.execute(session_id, request_id, result.tool_calls)
+            except ToolExecutionFailed as failed:
+                self._repository.update(request_id, "failed", failed.reply_text, error=failed.error)
+                return
+            except Exception:
+                logger.exception("voice tool execution crashed")
+                self._repository.update(
+                    request_id, "failed", FALLBACK_REPLY,
+                    error=VoiceErrorResponse(code="ai_unavailable", detail="장바구니에 반영하지 못했습니다."),
+                )
+                return
+            actions = ["cart_updated"]
         if result.status != "ignored":
             # Speech not meant for the kiosk would only confuse later turns.
             self._repository.append_turn(session_id, VoiceTurn(request=request, result=result))
-        # tool_calls are MCP inputs (a proposal when needs_confirmation); nothing has
-        # been changed here, so actions stay empty.
-        self._repository.update(request_id, result.status, result.reply_text, result.tool_calls)
+        # Without an executor, tool_calls are MCP inputs only (a proposal when
+        # needs_confirmation) and actions stay empty.
+        self._repository.update(
+            request_id, result.status, result.reply_text, result.tool_calls, actions=actions,
+        )
 
     def get(self, session_id: str, request_id: str) -> VoiceRequestStatus:
         if not self._session_exists(session_id):
