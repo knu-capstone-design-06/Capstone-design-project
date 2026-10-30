@@ -15,7 +15,7 @@ from app.modules.voice.schemas import (
 logger = logging.getLogger(__name__)
 
 # Record this version with experiment results; add a new file for a new prompt.
-PROMPT_VERSION = "interpret_v2"
+PROMPT_VERSION = "interpret_v3"
 _PROMPT_PATH = Path(__file__).parent / "prompts" / f"{PROMPT_VERSION}.md"
 
 _TEMPERATURE = {"type": ["string", "null"], "enum": ["iced", "hot", None]}

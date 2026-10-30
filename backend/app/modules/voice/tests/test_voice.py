@@ -187,14 +187,13 @@ class VoiceApiTests(unittest.TestCase):
             call("remove_cart_item", "latte", "hot"),  # unavailable items can still leave the cart
         ]
         self.interpreter.result = interpretation(*valid)
-        request_id = self.post().json()["request_id"]
+        request_id = self.say("샌드위치 세 개로 바꾸고 라떼는 빼 주세요")
         self.assertEqual(self.status(request_id).json()["tool_calls"], valid)
 
     def test_tool_calls_off_menu_are_rejected(self):
         for bad in (
             call("add_cart_item", "mocha", "iced", 1),     # not on menu
             call("add_cart_item", "latte", "hot", 1),      # unavailable
-            call("add_cart_item", "americano", None, 1),   # temperature required
             call("add_cart_item", "sandwich", "hot", 1),   # no temperature for food
             call("remove_cart_item", "latte", "iced"),     # temperature not allowed
         ):
@@ -203,6 +202,95 @@ class VoiceApiTests(unittest.TestCase):
                 body = self.status(self.post().json()["request_id"]).json()
                 self.assertEqual(body["status"], "failed", bad)
                 self.assertEqual(body["tool_calls"], [])
+
+    def test_drink_without_temperature_becomes_temperature_question(self):
+        for reply_text in (None, "담을까요?"):  # completed and proposals alike
+            self.interpreter.result = interpretation(
+                call("add_cart_item", "americano", None, 2), reply_text=reply_text)
+            body = self.status(self.post().json()["request_id"]).json()
+            self.assertEqual(body["status"], "needs_clarification")
+            self.assertEqual(body["tool_calls"], [])
+            self.assertIn("아메리카노", body["reply_text"])
+            self.assertIsNone(body["error"])
+
+    def test_single_allowed_temperature_is_filled_in(self):
+        self.interpreter.result = interpretation(call("remove_cart_item", "latte", None))
+        body = self.status(self.say("라떼 빼 주세요")).json()
+        self.assertEqual(body["status"], "completed")
+        self.assertEqual(body["tool_calls"], [call("remove_cart_item", "latte", "hot")])
+
+    def test_temperature_question_is_kept_for_the_next_answer(self):
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", None, 1))
+        self.say("아메리카노 하나")
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 1))
+        body = self.status(self.say("아이스로요")).json()
+        self.assertEqual(body["status"], "completed")
+        previous = self.interpreter.histories[-1]
+        self.assertEqual(len(previous), 1)
+        self.assertEqual(previous[0].request.text, "아메리카노 하나")
+        self.assertEqual(previous[0].result.status, "needs_clarification")
+
+    def test_bare_yes_after_a_question_repeats_the_question(self):
+        question = "카페 라떼는 아이스, 따뜻한 것 중 무엇으로 할까요?"
+        self.interpreter.result = interpretation(reply_text=question)
+        self.say("카페라떼 하나요")
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "hot", 1))
+        body = self.status(self.say("네.")).json()
+        self.assertEqual(body["status"], "needs_clarification")
+        self.assertEqual(body["reply_text"], question)
+        self.assertEqual(self.interpreter.calls, 1, "질문을 다시 할 때는 OpenAI를 부르지 않음")
+
+    def test_yes_after_a_proposal_still_reaches_the_interpreter(self):
+        self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
+        self.say("아메리카노 두 잔")
+        self.interpreter.result = interpretation(ADD_AMERICANO)
+        body = self.status(self.say("네")).json()
+        self.assertEqual(body["status"], "completed")
+        self.assertEqual(self.interpreter.calls, 2)
+
+    def test_first_bare_answer_in_a_session_sends_no_tool_calls(self):
+        self.interpreter.result = interpretation(ADD_AMERICANO)  # the model made one up
+        body = self.status(self.say("네")).json()
+        self.assertEqual(body["status"], "needs_clarification")
+        self.assertEqual(body["tool_calls"], [])
+        self.assertEqual(body["reply_text"], "어떤 메뉴를 주문할까요?")
+
+    def test_temperature_only_answer_without_a_question_sends_no_tool_calls(self):
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "hot", 1))
+        body = self.status(self.say("따뜻한 걸로요")).json()
+        self.assertEqual(body["status"], "needs_clarification")
+        self.assertEqual(body["tool_calls"], [])
+
+    def test_product_named_earlier_in_the_session_is_kept(self):
+        self.interpreter.result = interpretation(ADD_AMERICANO)
+        self.say("아이스 아메리카노 두 잔")
+        self.interpreter.result = interpretation(call("update_cart_item", "americano", "iced", 3))
+        body = self.status(self.say("하나 더요")).json()
+        self.assertEqual(body["status"], "completed")
+        self.assertEqual(body["tool_calls"], [call("update_cart_item", "americano", "iced", 3)])
+
+    def test_bare_yes_after_a_completed_order_asks_without_calling_openai(self):
+        self.interpreter.result = interpretation(ADD_AMERICANO)
+        self.say("아이스 아메리카노 두 잔")
+        body = self.status(self.say("네")).json()
+        self.assertEqual(body["status"], "needs_clarification")
+        self.assertEqual(body["tool_calls"], [])
+        self.assertEqual(self.interpreter.calls, 1, "다시 담지 않도록 OpenAI를 부르지 않음")
+
+    def test_answer_to_a_general_menu_question_still_has_to_name_a_product(self):
+        self.say("네")  # stored as "어떤 메뉴를 주문할까요?"
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "hot", 1))
+        body = self.status(self.say("따뜻한 걸로요")).json()
+        self.assertEqual(body["status"], "needs_clarification")
+        self.assertEqual(body["tool_calls"], [])
+
+    def test_other_product_than_the_one_named_is_not_sent(self):
+        self.interpreter.result = interpretation(ADD_AMERICANO)
+        self.say("아이스 아메리카노 두 잔")
+        self.interpreter.result = interpretation(call("add_cart_item", "sandwich", None, 1))
+        body = self.status(self.say("따뜻한 걸로요")).json()
+        self.assertEqual(body["status"], "needs_clarification")
+        self.assertEqual(body["tool_calls"], [])
 
     def test_ai_unavailable_and_crash_become_failed(self):
         for result in (None, RuntimeError("boom")):
@@ -354,14 +442,69 @@ class RetentionTests(unittest.TestCase):
         self.assertIsNone(self.repository.get("s1", record.request_id))
 
 
+class MissingTemperatureTests(unittest.TestCase):
+    def test_sold_out_drink_without_temperature_is_still_rejected(self):
+        from app.modules.voice.service import ask_for_missing_temperature, matches_menu
+
+        menu = [MenuItem(product_id="americano", name="아메리카노", available=False,
+                         temperatures=["iced", "hot"])]
+        result = ask_for_missing_temperature(
+            interpretation(call("add_cart_item", "americano", None, 1)), menu)
+        self.assertEqual(result.status, "completed")
+        self.assertFalse(matches_menu(result, menu))
+
+
+class NamedProductTests(unittest.TestCase):
+    LATTES = [
+        MenuItem(product_id="latte", name="카페 라떼", available=True, temperatures=["iced", "hot"]),
+        MenuItem(product_id="vanilla", name="바닐라 라떼", available=True, temperatures=["iced", "hot"]),
+    ]
+
+    def check(self, text, *tool_calls, history=()):
+        from app.modules.voice.service import require_named_products
+
+        request = VoiceRequestCreate(text=text, alternatives=[], screen_id="menu_list")
+        return require_named_products(interpretation(*tool_calls), request, list(history), self.LATTES)
+
+    def test_full_name_keeps_the_named_latte(self):
+        result = self.check("따뜻한 바닐라 라떼 두 잔", call("add_cart_item", "vanilla", "hot", 2))
+        self.assertEqual(result.status, "completed")
+
+    def test_shared_word_does_not_let_another_latte_through(self):
+        result = self.check("따뜻한 바닐라 라떼 두 잔", call("add_cart_item", "latte", "hot", 2))
+        self.assertEqual(result.status, "needs_clarification")
+        self.assertEqual(result.tool_calls, [])
+
+    def test_only_a_shared_word_asks_which_one(self):
+        result = self.check("따뜻한 라떼 두 잔", call("add_cart_item", "vanilla", "hot", 2))
+        self.assertEqual(result.status, "needs_clarification")
+        self.assertEqual(result.reply_text, "라떼 중 어떤 메뉴로 할까요?")
+
+    def test_answer_to_a_question_about_that_latte_is_kept(self):
+        question = VoiceTurn(
+            request=VoiceRequestCreate(text="카페라떼 하나요", alternatives=[], screen_id="menu_list"),
+            result=interpretation(reply_text="카페 라떼는 아이스, 따뜻한 것 중 무엇으로 할까요?"),
+        )
+        result = self.check("아이스로요", call("add_cart_item", "latte", "iced", 1), history=[question])
+        self.assertEqual(result.status, "completed")
+
+
 class PromptVersionTests(unittest.TestCase):
     def test_current_prompt_explains_every_status(self):
         from app.modules.voice import interpreter
 
-        self.assertEqual(interpreter.PROMPT_VERSION, "interpret_v2")
+        self.assertEqual(interpreter.PROMPT_VERSION, "interpret_v3")
         prompt = interpreter._PROMPT_PATH.read_text(encoding="utf-8")
         for status in ("completed", "needs_confirmation", "needs_clarification", "ignored"):
             self.assertIn(f"- {status}:", prompt)
+
+
+    def test_current_prompt_asks_temperature_and_does_not_invent_answers(self):
+        from app.modules.voice import interpreter
+
+        prompt = interpreter._PROMPT_PATH.read_text(encoding="utf-8")
+        self.assertIn("temperature를 null로 두지 않는다", prompt)
+        self.assertIn("상품을 지어내지 않는다", prompt)
 
 
 class MenuFromProductsTests(unittest.TestCase):

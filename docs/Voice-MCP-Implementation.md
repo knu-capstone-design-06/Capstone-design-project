@@ -62,7 +62,7 @@ MCP 방식에서는 상태 변경이 프론트의 요청에서 시작하지 않�
 - `alternatives`는 Chrome 인식 후보와 신뢰도입니다(`maxAlternatives`). OpenAI 해석 시 맥락으로 함께 씁니다.
 - 상태 조회는 SSE가 준비되기 전이나 연결이 끊겼을 때 음성 기능을 확인하는 용도입니다.
 - 실패하면 `{ code, detail }`을 반환합니다. 예: `request_in_progress`, `ai_unavailable`
-- 프롬프트·지침은 파일로 관리하고, 실험에 쓴 버전을 기록합니다. 현재는 `prompts/interpret_v2.md`입니다.
+- 프롬프트·지침은 파일로 관리하고, 실험에 쓴 버전을 기록합니다. 현재는 `prompts/interpret_v3.md`입니다.
 
 ### 3.2 MCP 서버·도구 (Decision AI + Back-end)
 
@@ -191,7 +191,10 @@ backend 음성 해석 (`backend/app/modules/voice/`)
 - OpenAI가 세션별 최근 10턴 대화 맥락과 메뉴 목록으로 발화를 해석해 MCP 장바구니 도구 입력(`tool_calls`)을 만듭니다.
   - 확실하면 `completed`, 애매하면 `needs_confirmation`(제안 + 짧은 확인 문장), 정할 수 없으면 `needs_clarification`(질문), 키오스크에게 한 말이 아니면 `ignored`.
   - 메뉴에 없는 상품·품절 상품 담기·허용되지 않은 온도는 서버가 거르고 실패로 처리합니다.
-- `OPENAI_API_KEY`가 없으면 OpenAI를 호출하지 않고 개발용 응답을 돌려줍니다. 메뉴는 주문 API와 같은 시연 카탈로그(17개)를 씁니다. 판매 메뉴가 비어 있으면 OpenAI를 호출하지 않고 `failed`(`ai_unavailable`)로 알립니다. 실제 키로는 아직 확인하지 않았습니다.
+  - 아이스·따뜻한 것을 모두 파는 음료에 온도가 빠지면 실패 대신 온도를 묻습니다(`needs_clarification`). 허용 온도가 하나뿐이면 그 온도로 채웁니다.
+  - 질문 뒤 "네"처럼 고르지 않은 대답이 오면 OpenAI를 부르지 않고 같은 질문을 다시 합니다. 확인 제안(`needs_confirmation`) 뒤의 "네"는 그대로 수락으로 해석합니다.
+  - 도구 입력마다 그 상품의 이름을 손님이 이번 발화·인식 후보·앞선 발화에서 말했거나, 키오스크가 그 상품에 대해 물은 경우("카페 라떼는 아이스, 따뜻한 것 중…")에만 내보냅니다. 상품은 전체 이름("바닐라 라떼")이나 그 상품 이름에만 있는 단어("바닐라", "아메리카노")로 확인하므로, 앞서 말한 상품과 다른 상품으로의 바꿔치기를 막습니다. "라떼"처럼 여러 상품 이름에 들어가는 단어만 있으면 "라떼 중 어떤 메뉴로 할까요?"로 묻습니다. 아니면(맥락 없는 "네", 일반 질문 "어떤 메뉴를 주문할까요?" 뒤의 "따뜻한 걸로요") 모델 결과와 상관없이 "어떤 메뉴를 주문할까요?"로 묻습니다. 제안 없이 들어온 "네"는 OpenAI를 부르지 않습니다. 품절 음료의 온도 누락은 질문이 아니라 기존대로 거절합니다.
+- `OPENAI_API_KEY`가 없으면 OpenAI를 호출하지 않고 개발용 응답을 돌려줍니다. 메뉴는 주문 API와 같은 시연 카탈로그(17개)를 씁니다. 판매 메뉴가 비어 있으면 OpenAI를 호출하지 않고 `failed`(`ai_unavailable`)로 알립니다. 2026-10-29에 실제 키(`gpt-4o-mini`, `interpret_v3`)로 주요 문장을 확인했습니다(PR 본문의 결과 표).
 - 키 설정: `backend/`에서 직접 실행하면 `backend/.env`, Docker Compose로 실행하면 셸 환경변수나 루트 `.env`(커밋하지 않음)의 `OPENAI_API_KEY`를 씁니다.
 - 브라우저 frontend는 기본으로 같은 출처 프록시(`/backend/`)로 호출합니다. backend CORS는 `Idempotency-Key`를 허용하므로 `CORS_ORIGINS`에 넣은 출처에서는 직접 호출도 됩니다(PR #40).
 - 요청 기록·`Idempotency-Key`는 접수 후 1시간, 대화 맥락은 마지막 발화 후 1시간 보관합니다(제안값, `repository.py`의 `RETENTION`).
@@ -223,7 +226,7 @@ frontend 음성 입력 (`frontend/src/features/voice/`, 화면 요소 없음)
 | 5 | 실행 결과를 `actions`(`cart_updated` 등)와 SSE 알림으로 전달 | Back-end + Front-end | 4, 3.4 |
 | 6 | 프론트 화면 연결: 메뉴 화면의 음성 모드 버튼·다시 말하기·인식 문장과 `reply_text` 표시는 완료(PR #53). `voice_guide`로 모드 자동 켜기, 확인·취소 버튼, 메뉴 외 화면은 남음 | Front-end | 판단 모델 결과 수신 |
 | 7 | 실행 환경: CORS의 `Idempotency-Key`·메서드 허용은 PR #40에서 반영됨. 배포 출처를 `CORS_ORIGINS`에 넣을지는 배포 구성에서 정함. Compose의 키 전달은 반영함 | Back-end·infra | — |
-| 8 | 실제 키로 프롬프트 검증, 실험에 쓴 프롬프트 버전(현재 `interpret_v2`, v1은 ignored 없음)·모델 기록 | Decision AI | 2 |
+| 8 | 실제 키 검증은 1차 완료(2026-10-29, `gpt-4o-mini`, `interpret_v3`). 실험 전 최종 프롬프트 버전(v1은 ignored 없음, v2는 온도 규칙 약함)·모델 기록은 남음 | Decision AI | 2 |
 
 ### 7.3 결정이 필요한 항목
 
