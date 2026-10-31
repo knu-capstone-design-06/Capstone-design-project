@@ -67,7 +67,11 @@ class FakeInterpreter:
         return self.result
 
 
-class VoiceApiTests(unittest.TestCase):
+class VoiceApiCase(unittest.TestCase):
+    """App with a fake interpreter and the small MENU; SETTINGS overrides defaults."""
+
+    SETTINGS: dict = {}
+
     def setUp(self):
         self.interpreter = FakeInterpreter()
         for target, value in (("app.main.build_voice_interpreter", self.interpreter),
@@ -75,7 +79,7 @@ class VoiceApiTests(unittest.TestCase):
             patcher = patch(target, return_value=value)
             patcher.start()
             self.addCleanup(patcher.stop)
-        app = create_app(Settings(_env_file=None, openai_api_key=None))
+        app = create_app(Settings(_env_file=None, openai_api_key=None, **self.SETTINGS))
         self.client = self.enterContext(TestClient(app))
         self.session_id = self.client.post("/api/v1/sessions").json()["session_id"]
 
@@ -106,6 +110,11 @@ class VoiceApiTests(unittest.TestCase):
                                    headers={"Idempotency-Key": str(uuid4())})
         self.assertEqual(ordered.status_code, 201)
 
+    def cart(self):
+        return self.client.get(f"/api/v1/sessions/{self.session_id}/cart").json()
+
+
+class VoiceApiTests(VoiceApiCase):
     def test_accepts_and_returns_tool_calls_without_claiming_changes(self):
         response = self.post()
         self.assertEqual(response.status_code, 202)
@@ -118,6 +127,7 @@ class VoiceApiTests(unittest.TestCase):
             "reply_text": None, "tool_calls": [ADD_AMERICANO], "actions": [], "error": None,
         })
         self.assertEqual(self.interpreter.menus, [MENU])
+        self.assertEqual(self.cart()["items"], [])  # the default does not execute tool_calls
 
     def test_needs_clarification_is_reported(self):
         question = "라떼는 아이스, 따뜻한 것 중 무엇으로 할까요?"
@@ -140,7 +150,7 @@ class VoiceApiTests(unittest.TestCase):
         self.interpreter.result = proposal
         self.say("아이스 아메리카노 두 개")
         self.interpreter.result = interpretation(ADD_AMERICANO)
-        body = self.status(self.say("네")).json()
+        body = self.status(self.say("네 그걸로 주세요")).json()  # not a bare "네": the model reads it
         self.assertEqual(body["status"], "completed")
         self.assertEqual(body["tool_calls"], [ADD_AMERICANO])
         first, second = self.interpreter.histories
@@ -240,13 +250,55 @@ class VoiceApiTests(unittest.TestCase):
         self.assertEqual(body["reply_text"], question)
         self.assertEqual(self.interpreter.calls, 1, "질문을 다시 할 때는 OpenAI를 부르지 않음")
 
-    def test_yes_after_a_proposal_still_reaches_the_interpreter(self):
+    def test_yes_after_a_proposal_completes_the_stored_proposal_without_openai(self):
         self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
         self.say("아메리카노 두 잔")
-        self.interpreter.result = interpretation(ADD_AMERICANO)
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 20))
         body = self.status(self.say("네")).json()
         self.assertEqual(body["status"], "completed")
+        self.assertEqual(body["tool_calls"], [ADD_AMERICANO], "제안과 다른 모델 출력은 쓰지 않음")
+        self.assertEqual(self.interpreter.calls, 1, "수락은 OpenAI를 부르지 않음")
+        # The accepted order is in the context for "하나 더" that may follow.
+        self.say("다음")
+        self.assertEqual(self.interpreter.histories[-1][-1].result.status, "completed")
+
+    def test_modified_answer_after_a_proposal_is_proposed_again_not_completed(self):
+        self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
+        self.say("아메리카노 두 잔")
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "hot", 2))
+        body = self.status(self.say("아니 따뜻한 걸로요")).json()
+        self.assertEqual(self.interpreter.calls, 2, "고친 대답은 OpenAI가 읽음")
+        self.assertEqual(body["status"], "needs_confirmation")
+        self.assertEqual(body["tool_calls"], [call("add_cart_item", "americano", "hot", 2)])
+        self.assertEqual(body["reply_text"], "따뜻한 아메리카노 2잔 담을까요?")
+        body = self.status(self.say("네")).json()
+        self.assertEqual(body["status"], "completed")
+        self.assertEqual(body["tool_calls"], [call("add_cart_item", "americano", "hot", 2)])
+
+    def test_confirmation_text_comes_from_the_tool_calls_not_the_model(self):
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 20),
+                                                 reply_text="아메리카노 2잔 담을까요?")
+        body = self.status(self.say("아메리카노 스무 잔")).json()
+        self.assertEqual(body["status"], "needs_confirmation")
+        self.assertEqual(body["reply_text"], "아이스 아메리카노 20잔 담을까요?")
+
+    def test_proposal_lapses_after_an_ignored_utterance(self):
+        self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
+        self.say("아메리카노 두 잔")
+        self.interpreter.result = VoiceInterpretation(status="ignored", tool_calls=[], reply_text=None)
+        self.say("잠깐만 전화 좀")
+        body = self.status(self.say("네")).json()
+        self.assertEqual(body["status"], "needs_clarification")
+        self.assertEqual(body["reply_text"], "어떤 메뉴를 주문할까요?")
+        self.assertEqual(body["tool_calls"], [])
+
+    def test_questioning_eo_is_not_an_acceptance(self):
+        self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
+        self.say("아메리카노 두 잔")
+        self.interpreter.result = interpretation(reply_text="다시 말씀해 주시겠어요?")
+        body = self.status(self.say("어?")).json()
         self.assertEqual(self.interpreter.calls, 2)
+        self.assertEqual(body["status"], "needs_clarification")
 
     def test_first_bare_answer_in_a_session_sends_no_tool_calls(self):
         self.interpreter.result = interpretation(ADD_AMERICANO)  # the model made one up
@@ -400,6 +452,138 @@ class VoiceApiTests(unittest.TestCase):
         self.assertEqual(self.post(body=body).status_code, 202)
 
 
+class ToolExecutionApiTests(VoiceApiCase):
+    """VOICE_EXECUTE_TOOLS=true: completed results change the cart through the ordering API."""
+
+    SETTINGS = {"voice_execute_tools": True}
+
+    def test_completed_result_changes_the_cart_and_reports_cart_updated(self):
+        body = self.status(self.post().json()["request_id"]).json()
+        self.assertEqual(body["status"], "completed")
+        self.assertEqual(body["tool_calls"], [ADD_AMERICANO])
+        self.assertEqual(body["actions"], ["cart_updated"])
+        cart = self.cart()
+        self.assertEqual([(i["product_id"], i["temperature"], i["quantity"]) for i in cart["items"]],
+                         [("americano", "iced", 2)])
+        self.assertEqual(cart["version"], 1)
+
+    def test_proposal_waits_and_the_customers_yes_runs_it_once(self):
+        self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
+        proposed = self.status(self.say("아이스 아메리카노 두 개")).json()
+        self.assertEqual(proposed["status"], "needs_confirmation")
+        self.assertEqual(proposed["actions"], [])
+        self.assertEqual(self.cart()["items"], [])
+        self.interpreter.result = interpretation(ADD_AMERICANO)
+        key = str(uuid4())
+        accepted = self.post(body={**BODY, "text": "네", "alternatives": []}, key=key).json()
+        self.assertEqual(self.status(accepted["request_id"]).json()["actions"], ["cart_updated"])
+        self.assertEqual(self.cart()["total_quantity"], 2)
+        # A replayed key returns the stored result and does not run the tools again.
+        replay = self.post(body={**BODY, "text": "네", "alternatives": []}, key=key).json()
+        self.assertEqual(replay["request_id"], accepted["request_id"])
+        self.assertEqual(self.cart()["total_quantity"], 2)
+
+    def test_yes_runs_the_confirmed_proposal_even_if_the_model_now_says_otherwise(self):
+        self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
+        self.say("아이스 아메리카노 두 개")
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 20))
+        body = self.status(self.say("네")).json()
+        self.assertEqual(body["status"], "completed")
+        self.assertEqual(body["actions"], ["cart_updated"])
+        self.assertEqual(self.cart()["total_quantity"], 2, "확인한 2잔만 담김")
+
+    def test_worded_acceptance_with_other_tool_inputs_asks_again_instead_of_running(self):
+        for text in ("네 그걸로 주세요", "네 맞아요", "네 그렇게 해주세요"):
+            with self.subTest(text=text):
+                self.session_id = self.client.post("/api/v1/sessions").json()["session_id"]
+                self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
+                self.say("아이스 아메리카노 두 개")
+                self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 20))
+                body = self.status(self.say(text)).json()
+                self.assertEqual(body["status"], "needs_confirmation")
+                self.assertEqual(body["reply_text"], "아이스 아메리카노 20잔 담을까요?")
+                self.assertEqual(body["actions"], [])
+                self.assertEqual(self.cart()["items"], [], "확인 없이 담지 않음")
+        # The customer now confirms the new proposal explicitly; only then does it run.
+        self.assertEqual(self.status(self.say("네")).json()["actions"], ["cart_updated"])
+        self.assertEqual(self.cart()["total_quantity"], 20)
+
+    def test_lapsed_proposal_is_not_run_through_the_model_either(self):
+        # After the lapse the model answers once with another quantity, once with the old one.
+        for lapse, answer in (("ignored", call("add_cart_item", "americano", "iced", 20)),
+                              ("failed", ADD_AMERICANO)):
+            with self.subTest(lapse=lapse):
+                self.session_id = self.client.post("/api/v1/sessions").json()["session_id"]
+                self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
+                self.say("아이스 아메리카노 두 개")
+                self.interpreter.result = (VoiceInterpretation(status="ignored", tool_calls=[], reply_text=None)
+                                           if lapse == "ignored" else None)
+                self.say("잠깐만 전화 좀")
+                self.interpreter.result = interpretation(answer)
+                body = self.status(self.say("네 그걸로 주세요")).json()
+                self.assertEqual(self.interpreter.histories[-1], [], "만료된 제안은 모델에게도 보이지 않음")
+                self.assertNotEqual(body["status"], "completed")
+                self.assertEqual(body["actions"], [])
+                self.assertEqual(self.cart()["items"], [])
+
+    def test_long_proposal_asks_to_split_instead_of_hiding_items(self):
+        self.interpreter.result = interpretation(
+            call("add_cart_item", "americano", "iced", 2), call("add_cart_item", "americano", "hot", 1),
+            call("add_cart_item", "sandwich", None, 20), call("remove_cart_item", "sandwich", None),
+            reply_text="네 가지 담을까요?",
+        )
+        body = self.status(self.say("아이스 아메리카노 두 잔, 따뜻한 거 하나, 샌드위치 하나")).json()
+        self.assertEqual(body["status"], "needs_clarification")
+        self.assertEqual(body["reply_text"], "주문이 길어요. 두 가지씩 나눠서 말씀해 주세요.")
+        self.assertEqual(body["tool_calls"], [])
+        # "네" cannot accept what was never read back; the request to split is repeated.
+        again = self.status(self.say("네")).json()
+        self.assertEqual((again["status"], again["reply_text"]), ("needs_clarification", "주문이 길어요. 두 가지씩 나눠서 말씀해 주세요."))
+        self.assertEqual(self.cart()["items"], [])
+
+    def test_worded_acceptance_with_the_same_tool_inputs_runs_once(self):
+        self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
+        self.say("아이스 아메리카노 두 개")
+        self.interpreter.result = interpretation(ADD_AMERICANO)
+        body = self.status(self.say("네 그걸로 주세요")).json()
+        self.assertEqual(body["status"], "completed")
+        self.assertEqual(body["actions"], ["cart_updated"])
+        self.assertEqual(self.cart()["total_quantity"], 2)
+
+    def test_refused_tool_input_fails_with_the_ordering_code_and_keeps_the_cart(self):
+        self.post()
+        self.interpreter.result = interpretation(call("update_cart_item", "sandwich", None, 3))
+        body = self.status(self.say("샌드위치 세 개로 바꿔 주세요")).json()
+        self.assertEqual(body["status"], "failed")
+        self.assertEqual(body["error"]["code"], "cart_item_not_found")
+        self.assertEqual(body["tool_calls"], [])
+        self.assertEqual(body["actions"], [])
+        self.assertTrue(body["reply_text"])
+        self.assertEqual(self.cart()["total_quantity"], 2)
+        # A failed execution stays out of the context like any other failure.
+        self.say("다음")
+        self.assertEqual([t.request.text for t in self.interpreter.histories[-1]], [BODY["text"]])
+
+    def test_unexpected_execution_error_is_not_blamed_on_the_ai(self):
+        with patch("app.modules.voice.executor.OrderingCartExecutor.execute", side_effect=RuntimeError("boom")):
+            body = self.status(self.post().json()["request_id"]).json()
+        self.assertEqual(body["status"], "failed")
+        self.assertEqual(body["error"]["code"], "cart_update_failed")
+        self.assertTrue(body["reply_text"])
+        self.assertEqual(body["actions"], [])
+        self.assertEqual(self.cart()["items"], [])
+
+    def test_touch_change_between_interpretation_and_execution_is_still_applied(self):
+        # The executor reads the cart version inside the ordering lock, so a touch
+        # change made before the voice request does not cause a version conflict.
+        self.client.post(f"/api/v1/sessions/{self.session_id}/cart/items", json={
+            "product_id": "sandwich", "temperature": None, "quantity": 1, "expected_version": 0,
+        }, headers={"Idempotency-Key": str(uuid4())})
+        body = self.status(self.post().json()["request_id"]).json()
+        self.assertEqual(body["actions"], ["cart_updated"])
+        self.assertEqual(self.cart()["total_quantity"], 3)
+
+
 class RetentionTests(unittest.TestCase):
     def setUp(self):
         self.now = datetime(2026, 10, 12, 10, 0, tzinfo=timezone.utc)
@@ -440,6 +624,28 @@ class RetentionTests(unittest.TestCase):
         with self.assertRaises(VoiceSessionCompleted):
             self.repository.accept("s1", key, "fingerprint", is_completed=lambda: True)
         self.assertIsNone(self.repository.get("s1", record.request_id))
+
+
+class ConfirmationTextTests(unittest.TestCase):
+    def text(self, *tool_calls):
+        from app.modules.voice.service import confirmation_text
+
+        return confirmation_text(interpretation(*tool_calls, reply_text="?").tool_calls, MENU)
+
+    def test_single_tool_inputs_read_naturally(self):
+        self.assertEqual(self.text(call("add_cart_item", "americano", "iced", 2)), "아이스 아메리카노 2잔 담을까요?")
+        self.assertEqual(self.text(call("add_cart_item", "sandwich", None, 1)), "에그 샌드위치 1개 담을까요?")
+        self.assertEqual(self.text(call("update_cart_item", "americano", "hot", 3)), "따뜻한 아메리카노 3잔으로 바꿀까요?")
+        self.assertEqual(self.text(call("remove_cart_item", "americano", "iced")), "아이스 아메리카노 뺄까요?")
+
+    def test_several_tool_inputs_are_listed_and_stay_short(self):
+        self.assertEqual(
+            self.text(call("add_cart_item", "americano", "iced", 2), call("remove_cart_item", "sandwich", None)),
+            "아이스 아메리카노 2잔 담기, 에그 샌드위치 빼기, 이대로 할까요?",
+        )
+        # Items the customer cannot read back are never confirmed by a count.
+        many = [call("add_cart_item", "americano", "iced", 1)] * 4
+        self.assertIsNone(self.text(*many))
 
 
 class MissingTemperatureTests(unittest.TestCase):
@@ -487,6 +693,63 @@ class NamedProductTests(unittest.TestCase):
         )
         result = self.check("아이스로요", call("add_cart_item", "latte", "iced", 1), history=[question])
         self.assertEqual(result.status, "completed")
+
+
+class ToolExecutionTests(unittest.TestCase):
+    """The executor runs tool inputs through the real ordering service and repository."""
+
+    def setUp(self):
+        from app.modules.ordering.repository import OrderingRepository
+        from app.modules.ordering.service import OrderingService
+        from app.modules.voice.executor import OrderingCartExecutor
+
+        self.repository = OrderingRepository()
+        self.service = OrderingService(lambda session_id: True, self.repository)
+        self.executor = OrderingCartExecutor(self.service, self.repository)
+
+    def execute(self, *tool_calls, request_id="vr_1"):
+        return self.executor.execute("s1", request_id, interpretation(*tool_calls).tool_calls)
+
+    @staticmethod
+    def lines(cart):
+        return [(item.product_id, item.temperature, item.quantity) for item in cart.items]
+
+    def test_applies_tool_inputs_in_spoken_order(self):
+        cart = self.execute(
+            call("add_cart_item", "americano", "iced", 2),
+            call("update_cart_item", "americano", "iced", 3),
+            call("add_cart_item", "sandwich", None, 1),
+            call("remove_cart_item", "americano", "iced"),
+        )
+        self.assertEqual(self.lines(cart), [("sandwich", None, 1)])
+        self.assertEqual(cart.version, 4)
+        self.assertEqual(self.lines(self.service.cart("s1")), [("sandwich", None, 1)])
+
+    def test_one_refused_tool_input_changes_nothing(self):
+        from app.modules.voice.executor import ToolExecutionFailed
+
+        self.execute(call("add_cart_item", "americano", "iced", 1))
+        before = self.service.cart("s1")
+        with self.assertRaises(ToolExecutionFailed) as raised:
+            self.execute(call("add_cart_item", "latte", "hot", 1),
+                         call("remove_cart_item", "cake", None), request_id="vr_2")
+        self.assertEqual(raised.exception.error.code, "cart_item_not_found")
+        self.assertTrue(raised.exception.reply_text)
+        self.assertEqual(self.service.cart("s1"), before)
+        self.assertFalse([key for _, key in self.repository.replays if key.startswith("voice:vr_2")])
+
+    def test_quantity_limit_and_completed_session_are_reported(self):
+        from app.modules.ordering.schemas import OrderRequest
+        from app.modules.voice.executor import ToolExecutionFailed
+
+        self.execute(call("add_cart_item", "americano", "iced", 19))
+        with self.assertRaises(ToolExecutionFailed) as raised:
+            self.execute(call("add_cart_item", "americano", "iced", 2), request_id="vr_2")
+        self.assertEqual(raised.exception.error.code, "quantity_limit_exceeded")
+        self.service.create_order("s1", "order-key", OrderRequest(expected_version=1))
+        with self.assertRaises(ToolExecutionFailed) as raised:
+            self.execute(call("add_cart_item", "americano", "iced", 1), request_id="vr_3")
+        self.assertEqual(raised.exception.error.code, "session_expired")
 
 
 class PromptVersionTests(unittest.TestCase):

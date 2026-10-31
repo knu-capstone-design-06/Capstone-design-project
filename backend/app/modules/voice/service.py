@@ -6,22 +6,59 @@ from uuid import UUID
 
 from app.modules.ordering.repository import OrderingRepository
 from app.modules.voice.exceptions import VoiceRequestNotFound, VoiceSessionNotFound
+from app.modules.voice.executor import (
+    FALLBACK_EXECUTION_REPLY, CartExecutor, ToolExecutionFailed,
+)
 from app.modules.voice.interpreter import VoiceInterpreter
 from app.modules.voice.repository import VoiceRepository
 from app.modules.voice.schemas import (
-    AddCartItemCall, MenuItem, VoiceErrorResponse, VoiceInterpretation,
+    AddCartItemCall, MenuItem, UpdateCartItemCall, VoiceErrorResponse, VoiceInterpretation,
     VoiceRequestAccepted, VoiceRequestCreate, VoiceRequestStatus, VoiceTurn,
 )
 
 logger = logging.getLogger(__name__)
 
 FALLBACK_REPLY = "지금은 음성 주문이 어려워요. 화면을 눌러 주문해 주세요."
-# Answers that accept a proposal but cannot pick an option such as a temperature.
-BARE_YES = {"네", "넵", "예", "응", "어", "그래", "그래요", "좋아요", "맞아요"}
+# Plain acceptances: they take a proposal as it stands and cannot pick an option such
+# as a temperature. "어" is left out because "어?" is a question, not a yes.
+BARE_YES = {"네", "넵", "예", "응", "그래", "그래요", "좋아요", "맞아요"}
+TEMPERATURE_WORDS = {"iced": "아이스", "hot": "따뜻한"}
+REPLY_MAX = 60
 
 
 def is_bare_yes(text: str) -> bool:
     return "".join(ch for ch in text if ch.isalnum()) in BARE_YES
+
+
+SPLIT_ORDER_REPLY = "주문이 길어요. 두 가지씩 나눠서 말씀해 주세요."
+
+
+def confirmation_text(tool_calls: list, menu: list[MenuItem]) -> str | None:
+    """Word the confirmation from the validated tool inputs, never from the model.
+
+    The model's reply_text and tool_calls are separate outputs and may disagree
+    ("2잔 담을까요?" beside quantity 20); what the customer confirms must be what runs.
+    Every product, option and quantity is spelled out; None when that does not fit the
+    reply limit, so a long proposal is never accepted with items the customer never saw.
+    """
+    products = {item.product_id: item for item in menu}
+    clauses = []
+    for call in tool_calls:
+        arguments = call.arguments
+        item = products[arguments.product_id]
+        unit = "잔" if item.temperatures else "개"
+        name = " ".join(filter(None, [TEMPERATURE_WORDS.get(arguments.temperature or ""), item.name]))
+        if isinstance(call, AddCartItemCall):
+            clauses.append((f"{name} {arguments.quantity}{unit}", "담을까요?", "담기"))
+        elif isinstance(call, UpdateCartItemCall):
+            clauses.append((f"{name} {arguments.quantity}{unit}으로", "바꿀까요?", "바꾸기"))
+        else:
+            clauses.append((name, "뺄까요?", "빼기"))
+    if len(clauses) == 1:
+        subject, verb, _ = clauses[0]
+        return f"{subject} {verb}"
+    text = ", ".join(f"{subject} {short}" for subject, _, short in clauses) + ", 이대로 할까요?"
+    return text if len(text) <= REPLY_MAX else None
 
 
 def menu_from_products(products: Iterable[object]) -> list[MenuItem]:
@@ -129,13 +166,15 @@ class VoiceService:
     def __init__(
         self, session_exists: Callable[[str], bool], repository: VoiceRepository,
         interpreter: VoiceInterpreter, menu_provider: Callable[[], list[MenuItem]],
-        ordering: OrderingRepository,
+        ordering: OrderingRepository, executor: CartExecutor | None = None,
     ):
         self._session_exists = session_exists
         self._repository = repository
         self._interpreter = interpreter
         self._menu_provider = menu_provider
         self._ordering = ordering
+        # None: tool_calls are returned as MCP inputs only and the cart is not changed.
+        self._executor = executor
 
     def accept(
         self, session_id: str, key: UUID, request: VoiceRequestCreate
@@ -172,11 +211,19 @@ class VoiceService:
                 return
             history = self._repository.history(session_id)
             last = history[-1].result if history else None
-            if last is not None and last.status == "needs_clarification" and is_bare_yes(request.text):
+            # A proposal answers this one utterance, whatever it turns out to be: an
+            # ignored or failed exchange in between must not leave it waiting for a later "네".
+            proposal = self._repository.take_proposal(session_id)
+            if proposal is not None and is_bare_yes(request.text):
+                # The customer accepted what the kiosk proposed, so run exactly that proposal.
+                # A fresh model reading of "네" could differ from it (another quantity) and
+                # would otherwise pass the menu checks and change the cart.
+                result = VoiceInterpretation(status="completed", tool_calls=proposal, reply_text=None)
+            elif last is not None and last.status == "needs_clarification" and is_bare_yes(request.text):
                 # "네" cannot answer "아이스, 따뜻한 것 중 무엇으로?"; ask again instead of guessing.
                 result = last
-            elif (last is None or last.status not in PENDING) and is_bare_yes(request.text):
-                # Nothing was proposed, so "네" must not repeat or invent an order.
+            elif is_bare_yes(request.text):
+                # Nothing is proposed (or the proposal has lapsed), so "네" must not invent an order.
                 result = VoiceInterpretation(status="needs_clarification", tool_calls=[], reply_text=ASK_MENU_REPLY)
             else:
                 result = await self._interpreter.interpret(request, menu, history)
@@ -191,10 +238,30 @@ class VoiceService:
             if result is not None and not matches_menu(result, menu):
                 logger.warning("voice interpretation rejected (not on menu)")
                 result = None
+            if (result is not None and result.status == "completed"
+                    and last is not None and last.status == "needs_confirmation"
+                    and result.tool_calls != proposal):
+                # An answer to a confirmation went to the model ("네 그걸로 주세요"), which
+                # may answer with other tool inputs than the customer confirmed, or the
+                # proposal has lapsed; either way it is a new proposal, not an order.
+                result = VoiceInterpretation(status="needs_confirmation", tool_calls=result.tool_calls, reply_text="?")
+            if result is not None and result.status == "needs_confirmation":
+                text = confirmation_text(result.tool_calls, menu)
+                if text is None:
+                    # Too much to read back in one line: never confirm items the customer cannot see.
+                    result = VoiceInterpretation(status="needs_clarification", tool_calls=[], reply_text=SPLIT_ORDER_REPLY)
+                else:
+                    result = result.model_copy(update={"reply_text": text})
+                    self._repository.set_proposal(session_id, result.tool_calls)
         except Exception:
             # A voice failure must not affect touch ordering; record it as unavailable.
             logger.exception("voice interpretation crashed")
             result = None
+        if proposal is not None and (result is None or result.status == "ignored"):
+            # The proposal lapsed without an answer. Ignored and failed turns stay out of
+            # the context, so the question itself leaves it too; a later "그걸로 주세요"
+            # must not be read against an offer that is no longer open.
+            self._repository.discard_proposal_turn(session_id)
         if result is None:
             # Failed exchanges stay out of the context so later turns read cleanly.
             self._repository.update(
@@ -202,12 +269,33 @@ class VoiceService:
                 error=VoiceErrorResponse(code="ai_unavailable", detail="외부 AI를 사용할 수 없습니다."),
             )
             return
+        actions = []
+        if result.status == "completed" and self._executor is not None:
+            # A proposal (needs_confirmation) is not run; the customer's "네" comes back
+            # as a completed result and is run then.
+            try:
+                self._executor.execute(session_id, request_id, result.tool_calls)
+            except ToolExecutionFailed as failed:
+                self._repository.update(request_id, "failed", failed.reply_text, error=failed.error)
+                return
+            except Exception:
+                # The interpretation succeeded; only the cart change failed, so the code
+                # must not blame the AI (the transaction already rolled the cart back).
+                logger.exception("voice tool execution crashed")
+                self._repository.update(
+                    request_id, "failed", FALLBACK_EXECUTION_REPLY,
+                    error=VoiceErrorResponse(code="cart_update_failed", detail="장바구니에 반영하지 못했습니다."),
+                )
+                return
+            actions = ["cart_updated"]
         if result.status != "ignored":
             # Speech not meant for the kiosk would only confuse later turns.
             self._repository.append_turn(session_id, VoiceTurn(request=request, result=result))
-        # tool_calls are MCP inputs (a proposal when needs_confirmation); nothing has
-        # been changed here, so actions stay empty.
-        self._repository.update(request_id, result.status, result.reply_text, result.tool_calls)
+        # Without an executor, tool_calls are MCP inputs only (a proposal when
+        # needs_confirmation) and actions stay empty.
+        self._repository.update(
+            request_id, result.status, result.reply_text, result.tool_calls, actions=actions,
+        )
 
     def get(self, session_id: str, request_id: str) -> VoiceRequestStatus:
         if not self._session_exists(session_id):

@@ -9,7 +9,7 @@ from app.modules.voice.exceptions import (
     IdempotencyKeyReused, RequestInProgress, VoiceSessionCompleted,
 )
 from app.modules.voice.schemas import (
-    ToolCall, VoiceErrorResponse, VoiceRequestStatus, VoiceStatus, VoiceTurn,
+    ToolCall, VoiceAction, VoiceErrorResponse, VoiceRequestStatus, VoiceStatus, VoiceTurn,
 )
 
 ACTIVE_STATUSES = {"accepted", "processing"}
@@ -32,7 +32,7 @@ class VoiceRecord:
     status: VoiceStatus = "accepted"
     reply_text: str | None = None
     tool_calls: list[ToolCall] = field(default_factory=list)
-    actions: list[str] = field(default_factory=list)
+    actions: list[VoiceAction] = field(default_factory=list)
     error: VoiceErrorResponse | None = None
 
     def to_status(self) -> VoiceRequestStatus:
@@ -56,6 +56,8 @@ class VoiceRepository:
         self._records: dict[str, VoiceRecord] = {}
         self._keys: dict[tuple[str, UUID], str] = {}
         self._history: dict[str, deque[VoiceTurn]] = {}
+        # A needs_confirmation proposal waiting for the very next utterance of its session.
+        self._proposals: dict[str, list[ToolCall]] = {}
         self._last_turn_at: dict[str, datetime] = {}
         self._retention = retention
         self._clock = clock
@@ -70,6 +72,7 @@ class VoiceRepository:
         for session_id in [s for s, at in self._last_turn_at.items() if at < cutoff]:
             del self._last_turn_at[session_id]
             self._history.pop(session_id, None)
+            self._proposals.pop(session_id, None)
 
     def accept(
         self, session_id: str, key: UUID, fingerprint: str,
@@ -110,6 +113,7 @@ class VoiceRepository:
     def update(
         self, request_id: str, status: VoiceStatus, reply_text: str | None = None,
         tool_calls: list[ToolCall] | None = None, error: VoiceErrorResponse | None = None,
+        actions: list[VoiceAction] | None = None,
     ) -> None:
         with self._lock:
             record = self._records.get(request_id)
@@ -118,6 +122,7 @@ class VoiceRepository:
             record.status = status
             record.reply_text = reply_text
             record.tool_calls = list(tool_calls or [])
+            record.actions = list(actions or [])
             record.error = error
 
     def history(self, session_id: str) -> list[VoiceTurn]:
@@ -128,3 +133,19 @@ class VoiceRepository:
         with self._lock:
             self._history.setdefault(session_id, deque(maxlen=HISTORY_TURNS)).append(turn)
             self._last_turn_at[session_id] = self._clock()
+
+    def take_proposal(self, session_id: str) -> list[ToolCall] | None:
+        """Return and clear the pending proposal: it answers one utterance only."""
+        with self._lock:
+            return self._proposals.pop(session_id, None)
+
+    def set_proposal(self, session_id: str, tool_calls: list[ToolCall]) -> None:
+        with self._lock:
+            self._proposals[session_id] = list(tool_calls)
+
+    def discard_proposal_turn(self, session_id: str) -> None:
+        """Drop the trailing needs_confirmation exchange: its offer is no longer open."""
+        with self._lock:
+            history = self._history.get(session_id)
+            if history and history[-1].result.status == "needs_confirmation":
+                history.pop()
