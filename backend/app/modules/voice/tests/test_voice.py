@@ -477,6 +477,15 @@ class ToolExecutionApiTests(VoiceApiCase):
         self.say("다음")
         self.assertEqual([t.request.text for t in self.interpreter.histories[-1]], [BODY["text"]])
 
+    def test_unexpected_execution_error_is_not_blamed_on_the_ai(self):
+        with patch("app.modules.voice.executor.OrderingCartExecutor.execute", side_effect=RuntimeError("boom")):
+            body = self.status(self.post().json()["request_id"]).json()
+        self.assertEqual(body["status"], "failed")
+        self.assertEqual(body["error"]["code"], "cart_update_failed")
+        self.assertTrue(body["reply_text"])
+        self.assertEqual(body["actions"], [])
+        self.assertEqual(self.cart()["items"], [])
+
     def test_touch_change_between_interpretation_and_execution_is_still_applied(self):
         # The executor reads the cart version inside the ordering lock, so a touch
         # change made before the voice request does not cause a version conflict.
