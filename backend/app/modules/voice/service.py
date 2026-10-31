@@ -175,7 +175,12 @@ class VoiceService:
                 return
             history = self._repository.history(session_id)
             last = history[-1].result if history else None
-            if last is not None and last.status == "needs_clarification" and is_bare_yes(request.text):
+            if last is not None and last.status == "needs_confirmation" and is_bare_yes(request.text):
+                # The customer accepted what the kiosk proposed, so run exactly that proposal.
+                # A fresh model reading of "네" could differ from it (another quantity) and
+                # would otherwise pass the menu checks and change the cart.
+                result = VoiceInterpretation(status="completed", tool_calls=last.tool_calls, reply_text=None)
+            elif last is not None and last.status == "needs_clarification" and is_bare_yes(request.text):
                 # "네" cannot answer "아이스, 따뜻한 것 중 무엇으로?"; ask again instead of guessing.
                 result = last
             elif (last is None or last.status not in PENDING) and is_bare_yes(request.text):

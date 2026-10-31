@@ -150,7 +150,7 @@ class VoiceApiTests(VoiceApiCase):
         self.interpreter.result = proposal
         self.say("아이스 아메리카노 두 개")
         self.interpreter.result = interpretation(ADD_AMERICANO)
-        body = self.status(self.say("네")).json()
+        body = self.status(self.say("네 그걸로 주세요")).json()  # not a bare "네": the model reads it
         self.assertEqual(body["status"], "completed")
         self.assertEqual(body["tool_calls"], [ADD_AMERICANO])
         first, second = self.interpreter.histories
@@ -250,12 +250,25 @@ class VoiceApiTests(VoiceApiCase):
         self.assertEqual(body["reply_text"], question)
         self.assertEqual(self.interpreter.calls, 1, "질문을 다시 할 때는 OpenAI를 부르지 않음")
 
-    def test_yes_after_a_proposal_still_reaches_the_interpreter(self):
+    def test_yes_after_a_proposal_completes_the_stored_proposal_without_openai(self):
         self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
         self.say("아메리카노 두 잔")
-        self.interpreter.result = interpretation(ADD_AMERICANO)
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 20))
         body = self.status(self.say("네")).json()
         self.assertEqual(body["status"], "completed")
+        self.assertEqual(body["tool_calls"], [ADD_AMERICANO], "제안과 다른 모델 출력은 쓰지 않음")
+        self.assertEqual(self.interpreter.calls, 1, "수락은 OpenAI를 부르지 않음")
+        # The accepted order is in the context for "하나 더" that may follow.
+        self.say("다음")
+        self.assertEqual(self.interpreter.histories[-1][-1].result.status, "completed")
+
+    def test_modified_answer_after_a_proposal_reaches_the_interpreter(self):
+        self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
+        self.say("아메리카노 두 잔")
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "hot", 2))
+        body = self.status(self.say("아니 따뜻한 걸로요")).json()
+        self.assertEqual(body["status"], "completed")
+        self.assertEqual(body["tool_calls"], [call("add_cart_item", "americano", "hot", 2)])
         self.assertEqual(self.interpreter.calls, 2)
 
     def test_first_bare_answer_in_a_session_sends_no_tool_calls(self):
@@ -440,6 +453,15 @@ class ToolExecutionApiTests(VoiceApiCase):
         replay = self.post(body={**BODY, "text": "네", "alternatives": []}, key=key).json()
         self.assertEqual(replay["request_id"], accepted["request_id"])
         self.assertEqual(self.cart()["total_quantity"], 2)
+
+    def test_yes_runs_the_confirmed_proposal_even_if_the_model_now_says_otherwise(self):
+        self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
+        self.say("아이스 아메리카노 두 개")
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 20))
+        body = self.status(self.say("네")).json()
+        self.assertEqual(body["status"], "completed")
+        self.assertEqual(body["actions"], ["cart_updated"])
+        self.assertEqual(self.cart()["total_quantity"], 2, "확인한 2잔만 담김")
 
     def test_refused_tool_input_fails_with_the_ordering_code_and_keeps_the_cart(self):
         self.post()
