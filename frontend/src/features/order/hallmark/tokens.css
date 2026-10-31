@@ -1,0 +1,123 @@
+:root {
+  color-scheme: light;
+  --space-3xs: 2px; --space-2xs: 4px; --space-xs: 8px; --space-sm: 12px; --space-md: 16px; --space-lg: 24px; --space-xl: 40px; --space-2xl: 64px; --space-3xl: 96px; --space-4xl: 144px;
+  --text-xs: 0.75rem; --text-sm: 0.875rem; --text-md: 1rem; --text-lg: 1.2rem; --text-xl: 1.44rem; --text-2xl: 1.728rem; --text-3xl: 2.074rem;
+  --text-display-s: 1.44rem; --text-display: 1.728rem; --text-section: 1.2rem; --text-title: 1rem; --text-lead: 1rem;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1); --ease-in: cubic-bezier(0.7, 0, 0.84, 0); --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-micro: 120ms; --dur-short: 220ms; --dur-long: 420ms;
+  --color-error: oklch(52% 0.19 27); --color-success: oklch(50% 0.12 150);
+  --container: 1440px; --gutter: 64px; --gap-columns: 32px; --section-gap-s: 120px; --section-gap: 144px; --section-gap-l: 176px;
+  --z-base: 1; --z-raised: 10; --z-dropdown: 100; --z-sticky: 200; --z-sticky-nav: 300; --z-modal: 400; --z-toast: 500; --z-tooltip: 600;
+  --color-paper: oklch(96% 0.011 85); --color-paper-2: oklch(99.5% 0.005 85); --color-paper-3: oklch(92% 0.016 85);
+  --color-ink: oklch(18% 0.006 60); --color-ink-2: oklch(28% 0.008 60); --color-muted: oklch(44% 0.012 60); --color-rule: oklch(88% 0.013 85);
+  --color-accent: oklch(70% 0.19 40); --color-accent-ink: oklch(18% 0.006 60); --color-accent-soft: oklch(91% 0.05 50); --color-focus: oklch(60% 0.19 40);
+  --color-green: oklch(48% 0.11 150); --color-green-soft: oklch(92% 0.04 150);
+  --color-contour: oklch(62% 0.07 58); --color-water: oklch(60% 0.05 232); --color-hedge: oklch(50% 0.1 150);
+  --color-grid: oklch(90% 0.014 85); --color-grid-strong: oklch(85% 0.018 85); --color-sheet: oklch(99.3% 0.004 85);
+  --font-display: 'Noto Sans KR', system-ui, sans-serif; --font-body: 'Noto Sans KR', system-ui, sans-serif;
+  --font-outlier: 'Noto Sans KR', system-ui, sans-serif;
+  --radius-card: 10px; --radius-entry: 14px; --radius-pill: 6px; --rule-hair: 1px;
+  --shadow-card: 0 1px 2px oklch(18% 0.006 60 / 0.08), 0 14px 28px -16px oklch(18% 0.006 60 / 0.28);
+  --shadow-lift: 0 1px 1px oklch(18% 0.006 60 / 0.1), 0 2px 4px -1px oklch(18% 0.006 60 / 0.1), 0 24px 44px -20px oklch(18% 0.006 60 / 0.42);
+  --tracking-display: -0.035em; --display-weight: 600;
+}
+
+:root {
+  --font-display: 'Noto Sans KR', system-ui, sans-serif;
+  --font-body: 'Noto Sans KR', system-ui, sans-serif;
+  --font-outlier: 'Noto Sans KR', system-ui, sans-serif;
+  --color-paper: oklch(96% 0.011 85);
+  --color-paper-2: oklch(99% 0.006 85);
+  --color-paper-3: oklch(92% 0.016 85);
+  --color-ink: oklch(23% 0.014 60);
+  --color-ink-2: oklch(32% 0.014 60);
+  --color-muted: oklch(43% 0.018 60);
+  --color-rule: oklch(77% 0.02 85);
+  --color-control-edge: oklch(56% 0.018 60);
+  --color-accent: oklch(75% 0.16 52);
+  --color-accent-ink: oklch(23% 0.014 60);
+  --color-accent-soft: oklch(91% 0.045 65);
+  --color-focus: oklch(42% 0.13 42);
+  --color-error-soft: oklch(95% 0.025 30);
+  --color-voice-ready: oklch(38% 0.1 150);
+  --color-voice-ready-soft: oklch(93% 0.035 150);
+  --color-voice-off: oklch(43% 0.12 28);
+  --color-voice-off-soft: oklch(95% 0.025 28);
+  --color-pad: oklch(30% 0.016 60);
+  --color-pad-ink: oklch(96% 0.011 85);
+  --color-clear: transparent;
+  --color-scrim: oklch(18% 0.006 60 / .55);
+  --contrast-paper: #000;
+  --contrast-well: #111;
+  --contrast-ink: #fffa70;
+  --contrast-ink-on-fill: #000;
+  --kiosk-base: 28px;
+  --kiosk-container: 1600px;
+  --kiosk-gutter: 32px;
+  --kiosk-control: 64px;
+  --kiosk-control-large: 80px;
+  --kiosk-mic: 112px;
+  --kiosk-mic-large: 136px;
+  --kiosk-interaction-height: min(100dvh, max(60dvh, 720px));
+  --kiosk-radius: 12px;
+  --kiosk-panel-radius: 20px;
+  --kiosk-circle: 50%;
+  --kiosk-focus-width: 3px;
+  --kiosk-weight: 600;
+  --kiosk-line-height: 1.5;
+  --kiosk-text-title: 1.25em;
+  --kiosk-text-display: 1.5em;
+  --kiosk-icon: 28px;
+  --kiosk-zero-shadow: none;
+  --ui-ink: var(--color-ink);
+  --ui-muted: var(--color-muted);
+  --ui-surface: var(--color-paper);
+  --ui-canvas: var(--color-paper-3);
+  --ui-line: var(--color-control-edge);
+  --ui-accent: var(--color-accent);
+  --ui-on-accent: var(--color-accent-ink);
+}
+.kiosk.high-contrast {
+  --ui-ink: var(--contrast-ink);
+  --ui-muted: var(--contrast-ink);
+  --ui-surface: var(--contrast-paper);
+  --ui-canvas: var(--contrast-well);
+  --ui-line: var(--contrast-ink);
+  --ui-accent: var(--contrast-ink);
+  --ui-on-accent: var(--contrast-ink-on-fill);
+  --color-paper-2: var(--contrast-paper);
+  --color-rule: var(--contrast-ink);
+  --color-focus: var(--contrast-ink);
+  --color-error-soft: var(--contrast-well);
+  --color-error: var(--contrast-ink);
+  --color-voice-ready: var(--contrast-ink);
+  --color-voice-ready-soft: var(--contrast-well);
+  --color-voice-off: var(--contrast-ink);
+  --color-voice-off-soft: var(--contrast-well);
+}
+
+:root { --space-panel: 32px; }
+
+/* sRGB projections preserve the existing kiosk contrast-test contract. */
+:root {
+  --color-paper: rgb(245, 241, 234);
+  --color-paper-2: rgb(254, 252, 247);
+  --color-paper-3: rgb(233, 228, 217);
+  --color-ink: rgb(34, 27, 22);
+  --color-ink-2: rgb(56, 49, 44);
+  --color-muted: rgb(87, 78, 70);
+  --color-rule: rgb(186, 180, 166);
+  --color-control-edge: rgb(125, 114, 106);
+  --color-accent: rgb(251, 141, 65);
+  --color-accent-ink: rgb(34, 27, 22);
+  --color-accent-soft: rgb(247, 220, 195);
+  --color-focus: rgb(132, 44, 0);
+  --color-error: rgb(190, 35, 35);
+  --color-error-soft: rgb(255, 233, 229);
+  --color-voice-ready: rgb(8, 80, 35);
+  --color-voice-ready-soft: rgb(216, 239, 220);
+  --color-voice-off: rgb(133, 47, 40);
+  --color-voice-off-soft: rgb(255, 233, 229);
+  --color-pad: rgb(52, 44, 38);
+  --color-pad-ink: rgb(245, 241, 234);
+}
