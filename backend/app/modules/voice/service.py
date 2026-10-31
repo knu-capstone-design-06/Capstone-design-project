@@ -12,7 +12,7 @@ from app.modules.voice.executor import (
 from app.modules.voice.interpreter import VoiceInterpreter
 from app.modules.voice.repository import VoiceRepository
 from app.modules.voice.schemas import (
-    AddCartItemCall, MenuItem, VoiceErrorResponse, VoiceInterpretation,
+    AddCartItemCall, MenuItem, UpdateCartItemCall, VoiceErrorResponse, VoiceInterpretation,
     VoiceRequestAccepted, VoiceRequestCreate, VoiceRequestStatus, VoiceTurn,
 )
 
@@ -21,10 +21,42 @@ logger = logging.getLogger(__name__)
 FALLBACK_REPLY = "지금은 음성 주문이 어려워요. 화면을 눌러 주문해 주세요."
 # Answers that accept a proposal but cannot pick an option such as a temperature.
 BARE_YES = {"네", "넵", "예", "응", "어", "그래", "그래요", "좋아요", "맞아요"}
+TEMPERATURE_WORDS = {"iced": "아이스", "hot": "따뜻한"}
+REPLY_MAX = 60
 
 
 def is_bare_yes(text: str) -> bool:
     return "".join(ch for ch in text if ch.isalnum()) in BARE_YES
+
+
+def confirmation_text(tool_calls: list, menu: list[MenuItem]) -> str:
+    """Word the confirmation from the validated tool inputs, never from the model.
+
+    The model's reply_text and tool_calls are separate outputs and may disagree
+    ("2잔 담을까요?" beside quantity 20); what the customer confirms must be what runs.
+    """
+    products = {item.product_id: item for item in menu}
+    clauses = []
+    for call in tool_calls:
+        arguments = call.arguments
+        item = products[arguments.product_id]
+        unit = "잔" if item.temperatures else "개"
+        name = " ".join(filter(None, [TEMPERATURE_WORDS.get(arguments.temperature or ""), item.name]))
+        if isinstance(call, AddCartItemCall):
+            clauses.append((f"{name} {arguments.quantity}{unit}", "담을까요?", "담기"))
+        elif isinstance(call, UpdateCartItemCall):
+            clauses.append((f"{name} {arguments.quantity}{unit}으로", "바꿀까요?", "바꾸기"))
+        else:
+            clauses.append((name, "뺄까요?", "빼기"))
+    if len(clauses) == 1:
+        subject, verb, _ = clauses[0]
+        return f"{subject} {verb}"
+    text = ", ".join(f"{subject} {short}" for subject, _, short in clauses) + ", 이대로 할까요?"
+    if len(text) > REPLY_MAX:
+        text = f"{clauses[0][0]} {clauses[0][2]} 외 {len(clauses) - 1}건, 이대로 할까요?"
+    if len(text) > REPLY_MAX:
+        text = f"말씀하신 {len(clauses)}건, 이대로 할까요?"
+    return text
 
 
 def menu_from_products(products: Iterable[object]) -> list[MenuItem]:
@@ -201,6 +233,8 @@ class VoiceService:
             if result is not None and not matches_menu(result, menu):
                 logger.warning("voice interpretation rejected (not on menu)")
                 result = None
+            if result is not None and result.status == "needs_confirmation":
+                result = result.model_copy(update={"reply_text": confirmation_text(result.tool_calls, menu)})
         except Exception:
             # A voice failure must not affect touch ordering; record it as unavailable.
             logger.exception("voice interpretation crashed")
