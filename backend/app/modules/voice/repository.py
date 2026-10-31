@@ -56,6 +56,8 @@ class VoiceRepository:
         self._records: dict[str, VoiceRecord] = {}
         self._keys: dict[tuple[str, UUID], str] = {}
         self._history: dict[str, deque[VoiceTurn]] = {}
+        # A needs_confirmation proposal waiting for the very next utterance of its session.
+        self._proposals: dict[str, list[ToolCall]] = {}
         self._last_turn_at: dict[str, datetime] = {}
         self._retention = retention
         self._clock = clock
@@ -70,6 +72,7 @@ class VoiceRepository:
         for session_id in [s for s, at in self._last_turn_at.items() if at < cutoff]:
             del self._last_turn_at[session_id]
             self._history.pop(session_id, None)
+            self._proposals.pop(session_id, None)
 
     def accept(
         self, session_id: str, key: UUID, fingerprint: str,
@@ -130,3 +133,12 @@ class VoiceRepository:
         with self._lock:
             self._history.setdefault(session_id, deque(maxlen=HISTORY_TURNS)).append(turn)
             self._last_turn_at[session_id] = self._clock()
+
+    def take_proposal(self, session_id: str) -> list[ToolCall] | None:
+        """Return and clear the pending proposal: it answers one utterance only."""
+        with self._lock:
+            return self._proposals.pop(session_id, None)
+
+    def set_proposal(self, session_id: str, tool_calls: list[ToolCall]) -> None:
+        with self._lock:
+            self._proposals[session_id] = list(tool_calls)

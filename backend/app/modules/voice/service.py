@@ -19,8 +19,9 @@ from app.modules.voice.schemas import (
 logger = logging.getLogger(__name__)
 
 FALLBACK_REPLY = "지금은 음성 주문이 어려워요. 화면을 눌러 주문해 주세요."
-# Answers that accept a proposal but cannot pick an option such as a temperature.
-BARE_YES = {"네", "넵", "예", "응", "어", "그래", "그래요", "좋아요", "맞아요"}
+# Plain acceptances: they take a proposal as it stands and cannot pick an option such
+# as a temperature. "어" is left out because "어?" is a question, not a yes.
+BARE_YES = {"네", "넵", "예", "응", "그래", "그래요", "좋아요", "맞아요"}
 TEMPERATURE_WORDS = {"iced": "아이스", "hot": "따뜻한"}
 REPLY_MAX = 60
 
@@ -209,16 +210,19 @@ class VoiceService:
                 return
             history = self._repository.history(session_id)
             last = history[-1].result if history else None
-            if last is not None and last.status == "needs_confirmation" and is_bare_yes(request.text):
+            # A proposal answers this one utterance, whatever it turns out to be: an
+            # ignored or failed exchange in between must not leave it waiting for a later "네".
+            proposal = self._repository.take_proposal(session_id)
+            if proposal is not None and is_bare_yes(request.text):
                 # The customer accepted what the kiosk proposed, so run exactly that proposal.
                 # A fresh model reading of "네" could differ from it (another quantity) and
                 # would otherwise pass the menu checks and change the cart.
-                result = VoiceInterpretation(status="completed", tool_calls=last.tool_calls, reply_text=None)
+                result = VoiceInterpretation(status="completed", tool_calls=proposal, reply_text=None)
             elif last is not None and last.status == "needs_clarification" and is_bare_yes(request.text):
                 # "네" cannot answer "아이스, 따뜻한 것 중 무엇으로?"; ask again instead of guessing.
                 result = last
-            elif (last is None or last.status not in PENDING) and is_bare_yes(request.text):
-                # Nothing was proposed, so "네" must not repeat or invent an order.
+            elif is_bare_yes(request.text):
+                # Nothing is proposed (or the proposal has lapsed), so "네" must not invent an order.
                 result = VoiceInterpretation(status="needs_clarification", tool_calls=[], reply_text=ASK_MENU_REPLY)
             else:
                 result = await self._interpreter.interpret(request, menu, history)
@@ -233,8 +237,14 @@ class VoiceService:
             if result is not None and not matches_menu(result, menu):
                 logger.warning("voice interpretation rejected (not on menu)")
                 result = None
+            if (result is not None and proposal is not None and result.status == "completed"
+                    and result.tool_calls != proposal):
+                # "네 그걸로 주세요" went to the model, which may answer with other tool
+                # inputs than the customer confirmed; those are a new proposal, not an order.
+                result = VoiceInterpretation(status="needs_confirmation", tool_calls=result.tool_calls, reply_text="?")
             if result is not None and result.status == "needs_confirmation":
                 result = result.model_copy(update={"reply_text": confirmation_text(result.tool_calls, menu)})
+                self._repository.set_proposal(session_id, result.tool_calls)
         except Exception:
             # A voice failure must not affect touch ordering; record it as unavailable.
             logger.exception("voice interpretation crashed")

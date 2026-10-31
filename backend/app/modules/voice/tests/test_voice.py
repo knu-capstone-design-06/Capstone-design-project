@@ -262,14 +262,43 @@ class VoiceApiTests(VoiceApiCase):
         self.say("다음")
         self.assertEqual(self.interpreter.histories[-1][-1].result.status, "completed")
 
-    def test_modified_answer_after_a_proposal_reaches_the_interpreter(self):
+    def test_modified_answer_after_a_proposal_is_proposed_again_not_completed(self):
         self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
         self.say("아메리카노 두 잔")
         self.interpreter.result = interpretation(call("add_cart_item", "americano", "hot", 2))
         body = self.status(self.say("아니 따뜻한 걸로요")).json()
+        self.assertEqual(self.interpreter.calls, 2, "고친 대답은 OpenAI가 읽음")
+        self.assertEqual(body["status"], "needs_confirmation")
+        self.assertEqual(body["tool_calls"], [call("add_cart_item", "americano", "hot", 2)])
+        self.assertEqual(body["reply_text"], "따뜻한 아메리카노 2잔 담을까요?")
+        body = self.status(self.say("네")).json()
         self.assertEqual(body["status"], "completed")
         self.assertEqual(body["tool_calls"], [call("add_cart_item", "americano", "hot", 2)])
+
+    def test_confirmation_text_comes_from_the_tool_calls_not_the_model(self):
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 20),
+                                                 reply_text="아메리카노 2잔 담을까요?")
+        body = self.status(self.say("아메리카노 스무 잔")).json()
+        self.assertEqual(body["status"], "needs_confirmation")
+        self.assertEqual(body["reply_text"], "아이스 아메리카노 20잔 담을까요?")
+
+    def test_proposal_lapses_after_an_ignored_utterance(self):
+        self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
+        self.say("아메리카노 두 잔")
+        self.interpreter.result = VoiceInterpretation(status="ignored", tool_calls=[], reply_text=None)
+        self.say("잠깐만 전화 좀")
+        body = self.status(self.say("네")).json()
+        self.assertEqual(body["status"], "needs_clarification")
+        self.assertEqual(body["reply_text"], "어떤 메뉴를 주문할까요?")
+        self.assertEqual(body["tool_calls"], [])
+
+    def test_questioning_eo_is_not_an_acceptance(self):
+        self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
+        self.say("아메리카노 두 잔")
+        self.interpreter.result = interpretation(reply_text="다시 말씀해 주시겠어요?")
+        body = self.status(self.say("어?")).json()
         self.assertEqual(self.interpreter.calls, 2)
+        self.assertEqual(body["status"], "needs_clarification")
 
     def test_first_bare_answer_in_a_session_sends_no_tool_calls(self):
         self.interpreter.result = interpretation(ADD_AMERICANO)  # the model made one up
@@ -463,6 +492,31 @@ class ToolExecutionApiTests(VoiceApiCase):
         self.assertEqual(body["actions"], ["cart_updated"])
         self.assertEqual(self.cart()["total_quantity"], 2, "확인한 2잔만 담김")
 
+    def test_worded_acceptance_with_other_tool_inputs_asks_again_instead_of_running(self):
+        for text in ("네 그걸로 주세요", "네 맞아요", "네 그렇게 해주세요"):
+            with self.subTest(text=text):
+                self.session_id = self.client.post("/api/v1/sessions").json()["session_id"]
+                self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
+                self.say("아이스 아메리카노 두 개")
+                self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 20))
+                body = self.status(self.say(text)).json()
+                self.assertEqual(body["status"], "needs_confirmation")
+                self.assertEqual(body["reply_text"], "아이스 아메리카노 20잔 담을까요?")
+                self.assertEqual(body["actions"], [])
+                self.assertEqual(self.cart()["items"], [], "확인 없이 담지 않음")
+        # The customer now confirms the new proposal explicitly; only then does it run.
+        self.assertEqual(self.status(self.say("네")).json()["actions"], ["cart_updated"])
+        self.assertEqual(self.cart()["total_quantity"], 20)
+
+    def test_worded_acceptance_with_the_same_tool_inputs_runs_once(self):
+        self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
+        self.say("아이스 아메리카노 두 개")
+        self.interpreter.result = interpretation(ADD_AMERICANO)
+        body = self.status(self.say("네 그걸로 주세요")).json()
+        self.assertEqual(body["status"], "completed")
+        self.assertEqual(body["actions"], ["cart_updated"])
+        self.assertEqual(self.cart()["total_quantity"], 2)
+
     def test_refused_tool_input_fails_with_the_ordering_code_and_keeps_the_cart(self):
         self.post()
         self.interpreter.result = interpretation(call("update_cart_item", "sandwich", None, 3))
@@ -537,6 +591,29 @@ class RetentionTests(unittest.TestCase):
         with self.assertRaises(VoiceSessionCompleted):
             self.repository.accept("s1", key, "fingerprint", is_completed=lambda: True)
         self.assertIsNone(self.repository.get("s1", record.request_id))
+
+
+class ConfirmationTextTests(unittest.TestCase):
+    def text(self, *tool_calls):
+        from app.modules.voice.service import confirmation_text
+
+        return confirmation_text(interpretation(*tool_calls, reply_text="?").tool_calls, MENU)
+
+    def test_single_tool_inputs_read_naturally(self):
+        self.assertEqual(self.text(call("add_cart_item", "americano", "iced", 2)), "아이스 아메리카노 2잔 담을까요?")
+        self.assertEqual(self.text(call("add_cart_item", "sandwich", None, 1)), "에그 샌드위치 1개 담을까요?")
+        self.assertEqual(self.text(call("update_cart_item", "americano", "hot", 3)), "따뜻한 아메리카노 3잔으로 바꿀까요?")
+        self.assertEqual(self.text(call("remove_cart_item", "americano", "iced")), "아이스 아메리카노 뺄까요?")
+
+    def test_several_tool_inputs_are_listed_and_stay_short(self):
+        self.assertEqual(
+            self.text(call("add_cart_item", "americano", "iced", 2), call("remove_cart_item", "sandwich", None)),
+            "아이스 아메리카노 2잔 담기, 에그 샌드위치 빼기, 이대로 할까요?",
+        )
+        many = [call("add_cart_item", "americano", "iced", 1)] * 6
+        text = self.text(*many)
+        self.assertLessEqual(len(text), 60)
+        self.assertEqual(text, "아이스 아메리카노 1잔 담기 외 5건, 이대로 할까요?")
 
 
 class MissingTemperatureTests(unittest.TestCase):
