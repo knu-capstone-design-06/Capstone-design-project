@@ -200,8 +200,8 @@ backend 음성 해석 (`backend/app/modules/voice/`)
 - 요청 기록·`Idempotency-Key`는 접수 후 1시간, 대화 맥락은 마지막 발화 후 1시간 보관합니다(제안값, `repository.py`의 `RETENTION`).
 - 도구 실행은 backend 설정 `VOICE_EXECUTE_TOOLS`로 켭니다(기본 꺼짐). 꺼져 있으면 음성 API는 도구를 실행하지 않고 `actions`는 항상 빈 배열입니다.
   - 켜면 `completed`의 `tool_calls`를 backend 안(`voice/executor.py`)에서 주문 서비스로 말한 순서대로 반영합니다. 별도 MCP 서버나 SDK는 없습니다(결정 2026-10-29). 상품+온도로 `item_id`를 찾고, 주문 잠금 안에서 최신 장바구니 버전을 읽어 `expected_version`을 채우며, 도구 입력마다 `voice:{request_id}:{순서}` 키를 써서 같은 음성 요청이 재전송돼도 다시 실행하지 않습니다.
-  - 여러 도구 중 하나라도 주문 서비스에 거절되면(`cart_item_not_found`, `quantity_limit_exceeded`, `product_unavailable`, `cart_version_conflict`, `session_expired` 등) 앞서 반영한 것까지 되돌리고 `failed`로 그 오류 코드와 짧은 안내를 돌려줍니다. 장바구니는 바뀌지 않습니다.
-  - `needs_confirmation`의 제안은 실행하지 않습니다. 손님의 다음 "네"가 `completed`로 해석돼 돌아올 때 실행합니다. 성공하면 `actions: ["cart_updated"]`이고, 프론트는 장바구니를 다시 조회합니다.
+  - 여러 도구 중 하나라도 주문 서비스에 거절되면(`cart_item_not_found`, `quantity_limit_exceeded`, `product_unavailable`, `cart_version_conflict`, `session_expired` 등) 앞서 반영한 것까지 되돌리고 `failed`로 그 오류 코드와 짧은 안내를 돌려줍니다. 장바구니는 바뀌지 않습니다. 그 밖의 반영 실패는 `cart_update_failed`로, AI 장애(`ai_unavailable`)와 구분합니다.
+  - `needs_confirmation`의 제안은 실행하지 않습니다. 손님이 "네"처럼 고르지 않는 말로 수락하면 OpenAI를 부르지 않고 **저장된 제안 그대로** `completed`로 실행합니다. 모델이 "네"를 다시 읽어 다른 수량을 내더라도 확인받은 내용만 담깁니다. "아니 따뜻한 걸로"처럼 고친 대답은 OpenAI가 다시 해석합니다. 성공하면 `actions: ["cart_updated"]`이고, 프론트는 장바구니를 다시 조회합니다.
   - `main.py`가 `OrderingService`로 실행부를 만들어 넘기므로 voice 모듈은 주문 내부 구조를 직접 다루지 않습니다. 주문 저장소의 `transaction()`이 되돌리기를 맡습니다.
 - 키오스크에게 한 말이 아니면(일행과의 대화, 잡담) `ignored`로 답합니다. 문장을 띄우지 않고 대화 맥락에도 넣지 않습니다.
 
@@ -239,6 +239,7 @@ frontend 음성 입력 (`frontend/src/features/voice/`, 화면 요소 없음)
 ### 7.3 결정이 필요한 항목
 
 - [x] **실행 시점**: `completed`가 되면 backend가 바로 실행합니다. 다만 `VOICE_EXECUTE_TOOLS`(기본 꺼짐)로 켜야 하므로, 기본값을 켜는 시점(프론트의 `cart_updated` 재조회 반영 뒤)은 팀에서 정합니다
+- [ ] **버전 증가 단위**: 지금은 주문 서비스를 그대로 부르므로 도구 입력 하나당 장바구니 버전이 한 번 오릅니다(도구 4개면 4번). PR #62에는 음성 요청 1건당 한 번 올리는 안도 있습니다. 어느 쪽으로 할지와 프론트 재조회 기준을 팀에서 정하기 전에는 `VOICE_EXECUTE_TOOLS` 기본값을 켜지 않습니다
 - [ ] **확인 버튼으로 수락**: 지금은 "네" 발화만 수락 경로입니다. 버튼 수락은 저장된 제안을 한 번만 소비하는 별도 API가 필요하며 PR #62에서 논의 중
 - [x] **중간 실패**: 도구 여러 개 중 하나라도 거절되면 전부 되돌리고 `failed`로 오류 코드를 알립니다. 자동 재시도는 하지 않고 프론트가 장바구니를 다시 조회합니다(PR #62의 AI 담당 제안대로)
 - [x] **MCP 서버 위치·방식**: backend 내부 모듈(`voice/executor.py`)이 주문 서비스를 호출합니다. MCP SDK는 넣지 않고 도구 입력 형식만 MCP와 같게 유지합니다(결정 2026-10-29)
