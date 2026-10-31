@@ -6,7 +6,9 @@ from uuid import UUID
 
 from app.modules.ordering.repository import OrderingRepository
 from app.modules.voice.exceptions import VoiceRequestNotFound, VoiceSessionNotFound
-from app.modules.voice.executor import CartExecutor, ToolExecutionFailed
+from app.modules.voice.executor import (
+    FALLBACK_EXECUTION_REPLY, CartExecutor, ToolExecutionFailed,
+)
 from app.modules.voice.interpreter import VoiceInterpreter
 from app.modules.voice.repository import VoiceRepository
 from app.modules.voice.schemas import (
@@ -220,10 +222,12 @@ class VoiceService:
                 self._repository.update(request_id, "failed", failed.reply_text, error=failed.error)
                 return
             except Exception:
+                # The interpretation succeeded; only the cart change failed, so the code
+                # must not blame the AI (the transaction already rolled the cart back).
                 logger.exception("voice tool execution crashed")
                 self._repository.update(
-                    request_id, "failed", FALLBACK_REPLY,
-                    error=VoiceErrorResponse(code="ai_unavailable", detail="장바구니에 반영하지 못했습니다."),
+                    request_id, "failed", FALLBACK_EXECUTION_REPLY,
+                    error=VoiceErrorResponse(code="cart_update_failed", detail="장바구니에 반영하지 못했습니다."),
                 )
                 return
             actions = ["cart_updated"]

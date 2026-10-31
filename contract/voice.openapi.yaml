@@ -402,10 +402,12 @@ components:
             - cart_item_not_found
             - quantity_limit_exceeded
             - invalid_option
+            - cart_update_failed
           description: |
             frontend 분기용 오류 코드. cart_version_conflict 아래 여섯 개는 VOICE_EXECUTE_TOOLS=true에서 도구 입력이
             주문 서비스에 거절됐을 때의 주문 오류 코드(frontend-backend.openapi.yaml과 같은 뜻)이며, 이때 장바구니는
-            바뀌지 않았습니다. session_expired는 접수 410과 실행 중 완료된 세션 양쪽에 쓰입니다.
+            바뀌지 않았습니다. cart_update_failed는 해석은 성공했지만 장바구니 반영이 다른 이유로 실패한 경우로,
+            ai_unavailable과 구분합니다. session_expired는 접수 410과 실행 중 완료된 세션 양쪽에 쓰입니다.
         detail:
           type: string
           description: 오류 설명. 내부 예외·키·외부 API 응답 원문은 넣지 않습니다.

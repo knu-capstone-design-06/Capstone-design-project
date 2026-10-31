@@ -60,7 +60,7 @@ class OrderingCartExecutor:
                     cart = self._apply(session_id, f"voice:{request_id}:{index}", cart, call)
                 return cart
         except OrderingError as error:
-            code = error.code if error.code in KNOWN_CODES else "ai_unavailable"
+            code = error.code if error.code in KNOWN_CODES else "cart_update_failed"
             raise ToolExecutionFailed(
                 VoiceErrorResponse(code=code, detail=error.detail),
                 EXECUTION_REPLIES.get(code, FALLBACK_EXECUTION_REPLY),
