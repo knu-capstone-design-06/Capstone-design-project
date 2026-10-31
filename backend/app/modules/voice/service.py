@@ -239,11 +239,13 @@ class VoiceService:
                 logger.warning("voice interpretation rejected (not on menu)")
                 result = None
             if (result is not None and result.status == "completed"
-                    and last is not None and last.status == "needs_confirmation"
+                    and self._repository.needs_reconfirm(session_id)
                     and result.tool_calls != proposal):
                 # An answer to a confirmation went to the model ("네 그걸로 주세요"), which
                 # may answer with other tool inputs than the customer confirmed, or the
-                # proposal has lapsed; either way it is a new proposal, not an order.
+                # proposal has lapsed and the model read the answer against older turns;
+                # either way it is a new proposal, not an order. The mark lives apart from
+                # the history, so earlier completed orders cannot stand in for the offer.
                 result = VoiceInterpretation(status="needs_confirmation", tool_calls=result.tool_calls, reply_text="?")
             if result is not None and result.status == "needs_confirmation":
                 text = confirmation_text(result.tool_calls, menu)
@@ -257,11 +259,14 @@ class VoiceService:
             # A voice failure must not affect touch ordering; record it as unavailable.
             logger.exception("voice interpretation crashed")
             result = None
-        if proposal is not None and (result is None or result.status == "ignored"):
-            # The proposal lapsed without an answer. Ignored and failed turns stay out of
-            # the context, so the question itself leaves it too; a later "그걸로 주세요"
-            # must not be read against an offer that is no longer open.
-            self._repository.discard_proposal_turn(session_id)
+        if result is None or result.status == "ignored":
+            if proposal is not None:
+                # The proposal lapsed without an answer. Ignored and failed turns stay out
+                # of the context, so the question itself leaves it too; the reconfirm mark
+                # set with the proposal stays until the session says something readable.
+                self._repository.discard_proposal_turn(session_id)
+        elif result.status != "needs_confirmation":
+            self._repository.clear_reconfirm(session_id)
         if result is None:
             # Failed exchanges stay out of the context so later turns read cleanly.
             self._repository.update(

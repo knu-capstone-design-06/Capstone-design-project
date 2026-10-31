@@ -526,6 +526,40 @@ class ToolExecutionApiTests(VoiceApiCase):
                 self.assertEqual(body["actions"], [])
                 self.assertEqual(self.cart()["items"], [])
 
+    def test_lapsed_proposal_after_an_earlier_order_is_confirmed_again_not_added(self):
+        # An earlier completed order of the same product lets the model's reading pass the
+        # name check; the lapsed proposal must still not turn "그걸로 주세요" into an order.
+        for lapse in ("ignored", "failed"):
+            for quantity in (2, 19):
+                with self.subTest(lapse=lapse, quantity=quantity):
+                    self.session_id = self.client.post("/api/v1/sessions").json()["session_id"]
+                    self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 1))
+                    self.say("아이스 아메리카노 한 잔")
+                    self.assertEqual(self.cart()["total_quantity"], 1)
+                    self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
+                    self.say("아이스 아메리카노 두 잔 더 주세요")
+                    self.interpreter.result = (VoiceInterpretation(status="ignored", tool_calls=[], reply_text=None)
+                                               if lapse == "ignored" else None)
+                    self.say("잠깐만 전화 좀 받을게")
+                    self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", quantity))
+                    body = self.status(self.say("네 그걸로 주세요")).json()
+                    self.assertEqual(body["status"], "needs_confirmation")
+                    self.assertEqual(body["reply_text"], f"아이스 아메리카노 {quantity}잔 담을까요?")
+                    self.assertEqual(self.cart()["total_quantity"], 1, "재확인 전에는 그대로")
+                    # The customer confirms what was read back; only now does it run.
+                    self.assertEqual(self.status(self.say("네")).json()["actions"], ["cart_updated"])
+                    self.assertEqual(self.cart()["total_quantity"], 1 + quantity)
+
+    def test_reconfirm_mark_clears_once_the_session_says_something_readable(self):
+        self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
+        self.say("아이스 아메리카노 두 잔")
+        self.interpreter.result = interpretation(reply_text="어떤 메뉴를 주문할까요?")
+        self.say("아니요")  # declined: a question is asked, the mark clears
+        self.interpreter.result = interpretation(call("add_cart_item", "sandwich", None, 1))
+        body = self.status(self.say("샌드위치 하나 주세요")).json()
+        self.assertEqual(body["status"], "completed")
+        self.assertEqual(body["actions"], ["cart_updated"])
+
     def test_long_proposal_asks_to_split_instead_of_hiding_items(self):
         self.interpreter.result = interpretation(
             call("add_cart_item", "americano", "iced", 2), call("add_cart_item", "americano", "hot", 1),

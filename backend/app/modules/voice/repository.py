@@ -58,6 +58,9 @@ class VoiceRepository:
         self._history: dict[str, deque[VoiceTurn]] = {}
         # A needs_confirmation proposal waiting for the very next utterance of its session.
         self._proposals: dict[str, list[ToolCall]] = {}
+        # Sessions whose next completed reading must be confirmed again: a proposal is
+        # open or has just lapsed, so an answer read against the context is not an order.
+        self._reconfirm: set[str] = set()
         self._last_turn_at: dict[str, datetime] = {}
         self._retention = retention
         self._clock = clock
@@ -73,6 +76,7 @@ class VoiceRepository:
             del self._last_turn_at[session_id]
             self._history.pop(session_id, None)
             self._proposals.pop(session_id, None)
+            self._reconfirm.discard(session_id)
 
     def accept(
         self, session_id: str, key: UUID, fingerprint: str,
@@ -142,9 +146,22 @@ class VoiceRepository:
     def set_proposal(self, session_id: str, tool_calls: list[ToolCall]) -> None:
         with self._lock:
             self._proposals[session_id] = list(tool_calls)
+            self._reconfirm.add(session_id)
+
+    def needs_reconfirm(self, session_id: str) -> bool:
+        with self._lock:
+            return session_id in self._reconfirm
+
+    def clear_reconfirm(self, session_id: str) -> None:
+        """The session answered with something other than a lapse; readings are orders again."""
+        with self._lock:
+            self._reconfirm.discard(session_id)
 
     def discard_proposal_turn(self, session_id: str) -> None:
-        """Drop the trailing needs_confirmation exchange: its offer is no longer open."""
+        """Drop the trailing needs_confirmation exchange: its offer is no longer open.
+
+        The reconfirm mark stays, independent of what else the history holds.
+        """
         with self._lock:
             history = self._history.get(session_id)
             if history and history[-1].result.status == "needs_confirmation":
