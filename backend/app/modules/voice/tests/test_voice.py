@@ -508,6 +508,39 @@ class ToolExecutionApiTests(VoiceApiCase):
         self.assertEqual(self.status(self.say("네")).json()["actions"], ["cart_updated"])
         self.assertEqual(self.cart()["total_quantity"], 20)
 
+    def test_lapsed_proposal_is_not_run_through_the_model_either(self):
+        # After the lapse the model answers once with another quantity, once with the old one.
+        for lapse, answer in (("ignored", call("add_cart_item", "americano", "iced", 20)),
+                              ("failed", ADD_AMERICANO)):
+            with self.subTest(lapse=lapse):
+                self.session_id = self.client.post("/api/v1/sessions").json()["session_id"]
+                self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
+                self.say("아이스 아메리카노 두 개")
+                self.interpreter.result = (VoiceInterpretation(status="ignored", tool_calls=[], reply_text=None)
+                                           if lapse == "ignored" else None)
+                self.say("잠깐만 전화 좀")
+                self.interpreter.result = interpretation(answer)
+                body = self.status(self.say("네 그걸로 주세요")).json()
+                self.assertEqual(self.interpreter.histories[-1], [], "만료된 제안은 모델에게도 보이지 않음")
+                self.assertNotEqual(body["status"], "completed")
+                self.assertEqual(body["actions"], [])
+                self.assertEqual(self.cart()["items"], [])
+
+    def test_long_proposal_asks_to_split_instead_of_hiding_items(self):
+        self.interpreter.result = interpretation(
+            call("add_cart_item", "americano", "iced", 2), call("add_cart_item", "americano", "hot", 1),
+            call("add_cart_item", "sandwich", None, 20), call("remove_cart_item", "sandwich", None),
+            reply_text="네 가지 담을까요?",
+        )
+        body = self.status(self.say("아이스 아메리카노 두 잔, 따뜻한 거 하나, 샌드위치 하나")).json()
+        self.assertEqual(body["status"], "needs_clarification")
+        self.assertEqual(body["reply_text"], "주문이 길어요. 두 가지씩 나눠서 말씀해 주세요.")
+        self.assertEqual(body["tool_calls"], [])
+        # "네" cannot accept what was never read back; the request to split is repeated.
+        again = self.status(self.say("네")).json()
+        self.assertEqual((again["status"], again["reply_text"]), ("needs_clarification", "주문이 길어요. 두 가지씩 나눠서 말씀해 주세요."))
+        self.assertEqual(self.cart()["items"], [])
+
     def test_worded_acceptance_with_the_same_tool_inputs_runs_once(self):
         self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
         self.say("아이스 아메리카노 두 개")
@@ -610,10 +643,9 @@ class ConfirmationTextTests(unittest.TestCase):
             self.text(call("add_cart_item", "americano", "iced", 2), call("remove_cart_item", "sandwich", None)),
             "아이스 아메리카노 2잔 담기, 에그 샌드위치 빼기, 이대로 할까요?",
         )
-        many = [call("add_cart_item", "americano", "iced", 1)] * 6
-        text = self.text(*many)
-        self.assertLessEqual(len(text), 60)
-        self.assertEqual(text, "아이스 아메리카노 1잔 담기 외 5건, 이대로 할까요?")
+        # Items the customer cannot read back are never confirmed by a count.
+        many = [call("add_cart_item", "americano", "iced", 1)] * 4
+        self.assertIsNone(self.text(*many))
 
 
 class MissingTemperatureTests(unittest.TestCase):

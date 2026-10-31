@@ -142,3 +142,10 @@ class VoiceRepository:
     def set_proposal(self, session_id: str, tool_calls: list[ToolCall]) -> None:
         with self._lock:
             self._proposals[session_id] = list(tool_calls)
+
+    def discard_proposal_turn(self, session_id: str) -> None:
+        """Drop the trailing needs_confirmation exchange: its offer is no longer open."""
+        with self._lock:
+            history = self._history.get(session_id)
+            if history and history[-1].result.status == "needs_confirmation":
+                history.pop()

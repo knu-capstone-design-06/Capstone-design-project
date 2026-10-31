@@ -30,11 +30,16 @@ def is_bare_yes(text: str) -> bool:
     return "".join(ch for ch in text if ch.isalnum()) in BARE_YES
 
 
-def confirmation_text(tool_calls: list, menu: list[MenuItem]) -> str:
+SPLIT_ORDER_REPLY = "주문이 길어요. 두 가지씩 나눠서 말씀해 주세요."
+
+
+def confirmation_text(tool_calls: list, menu: list[MenuItem]) -> str | None:
     """Word the confirmation from the validated tool inputs, never from the model.
 
     The model's reply_text and tool_calls are separate outputs and may disagree
     ("2잔 담을까요?" beside quantity 20); what the customer confirms must be what runs.
+    Every product, option and quantity is spelled out; None when that does not fit the
+    reply limit, so a long proposal is never accepted with items the customer never saw.
     """
     products = {item.product_id: item for item in menu}
     clauses = []
@@ -53,11 +58,7 @@ def confirmation_text(tool_calls: list, menu: list[MenuItem]) -> str:
         subject, verb, _ = clauses[0]
         return f"{subject} {verb}"
     text = ", ".join(f"{subject} {short}" for subject, _, short in clauses) + ", 이대로 할까요?"
-    if len(text) > REPLY_MAX:
-        text = f"{clauses[0][0]} {clauses[0][2]} 외 {len(clauses) - 1}건, 이대로 할까요?"
-    if len(text) > REPLY_MAX:
-        text = f"말씀하신 {len(clauses)}건, 이대로 할까요?"
-    return text
+    return text if len(text) <= REPLY_MAX else None
 
 
 def menu_from_products(products: Iterable[object]) -> list[MenuItem]:
@@ -237,18 +238,30 @@ class VoiceService:
             if result is not None and not matches_menu(result, menu):
                 logger.warning("voice interpretation rejected (not on menu)")
                 result = None
-            if (result is not None and proposal is not None and result.status == "completed"
+            if (result is not None and result.status == "completed"
+                    and last is not None and last.status == "needs_confirmation"
                     and result.tool_calls != proposal):
-                # "네 그걸로 주세요" went to the model, which may answer with other tool
-                # inputs than the customer confirmed; those are a new proposal, not an order.
+                # An answer to a confirmation went to the model ("네 그걸로 주세요"), which
+                # may answer with other tool inputs than the customer confirmed, or the
+                # proposal has lapsed; either way it is a new proposal, not an order.
                 result = VoiceInterpretation(status="needs_confirmation", tool_calls=result.tool_calls, reply_text="?")
             if result is not None and result.status == "needs_confirmation":
-                result = result.model_copy(update={"reply_text": confirmation_text(result.tool_calls, menu)})
-                self._repository.set_proposal(session_id, result.tool_calls)
+                text = confirmation_text(result.tool_calls, menu)
+                if text is None:
+                    # Too much to read back in one line: never confirm items the customer cannot see.
+                    result = VoiceInterpretation(status="needs_clarification", tool_calls=[], reply_text=SPLIT_ORDER_REPLY)
+                else:
+                    result = result.model_copy(update={"reply_text": text})
+                    self._repository.set_proposal(session_id, result.tool_calls)
         except Exception:
             # A voice failure must not affect touch ordering; record it as unavailable.
             logger.exception("voice interpretation crashed")
             result = None
+        if proposal is not None and (result is None or result.status == "ignored"):
+            # The proposal lapsed without an answer. Ignored and failed turns stay out of
+            # the context, so the question itself leaves it too; a later "그걸로 주세요"
+            # must not be read against an offer that is no longer open.
+            self._repository.discard_proposal_turn(session_id)
         if result is None:
             # Failed exchanges stay out of the context so later turns read cleanly.
             self._repository.update(
