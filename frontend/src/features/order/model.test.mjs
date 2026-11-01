@@ -144,6 +144,25 @@ test('낮은 버전 응답으로 현재 Cart를 덮어쓰지 않는다', async (
   assert.equal(controller.getSnapshot().cart.version, 5);
 });
 
+test('음성 장바구니 변경 뒤에는 최신 Cart를 다시 읽고, 실패해도 이전 Cart를 보존한다', async () => {
+  let reads = 0;
+  const latest = { ...populatedCart(3), items: [{ ...populatedCart().items[0], quantity: 3, line_amount: 10500 }], total_quantity: 3, total_amount: 10500 };
+  const controller = fixture({ getCart: async () => {
+    reads += 1;
+    if (reads === 1) return populatedCart(1);
+    if (reads === 2) return latest;
+    throw new ApiError(503, { detail: 'temporary failure' });
+  } });
+  await controller.initialize();
+  assert.equal(await controller.refreshCartAfterVoice(), true);
+  assert.equal(controller.getSnapshot().cart.total_quantity, 3);
+  assert.match(controller.getSnapshot().notice, /음성 주문/);
+  assert.equal(await controller.refreshCartAfterVoice(), false);
+  assert.equal(controller.getSnapshot().status, 'ready');
+  assert.equal(controller.getSnapshot().cart.total_quantity, 3);
+  assert.match(controller.getSnapshot().message, /음성 주문 결과/);
+});
+
 test('처리 중 응답의 재시도 간격을 존중하고 그동안 새 키를 만들지 않는다', async () => {
   let calls = 0;
   const controller = fixture({ addCartItem: async () => {

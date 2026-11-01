@@ -92,8 +92,9 @@ test('메뉴에서 마이크·질문·해석 결과를 표시하고 주문 확�
   const { browser, page, errors, fixture } = await open([
     ...bootstrap(session),
     voicePost(session), voiceGet(session, voiceStatus('needs_clarification', { reply_text: '온도를 골라 주세요.' })),
-    voicePost(session), voiceGet(session, voiceStatus('completed', { tool_calls: [{ tool: 'add_cart_item', arguments: { product_id: 'americano', temperature: 'hot', quantity: 1 } }] })),
-    mutation(session, '/cart/items', cart),
+    voicePost(session), voiceGet(session, voiceStatus('completed', { actions: ['cart_updated'], tool_calls: [{ tool: 'add_cart_item', arguments: { product_id: 'americano', temperature: 'hot', quantity: 1 } }] })),
+    { method: 'GET', path: `/api/v1/sessions/${session}/cart`, body: cart },
+    mutation(session, '/cart/items', cartResponse(session, 2, [iced(2)])),
   ]);
   try {
     const toggle = page.locator('[data-log-target="voice-mode-toggle"]');
@@ -111,9 +112,9 @@ test('메뉴에서 마이크·질문·해석 결과를 표시하고 주문 확�
     assert.match(await page.locator('.voice-mode-feedback').innerText(), /온도를 골라 주세요.*듣는 중: 따뜻한/);
     await screenshot(page, 'voice-question-menu', 450);
     await page.evaluate(() => window.voiceFakes.at(-1).final('핫'));
-    await page.locator('.voice-mode-feedback').getByText(/주문을 변경하는 기능은 아직 준비 중/).waitFor();
+    await page.locator('.cart-notice').getByText(/음성 주문을 장바구니에 반영/).waitFor();
     assert.match(await page.locator('.voice-mode-transcript').innerText(), /인식한 말\s+핫/);
-    assert.match(await page.locator('.total').innerText(), /0원/, '해석만으로 장바구니를 변경하지 않음');
+    assert.match(await page.locator('.total').innerText(), /3,500원/, 'cart_updated 뒤 최신 장바구니를 다시 읽음');
     await screenshot(page, 'voice-result-menu');
     const submitted = fixture.requests.filter(request => request.path.endsWith('/voice/requests') && request.method === 'POST');
     assert.deepEqual(submitted.map(request => [request.body.text, request.body.screen_id]), [

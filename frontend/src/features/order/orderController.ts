@@ -95,6 +95,31 @@ export class OrderController {
     return this.write('order', (session, cart, key) => this.api.createOrder(session, { expected_version: cart.version }, key), '');
   }
 
+  /** Server-side voice tools changed the Cart; read the confirmed snapshot before the screen accepts another change. */
+  async refreshCartAfterVoice(): Promise<boolean> {
+    const { session, status, order } = this.state;
+    if (!session || order || status !== 'ready' || this.pending) return false;
+    const sessionId = session.session_id;
+    this.set({ status: 'saving', message: '', notice: '', retryAt: 0, canAbandonPending: false, abandonWarning: '' });
+    try {
+      const cart = await this.api.getCart(sessionId);
+      if (this.state.session?.session_id !== sessionId || this.state.order) return false;
+      if (cart.session_id !== sessionId) throw new Error('세션 응답 불일치');
+      this.set({ cart: this.acceptCart(cart), status: 'ready', notice: orderCopy.voiceCartUpdated });
+      return true;
+    } catch (error) {
+      if (this.state.session?.session_id !== sessionId || this.state.order) return false;
+      const apiError = error instanceof ApiError ? error : null;
+      const body = apiError && typeof apiError.body === 'object' && apiError.body !== null
+        ? apiError.body as Partial<OrderApiError> : null;
+      const ended = apiError !== null && (apiError.status === 401 || apiError.status === 403 || apiError.status === 410
+        || ['session_not_found', 'session_expired'].includes(body?.code ?? '')
+        || (apiError.status === 404 && !['product_not_found', 'cart_item_not_found'].includes(body?.code ?? '')));
+      this.set({ status: ended ? 'ended' : 'ready', message: ended ? orderCopy.ended : orderCopy.voiceCartSyncFailed });
+      return false;
+    }
+  }
+
   private write(kind: Pending['kind'], run: (session: string, cart: Cart, key: string) => Promise<Cart | Order>, notice: string): Promise<boolean> {
     const { session, cart, status, order } = this.state;
     if (!session || !cart || order || status !== 'ready' || this.pending) return Promise.resolve(false);
