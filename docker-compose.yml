@@ -21,6 +21,8 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-}
       OPENAI_TIMEOUT_SECONDS: ${OPENAI_TIMEOUT_SECONDS:-}
+      # true: completed voice results change the cart. Empty = tool_calls only.
+      VOICE_EXECUTE_TOOLS: ${VOICE_EXECUTE_TOOLS:-}
     depends_on:
       ai-engine:
         condition: service_healthy

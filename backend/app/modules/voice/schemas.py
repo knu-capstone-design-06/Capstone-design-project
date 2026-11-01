@@ -13,6 +13,10 @@ VoiceAction = Literal["cart_updated", "ui_changed", "confirmation_required"]
 VoiceErrorCode = Literal[
     "invalid_request", "session_not_found", "session_expired", "voice_request_not_found",
     "request_in_progress", "idempotency_key_reused", "ai_unavailable",
+    # Ordering errors passed through when executing tool_calls fails, and the code for
+    # an execution failure that is not one of them (the interpretation itself succeeded).
+    "cart_version_conflict", "product_not_found", "product_unavailable",
+    "cart_item_not_found", "quantity_limit_exceeded", "invalid_option", "cart_update_failed",
 ]
 
 
