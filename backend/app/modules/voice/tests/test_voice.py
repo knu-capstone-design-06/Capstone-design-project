@@ -347,6 +347,17 @@ class VoiceApiTests(VoiceApiCase):
             CartLine(product_id="americano", temperature="hot", quantity=2),
         ])
 
+    def test_one_more_of_a_product_added_by_touch_passes_the_name_check(self):
+        # No voice turn named it; the customer put it in the cart by touch.
+        self.add_by_touch("americano", "iced", 2)
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 1))
+        body = self.status(self.say("하나 더요")).json()
+        self.assertEqual(body["status"], "completed")
+        self.assertEqual(body["tool_calls"], [call("add_cart_item", "americano", "iced", 1)])
+        # A product neither named nor in the cart still has to be asked about.
+        self.interpreter.result = interpretation(call("add_cart_item", "sandwich", None, 1))
+        self.assertEqual(self.status(self.say("그것도요")).json()["reply_text"], "어떤 메뉴를 주문할까요?")
+
     def test_identical_repeated_tool_inputs_are_kept_once(self):
         one = call("add_cart_item", "americano", "iced", 1)
         self.interpreter.result = interpretation(one, one, call("add_cart_item", "sandwich", None, 1))
@@ -661,6 +672,14 @@ class ToolExecutionApiTests(VoiceApiCase):
                                  ("needs_clarification", "주문이 길어요. 두 가지씩 나눠서 말씀해 주세요."))
                 self.assertEqual(body["actions"], [])
                 self.assertEqual(self.cart()["items"], [], "읽어 주지 않은 항목은 담기지 않음")
+
+    def test_one_more_after_a_touch_order_adds_one_to_the_cart(self):
+        self.add_by_touch("americano", "iced", 2)
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 1))
+        body = self.status(self.say("하나 더요")).json()
+        self.assertEqual((body["status"], body["actions"]), ("completed", ["cart_updated"]))
+        self.assertEqual([(i["product_id"], i["temperature"], i["quantity"]) for i in self.cart()["items"]],
+                         [("americano", "iced", 3)])
 
     def test_worded_acceptance_with_the_same_tool_inputs_runs_once(self):
         self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
