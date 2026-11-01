@@ -153,6 +153,18 @@ def _compact(text: str) -> str:
     return "".join(ch for ch in text if ch.isalnum())
 
 
+def which_in_cart_reply(lines: list[CartLine], menu: list[MenuItem]) -> str:
+    """Ask which cart line an unnamed "하나 더", "그거" means, naming them when that fits."""
+    names = {item.product_id: item.name for item in menu}
+    labels = []
+    for line in lines:
+        label = " ".join(filter(None, [TEMPERATURE_WORDS.get(line.temperature or ""), names.get(line.product_id, line.product_id)]))
+        if label not in labels:
+            labels.append(label)
+    text = ", ".join(labels) + " 중 어느 것을 말씀하시나요?"
+    return text if len(text) <= REPLY_MAX else "장바구니의 어느 상품을 말씀하시나요?"
+
+
 def require_named_products(
     result: VoiceInterpretation, request: VoiceRequestCreate, history: list[VoiceTurn],
     menu: list[MenuItem], cart: Iterable[CartLine] = (),
@@ -167,11 +179,14 @@ def require_named_products(
     무엇으로 할까요?"). A word several names share ("라떼") is not enough; the
     kiosk asks which one. A general "어떤 메뉴를 주문할까요?" names nothing.
     What the customer put in the cart by touch counts as named too, so "하나 더요"
-    and "그거 빼 줘" can point at it.
+    and "그거 빼 줘" can point at it, but only while the cart leaves one thing to point
+    at: with two products, or one product in two temperatures, the kiosk asks which.
     """
     if not result.tool_calls:
         return result
-    in_cart = {line.product_id for line in cart}
+    lines = list(cart)
+    sole = lines[0] if len(lines) == 1 else None
+    in_cart = {line.product_id for line in lines}
     said = [_compact(request.text), *(_compact(item.text) for item in request.alternatives)]
     for turn in history:
         said.append(_compact(turn.request.text))
@@ -182,11 +197,16 @@ def require_named_products(
     names = {item.product_id: item.name for item in menu}
     for call in result.tool_calls:
         product_id = call.arguments.product_id
-        if product_id in in_cart:
-            continue
         keys = [_compact(names.get(product_id, "")), *(w for w in words.get(product_id, []) if uses[w] == 1)]
         if any(key and key in text for key in keys for text in said):
             continue
+        if product_id in in_cart:
+            temperature = call.arguments.temperature
+            if sole is not None and temperature in (None, sole.temperature):
+                continue  # the one thing in the cart is the only thing "그거" can mean
+            return VoiceInterpretation(
+                status="needs_clarification", tool_calls=[], reply_text=which_in_cart_reply(lines, menu),
+            )
         shared = [w for w in words.get(product_id, []) if uses[w] > 1 and any(w in text for text in said)]
         reply = f"{max(shared, key=len)} 중 어떤 메뉴로 할까요?" if shared else ASK_MENU_REPLY
         return VoiceInterpretation(status="needs_clarification", tool_calls=[], reply_text=reply)
