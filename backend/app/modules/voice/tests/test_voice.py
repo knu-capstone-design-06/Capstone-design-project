@@ -57,11 +57,13 @@ class FakeInterpreter:
         self.calls = 0
         self.menus = []
         self.histories = []
+        self.carts = []
 
-    async def interpret(self, request, menu, history):
+    async def interpret(self, request, menu, history, cart=()):
         self.calls += 1
         self.menus.append(menu)
         self.histories.append(history)
+        self.carts.append(list(cart))
         if isinstance(self.result, Exception):
             raise self.result
         return self.result
@@ -112,6 +114,15 @@ class VoiceApiCase(unittest.TestCase):
 
     def cart(self):
         return self.client.get(f"/api/v1/sessions/{self.session_id}/cart").json()
+
+    def add_by_touch(self, product_id, temperature, quantity=1):
+        """Put something in the cart the way the touch screen does (real catalog)."""
+        cart = self.cart()
+        added = self.client.post(f"/api/v1/sessions/{self.session_id}/cart/items", json={
+            "product_id": product_id, "temperature": temperature, "quantity": quantity,
+            "expected_version": cart["version"],
+        }, headers={"Idempotency-Key": str(uuid4())})
+        self.assertEqual(added.status_code, 200, added.text)
 
 
 class VoiceApiTests(VoiceApiCase):
@@ -192,6 +203,8 @@ class VoiceApiTests(VoiceApiCase):
         self.assertEqual([t.request.text for t in self.interpreter.histories[-1]], ["아메리카노"])
 
     def test_tool_calls_on_menu_are_kept_in_order(self):
+        self.add_by_touch("sandwich", None, 1)
+        self.add_by_touch("latte", "hot", 1)
         valid = [
             call("update_cart_item", "sandwich", None, 3),
             call("remove_cart_item", "latte", "hot"),  # unavailable items can still leave the cart
@@ -224,6 +237,7 @@ class VoiceApiTests(VoiceApiCase):
             self.assertIsNone(body["error"])
 
     def test_single_allowed_temperature_is_filled_in(self):
+        self.add_by_touch("latte", "hot", 1)
         self.interpreter.result = interpretation(call("remove_cart_item", "latte", None))
         body = self.status(self.say("라떼 빼 주세요")).json()
         self.assertEqual(body["status"], "completed")
@@ -314,12 +328,48 @@ class VoiceApiTests(VoiceApiCase):
         self.assertEqual(body["tool_calls"], [])
 
     def test_product_named_earlier_in_the_session_is_kept(self):
+        self.add_by_touch("americano", "iced", 2)
         self.interpreter.result = interpretation(ADD_AMERICANO)
         self.say("아이스 아메리카노 두 잔")
         self.interpreter.result = interpretation(call("update_cart_item", "americano", "iced", 3))
         body = self.status(self.say("하나 더요")).json()
         self.assertEqual(body["status"], "completed")
         self.assertEqual(body["tool_calls"], [call("update_cart_item", "americano", "iced", 3)])
+
+    def test_current_cart_is_passed_to_the_interpreter(self):
+        from app.modules.voice.schemas import CartLine
+
+        self.add_by_touch("sandwich", None, 1)
+        self.add_by_touch("americano", "hot", 2)
+        self.say("하나 더요")
+        self.assertEqual(self.interpreter.carts[-1], [
+            CartLine(product_id="sandwich", temperature=None, quantity=1),
+            CartLine(product_id="americano", temperature="hot", quantity=2),
+        ])
+
+    def test_identical_repeated_tool_inputs_are_kept_once(self):
+        one = call("add_cart_item", "americano", "iced", 1)
+        self.interpreter.result = interpretation(one, one, call("add_cart_item", "sandwich", None, 1))
+        body = self.status(self.say("아이스 아메리카노 하나랑 샌드위치 하나")).json()
+        self.assertEqual(body["status"], "completed")
+        self.assertEqual(body["tool_calls"], [one, call("add_cart_item", "sandwich", None, 1)])
+
+    def test_change_or_removal_of_something_not_in_the_cart_asks(self):
+        self.interpreter.result = interpretation(call("update_cart_item", "americano", "iced", 3))
+        body = self.status(self.say("아메리카노 세 잔으로 바꿔 주세요")).json()
+        self.assertEqual((body["status"], body["reply_text"]), ("needs_clarification", "아메리카노, 지금 장바구니에 없어요."))
+        self.assertEqual(body["tool_calls"], [])
+
+    def test_temperature_of_a_change_comes_from_the_cart(self):
+        self.add_by_touch("americano", "hot", 2)
+        self.interpreter.result = interpretation(call("remove_cart_item", "americano", None))
+        body = self.status(self.say("아메리카노 빼 주세요")).json()
+        self.assertEqual(body["status"], "completed")
+        self.assertEqual(body["tool_calls"], [call("remove_cart_item", "americano", "hot")])
+        # Both temperatures in the cart: the kiosk has to ask which one.
+        self.add_by_touch("americano", "iced", 1)
+        body = self.status(self.say("아메리카노 빼 주세요")).json()
+        self.assertEqual((body["status"], body["reply_text"]), ("needs_clarification", "아메리카노, 따뜻한 것과 아이스 중 무엇으로 할까요?"))
 
     def test_bare_yes_after_a_completed_order_asks_without_calling_openai(self):
         self.interpreter.result = interpretation(ADD_AMERICANO)
@@ -584,7 +634,7 @@ class ToolExecutionApiTests(VoiceApiCase):
     def test_long_proposal_asks_to_split_instead_of_hiding_items(self):
         self.interpreter.result = interpretation(
             call("add_cart_item", "americano", "iced", 2), call("add_cart_item", "americano", "hot", 1),
-            call("add_cart_item", "sandwich", None, 20), call("remove_cart_item", "sandwich", None),
+            call("add_cart_item", "sandwich", None, 20), call("add_cart_item", "sandwich", None, 1),
             reply_text="네 가지 담을까요?",
         )
         body = self.status(self.say("아이스 아메리카노 두 잔, 따뜻한 거 하나, 샌드위치 하나")).json()
@@ -598,7 +648,7 @@ class ToolExecutionApiTests(VoiceApiCase):
 
     def test_split_request_is_not_bypassed_by_a_worded_acceptance(self):
         four = (call("add_cart_item", "americano", "iced", 2), call("add_cart_item", "americano", "hot", 1),
-                call("add_cart_item", "sandwich", None, 20), call("remove_cart_item", "sandwich", None))
+                call("add_cart_item", "sandwich", None, 20), call("add_cart_item", "sandwich", None, 1))
         for text in ("네 그걸로 주세요", "네 맞아요", "네 그렇게 해주세요"):
             with self.subTest(text=text):
                 self.session_id = self.client.post("/api/v1/sessions").json()["session_id"]
@@ -623,10 +673,10 @@ class ToolExecutionApiTests(VoiceApiCase):
 
     def test_refused_tool_input_fails_with_the_ordering_code_and_keeps_the_cart(self):
         self.post()
-        self.interpreter.result = interpretation(call("update_cart_item", "sandwich", None, 3))
-        body = self.status(self.say("샌드위치 세 개로 바꿔 주세요")).json()
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 19))
+        body = self.status(self.say("아이스 아메리카노 열아홉 잔 더요")).json()
         self.assertEqual(body["status"], "failed")
-        self.assertEqual(body["error"]["code"], "cart_item_not_found")
+        self.assertEqual(body["error"]["code"], "quantity_limit_exceeded")
         self.assertEqual(body["tool_calls"], [])
         self.assertEqual(body["actions"], [])
         self.assertTrue(body["reply_text"])
@@ -827,10 +877,19 @@ class PromptVersionTests(unittest.TestCase):
     def test_current_prompt_explains_every_status(self):
         from app.modules.voice import interpreter
 
-        self.assertEqual(interpreter.PROMPT_VERSION, "interpret_v3")
+        self.assertEqual(interpreter.PROMPT_VERSION, "interpret_v4")
         prompt = interpreter._PROMPT_PATH.read_text(encoding="utf-8")
         for status in ("completed", "needs_confirmation", "needs_clarification", "ignored"):
             self.assertIn(f"- {status}:", prompt)
+
+    def test_current_prompt_reads_more_against_the_cart(self):
+        from app.modules.voice import interpreter
+
+        prompt = interpreter._PROMPT_PATH.read_text(encoding="utf-8")
+        self.assertIn("- cart:", prompt)
+        self.assertIn("더 담을 개수만 넣는다", prompt)
+        self.assertIn("quantity 3이 아니다", prompt)
+        self.assertIn("cart에 없는 상품을 바꾸거나 빼 달라고 하면", prompt)
 
 
     def test_current_prompt_asks_temperature_and_does_not_invent_answers(self):
@@ -920,7 +979,8 @@ class OpenAiInterpreterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["response_format"]["type"], "json_schema")
         self.assertTrue(payload["response_format"]["json_schema"]["strict"])
         user = json.loads(payload["messages"][-1]["content"])
-        self.assertEqual(set(user), {"text", "alternatives", "screen_id", "menu"})
+        self.assertEqual(set(user), {"text", "alternatives", "screen_id", "menu", "cart"})
+        self.assertEqual(user["cart"], [])
         self.assertEqual([item["product_id"] for item in user["menu"]],
                          ["americano", "sandwich", "latte"])
 
