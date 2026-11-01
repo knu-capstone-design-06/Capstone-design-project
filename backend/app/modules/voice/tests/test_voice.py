@@ -596,6 +596,22 @@ class ToolExecutionApiTests(VoiceApiCase):
         self.assertEqual((again["status"], again["reply_text"]), ("needs_clarification", "주문이 길어요. 두 가지씩 나눠서 말씀해 주세요."))
         self.assertEqual(self.cart()["items"], [])
 
+    def test_split_request_is_not_bypassed_by_a_worded_acceptance(self):
+        four = (call("add_cart_item", "americano", "iced", 2), call("add_cart_item", "americano", "hot", 1),
+                call("add_cart_item", "sandwich", None, 20), call("remove_cart_item", "sandwich", None))
+        for text in ("네 그걸로 주세요", "네 맞아요", "네 그렇게 해주세요"):
+            with self.subTest(text=text):
+                self.session_id = self.client.post("/api/v1/sessions").json()["session_id"]
+                self.interpreter.result = interpretation(*four, reply_text="네 가지 담을까요?")
+                self.say("아이스 아메리카노 두 잔, 따뜻한 거 하나, 샌드위치 하나")
+                # The model now reads the acceptance against the long utterance still in context.
+                self.interpreter.result = interpretation(*four)
+                body = self.status(self.say(text)).json()
+                self.assertEqual((body["status"], body["reply_text"]),
+                                 ("needs_clarification", "주문이 길어요. 두 가지씩 나눠서 말씀해 주세요."))
+                self.assertEqual(body["actions"], [])
+                self.assertEqual(self.cart()["items"], [], "읽어 주지 않은 항목은 담기지 않음")
+
     def test_worded_acceptance_with_the_same_tool_inputs_runs_once(self):
         self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
         self.say("아이스 아메리카노 두 개")

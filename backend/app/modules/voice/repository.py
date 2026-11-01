@@ -148,6 +148,11 @@ class VoiceRepository:
             self._proposals[session_id] = list(tool_calls)
             self._reconfirm.add(session_id)
 
+    def mark_reconfirm(self, session_id: str) -> None:
+        """An offer was refused before it could be read back; the next reading is not an order."""
+        with self._lock:
+            self._reconfirm.add(session_id)
+
     def needs_reconfirm(self, session_id: str) -> bool:
         with self._lock:
             return session_id in self._reconfirm

@@ -250,8 +250,11 @@ class VoiceService:
             if result is not None and result.status == "needs_confirmation":
                 text = confirmation_text(result.tool_calls, menu)
                 if text is None:
-                    # Too much to read back in one line: never confirm items the customer cannot see.
+                    # Too much to read back in one line: never confirm items the customer
+                    # cannot see. The utterance stays in the context, so a later "그걸로
+                    # 주세요" read against it must come back here, not run.
                     result = VoiceInterpretation(status="needs_clarification", tool_calls=[], reply_text=SPLIT_ORDER_REPLY)
+                    self._repository.mark_reconfirm(session_id)
                 else:
                     result = result.model_copy(update={"reply_text": text})
                     self._repository.set_proposal(session_id, result.tool_calls)
