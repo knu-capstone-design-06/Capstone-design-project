@@ -47,6 +47,25 @@ class OrderingRepository:
             state = self.states.get(session_id)
             yield state.completed if state is not None else False
 
+    @contextmanager
+    def transaction(self, session_id: str) -> Iterator[None]:
+        """Apply several cart changes as one; an exception restores the cart and replays.
+
+        Holds the lock for the whole block. Used by voice tool execution, where a
+        request with several tool inputs must change the cart entirely or not at all.
+        """
+        with self.lock:
+            state = self.state(session_id)
+            cart = state.cart.model_copy(deep=True)
+            keys = set(self.replays)
+            try:
+                yield
+            except BaseException:
+                state.cart = cart
+                for key in set(self.replays) - keys:
+                    del self.replays[key]
+                raise
+
     def replay(self, session_id: str, key: str) -> Replay | None:
         return self.replays.get((session_id, key))
 
