@@ -550,15 +550,36 @@ class ToolExecutionApiTests(VoiceApiCase):
                     self.assertEqual(self.status(self.say("네")).json()["actions"], ["cart_updated"])
                     self.assertEqual(self.cart()["total_quantity"], 1 + quantity)
 
-    def test_reconfirm_mark_clears_once_the_session_says_something_readable(self):
+    def test_declined_proposal_is_not_run_from_a_later_worded_acceptance(self):
         self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
         self.say("아이스 아메리카노 두 잔")
         self.interpreter.result = interpretation(reply_text="어떤 메뉴를 주문할까요?")
-        self.say("아니요")  # declined: a question is asked, the mark clears
+        self.say("아니요")  # declined: the kiosk asks again, the offer is closed
+        self.interpreter.result = interpretation(ADD_AMERICANO)  # the model leans on the old offer
+        body = self.status(self.say("네 그걸로 주세요")).json()
+        self.assertEqual([t.result.status for t in self.interpreter.histories[-1]], ["needs_clarification"],
+                         "닫힌 제안은 모델에게 보이지 않음")
+        # Nothing in the open context names the product any more, so the kiosk asks for
+        # the menu rather than confirming or running the closed offer.
+        self.assertEqual((body["status"], body["reply_text"]), ("needs_clarification", "어떤 메뉴를 주문할까요?"))
+        self.assertEqual(body["actions"], [])
+        self.assertEqual(self.cart()["items"], [])
+        self.assertEqual(self.status(self.say("네")).json()["status"], "needs_clarification")
+        self.assertEqual(self.cart()["items"], [])
+
+    def test_first_order_after_a_declined_proposal_is_confirmed_once_then_orders_run_directly(self):
+        self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
+        self.say("아이스 아메리카노 두 잔")
+        self.interpreter.result = interpretation(reply_text="어떤 메뉴를 주문할까요?")
+        self.say("아니요")
         self.interpreter.result = interpretation(call("add_cart_item", "sandwich", None, 1))
         body = self.status(self.say("샌드위치 하나 주세요")).json()
-        self.assertEqual(body["status"], "completed")
-        self.assertEqual(body["actions"], ["cart_updated"])
+        self.assertEqual((body["status"], body["reply_text"]), ("needs_confirmation", "에그 샌드위치 1개 담을까요?"))
+        self.assertEqual(self.status(self.say("네")).json()["actions"], ["cart_updated"])
+        # The mark is gone once an order went through: the next reading runs directly.
+        self.interpreter.result = interpretation(call("add_cart_item", "sandwich", None, 2))
+        self.assertEqual(self.status(self.say("샌드위치 두 개 더")).json()["actions"], ["cart_updated"])
+        self.assertEqual(self.cart()["total_quantity"], 3)
 
     def test_long_proposal_asks_to_split_instead_of_hiding_items(self):
         self.interpreter.result = interpretation(

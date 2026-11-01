@@ -259,14 +259,12 @@ class VoiceService:
             # A voice failure must not affect touch ordering; record it as unavailable.
             logger.exception("voice interpretation crashed")
             result = None
-        if result is None or result.status == "ignored":
-            if proposal is not None:
-                # The proposal lapsed without an answer. Ignored and failed turns stay out
-                # of the context, so the question itself leaves it too; the reconfirm mark
-                # set with the proposal stays until the session says something readable.
-                self._repository.discard_proposal_turn(session_id)
-        elif result.status != "needs_confirmation":
-            self._repository.clear_reconfirm(session_id)
+        if proposal is not None and (result is None or result.status != "completed"):
+            # The proposal was not accepted (declined, ignored, failed, or replaced by a new
+            # one), so its question leaves the context: a later "그걸로 주세요" must not be
+            # read against an offer that is no longer open. The reconfirm mark stays until
+            # an order actually goes through.
+            self._repository.discard_proposal_turn(session_id)
         if result is None:
             # Failed exchanges stay out of the context so later turns read cleanly.
             self._repository.update(
@@ -293,6 +291,10 @@ class VoiceService:
                 )
                 return
             actions = ["cart_updated"]
+        if result.status == "completed":
+            # An order went through (accepted or read with no open offer): later readings
+            # are orders again.
+            self._repository.clear_reconfirm(session_id)
         if result.status != "ignored":
             # Speech not meant for the kiosk would only confuse later turns.
             self._repository.append_turn(session_id, VoiceTurn(request=request, result=result))

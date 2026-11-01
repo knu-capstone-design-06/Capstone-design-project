@@ -153,7 +153,7 @@ class VoiceRepository:
             return session_id in self._reconfirm
 
     def clear_reconfirm(self, session_id: str) -> None:
-        """The session answered with something other than a lapse; readings are orders again."""
+        """An order went through; the session's readings are orders again."""
         with self._lock:
             self._reconfirm.discard(session_id)
 
