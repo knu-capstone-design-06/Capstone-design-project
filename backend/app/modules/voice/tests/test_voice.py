@@ -358,6 +358,33 @@ class VoiceApiTests(VoiceApiCase):
         self.interpreter.result = interpretation(call("add_cart_item", "sandwich", None, 1))
         self.assertEqual(self.status(self.say("그것도요")).json()["reply_text"], "어떤 메뉴를 주문할까요?")
 
+    def test_unnamed_instruction_with_several_cart_lines_asks_which(self):
+        self.add_by_touch("americano", "iced", 2)
+        self.add_by_touch("sandwich", None, 1)
+        self.interpreter.result = interpretation(call("add_cart_item", "sandwich", None, 1))
+        body = self.status(self.say("하나 더요")).json()
+        self.assertEqual((body["status"], body["reply_text"]),
+                         ("needs_clarification", "아이스 아메리카노, 에그 샌드위치 중 어느 것을 말씀하시나요?"))
+        self.assertEqual(body["tool_calls"], [])
+        # Naming it still works with several lines in the cart.
+        self.interpreter.result = interpretation(call("add_cart_item", "sandwich", None, 1))
+        self.assertEqual(self.status(self.say("샌드위치 하나 더요")).json()["status"], "completed")
+
+    def test_unnamed_instruction_with_two_temperatures_in_the_cart_asks_which(self):
+        self.add_by_touch("americano", "iced", 1)
+        self.add_by_touch("americano", "hot", 1)
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 1))
+        body = self.status(self.say("하나 더요")).json()
+        self.assertEqual((body["status"], body["reply_text"]),
+                         ("needs_clarification", "아이스 아메리카노, 따뜻한 아메리카노 중 어느 것을 말씀하시나요?"))
+        # One line in the cart but the model picks the other temperature: not what "그거" means.
+        self.session_id = self.client.post("/api/v1/sessions").json()["session_id"]
+        self.add_by_touch("americano", "iced", 1)
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "hot", 1))
+        body = self.status(self.say("하나 더요")).json()
+        self.assertEqual((body["status"], body["reply_text"]),
+                         ("needs_clarification", "아이스 아메리카노 중 어느 것을 말씀하시나요?"))
+
     def test_identical_repeated_tool_inputs_are_kept_once(self):
         one = call("add_cart_item", "americano", "iced", 1)
         self.interpreter.result = interpretation(one, one, call("add_cart_item", "sandwich", None, 1))
