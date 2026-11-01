@@ -155,9 +155,9 @@ def _compact(text: str) -> str:
 
 def require_named_products(
     result: VoiceInterpretation, request: VoiceRequestCreate, history: list[VoiceTurn],
-    menu: list[MenuItem],
+    menu: list[MenuItem], cart: Iterable[CartLine] = (),
 ) -> VoiceInterpretation:
-    """Send tool inputs only for products named in this conversation.
+    """Send tool inputs only for products named in this conversation or already in the cart.
 
     A short answer such as "네" or "따뜻한 걸로요" must not become an order the
     model made up, nor swap in another product. A product is named when its full name
@@ -166,9 +166,12 @@ def require_named_products(
     or in a question the kiosk asked about it ("카페 라떼는 아이스, 따뜻한 것 중
     무엇으로 할까요?"). A word several names share ("라떼") is not enough; the
     kiosk asks which one. A general "어떤 메뉴를 주문할까요?" names nothing.
+    What the customer put in the cart by touch counts as named too, so "하나 더요"
+    and "그거 빼 줘" can point at it.
     """
     if not result.tool_calls:
         return result
+    in_cart = {line.product_id for line in cart}
     said = [_compact(request.text), *(_compact(item.text) for item in request.alternatives)]
     for turn in history:
         said.append(_compact(turn.request.text))
@@ -179,6 +182,8 @@ def require_named_products(
     names = {item.product_id: item.name for item in menu}
     for call in result.tool_calls:
         product_id = call.arguments.product_id
+        if product_id in in_cart:
+            continue
         keys = [_compact(names.get(product_id, "")), *(w for w in words.get(product_id, []) if uses[w] == 1)]
         if any(key and key in text for key in keys for text in said):
             continue
@@ -300,7 +305,7 @@ class VoiceService:
                 # Check named products before asking about a temperature, so the kiosk
                 # never asks about a drink the customer did not mention.
                 result = drop_repeated_calls(result)
-                result = require_named_products(result, request, history, menu)
+                result = require_named_products(result, request, history, menu, cart)
                 result = ask_for_missing_temperature(result, menu, cart)
                 result = require_cart_items(result, cart, menu)
             if result is not None and not matches_menu(result, menu):
