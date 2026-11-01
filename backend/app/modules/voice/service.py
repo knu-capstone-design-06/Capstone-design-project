@@ -12,8 +12,8 @@ from app.modules.voice.executor import (
 from app.modules.voice.interpreter import VoiceInterpreter
 from app.modules.voice.repository import VoiceRepository
 from app.modules.voice.schemas import (
-    AddCartItemCall, MenuItem, UpdateCartItemCall, VoiceErrorResponse, VoiceInterpretation,
-    VoiceRequestAccepted, VoiceRequestCreate, VoiceRequestStatus, VoiceTurn,
+    AddCartItemCall, CartLine, MenuItem, UpdateCartItemCall, VoiceErrorResponse,
+    VoiceInterpretation, VoiceRequestAccepted, VoiceRequestCreate, VoiceRequestStatus, VoiceTurn,
 )
 
 logger = logging.getLogger(__name__)
@@ -70,11 +70,25 @@ def menu_from_products(products: Iterable[object]) -> list[MenuItem]:
     ]
 
 
-def ask_for_missing_temperature(result: VoiceInterpretation, menu: list[MenuItem]) -> VoiceInterpretation:
+def cart_from_items(items: Iterable[object]) -> list[CartLine]:
+    """Keep only the cart fields the interpreter needs (e.g. the ordering Cart's items)."""
+    fields = CartLine.model_fields.keys()
+    return [CartLine.model_validate({name: getattr(item, name) for name in fields}) for item in items]
+
+
+def _with_temperature(call, temperature):
+    return call.model_copy(update={"arguments": call.arguments.model_copy(update={"temperature": temperature})})
+
+
+def ask_for_missing_temperature(
+    result: VoiceInterpretation, menu: list[MenuItem], cart: Iterable[CartLine] = (),
+) -> VoiceInterpretation:
     """Turn a drink without a temperature into a question instead of a failure.
 
     The model sometimes sends temperature null for products sold iced and hot even
-    though the prompt says to ask. A single allowed temperature is filled in.
+    though the prompt says to ask. A single allowed temperature is filled in. For a
+    change or removal, the cart decides: one line of that product fills its temperature,
+    two lines ask which one.
     """
     products = {item.product_id: item for item in menu}
     calls = []
@@ -84,15 +98,51 @@ def ask_for_missing_temperature(result: VoiceInterpretation, menu: list[MenuItem
                 or (isinstance(call, AddCartItemCall) and not item.available)):
             calls.append(call)  # left for matches_menu, which rejects unsold additions
             continue
+        in_cart = [line for line in cart if line.product_id == item.product_id]
+        if not isinstance(call, AddCartItemCall) and len(in_cart) == 1:
+            calls.append(_with_temperature(call, in_cart[0].temperature))
+            continue
         if len(item.temperatures) > 1:
             return VoiceInterpretation(
                 status="needs_clarification", tool_calls=[],
                 reply_text=f"{item.name}, 따뜻한 것과 아이스 중 무엇으로 할까요?",
             )
-        calls.append(call.model_copy(update={
-            "arguments": call.arguments.model_copy(update={"temperature": item.temperatures[0]}),
-        }))
+        calls.append(_with_temperature(call, item.temperatures[0]))
     return result.model_copy(update={"tool_calls": calls})
+
+
+def drop_repeated_calls(result: VoiceInterpretation) -> VoiceInterpretation:
+    """Keep one of several identical tool inputs.
+
+    The model sometimes repeats the very same call (two "add 1 iced latte" for one
+    "카페라떼 하나요"); nobody orders the same thing twice in one breath, they say a number.
+    """
+    seen, calls = set(), []
+    for call in result.tool_calls:
+        key = (call.tool, call.arguments.model_dump_json())
+        if key in seen:
+            logger.warning("voice interpretation repeated a tool input; kept one")
+            continue
+        seen.add(key)
+        calls.append(call)
+    return result.model_copy(update={"tool_calls": calls}) if len(calls) != len(result.tool_calls) else result
+
+
+def require_cart_items(
+    result: VoiceInterpretation, cart: Iterable[CartLine], menu: list[MenuItem],
+) -> VoiceInterpretation:
+    """A change or removal of something not in the cart becomes a question, not a failure."""
+    lines = {(line.product_id, line.temperature) for line in cart}
+    names = {item.product_id: item.name for item in menu}
+    for call in result.tool_calls:
+        if isinstance(call, AddCartItemCall):
+            continue
+        if (call.arguments.product_id, call.arguments.temperature) not in lines:
+            name = names.get(call.arguments.product_id, call.arguments.product_id)
+            return VoiceInterpretation(
+                status="needs_clarification", tool_calls=[], reply_text=f"{name}, 지금 장바구니에 없어요.",
+            )
+    return result
 
 
 ASK_MENU_REPLY = "어떤 메뉴를 주문할까요?"
@@ -167,6 +217,7 @@ class VoiceService:
         self, session_exists: Callable[[str], bool], repository: VoiceRepository,
         interpreter: VoiceInterpreter, menu_provider: Callable[[], list[MenuItem]],
         ordering: OrderingRepository, executor: CartExecutor | None = None,
+        cart_provider: Callable[[str], Iterable[CartLine]] | None = None,
     ):
         self._session_exists = session_exists
         self._repository = repository
@@ -175,6 +226,19 @@ class VoiceService:
         self._ordering = ordering
         # None: tool_calls are returned as MCP inputs only and the cart is not changed.
         self._executor = executor
+        # What the session has in its cart now, for "하나 더" and "빼 줘"; None reads as empty.
+        self._cart_provider = cart_provider
+
+    def _cart(self, session_id: str) -> list[CartLine]:
+        if self._cart_provider is None:
+            return []
+        try:
+            return list(self._cart_provider(session_id))
+        except Exception:
+            # A cart that cannot be read (completed session, store error) is read as empty;
+            # the ordering service still has the last word when tools run.
+            logger.warning("voice could not read the cart; interpreting without it")
+            return []
 
     def accept(
         self, session_id: str, key: UUID, request: VoiceRequestCreate
@@ -226,15 +290,19 @@ class VoiceService:
                 # Nothing is proposed (or the proposal has lapsed), so "네" must not invent an order.
                 result = VoiceInterpretation(status="needs_clarification", tool_calls=[], reply_text=ASK_MENU_REPLY)
             else:
-                result = await self._interpreter.interpret(request, menu, history)
+                cart = self._cart(session_id)
+                result = await self._interpreter.interpret(request, menu, history, cart)
             if result is not None and not matches_menu(result, menu, allow_missing_temperature=True):
                 logger.warning("voice interpretation rejected (not on menu)")
                 result = None
             if result is not None:
+                cart = self._cart(session_id)
                 # Check named products before asking about a temperature, so the kiosk
                 # never asks about a drink the customer did not mention.
+                result = drop_repeated_calls(result)
                 result = require_named_products(result, request, history, menu)
-                result = ask_for_missing_temperature(result, menu)
+                result = ask_for_missing_temperature(result, menu, cart)
+                result = require_cart_items(result, cart, menu)
             if result is not None and not matches_menu(result, menu):
                 logger.warning("voice interpretation rejected (not on menu)")
                 result = None
