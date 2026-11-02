@@ -370,6 +370,30 @@ class VoiceApiTests(VoiceApiCase):
         self.interpreter.result = interpretation(call("add_cart_item", "sandwich", None, 1))
         self.assertEqual(self.status(self.say("샌드위치 하나 더요")).json()["status"], "completed")
 
+    def test_products_said_earlier_do_not_license_an_ambiguous_instruction_now(self):
+        # Both products were ordered by voice (and sit in the cart); "하나 더요" names neither.
+        self.add_by_touch("americano", "iced", 2)
+        self.add_by_touch("sandwich", None, 1)
+        self.interpreter.result = interpretation(ADD_AMERICANO)
+        self.say("아이스 아메리카노 두 잔")
+        self.interpreter.result = interpretation(call("add_cart_item", "sandwich", None, 1))
+        self.say("에그 샌드위치 하나")
+        self.interpreter.result = interpretation(call("add_cart_item", "sandwich", None, 1))
+        body = self.status(self.say("하나 더요")).json()
+        self.assertEqual((body["status"], body["reply_text"]),
+                         ("needs_clarification", "아이스 아메리카노, 에그 샌드위치 중 어느 것을 말씀하시나요?"))
+
+    def test_product_named_now_wins_over_one_said_earlier(self):
+        self.add_by_touch("americano", "iced", 2)
+        self.add_by_touch("sandwich", None, 1)
+        self.interpreter.result = interpretation(ADD_AMERICANO)
+        self.say("아이스 아메리카노 두 잔")
+        # The customer names the sandwich now; the model returns the americano from before.
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 1))
+        body = self.status(self.say("샌드위치 하나 더요")).json()
+        self.assertEqual((body["status"], body["reply_text"]), ("needs_clarification", "어떤 메뉴를 주문할까요?"))
+        self.assertEqual(body["tool_calls"], [])
+
     def test_unnamed_instruction_with_two_temperatures_in_the_cart_asks_which(self):
         self.add_by_touch("americano", "iced", 1)
         self.add_by_touch("americano", "hot", 1)
@@ -695,8 +719,9 @@ class ToolExecutionApiTests(VoiceApiCase):
                 # The model now reads the acceptance against the long utterance still in context.
                 self.interpreter.result = interpretation(*four)
                 body = self.status(self.say(text)).json()
-                self.assertEqual((body["status"], body["reply_text"]),
-                                 ("needs_clarification", "주문이 길어요. 두 가지씩 나눠서 말씀해 주세요."))
+                # Nothing named now and the cart is empty: the kiosk asks again, never runs.
+                self.assertEqual(body["status"], "needs_clarification")
+                self.assertEqual(body["tool_calls"], [])
                 self.assertEqual(body["actions"], [])
                 self.assertEqual(self.cart()["items"], [], "읽어 주지 않은 항목은 담기지 않음")
 
