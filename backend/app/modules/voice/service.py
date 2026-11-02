@@ -169,45 +169,56 @@ def require_named_products(
     result: VoiceInterpretation, request: VoiceRequestCreate, history: list[VoiceTurn],
     menu: list[MenuItem], cart: Iterable[CartLine] = (),
 ) -> VoiceInterpretation:
-    """Send tool inputs only for products named in this conversation or already in the cart.
+    """Send tool inputs only for products this utterance points at.
 
     A short answer such as "네" or "따뜻한 걸로요" must not become an order the
-    model made up, nor swap in another product. A product is named when its full name
-    or a word only its name has appears in what the customer said (this utterance,
-    its recognition alternatives, earlier utterances such as the base of "하나 더")
-    or in a question the kiosk asked about it ("카페 라떼는 아이스, 따뜻한 것 중
-    무엇으로 할까요?"). A word several names share ("라떼") is not enough; the
-    kiosk asks which one. A general "어떤 메뉴를 주문할까요?" names nothing.
-    What the customer put in the cart by touch counts as named too, so "하나 더요"
-    and "그거 빼 줘" can point at it, but only while the cart leaves one thing to point
-    at: with two products, or one product in two temperatures, the kiosk asks which.
+    model made up, nor swap in another product. What counts, in this order:
+
+    1. Products named in this utterance (or its recognition alternatives) by their full
+       name or a word only their name has. Then every tool input must be one of them;
+       a product the customer said earlier but not now is not enough ("샌드위치 하나
+       더요" must not add the americano from two turns ago).
+    2. Otherwise the product the kiosk's last reply asked about ("카페 라떼는 아이스,
+       따뜻한 것 중 무엇으로 할까요?" → "아이스로요"). A general "어떤 메뉴를
+       주문할까요?" names nothing.
+    3. Otherwise ("하나 더요", "그거 빼 줘") the cart decides: only while it holds exactly
+       one line, and the tool input means that line. Two products, or one product in two
+       temperatures, make the kiosk ask which; an empty cart makes it ask for the menu.
+
+    A word several names share ("라떼") is not enough; the kiosk asks which one.
     """
     if not result.tool_calls:
         return result
-    lines = list(cart)
-    sole = lines[0] if len(lines) == 1 else None
-    in_cart = {line.product_id for line in lines}
-    said = [_compact(request.text), *(_compact(item.text) for item in request.alternatives)]
-    for turn in history:
-        said.append(_compact(turn.request.text))
-        if turn.result.reply_text:
-            said.append(_compact(turn.result.reply_text))
     words = {item.product_id: [w for w in map(_compact, item.name.split()) if len(w) >= 2] for item in menu}
     uses = Counter(word for item_words in words.values() for word in set(item_words))
     names = {item.product_id: item.name for item in menu}
+
+    def named_in(texts: list[str]) -> set[str]:
+        found = set()
+        for product_id in words:
+            keys = [_compact(names[product_id]), *(w for w in words[product_id] if uses[w] == 1)]
+            if any(key and key in text for key in keys for text in texts):
+                found.add(product_id)
+        return found
+
+    now = [_compact(request.text), *(_compact(item.text) for item in request.alternatives)]
+    asked = [_compact(history[-1].result.reply_text)] if history and history[-1].result.reply_text else []
+    allowed = named_in(now) or named_in(asked)
+    lines = list(cart)
+    sole = lines[0] if len(lines) == 1 else None
+    in_cart = {line.product_id for line in lines}
     for call in result.tool_calls:
         product_id = call.arguments.product_id
-        keys = [_compact(names.get(product_id, "")), *(w for w in words.get(product_id, []) if uses[w] == 1)]
-        if any(key and key in text for key in keys for text in said):
-            continue
-        if product_id in in_cart:
-            temperature = call.arguments.temperature
-            if sole is not None and temperature in (None, sole.temperature):
+        if allowed:
+            if product_id in allowed:
+                continue
+        elif product_id in in_cart:
+            if sole is not None and call.arguments.temperature in (None, sole.temperature):
                 continue  # the one thing in the cart is the only thing "그거" can mean
             return VoiceInterpretation(
                 status="needs_clarification", tool_calls=[], reply_text=which_in_cart_reply(lines, menu),
             )
-        shared = [w for w in words.get(product_id, []) if uses[w] > 1 and any(w in text for text in said)]
+        shared = [w for w in words.get(product_id, []) if uses[w] > 1 and any(w in text for text in now)]
         reply = f"{max(shared, key=len)} 중 어떤 메뉴로 할까요?" if shared else ASK_MENU_REPLY
         return VoiceInterpretation(status="needs_clarification", tool_calls=[], reply_text=reply)
     return result
