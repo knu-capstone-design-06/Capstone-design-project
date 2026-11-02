@@ -376,6 +376,31 @@ class VoiceApiTests(VoiceApiCase):
         self.assertEqual((body["status"], body["reply_text"]), ("needs_confirmation", "아이스 아메리카노 4잔으로 바꿀까요?"))
         self.assertEqual(body["tool_calls"], [call("update_cart_item", "americano", "iced", 4)])
 
+    def test_each_spoken_count_checks_the_product_named_before_it(self):
+        self.add_by_touch("americano", "iced", 2)
+        # The model gives the sandwich 1 where the customer said two.
+        self.interpreter.result = interpretation(
+            call("add_cart_item", "americano", "iced", 1), call("add_cart_item", "sandwich", None, 1))
+        body = self.status(self.say("아메리카노 하나 더, 샌드위치 두 개 더")).json()
+        self.assertEqual((body["status"], body["reply_text"]),
+                         ("needs_confirmation", "아이스 아메리카노 1잔 담기, 에그 샌드위치 2개 담기, 이대로 할까요?"))
+        self.assertEqual(body["tool_calls"],
+                         [call("add_cart_item", "americano", "iced", 1), call("add_cart_item", "sandwich", None, 2)])
+
+    def test_spoken_count_past_the_cart_limit_is_refused_with_the_limit(self):
+        self.add_by_touch("americano", "iced", 19)
+        for text, tool_call in [
+            ("100잔 더요", call("add_cart_item", "americano", "iced", 1)),
+            ("두 잔 더요", call("update_cart_item", "americano", "iced", 20)),  # 19 + 2
+        ]:
+            with self.subTest(text=text):
+                self.interpreter.result = interpretation(tool_call)
+                body = self.status(self.say(text)).json()
+                self.assertEqual((body["status"], body["reply_text"]), ("needs_clarification", "한 상품은 20개까지 담을 수 있어요."))
+                self.assertEqual(body["tool_calls"], [])
+        # Nothing was proposed, so "네" does not run anything.
+        self.assertEqual(self.status(self.say("네")).json()["status"], "needs_clarification")
+
     def test_tool_inputs_matching_the_spoken_increment_run_as_they_are(self):
         self.add_by_touch("americano", "iced", 2)
         for text, tool_call in [
@@ -775,6 +800,22 @@ class ToolExecutionApiTests(VoiceApiCase):
         self.assertEqual([(i["product_id"], i["temperature"], i["quantity"]) for i in self.cart()["items"]],
                          [("americano", "iced", 3)])
 
+    def test_wrong_increment_beside_a_removal_is_confirmed_not_run(self):
+        # The reviewer's reproduction: "빼" in the sentence must not switch the count check off.
+        self.add_by_touch("americano", "iced", 2)
+        self.add_by_touch("sandwich", None, 1)
+        self.interpreter.result = interpretation(
+            call("add_cart_item", "americano", "iced", 3), call("remove_cart_item", "sandwich", None))
+        body = self.status(self.say("아이스 아메리카노 하나 더, 샌드위치 빼 주세요")).json()
+        self.assertEqual((body["status"], body["actions"]), ("needs_confirmation", []))
+        self.assertEqual(body["tool_calls"],
+                         [call("add_cart_item", "americano", "iced", 1), call("remove_cart_item", "sandwich", None)])
+        self.assertEqual(self.cart()["total_quantity"], 3)
+        body = self.status(self.say("네")).json()
+        self.assertEqual((body["status"], body["actions"]), ("completed", ["cart_updated"]))
+        self.assertEqual([(i["product_id"], i["temperature"], i["quantity"]) for i in self.cart()["items"]],
+                         [("americano", "iced", 3)])
+
     def test_worded_acceptance_with_the_same_tool_inputs_runs_once(self):
         self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
         self.say("아이스 아메리카노 두 개")
@@ -907,6 +948,39 @@ class SpokenIncrementTests(unittest.TestCase):
         request = VoiceRequestCreate(text="샌드위치 하나 더요", alternatives=[], screen_id="menu_list")
         result = interpretation(call("add_cart_item", "sandwich", None, 1), call("remove_cart_item", "americano", "iced"))
         self.assertIs(limit_to_spoken_increment(result, request, []), result)
+
+    def test_counts_bind_to_the_product_named_before_them(self):
+        from app.modules.voice.service import spoken_increments
+
+        menu = [MenuItem(product_id="americano", name="아메리카노", available=True, temperatures=["iced", "hot"]),
+                MenuItem(product_id="sandwich", name="에그 샌드위치", available=True, temperatures=[])]
+        for text, expected in [
+            ("아메리카노 하나 더, 샌드위치 두 개 더", [("americano", 1), ("sandwich", 2)]),
+            ("아이스 아메리카노 하나 더, 샌드위치 빼 주세요", [("americano", 1)]),
+            ("샌드위치 빼고 아메리카노 하나 더", [("americano", 1)]),
+            ("아메리카노 두 잔이랑 샌드위치 하나 더", [("sandwich", 1)]),
+            ("하나 더요", [(None, 1)]),
+            ("하나 더 빼 주세요", []),
+        ]:
+            with self.subTest(text=text):
+                self.assertEqual(spoken_increments(text, menu), expected)
+
+    def test_counts_that_cannot_be_matched_to_the_tool_inputs_confirm_them_as_they_are(self):
+        from app.modules.voice.service import limit_to_spoken_increment
+
+        menu = [MenuItem(product_id="americano", name="아메리카노", available=True, temperatures=["iced", "hot"]),
+                MenuItem(product_id="sandwich", name="에그 샌드위치", available=True, temperatures=[])]
+        for text, tool_calls in [
+            # The customer counted the sandwich too; the model left it out.
+            ("아메리카노 하나 더, 샌드위치 두 개 더", [call("add_cart_item", "americano", "iced", 1)]),
+            # One unnamed count, two additions: which one is "하나"?
+            ("하나 더요", [call("add_cart_item", "americano", "iced", 1), call("add_cart_item", "sandwich", None, 1)]),
+        ]:
+            with self.subTest(text=text):
+                request = VoiceRequestCreate(text=text, alternatives=[], screen_id="menu_list")
+                result = limit_to_spoken_increment(interpretation(*tool_calls), request, [], menu)
+                self.assertEqual(result.status, "needs_confirmation")
+                self.assertEqual(result.tool_calls, interpretation(*tool_calls).tool_calls)
 
 
 class MissingTemperatureTests(unittest.TestCase):
