@@ -27,6 +27,7 @@ export class OrderController {
   private initializing: Promise<boolean> | null = null;
   private pending: Pending | null = null;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  private voiceCartRefreshSession: string | null = null;
 
   constructor(api: Api, onInvalidOrder: (fields: readonly string[]) => void = () => {}) {
     this.api = api; this.onInvalidOrder = onInvalidOrder;
@@ -35,6 +36,16 @@ export class OrderController {
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   private set(patch: Partial<OrderSnapshot>) {
     this.state = { ...this.state, ...patch };
+    const { session, status, order } = this.state;
+    if (this.voiceCartRefreshSession !== session?.session_id || order || status === 'ended' || status === 'disconnected') {
+      this.voiceCartRefreshSession = null;
+    }
+    if (this.voiceCartRefreshSession && status === 'ready' && !this.pending) {
+      // Start the queued read before notifying the screen, so stale Cart data never
+      // opens a brief ready state between a touch response and the latest snapshot.
+      void this.refreshCartAfterVoice();
+      return;
+    }
     this.listeners.forEach(listener => listener());
   }
 
@@ -98,7 +109,12 @@ export class OrderController {
   /** Server-side voice tools changed the Cart; read the confirmed snapshot before the screen accepts another change. */
   async refreshCartAfterVoice(): Promise<boolean> {
     const { session, status, order } = this.state;
-    if (!session || order || status !== 'ready' || this.pending) return false;
+    if (!session || order || status === 'ended' || status === 'disconnected') return false;
+    // Coalesce notifications for this session while a touch request, its manual
+    // retry, or another voice refresh is running. set() drains this once ready.
+    this.voiceCartRefreshSession = session.session_id;
+    if (status !== 'ready' || this.pending) return false;
+    this.voiceCartRefreshSession = null;
     const sessionId = session.session_id;
     this.set({ status: 'saving', message: '', notice: '', retryAt: 0, canAbandonPending: false, abandonWarning: '' });
     try {
