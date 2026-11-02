@@ -159,17 +159,13 @@ _INCREMENT = re.compile(
     r"|(?P<digits>\d+)(?:잔|개|컵|병)?"
     r"|(?P<short_tens>열|스물|스무)?(?P<short>한|두|세|네)(?:잔|개|컵|병))(?:만|씩)?더"
 )
-DECREASE_WORDS = ("빼", "취소", "줄", "덜", "없")
+# "하나 더 빼 주세요", "하나 더 줄여 주세요": the 더 right before one of these takes away.
+DECREASE_AFTER = ("빼", "취소", "줄", "덜", "없")
+QUANTITY_MAX = 20  # as Quantity in schemas.py and the ordering API
+QUANTITY_LIMIT_REPLY = f"한 상품은 {QUANTITY_MAX}개까지 담을 수 있어요."
 
 
-def spoken_increment(text: str) -> int | None:
-    """The count in "하나 더요", "두 잔 더 주세요"; None when the utterance is not that."""
-    compact = _compact(text)
-    if any(word in compact for word in DECREASE_WORDS):
-        return None  # "하나 더 빼 주세요" takes away
-    found = _INCREMENT.search(compact)
-    if found is None:
-        return None
+def _count(found: re.Match) -> int:
     if found.group("digits"):
         return int(found.group("digits"))
     tens = TENS.get(found.group("tens") or found.group("tens_only") or found.group("short_tens") or "", 0)
@@ -177,29 +173,92 @@ def spoken_increment(text: str) -> int | None:
     return tens + ones
 
 
+def spoken_increments(text: str, menu: list[MenuItem]) -> list[tuple[str | None, int]]:
+    """Every "N 더" in the utterance with the product named just before it, in order.
+
+    "아메리카노 하나 더, 샌드위치 두 개 더" gives [(americano, 1), (sandwich, 2)]; a bare
+    "하나 더요" gives [(None, 1)]. The product is the one named last between the previous
+    count and this one, so "샌드위치 빼고 아메리카노 하나 더" binds to the americano.
+    A 더 followed by 빼/줄여/취소 takes away and is not an increment.
+    """
+    compact = _compact(text)
+    keys = _name_keys(menu)
+    increments, start = [], 0
+    for found in _INCREMENT.finditer(compact):
+        if compact[found.end():].startswith(DECREASE_AFTER):
+            start = found.end()
+            continue
+        segment = compact[start:found.start()]
+        positions = {
+            product_id: max(segment.rfind(key) for key in product_keys)
+            for product_id, product_keys in keys.items()
+            if any(key in segment for key in product_keys)
+        }
+        product_id = max(positions, key=positions.get) if positions else None
+        increments.append((product_id, _count(found)))
+        start = found.end()
+    return increments
+
+
+def spoken_increment(text: str) -> int | None:
+    """The count in a bare "하나 더요", "두 잔 더 주세요"; None when the utterance is not that."""
+    increments = spoken_increments(text, [])
+    return increments[0][1] if len(increments) == 1 else None
+
+
 def limit_to_spoken_increment(
     result: VoiceInterpretation, request: VoiceRequestCreate, cart: Iterable[CartLine],
+    menu: list[MenuItem] = (),
 ) -> VoiceInterpretation:
     """When the customer said how many more, the tool inputs must add exactly that many.
 
     The prompt says "하나 더요" over two iced americanos is add 1, not 3, but the model
     may still send 3 (or update to 5), and the named-product check only looks at the
     product. A spoken count is the customer's own number, so a quantity that disagrees
-    is set to it and read back for confirmation instead of running.
+    is set to it and read back for confirmation instead of running. Each count checks
+    the product named before it; one count with no product checks the one addition
+    no count was named for. Counts that cannot be matched to the tool inputs (two
+    unnamed counts, a count for a product the model left out) make the whole result a
+    confirmation, so nothing the customer did not hear runs. A count past the cart
+    limit is refused with the limit, never stored as a proposal.
     """
-    more = spoken_increment(request.text)
-    if more is None or not result.tool_calls:
+    increments = spoken_increments(request.text, list(menu))
+    targets = [call for call in result.tool_calls if isinstance(call, (AddCartItemCall, UpdateCartItemCall))]
+    if not increments or not targets:
         return result
+    bound: dict[str, int] = {}
+    unbound: list[int] = []
+    ambiguous = False
+    for product_id, count in increments:
+        if product_id is None:
+            unbound.append(count)
+        elif product_id in bound:
+            ambiguous = True  # "아메리카노 하나 더... 아메리카노 두 잔 더": which one?
+        else:
+            bound[product_id] = count
+    unnamed = [call for call in targets if call.arguments.product_id not in bound]
+    if len(unbound) > 1 or (unbound and len(unnamed) != 1):
+        ambiguous = True
+    if any(product_id not in {call.arguments.product_id for call in targets} for product_id in bound):
+        ambiguous = True
+    if ambiguous:
+        logger.warning("voice interpretation spoken counts could not be matched to tool inputs; confirming")
+        return VoiceInterpretation(status="needs_confirmation", tool_calls=result.tool_calls, reply_text="?")
     in_cart = {(line.product_id, line.temperature): line.quantity for line in cart}
     calls, changed = [], False
     for call in result.tool_calls:
-        if isinstance(call, AddCartItemCall):
-            expected = more
-        elif isinstance(call, UpdateCartItemCall):
-            expected = in_cart.get((call.arguments.product_id, call.arguments.temperature), 0) + more
-        else:
+        if call not in targets:
             calls.append(call)
             continue
+        more = bound.get(call.arguments.product_id, unbound[0] if unbound else None)
+        if more is None:
+            calls.append(call)  # no count was said for this one
+            continue
+        expected = more
+        if isinstance(call, UpdateCartItemCall):
+            expected += in_cart.get((call.arguments.product_id, call.arguments.temperature), 0)
+        if not 1 <= expected <= QUANTITY_MAX:
+            return VoiceInterpretation(status="needs_clarification", tool_calls=[], reply_text=QUANTITY_LIMIT_REPLY)
         if call.arguments.quantity != expected:
             logger.warning("voice interpretation quantity disagrees with the spoken count; confirming")
             call = call.model_copy(update={"arguments": call.arguments.model_copy(update={"quantity": expected})})
@@ -216,6 +275,20 @@ PENDING = {"needs_confirmation", "needs_clarification"}
 
 def _compact(text: str) -> str:
     return "".join(ch for ch in text if ch.isalnum())
+
+
+def _name_words(menu: list[MenuItem]) -> dict[str, list[str]]:
+    return {item.product_id: [w for w in map(_compact, item.name.split()) if len(w) >= 2] for item in menu}
+
+
+def _name_keys(menu: list[MenuItem]) -> dict[str, list[str]]:
+    """What names each product in an utterance: its full name, or a word only its name has."""
+    words = _name_words(menu)
+    uses = Counter(word for item_words in words.values() for word in set(item_words))
+    return {
+        item.product_id: [k for k in [_compact(item.name), *(w for w in words[item.product_id] if uses[w] == 1)] if k]
+        for item in menu
+    }
 
 
 def which_in_cart_reply(lines: list[CartLine], menu: list[MenuItem]) -> str:
@@ -254,17 +327,12 @@ def require_named_products(
     """
     if not result.tool_calls:
         return result
-    words = {item.product_id: [w for w in map(_compact, item.name.split()) if len(w) >= 2] for item in menu}
+    words = _name_words(menu)
     uses = Counter(word for item_words in words.values() for word in set(item_words))
-    names = {item.product_id: item.name for item in menu}
+    keys = _name_keys(menu)
 
     def named_in(texts: list[str]) -> set[str]:
-        found = set()
-        for product_id in words:
-            keys = [_compact(names[product_id]), *(w for w in words[product_id] if uses[w] == 1)]
-            if any(key and key in text for key in keys for text in texts):
-                found.add(product_id)
-        return found
+        return {product_id for product_id in keys if any(key in text for key in keys[product_id] for text in texts)}
 
     now = [_compact(request.text), *(_compact(item.text) for item in request.alternatives)]
     asked = [_compact(history[-1].result.reply_text)] if history and history[-1].result.reply_text else []
@@ -404,7 +472,7 @@ class VoiceService:
                 result = require_named_products(result, request, history, menu, cart)
                 result = ask_for_missing_temperature(result, menu, cart)
                 result = require_cart_items(result, cart, menu)
-                result = limit_to_spoken_increment(result, request, cart)
+                result = limit_to_spoken_increment(result, request, cart, menu)
             if result is not None and not matches_menu(result, menu):
                 logger.warning("voice interpretation rejected (not on menu)")
                 result = None
