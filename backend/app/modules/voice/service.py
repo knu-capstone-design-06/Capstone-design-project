@@ -1,5 +1,6 @@
 import hashlib
 import logging
+import re
 from collections import Counter
 from collections.abc import Callable, Iterable
 from uuid import UUID
@@ -143,6 +144,70 @@ def require_cart_items(
                 status="needs_clarification", tool_calls=[], reply_text=f"{name}, 지금 장바구니에 없어요.",
             )
     return result
+
+
+ONES = {
+    "하나": 1, "한": 1, "둘": 2, "두": 2, "셋": 3, "세": 3, "넷": 4, "네": 4, "다섯": 5,
+    "여섯": 6, "일곱": 7, "여덟": 8, "아홉": 9,
+}
+TENS = {"열": 10, "스물": 20, "스무": 20}
+# "하나 더", "두 잔 더", "열아홉 잔 더", "3개 더", "한 잔만 더": a count, an optional unit,
+# then 더. The one-syllable counts (한, 두, 세, 네) need the unit, so "네" the yes is never four.
+_INCREMENT = re.compile(
+    r"(?:(?P<tens>열|스물|스무)?(?P<ones>하나|둘|셋|넷|다섯|여섯|일곱|여덟|아홉)(?:잔|개|컵|병)?"
+    r"|(?P<tens_only>열|스물|스무)(?:잔|개|컵|병)?"
+    r"|(?P<digits>\d+)(?:잔|개|컵|병)?"
+    r"|(?P<short_tens>열|스물|스무)?(?P<short>한|두|세|네)(?:잔|개|컵|병))(?:만|씩)?더"
+)
+DECREASE_WORDS = ("빼", "취소", "줄", "덜", "없")
+
+
+def spoken_increment(text: str) -> int | None:
+    """The count in "하나 더요", "두 잔 더 주세요"; None when the utterance is not that."""
+    compact = _compact(text)
+    if any(word in compact for word in DECREASE_WORDS):
+        return None  # "하나 더 빼 주세요" takes away
+    found = _INCREMENT.search(compact)
+    if found is None:
+        return None
+    if found.group("digits"):
+        return int(found.group("digits"))
+    tens = TENS.get(found.group("tens") or found.group("tens_only") or found.group("short_tens") or "", 0)
+    ones = ONES.get(found.group("ones") or found.group("short") or "", 0)
+    return tens + ones
+
+
+def limit_to_spoken_increment(
+    result: VoiceInterpretation, request: VoiceRequestCreate, cart: Iterable[CartLine],
+) -> VoiceInterpretation:
+    """When the customer said how many more, the tool inputs must add exactly that many.
+
+    The prompt says "하나 더요" over two iced americanos is add 1, not 3, but the model
+    may still send 3 (or update to 5), and the named-product check only looks at the
+    product. A spoken count is the customer's own number, so a quantity that disagrees
+    is set to it and read back for confirmation instead of running.
+    """
+    more = spoken_increment(request.text)
+    if more is None or not result.tool_calls:
+        return result
+    in_cart = {(line.product_id, line.temperature): line.quantity for line in cart}
+    calls, changed = [], False
+    for call in result.tool_calls:
+        if isinstance(call, AddCartItemCall):
+            expected = more
+        elif isinstance(call, UpdateCartItemCall):
+            expected = in_cart.get((call.arguments.product_id, call.arguments.temperature), 0) + more
+        else:
+            calls.append(call)
+            continue
+        if call.arguments.quantity != expected:
+            logger.warning("voice interpretation quantity disagrees with the spoken count; confirming")
+            call = call.model_copy(update={"arguments": call.arguments.model_copy(update={"quantity": expected})})
+            changed = True
+        calls.append(call)
+    if not changed:
+        return result
+    return VoiceInterpretation(status="needs_confirmation", tool_calls=calls, reply_text="?")
 
 
 ASK_MENU_REPLY = "어떤 메뉴를 주문할까요?"
@@ -339,6 +404,7 @@ class VoiceService:
                 result = require_named_products(result, request, history, menu, cart)
                 result = ask_for_missing_temperature(result, menu, cart)
                 result = require_cart_items(result, cart, menu)
+                result = limit_to_spoken_increment(result, request, cart)
             if result is not None and not matches_menu(result, menu):
                 logger.warning("voice interpretation rejected (not on menu)")
                 result = None
