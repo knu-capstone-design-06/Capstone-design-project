@@ -30,12 +30,14 @@ create table kiosk.carts (
 create table kiosk.cart_items (
     item_id text primary key check (length(btrim(item_id)) > 0),
     session_id text not null references kiosk.carts(session_id) on delete cascade,
+    position integer not null check (position >= 0),
     product_id text not null references kiosk.products(product_id) on delete restrict,
     name text not null check (length(btrim(name)) > 0),
     temperature text check (temperature in ('iced', 'hot')),
     quantity integer not null check (quantity between 1 and 20),
     unit_price bigint not null check (unit_price >= 0),
     line_amount bigint generated always as (unit_price * quantity) stored,
+    constraint cart_items_session_position unique (session_id, position),
     constraint cart_items_one_product_option unique nulls not distinct
         (session_id, product_id, temperature)
 );
@@ -79,7 +81,7 @@ create table kiosk.order_request_replays (
 
 comment on table kiosk.products is 'First-demo catalog, served only by the backend';
 comment on table kiosk.carts is 'One versioned cart per kiosk session; totals derive from cart_items';
-comment on table kiosk.cart_items is 'Current cart lines; one row per session, product, and temperature';
+comment on table kiosk.cart_items is 'Current cart lines ordered by session and position; one row per product and temperature';
 comment on table kiosk.orders is 'One simulated order per session; no payment or stock change';
 comment on table kiosk.order_items is 'Immutable product, option, and price snapshot at order confirmation';
 comment on table kiosk.order_request_replays is 'Successful cart/order response replay by session and key';
