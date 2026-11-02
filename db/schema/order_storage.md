@@ -77,16 +77,74 @@ where n.nspname = 'kiosk'
                     'order_items', 'order_request_replays')
 order by c.relname;
 
-select table_name, privilege_type
-from information_schema.role_table_grants
-where table_schema = 'kiosk'
-  and grantee in ('kiosk_backend', 'anon', 'authenticated')
+-- 명시적 테이블 GRANT: grantee 0은 PUBLIC이다.
+select c.relname as table_name,
+       case when a.grantee = 0 then 'PUBLIC' else r.rolname end as grantee,
+       a.privilege_type
+from pg_class c
+join pg_namespace n on n.oid = c.relnamespace
+cross join lateral aclexplode(coalesce(c.relacl, acldefault('r', c.relowner))) a
+left join pg_roles r on r.oid = a.grantee
+where n.nspname = 'kiosk'
+  and c.relname in ('products', 'carts', 'cart_items', 'orders',
+                    'order_items', 'order_request_replays')
+  and (a.grantee = 0 or r.rolname in ('kiosk_backend', 'anon', 'authenticated'))
 order by table_name, grantee, privilege_type;
+
+-- 실제 유효 권한: PUBLIC과 상속된 역할의 GRANT도 반영한다.
+with roles(role_name) as (
+    values ('kiosk_backend'), ('anon'), ('authenticated')
+), tables(table_name) as (
+    values ('products'), ('carts'), ('cart_items'), ('orders'),
+           ('order_items'), ('order_request_replays')
+)
+select role_name, table_name,
+       has_schema_privilege(role_name, 'kiosk', 'USAGE') as schema_usage,
+       has_table_privilege(role_name, format('kiosk.%I', table_name), 'SELECT') as can_select,
+       has_table_privilege(role_name, format('kiosk.%I', table_name), 'INSERT') as can_insert,
+       has_table_privilege(role_name, format('kiosk.%I', table_name), 'UPDATE') as can_update,
+       has_table_privilege(role_name, format('kiosk.%I', table_name), 'DELETE') as can_delete
+from roles cross join tables
+order by role_name, table_name;
 ```
 
 기대 결과는 상품 17건, 새 테이블 6개 모두 RLS `true`, 브라우저 역할의 권한
-없음이다. `kiosk_backend`로 조회·쓰기를 별도로 확인하고, 기존 세션 생성·조회도
-회귀 확인한다. 실제 주문을 DB에 저장하는 검증은 백엔드 연결 PR에서 수행한다.
+없음이다. 유효 권한 표에서 `anon`·`authenticated`의 `schema_usage`와 네 가지
+테이블 권한은 모두 `false`여야 한다. `kiosk_backend`는 스키마 사용·상품 조회,
+각 테이블에 마이그레이션에서 허용한 작업만 `true`여야 한다. 예상 밖의 `true`는
+PUBLIC 또는 상속된 역할의 권한을 포함해 원인을 확인한다.
+
+관리자 연결에서 아래 블록을 **각각 따로** 실행해 실제 역할도 확인한다.
+`SET LOCAL ROLE`이 허용된 연결이어야 하며, 실패하면 테스트한 것으로 기록하지
+않는다. 거부 예상 쿼리는 오류로 트랜잭션이 중단되므로 `ROLLBACK`을 별도로
+실행한다. 테스트는 조회만 수행하며 운영 데이터를 변경하지 않는다.
+
+```sql
+begin;
+set local role kiosk_backend;
+select current_user, count(*) from kiosk.products;
+rollback;
+```
+
+```sql
+begin;
+set local role anon;
+select current_user;
+select count(*) from kiosk.products; -- permission denied 예상
+-- 위 오류 뒤 별도로 ROLLBACK 실행
+```
+
+```sql
+begin;
+set local role authenticated;
+select current_user;
+select count(*) from kiosk.products; -- permission denied 예상
+-- 위 오류 뒤 별도로 ROLLBACK 실행
+```
+
+`kiosk_backend`의 쓰기 권한은 위 유효 권한 표로 확인하고, 실제 INSERT·UPDATE·DELETE와
+RLS 동작은 격리된 복구 연습 환경에서 트랜잭션 롤백과 함께 검증한다. 기존 세션
+생성·조회도 회귀 확인한다. 실제 주문 DB 저장 검증은 백엔드 연결 PR에서 수행한다.
 
 ## 이벤트·지원 이력
 
