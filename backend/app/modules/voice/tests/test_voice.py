@@ -870,6 +870,43 @@ class ToolExecutionApiTests(VoiceApiCase):
         self.assertEqual([(i["product_id"], i["temperature"], i["quantity"]) for i in self.cart()["items"]],
                          [("latte", "hot", 1), ("americano", "iced", 1)])
 
+    def test_touch_change_between_the_checks_and_execution_is_not_overwritten(self):
+        # The reviewer's reproduction: "하나 더요" over 2 cups read as "3잔으로"; a touch makes
+        # it 5 before the executor runs. Running 3 now would throw the touch away.
+        from app.modules.ordering.schemas import AddItemRequest
+        from app.modules.voice.executor import OrderingCartExecutor
+
+        self.add_by_touch("americano", "iced", 2)
+        self.interpreter.result = interpretation(call("update_cart_item", "americano", "iced", 3))
+        original = OrderingCartExecutor.execute
+
+        def touch_then_execute(executor, session_id, request_id, calls, expected=None):
+            cart = executor.service.cart(session_id)
+            executor.service.add_item(session_id, str(uuid4()), AddItemRequest(
+                expected_version=cart.version, product_id="americano", temperature="iced", quantity=3))
+            return original(executor, session_id, request_id, calls, expected)
+
+        with patch.object(OrderingCartExecutor, "execute", autospec=True, side_effect=touch_then_execute):
+            body = self.status(self.say("하나 더요")).json()
+        self.assertEqual((body["status"], body["reply_text"], body["actions"]),
+                         ("needs_confirmation", "아이스 아메리카노 3잔으로 바꿀까요?", []))
+        self.assertEqual(self.cart()["total_quantity"], 5, "터치로 더한 3잔이 남아 있음")
+        # "네" runs the read-back inputs on the cart as the customer now sees it.
+        body = self.status(self.say("네")).json()
+        self.assertEqual((body["status"], body["actions"]), ("completed", ["cart_updated"]))
+        self.assertEqual(self.cart()["total_quantity"], 3)
+
+    def test_touch_change_after_a_proposal_makes_yes_confirm_again(self):
+        self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
+        self.say("아이스 아메리카노 두 개")
+        self.add_by_touch("sandwich", None, 1)
+        body = self.status(self.say("네")).json()
+        self.assertEqual((body["status"], body["reply_text"], body["actions"]), ("needs_confirmation", CONFIRM, []))
+        self.assertEqual(self.cart()["total_quantity"], 1)
+        body = self.status(self.say("네")).json()
+        self.assertEqual((body["status"], body["actions"]), ("completed", ["cart_updated"]))
+        self.assertEqual(self.cart()["total_quantity"], 3)
+
     def test_wrong_increment_beside_a_removal_is_confirmed_not_run(self):
         # The reviewer's reproduction: "빼" in the sentence must not switch the count check off.
         self.add_by_touch("americano", "iced", 2)
@@ -1149,6 +1186,21 @@ class ToolExecutionTests(unittest.TestCase):
     @staticmethod
     def lines(cart):
         return [(item.product_id, item.temperature, item.quantity) for item in cart.items]
+
+    def test_cart_other_than_the_one_checked_runs_nothing(self):
+        from app.modules.voice.executor import CartChanged
+        from app.modules.voice.schemas import CartLine
+
+        self.execute(call("add_cart_item", "americano", "iced", 5))
+        checked = [CartLine(product_id="americano", temperature="iced", quantity=2)]
+        with self.assertRaises(CartChanged) as raised:
+            self.executor.execute("s1", "vr_2", interpretation(call("update_cart_item", "americano", "iced", 3)).tool_calls, checked)
+        self.assertEqual(raised.exception.cart, [CartLine(product_id="americano", temperature="iced", quantity=5)])
+        self.assertEqual(self.lines(self.service.cart("s1")), [("americano", "iced", 5)])
+        # The same cart as checked runs as before.
+        cart = self.executor.execute("s1", "vr_3", interpretation(call("update_cart_item", "americano", "iced", 3)).tool_calls,
+                                     raised.exception.cart)
+        self.assertEqual(self.lines(cart), [("americano", "iced", 3)])
 
     def test_applies_tool_inputs_in_spoken_order(self):
         cart = self.execute(
