@@ -413,6 +413,19 @@ class VoiceApiTests(VoiceApiCase):
         self.assertEqual((body["status"], body["reply_text"]), ("needs_confirmation", "아이스 아메리카노 2잔으로 바꿀까요?"))
         self.assertEqual(body["tool_calls"], [call("update_cart_item", "americano", "iced", 2)])
 
+    def test_count_said_in_the_utterance_the_kiosk_asked_about_still_holds(self):
+        self.interpreter.result = interpretation(reply_text="아메리카노, 따뜻한 것과 아이스 중 무엇으로 할까요?")
+        self.say("아메리카노 두 잔이요")
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 2))
+        body = self.status(self.say("아이스로요")).json()
+        self.assertEqual((body["status"], body["tool_calls"]), ("completed", [call("add_cart_item", "americano", "iced", 2)]))
+        # A different number than the two cups asked about is read back first.
+        self.interpreter.result = interpretation(reply_text="아메리카노, 따뜻한 것과 아이스 중 무엇으로 할까요?")
+        self.say("아메리카노 두 잔이요")
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 5))
+        body = self.status(self.say("아이스로요")).json()
+        self.assertEqual((body["status"], body["reply_text"]), ("needs_confirmation", "아이스 아메리카노 2잔 담을까요?"))
+
     def test_answer_with_a_temperature_other_than_the_model_picked_is_confirmed(self):
         self.interpreter.result = interpretation(reply_text="아메리카노, 따뜻한 것과 아이스 중 무엇으로 할까요?")
         self.say("아메리카노 하나요")
@@ -906,6 +919,19 @@ class ToolExecutionApiTests(VoiceApiCase):
         body = self.status(self.say("네")).json()
         self.assertEqual((body["status"], body["actions"]), ("completed", ["cart_updated"]))
         self.assertEqual(self.cart()["total_quantity"], 3)
+
+    def test_addition_with_no_spoken_count_runs_only_as_one(self):
+        # One cup, as the prompt says for an order with no count, runs.
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 1))
+        body = self.status(self.say("아이스 아메리카노 주세요")).json()
+        self.assertEqual((body["status"], body["actions"]), ("completed", ["cart_updated"]))
+        self.assertEqual(self.cart()["total_quantity"], 1)
+        # The reviewer's reproduction: no count said, twenty returned.
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 20))
+        body = self.status(self.say("아이스 아메리카노 주세요")).json()
+        self.assertEqual((body["status"], body["reply_text"], body["actions"]),
+                         ("needs_confirmation", "아이스 아메리카노 20잔 담을까요?", []))
+        self.assertEqual(self.cart()["total_quantity"], 1)
 
     def test_wrong_increment_beside_a_removal_is_confirmed_not_run(self):
         # The reviewer's reproduction: "빼" in the sentence must not switch the count check off.
