@@ -13,8 +13,9 @@ from app.modules.voice.executor import (
 from app.modules.voice.interpreter import VoiceInterpreter
 from app.modules.voice.repository import VoiceRepository
 from app.modules.voice.schemas import (
-    AddCartItemCall, CartLine, MenuItem, UpdateCartItemCall, VoiceErrorResponse,
-    VoiceInterpretation, VoiceRequestAccepted, VoiceRequestCreate, VoiceRequestStatus, VoiceTurn,
+    AddCartItemCall, CartItemQuantity, CartItemTarget, CartLine, MenuItem, RemoveCartItemCall,
+    UpdateCartItemCall, VoiceErrorResponse, VoiceInterpretation, VoiceRequestAccepted,
+    VoiceRequestCreate, VoiceRequestStatus, VoiceTurn,
 )
 
 logger = logging.getLogger(__name__)
@@ -151,16 +152,21 @@ ONES = {
     "여섯": 6, "일곱": 7, "여덟": 8, "아홉": 9,
 }
 TENS = {"열": 10, "스물": 20, "스무": 20}
-# "하나 더", "두 잔 더", "열아홉 잔 더", "3개 더", "한 잔만 더": a count, an optional unit,
-# then 더. The one-syllable counts (한, 두, 세, 네) need the unit, so "네" the yes is never four.
-_INCREMENT = re.compile(
+# "하나", "두 잔", "열아홉 잔", "3개", "한 잔만": a count and an optional unit. The one-syllable
+# counts (한, 두, 세, 네) need the unit, so "네" the yes is never four and "따뜻한" never one.
+_COUNT = re.compile(
     r"(?:(?P<tens>열|스물|스무)?(?P<ones>하나|둘|셋|넷|다섯|여섯|일곱|여덟|아홉)(?:잔|개|컵|병)?"
     r"|(?P<tens_only>열|스물|스무)(?:잔|개|컵|병)?"
     r"|(?P<digits>\d+)(?:잔|개|컵|병)?"
-    r"|(?P<short_tens>열|스물|스무)?(?P<short>한|두|세|네)(?:잔|개|컵|병))(?:만|씩)?더"
+    r"|(?P<short_tens>열|스물|스무)?(?P<short>한|두|세|네)(?:잔|개|컵|병))(?:만|씩)?"
 )
-# "하나 더 빼 주세요", "하나 더 줄여 주세요": the 더 right before one of these takes away.
+# Right after a count (or its 더): "하나 빼 주세요", "하나 더 빼 주세요", "하나 줄여요" take away.
 DECREASE_AFTER = ("빼", "취소", "줄", "덜", "없")
+SPOKEN_TEMPERATURES = {
+    "아이스": "iced", "차가운": "iced", "차갑게": "iced", "시원한": "iced", "시원하게": "iced",
+    "따뜻한": "hot", "따뜻하게": "hot", "뜨거운": "hot", "뜨겁게": "hot",
+}
+_TEMPERATURE = re.compile("|".join(sorted(SPOKEN_TEMPERATURES, key=len, reverse=True)))
 QUANTITY_MAX = 20  # as Quantity in schemas.py and the ordering API
 QUANTITY_LIMIT_REPLY = f"한 상품은 {QUANTITY_MAX}개까지 담을 수 있어요."
 
@@ -173,31 +179,52 @@ def _count(found: re.Match) -> int:
     return tens + ones
 
 
-def spoken_increments(text: str, menu: list[MenuItem]) -> list[tuple[str | None, int]]:
-    """Every "N 더" in the utterance with the product named just before it, in order.
+def _name_positions(compact: str, menu: list[MenuItem]) -> list[tuple[int, str]]:
+    """Where each product is named in the utterance, as (position, product_id), in order."""
+    positions = []
+    for product_id, keys in _name_keys(menu).items():
+        for key in keys:
+            positions.extend((found.start(), product_id) for found in re.finditer(re.escape(key), compact))
+    return sorted(set(positions))
 
-    "아메리카노 하나 더, 샌드위치 두 개 더" gives [(americano, 1), (sandwich, 2)]; a bare
-    "하나 더요" gives [(None, 1)]. The product is the one named last between the previous
-    count and this one, so "샌드위치 빼고 아메리카노 하나 더" binds to the americano.
-    A 더 followed by 빼/줄여/취소 takes away and is not an increment.
+
+def spoken_mentions(
+    text: str, menu: list[MenuItem],
+) -> tuple[list[tuple[str | None, str, int]], list[tuple[str | None, str]]]:
+    """The counts and temperatures the customer said, each tied to a product.
+
+    Counts: (product_id, kind, n) with kind "more" ("하나 더"), "less" ("하나 빼", "하나 더
+    빼") or "abs" ("두 잔", "세 잔으로"). A count belongs to the product named last before
+    it since the previous count, so "아메리카노 하나 더, 샌드위치 두 개 더" gives
+    [(americano, more, 1), (sandwich, more, 2)] and a bare "하나 더요" gives [(None, more, 1)].
+    Temperatures: (product_id, temperature) tied to the product named next after the word
+    ("아이스 아메리카노"), else last before it ("아메리카노 아이스로"), else None ("아이스로요").
     """
     compact = _compact(text)
-    keys = _name_keys(menu)
-    increments, start = [], 0
-    for found in _INCREMENT.finditer(compact):
-        if compact[found.end():].startswith(DECREASE_AFTER):
-            start = found.end()
-            continue
-        segment = compact[start:found.start()]
-        positions = {
-            product_id: max(segment.rfind(key) for key in product_keys)
-            for product_id, product_keys in keys.items()
-            if any(key in segment for key in product_keys)
-        }
-        product_id = max(positions, key=positions.get) if positions else None
-        increments.append((product_id, _count(found)))
+    names = _name_positions(compact, menu)
+    counts, start = [], 0
+    for found in _COUNT.finditer(compact):
+        after = compact[found.end():]
+        if after.startswith("더"):
+            kind = "less" if after[1:].startswith(DECREASE_AFTER) else "more"
+        else:
+            kind = "less" if after.startswith(DECREASE_AFTER) else "abs"
+        before = [product_id for position, product_id in names if start <= position < found.start()]
+        counts.append((before[-1] if before else None, kind, _count(found)))
         start = found.end()
-    return increments
+    temperatures = []
+    for found in _TEMPERATURE.finditer(compact):
+        after = [product_id for position, product_id in names if position >= found.end()]
+        before = [product_id for position, product_id in names if position < found.start()]
+        product_id = after[0] if after else before[-1] if before else None
+        temperatures.append((product_id, SPOKEN_TEMPERATURES[found.group()]))
+    return counts, temperatures
+
+
+def spoken_increments(text: str, menu: list[MenuItem]) -> list[tuple[str | None, int]]:
+    """Every "N 더" in the utterance with the product named just before it, in order."""
+    counts, _ = spoken_mentions(text, menu)
+    return [(product_id, n) for product_id, kind, n in counts if kind == "more"]
 
 
 def spoken_increment(text: str) -> int | None:
@@ -206,63 +233,113 @@ def spoken_increment(text: str) -> int | None:
     return increments[0][1] if len(increments) == 1 else None
 
 
-def limit_to_spoken_increment(
+def _removal(call) -> RemoveCartItemCall:
+    return RemoveCartItemCall(
+        tool="remove_cart_item",
+        arguments=CartItemTarget(product_id=call.arguments.product_id, temperature=call.arguments.temperature),
+    )
+
+
+def _with_quantity(call, quantity: int):
+    return call.model_copy(update={"arguments": call.arguments.model_copy(update={"quantity": quantity})})
+
+
+def match_spoken_details(
     result: VoiceInterpretation, request: VoiceRequestCreate, cart: Iterable[CartLine],
     menu: list[MenuItem] = (),
 ) -> VoiceInterpretation:
-    """When the customer said how many more, the tool inputs must add exactly that many.
+    """The counts and temperatures the customer said must be what the tool inputs do.
 
-    The prompt says "하나 더요" over two iced americanos is add 1, not 3, but the model
-    may still send 3 (or update to 5), and the named-product check only looks at the
-    product. A spoken count is the customer's own number, so a quantity that disagrees
-    is set to it and read back for confirmation instead of running. Each count checks
-    the product named before it; one count with no product checks the one addition
-    no count was named for. Counts that cannot be matched to the tool inputs (two
-    unnamed counts, a count for a product the model left out) make the whole result a
-    confirmation, so nothing the customer did not hear runs. A count past the cart
-    limit is refused with the limit, never stored as a proposal.
+    The prompt tells the model to copy them, but it may still answer "아이스 아메리카노
+    한 잔 주세요" with three cups or a hot one, or "하나 더요" over two cups with add 3,
+    and the earlier checks only look at the product. What the customer said is their own
+    order, so a tool input that disagrees is set to it and read back for confirmation
+    instead of running: an addition gets the spoken count ("두 잔"), "N 더" adds N to the
+    cart line, "N 빼" takes N off it (down to removing the line), and a spoken temperature
+    replaces the model's. A count or temperature with no product goes with the one tool
+    input that has none of its own. Anything that cannot be matched (two unnamed counts,
+    a count for a product the model left out, two different counts for one product) turns
+    the whole result into a confirmation, so nothing the customer did not hear runs. A
+    count past the cart limit is refused with the limit and never stored as a proposal.
     """
-    increments = spoken_increments(request.text, list(menu))
-    targets = [call for call in result.tool_calls if isinstance(call, (AddCartItemCall, UpdateCartItemCall))]
-    if not increments or not targets:
+    menu = list(menu)
+    counts, temperatures = spoken_mentions(request.text, menu)
+    if not result.tool_calls or not (counts or temperatures):
         return result
-    bound: dict[str, int] = {}
-    unbound: list[int] = []
-    ambiguous = False
-    for product_id, count in increments:
-        if product_id is None:
-            unbound.append(count)
-        elif product_id in bound:
-            ambiguous = True  # "아메리카노 하나 더... 아메리카노 두 잔 더": which one?
-        else:
-            bound[product_id] = count
-    unnamed = [call for call in targets if call.arguments.product_id not in bound]
-    if len(unbound) > 1 or (unbound and len(unnamed) != 1):
-        ambiguous = True
-    if any(product_id not in {call.arguments.product_id for call in targets} for product_id in bound):
-        ambiguous = True
-    if ambiguous:
-        logger.warning("voice interpretation spoken counts could not be matched to tool inputs; confirming")
-        return VoiceInterpretation(status="needs_confirmation", tool_calls=result.tool_calls, reply_text="?")
+    products = {item.product_id: item for item in menu}
     in_cart = {(line.product_id, line.temperature): line.quantity for line in cart}
+    said = {call.arguments.product_id for call in result.tool_calls}
+    quantified = [call for call in result.tool_calls if not isinstance(call, RemoveCartItemCall)]
+    ambiguous = False
+
+    bound_counts: dict[str, tuple[str, int]] = {}
+    unbound_counts: list[tuple[str, int]] = []
+    for product_id, kind, n in counts:
+        if product_id is None:
+            unbound_counts.append((kind, n))
+        elif product_id in bound_counts or product_id not in said:
+            ambiguous = True  # two counts for one product, or a count for a product the model left out
+        else:
+            bound_counts[product_id] = (kind, n)
+    uncounted = [call for call in quantified if call.arguments.product_id not in bound_counts]
+    if len(unbound_counts) > 1 or (unbound_counts and len(uncounted) != 1):
+        ambiguous = True
+
+    bound_temperatures: dict[str, set[str]] = {}
+    unbound_temperatures: set[str] = set()
+    for product_id, temperature in temperatures:
+        if product_id is None:
+            unbound_temperatures.add(temperature)
+        else:
+            bound_temperatures.setdefault(product_id, set()).add(temperature)
+    if len(unbound_temperatures) > 1 or (unbound_temperatures and len(result.tool_calls) != 1):
+        ambiguous = True
+
+    if ambiguous:
+        logger.warning("voice interpretation: spoken counts or temperatures could not be matched; confirming")
+        return VoiceInterpretation(status="needs_confirmation", tool_calls=result.tool_calls, reply_text="?")
+
     calls, changed = [], False
     for call in result.tool_calls:
-        if call not in targets:
-            calls.append(call)
-            continue
-        more = bound.get(call.arguments.product_id, unbound[0] if unbound else None)
-        if more is None:
-            calls.append(call)  # no count was said for this one
-            continue
-        expected = more
-        if isinstance(call, UpdateCartItemCall):
-            expected += in_cart.get((call.arguments.product_id, call.arguments.temperature), 0)
-        if not 1 <= expected <= QUANTITY_MAX:
-            return VoiceInterpretation(status="needs_clarification", tool_calls=[], reply_text=QUANTITY_LIMIT_REPLY)
-        if call.arguments.quantity != expected:
-            logger.warning("voice interpretation quantity disagrees with the spoken count; confirming")
-            call = call.model_copy(update={"arguments": call.arguments.model_copy(update={"quantity": expected})})
-            changed = True
+        product_id = call.arguments.product_id
+        item = products.get(product_id)
+        spoken = bound_temperatures.get(product_id) or unbound_temperatures
+        if spoken and call.arguments.temperature is not None and call.arguments.temperature not in spoken:
+            if len(spoken) > 1:
+                return VoiceInterpretation(status="needs_confirmation", tool_calls=result.tool_calls, reply_text="?")
+            temperature = next(iter(spoken))
+            if item is not None and temperature not in item.temperatures:
+                return VoiceInterpretation(
+                    status="needs_clarification", tool_calls=[],
+                    reply_text=f"{item.name}, 따뜻한 것과 아이스 중 무엇으로 할까요?",
+                )
+            logger.warning("voice interpretation temperature disagrees with the spoken one; confirming")
+            call, changed = _with_temperature(call, temperature), True
+        count = bound_counts.get(product_id) or (unbound_counts[0] if unbound_counts and call in uncounted else None)
+        if count is not None:
+            kind, n = count
+            current = in_cart.get((product_id, call.arguments.temperature), 0)
+            if isinstance(call, RemoveCartItemCall):
+                if kind != "less":
+                    return VoiceInterpretation(status="needs_confirmation", tool_calls=result.tool_calls, reply_text="?")
+                expected = current - n  # "하나 빼 주세요" over three cups leaves two, not none
+            elif isinstance(call, UpdateCartItemCall):
+                expected = {"more": current + n, "less": current - n, "abs": n}[kind]
+            elif kind == "less":
+                return VoiceInterpretation(status="needs_confirmation", tool_calls=result.tool_calls, reply_text="?")
+            else:
+                expected = n
+            if expected > QUANTITY_MAX:
+                return VoiceInterpretation(status="needs_clarification", tool_calls=[], reply_text=QUANTITY_LIMIT_REPLY)
+            if expected <= 0:
+                if not isinstance(call, RemoveCartItemCall):
+                    call, changed = _removal(call), True
+            elif isinstance(call, RemoveCartItemCall):
+                call, changed = UpdateCartItemCall(tool="update_cart_item", arguments=CartItemQuantity(
+                    product_id=product_id, temperature=call.arguments.temperature, quantity=expected)), True
+            elif call.arguments.quantity != expected:
+                logger.warning("voice interpretation quantity disagrees with the spoken count; confirming")
+                call, changed = _with_quantity(call, expected), True
         calls.append(call)
     if not changed:
         return result
@@ -471,8 +548,8 @@ class VoiceService:
                 result = drop_repeated_calls(result)
                 result = require_named_products(result, request, history, menu, cart)
                 result = ask_for_missing_temperature(result, menu, cart)
+                result = match_spoken_details(result, request, cart, menu)
                 result = require_cart_items(result, cart, menu)
-                result = limit_to_spoken_increment(result, request, cart, menu)
             if result is not None and not matches_menu(result, menu):
                 logger.warning("voice interpretation rejected (not on menu)")
                 result = None
