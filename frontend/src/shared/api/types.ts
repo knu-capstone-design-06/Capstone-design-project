@@ -21,6 +21,8 @@ export interface TouchFeatures {
   repeat_tap_count: number;
   back_count: number;
   dwell_ms: number;
+  /** Optional versioned interaction observations. Existing five-field clients remain valid. */
+  interaction?: import('./interactionTypes.ts').InteractionFeatures | null;
 }
 
 export interface VisionFeatures {

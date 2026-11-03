@@ -17,6 +17,8 @@ import './orderAccessibility.css';
 
 const supportLabels: Record<keyof Settings, string> = { largeText: '큰 글씨 (200%)', largeButton: '큰 버튼', simpleScreen: '간편 화면', stepGuide: '단계별 안내', lowScreen: '낮은 화면', highContrast: '고대비' };
 const sampleMode = import.meta.env.DEV && import.meta.env.VITE_ORDER_SAMPLE === 'true';
+// Team contract and backend support are pending; opt in only for a coordinated pilot.
+const touchPilotEnabled = import.meta.env.VITE_TOUCH_INTERACTION_DRAFT === 'true';
 
 export function OrderPage() {
   const [controller] = useState(() => new OrderController(sampleMode ? createSampleOrderApi() : backendApi, fields => {
@@ -50,7 +52,7 @@ export function OrderPage() {
   const actionsRef = useRef<HTMLElement>(null);
   const opener = useRef<HTMLButtonElement | null>(null);
   const observation = captureTouchLogObservation(state, selected ? { productId: selected.product_id, temperature, quantity } : null, voice);
-  const touchLog = useTouchLog(screen, category === 'all' ? '전체' : categoryLabels[category], selected?.product_id ?? null, settings, state.session?.session_id ?? null, observation);
+  const touchLog = useTouchLog(screen, category === 'all' ? '전체' : categoryLabels[category], selected?.product_id ?? null, settings, state.session?.session_id ?? null, observation, !sampleMode && touchPilotEnabled);
   useEffect(() => { void controller.initialize(); }, [controller]);
   useEffect(() => {
     voiceController.setEnabled(false);
