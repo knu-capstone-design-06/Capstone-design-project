@@ -844,6 +844,18 @@ class ToolExecutionApiTests(VoiceApiCase):
         self.assertEqual([(i["product_id"], i["temperature"], i["quantity"]) for i in self.cart()["items"]],
                          [("americano", "iced", 1)])
 
+    def test_temperature_said_after_its_product_is_not_given_to_the_next_product(self):
+        # The reviewer's reproduction: "아이스" belongs to the americano before it, not the sandwich after.
+        self.interpreter.result = interpretation(
+            call("add_cart_item", "americano", "hot", 1), call("add_cart_item", "sandwich", None, 1))
+        body = self.status(self.say("아메리카노 아이스로 하고 샌드위치 하나 주세요")).json()
+        self.assertEqual((body["status"], body["reply_text"], body["actions"]),
+                         ("needs_confirmation", "아이스 아메리카노 1잔 담기, 에그 샌드위치 1개 담기, 이대로 할까요?", []))
+        self.assertEqual(self.cart()["items"], [])
+        body = self.status(self.say("네")).json()
+        self.assertEqual([(i["product_id"], i["temperature"], i["quantity"]) for i in self.cart()["items"]],
+                         [("americano", "iced", 1), ("sandwich", None, 1)])
+
     def test_wrong_increment_beside_a_removal_is_confirmed_not_run(self):
         # The reviewer's reproduction: "빼" in the sentence must not switch the count check off.
         self.add_by_touch("americano", "iced", 2)
@@ -1023,6 +1035,8 @@ class SpokenIncrementTests(unittest.TestCase):
             ("따뜻한 걸로요", [], [(None, "hot")]),
             ("아이스 아메리카노 하나랑 따뜻한 카페라떼 하나",
              [("americano", "abs", 1), ("latte", "abs", 1)], [("americano", "iced"), ("latte", "hot")]),
+            ("아메리카노 아이스로 하고 카페라떼 하나 주세요", [("latte", "abs", 1)], [("americano", "iced")]),
+            ("아이스로 아메리카노랑 카페라떼 주세요", [], [(None, "iced")]),
             ("네", [], []),
         ]:
             with self.subTest(text=text):
@@ -1038,6 +1052,11 @@ class SpokenIncrementTests(unittest.TestCase):
             ("아메리카노 하나 더, 샌드위치 두 개 더", [call("add_cart_item", "americano", "iced", 1)]),
             # One unnamed count, two additions: which one is "하나"?
             ("하나 더요", [call("add_cart_item", "americano", "iced", 1), call("add_cart_item", "sandwich", None, 1)]),
+            # A temperature tied to nothing, two additions: which one is iced?
+            ("아이스로 아메리카노랑 샌드위치 주세요",
+             [call("add_cart_item", "americano", "hot", 1), call("add_cart_item", "sandwich", None, 1)]),
+            # A temperature tied to a product sold at no temperature.
+            ("아이스 샌드위치 하나", [call("add_cart_item", "sandwich", None, 1)]),
         ]:
             with self.subTest(text=text):
                 request = VoiceRequestCreate(text=text, alternatives=[], screen_id="menu_list")
