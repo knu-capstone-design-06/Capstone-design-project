@@ -1,4 +1,4 @@
-"""Atomic process-local ordering state; replaced by DB storage in a later PR."""
+"""Atomic process-local ordering state when DATABASE_URL is unset."""
 
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from threading import RLock
 
-from app.modules.ordering.schemas import Cart, Order
+from app.modules.ordering.catalog import PRODUCTS
+from app.modules.ordering.schemas import Cart, Order, Product
 
 
 @dataclass
@@ -71,3 +72,10 @@ class OrderingRepository:
 
     def save(self, session_id: str, key: str, fingerprint: str, response: Cart | Order):
         self.replays[(session_id, key)] = Replay(fingerprint, response.model_copy(deep=True))
+
+    def products(self) -> list[Product]:
+        return [product.model_copy(deep=True) for product in PRODUCTS]
+
+    def product(self, product_id: str) -> Product | None:
+        product = next((item for item in PRODUCTS if item.product_id == product_id), None)
+        return product.model_copy(deep=True) if product is not None else None

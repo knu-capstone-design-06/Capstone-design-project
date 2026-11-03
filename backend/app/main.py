@@ -7,14 +7,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from app.common.config.settings import Settings, get_settings
+from app.infrastructure.database.postgres import PostgresDatabase
 from app.infrastructure.external.ai_client import AiEngineClient
 from app.infrastructure.external.openai_client import OpenAiClient, create_openai_http
 from app.modules.connectivity.router import router as connectivity_router
 from app.modules.ordering.catalog import PRODUCTS
 from app.modules.ordering.repository import OrderingRepository
+from app.modules.ordering.postgres_repository import PostgresOrderingRepository
 from app.modules.ordering.router import router as ordering_router
 from app.modules.ordering.service import OrderingService
 from app.modules.sessions.repository import SessionRepository
+from app.modules.sessions.postgres_repository import PostgresSessionRepository
 from app.modules.sessions.router import router as sessions_router
 from app.modules.sessions.service import SessionService
 from app.modules.voice.executor import OrderingCartExecutor
@@ -43,7 +46,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             app.state.ai_engine_client = AiEngineClient(
                 http, settings.ai_engine_timeout_seconds
             )
-            session_repository = SessionRepository()
+            if settings.database_url is not None:
+                database = PostgresDatabase(settings.database_url.get_secret_value())
+                database.check()
+                app.state.ordering_repository = PostgresOrderingRepository(database)
+                session_repository = PostgresSessionRepository(database)
+            else:
+                app.state.ordering_repository = OrderingRepository()
+                session_repository = SessionRepository()
             app.state.session_service = SessionService(
                 session_repository, app.state.ordering_repository
             )
@@ -67,7 +77,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 session_repository.exists, VoiceRepository(),
                 build_voice_interpreter(openai),
                 # Same demo catalog the ordering API sells.
-                menu_provider=lambda: menu_from_products(PRODUCTS),
+                menu_provider=lambda: menu_from_products(
+                    app.state.ordering_repository.products()
+                    if settings.database_url is not None else PRODUCTS
+                ),
                 ordering=app.state.ordering_repository,
                 executor=executor,
             )
