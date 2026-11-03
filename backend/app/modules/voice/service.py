@@ -197,8 +197,10 @@ def spoken_mentions(
     빼") or "abs" ("두 잔", "세 잔으로"). A count belongs to the product named last before
     it since the previous count, so "아메리카노 하나 더, 샌드위치 두 개 더" gives
     [(americano, more, 1), (sandwich, more, 2)] and a bare "하나 더요" gives [(None, more, 1)].
-    Temperatures: (product_id, temperature) tied to the product named next after the word
-    ("아이스 아메리카노"), else last before it ("아메리카노 아이스로"), else None ("아이스로요").
+    Temperatures: (product_id, temperature) tied to the product named right after the word
+    with nothing in between ("아이스 아메리카노"), else to the last product named before it
+    ("아메리카노 아이스로 하고 샌드위치 하나": the americano, not the sandwich), else None
+    ("아이스로요").
     """
     compact = _compact(text)
     names = _name_positions(compact, menu)
@@ -214,9 +216,9 @@ def spoken_mentions(
         start = found.end()
     temperatures = []
     for found in _TEMPERATURE.finditer(compact):
-        after = [product_id for position, product_id in names if position >= found.end()]
+        adjacent = [product_id for position, product_id in names if position == found.end()]
         before = [product_id for position, product_id in names if position < found.start()]
-        product_id = after[0] if after else before[-1] if before else None
+        product_id = adjacent[0] if adjacent else before[-1] if before else None
         temperatures.append((product_id, SPOKEN_TEMPERATURES[found.group()]))
     return counts, temperatures
 
@@ -290,6 +292,8 @@ def match_spoken_details(
     for product_id, temperature in temperatures:
         if product_id is None:
             unbound_temperatures.add(temperature)
+        elif product_id in products and not products[product_id].temperatures:
+            ambiguous = True  # "아이스 샌드위치": the word must have meant something else
         else:
             bound_temperatures.setdefault(product_id, set()).add(temperature)
     if len(unbound_temperatures) > 1 or (unbound_temperatures and len(result.tool_calls) != 1):
