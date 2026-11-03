@@ -276,9 +276,13 @@ def match_spoken_details(
     already read back (confirmed) run as they are.
     """
     menu = list(menu)
-    if not result.tool_calls or (confirmed is not None and result.tool_calls == confirmed):
+    if not result.tool_calls:
         return result
     counts, temperatures = spoken_mentions(request.text, menu)
+    if confirmed is not None and result.tool_calls == confirmed and not (counts or temperatures):
+        # "네 그걸로 주세요": the offer as read back, taken as it stands. An utterance with
+        # a count or temperature of its own ("한 잔만 주세요") is a correction, checked below.
+        return result
     last = history[-1] if history else None
     if (not counts and last is not None and last.result.status == "needs_clarification"
             and (last.result.reply_text or "").endswith("?")):
