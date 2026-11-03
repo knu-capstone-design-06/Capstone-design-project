@@ -86,6 +86,8 @@ export function buildTouchFeatureWindow(saved: SavedLog, now: number, sequence: 
         options_open: selectionEvent ? data(selectionEvent).after !== null : null,
         order_busy: busy(order), voice_enabled: typeof voice?.enabled === 'boolean' ? voice.enabled : null,
         microphone_active: typeof voice?.microphoneActive === 'boolean' ? voice.microphoneActive : null,
+        voice_processing: typeof voice?.phase === 'string' ? voice.phase === 'processing' : null,
+        voice_auto_off: voice?.autoOff === 'silence' || voice?.autoOff === 'idle' ? voice.autoOff : null,
         ui_settings: {
           large_text: settings.largeText === true, large_button: settings.largeButton === true,
           simple_screen: settings.simpleScreen === true, step_guide: settings.stepGuide === true,

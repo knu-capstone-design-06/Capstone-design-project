@@ -24,6 +24,8 @@ export interface InteractionFeatures {
   order_busy: boolean;
   voice_enabled: boolean | null;
   microphone_active: boolean | null;
+  voice_processing: boolean | null;
+  voice_auto_off: 'silence' | 'idle' | null;
   ui_settings: {
     large_text: boolean; large_button: boolean; simple_screen: boolean;
     step_guide: boolean; low_screen: boolean; high_contrast: boolean;

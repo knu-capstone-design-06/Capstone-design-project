@@ -152,3 +152,22 @@ test('busy state spanning the window is integrated and an absent baseline remain
   saved.events = saved.events.filter(e => e.kind !== 'order_state_change' || Date.parse(e.occurredAt) > 1000);
   assert.equal(buildTouchFeatureWindow(saved, 3000, 1).touch.interaction.order_busy_ms, null);
 });
+
+test('voice processing and automatic shutdown are context, not touch inactivity', () => {
+  const f = fixture();
+  f.record(1500, 'voice_state_change', {
+    before: { enabled: false, microphoneActive: false, phase: 'idle', autoOff: null },
+    after: { enabled: true, microphoneActive: false, phase: 'processing', autoOff: null },
+  });
+  let extra = buildTouchFeatureWindow(f.recorder.read(), 3000, 1).touch.interaction;
+  assert.equal(extra.voice_processing, true);
+  assert.equal(extra.voice_auto_off, null);
+  f.record(3200, 'voice_state_change', {
+    before: { enabled: true, microphoneActive: false, phase: 'processing', autoOff: null },
+    after: { enabled: false, microphoneActive: false, phase: 'idle', autoOff: 'silence' },
+  });
+  extra = buildTouchFeatureWindow(f.recorder.read(), 4000, 2).touch.interaction;
+  assert.equal(extra.voice_processing, false);
+  assert.equal(extra.voice_auto_off, 'silence');
+  assert.equal(extra.voice_enabled, false);
+});
