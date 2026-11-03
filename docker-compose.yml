@@ -23,6 +23,8 @@ services:
       OPENAI_TIMEOUT_SECONDS: ${OPENAI_TIMEOUT_SECONDS:-}
       # true: completed voice results change the cart. Empty = tool_calls only.
       VOICE_EXECUTE_TOOLS: ${VOICE_EXECUTE_TOOLS:-}
+      # Optional Supabase persistence; keep the value in the uncommitted root .env.
+      DATABASE_URL: ${DATABASE_URL:-}
     depends_on:
       ai-engine:
         condition: service_healthy

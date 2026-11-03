@@ -1,6 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -25,6 +25,27 @@ class Settings(BaseSettings):
     openai_timeout_seconds: float = Field(default=10.0, gt=0, allow_inf_nan=False)
     # Off: voice results return tool_calls only. On: completed tool_calls change the cart.
     voice_execute_tools: bool = False
+    # Optional first-demo persistence. The URL is server-only and must use the
+    # dedicated kiosk_backend login, never the Supabase postgres/admin account.
+    database_url: SecretStr | None = None
+
+    @field_validator("database_url")
+    @classmethod
+    def validate_database_url(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is None:
+            return None
+        parsed = urlsplit(value.get_secret_value())
+        user = unquote(parsed.username or "")
+        if (
+            parsed.scheme not in {"postgresql", "postgres"}
+            or not parsed.hostname or parsed.path != "/postgres"
+            or not (user == "kiosk_backend" or user.startswith("kiosk_backend."))
+            or not parsed.password
+            or parsed.fragment
+        ):
+            raise ValueError("DATABASE_URL must be a kiosk_backend PostgreSQL URL")
+        _ = parsed.port
+        return value
 
     @field_validator("ai_engine_url")
     @classmethod
