@@ -8,7 +8,7 @@ from uuid import UUID
 from app.modules.ordering.repository import OrderingRepository
 from app.modules.voice.exceptions import VoiceRequestNotFound, VoiceSessionNotFound
 from app.modules.voice.executor import (
-    FALLBACK_EXECUTION_REPLY, CartExecutor, ToolExecutionFailed,
+    FALLBACK_EXECUTION_REPLY, CartChanged, CartExecutor, ToolExecutionFailed,
 )
 from app.modules.voice.interpreter import VoiceInterpreter
 from app.modules.voice.repository import VoiceRepository
@@ -532,11 +532,14 @@ class VoiceService:
             # A proposal answers this one utterance, whatever it turns out to be: an
             # ignored or failed exchange in between must not leave it waiting for a later "네".
             proposal = self._repository.take_proposal(session_id)
+            # The cart the tool inputs are checked against; execution runs only on that cart.
+            expected: list[CartLine] | None = None
             if proposal is not None and is_bare_yes(request.text):
                 # The customer accepted what the kiosk proposed, so run exactly that proposal.
                 # A fresh model reading of "네" could differ from it (another quantity) and
                 # would otherwise pass the menu checks and change the cart.
-                result = VoiceInterpretation(status="completed", tool_calls=proposal, reply_text=None)
+                result = VoiceInterpretation(status="completed", tool_calls=proposal.tool_calls, reply_text=None)
+                expected = proposal.cart
             elif last is not None and last.status == "needs_clarification" and is_bare_yes(request.text):
                 # "네" cannot answer "아이스, 따뜻한 것 중 무엇으로?"; ask again instead of guessing.
                 result = last
@@ -550,7 +553,9 @@ class VoiceService:
                 logger.warning("voice interpretation rejected (not on menu)")
                 result = None
             if result is not None:
-                cart = self._cart(session_id)
+                cart = list(self._cart(session_id))
+                if expected is None:
+                    expected = cart
                 # Check named products before asking about a temperature, so the kiosk
                 # never asks about a drink the customer did not mention.
                 result = drop_repeated_calls(result)
@@ -563,7 +568,7 @@ class VoiceService:
                 result = None
             if (result is not None and result.status == "completed"
                     and self._repository.needs_reconfirm(session_id)
-                    and result.tool_calls != proposal):
+                    and (proposal is None or result.tool_calls != proposal.tool_calls)):
                 # An answer to a confirmation went to the model ("네 그걸로 주세요"), which
                 # may answer with other tool inputs than the customer confirmed, or the
                 # proposal has lapsed and the model read the answer against older turns;
@@ -580,7 +585,7 @@ class VoiceService:
                     self._repository.mark_reconfirm(session_id)
                 else:
                     result = result.model_copy(update={"reply_text": text})
-                    self._repository.set_proposal(session_id, result.tool_calls)
+                    self._repository.set_proposal(session_id, result.tool_calls, cart)
         except Exception:
             # A voice failure must not affect touch ordering; record it as unavailable.
             logger.exception("voice interpretation crashed")
@@ -603,7 +608,21 @@ class VoiceService:
             # A proposal (needs_confirmation) is not run; the customer's "네" comes back
             # as a completed result and is run then.
             try:
-                self._executor.execute(session_id, request_id, result.tool_calls)
+                self._executor.execute(session_id, request_id, result.tool_calls, expected)
+            except CartChanged as changed:
+                # A touch changed the cart after the inputs were checked ("3잔으로" was
+                # "하나 더" over two cups; now there are five). Nothing ran: read the same
+                # inputs back against the cart as it is now, and "네" runs them on that.
+                logger.warning("voice tool execution skipped: cart changed since the checks; confirming")
+                if proposal is not None:
+                    self._repository.discard_proposal_turn(session_id)
+                text = confirmation_text(result.tool_calls, menu)
+                if text is None:
+                    result = VoiceInterpretation(status="needs_clarification", tool_calls=[], reply_text=SPLIT_ORDER_REPLY)
+                    self._repository.mark_reconfirm(session_id)
+                else:
+                    result = VoiceInterpretation(status="needs_confirmation", tool_calls=result.tool_calls, reply_text=text)
+                    self._repository.set_proposal(session_id, result.tool_calls, changed.cart)
             except ToolExecutionFailed as failed:
                 self._repository.update(request_id, "failed", failed.reply_text, error=failed.error)
                 return
@@ -616,7 +635,8 @@ class VoiceService:
                     error=VoiceErrorResponse(code="cart_update_failed", detail="장바구니에 반영하지 못했습니다."),
                 )
                 return
-            actions = ["cart_updated"]
+            if result.status == "completed":
+                actions = ["cart_updated"]
         if result.status == "completed":
             # An order went through (accepted or read with no open offer): later readings
             # are orders again.
