@@ -51,7 +51,7 @@ Jev에는 후속 연동에서 시간 구간·관측 여부·현재 화면·비�
 | `cart_change_count` | 이전·이후 서버 Cart 버전 증가를 관측한 횟수. 최초 기준선 제외 | 주문이 실제로 진행되는지 확인하여 불필요한 도움을 거둘 근거. 터치·음성 원인과 개별 성공 횟수는 구분할 수 없음 |
 | `selection_change_count` | 상품·옵션·수량 선택 상태의 변화 수. 최초 기준선 제외 | 옵션을 조정 중인지, 아무 행동 없이 멈춘 상태인지 구분 |
 | `ui_settings_change_count` | 접근성 설정 변경 수 | 사용자가 도움을 직접 조정하는 흐름 확인. 지원 제안 수락·거절을 대신하지 않음 |
-| `voice_state_change_count` | 음성 모드·마이크·처리 단계의 변화 수. 최초 기준선 제외 | 터치 대신 음성을 사용하는 상황을 함께 고려 |
+| `voice_state_change_count` | 음성 모드·마이크·처리 단계의 변화 수. 최초 기준선 제외 | 터치 대신 음성을 사용하는 상황을 함께 고려. 발화 한 번에도 `listening → processing → idle`로 2~3회 늘 수 있어 모드 켬·끔 횟수나 발화 횟수가 아님 |
 | `since_last_input_ms` | 현재 방문의 마지막 누름 이후 ms. 누름 이력 없음은 `null` | 선택 후 멈춤을 확인. 성공 조작 후 정지나 사용자 부재를 의미하지 않음 |
 | `order_busy_ms` | 구간 내 프론트 주문 상태 `loading/saving` 시간의 합. 구간 시작 상태가 없으면 `null` | 시스템 응답을 기다리는 정지를 사용자 망설임으로 오해하지 않도록 보조. 실제 서버 처리 지연·요청별 소요 시간과 다름 |
 
@@ -62,6 +62,8 @@ Jev에는 후속 연동에서 시간 구간·관측 여부·현재 화면·비�
 | `options_open` | 현재 옵션 선택 중인지. 상태 기록 없음은 `null` |
 | `order_busy` | 현재 주문 처리·조회 대기 중인지 |
 | `voice_enabled`, `microphone_active` | 음성 입력 중이라 터치가 없는 경우를 구분. 상태 기록 없음은 `null` |
+| `voice_processing` | backend 음성 요청을 기다리는 단계인지. 상태 기록 없음은 `null` |
+| `voice_auto_off` | 음성 모드가 무음(`silence`) 또는 유휴 시간(`idle`)으로 저절로 꺼진 이유. 값이 있으면 사용자가 직접 끈 것과 구분하며, `null`은 자동 종료 이유를 관측하지 못했거나 자동 종료가 아니었음을 뜻함 |
 | `ui_settings` | 큰 글씨·큰 버튼·간편 화면·단계 안내·낮은 화면·고대비 적용 여부. 이미 켠 도움을 다시 제안하지 않을 근거 |
 | `visit_id` | 구간 종료 시 화면 방문. 같은 화면 재방문과 이전 방문을 구분 |
 | `window_sequence` | 현재 서버 세션에서 전송을 시도한 구간의 순서. 서버 중복 제거·최신 결과 적용을 보장하는 필드는 아님 |
@@ -78,6 +80,8 @@ Jev에는 후속 연동에서 시간 구간·관측 여부·현재 화면·비�
 - 자동 지원 제안·수락·거절·적용·되돌리기: 지원 UI와 결과 이벤트 계약을 연결한 뒤 추가한다. 현재 설정 변경만으로 거절 여부를 만들지 않는다.
 
 원시 영상·음성·인식 문장·상품별 선택 내역·포인터 좌표·전체 원시 이벤트는 이 요청에 포함하지 않는다.
+
+`since_last_input_ms`는 마지막 터치 누름만 기준으로 하므로 음성 요청을 처리하는 동안에도 늘어날 수 있다. 따라서 판단 층은 `voice_processing: true` 또는 `order_busy: true`인 구간을 사용자 망설임으로 단정하지 않는다. `voice_auto_off`는 자동 종료 사유만 보내며, 사용자가 끈 동작·인식 문장·음성 오류 상세는 보내지 않는다.
 
 ## 5. 전송 조건과 실패 처리
 
@@ -153,6 +157,8 @@ Jev에는 후속 연동에서 시간 구간·관측 여부·현재 화면·비�
       "order_busy": false,
       "voice_enabled": false,
       "microphone_active": false,
+      "voice_processing": false,
+      "voice_auto_off": null,
       "ui_settings": {
         "large_text": false,
         "large_button": false,
@@ -169,7 +175,7 @@ Jev에는 후속 연동에서 시간 구간·관측 여부·현재 화면·비�
 }
 ```
 
-위 예시의 모든 횟수는 0 이상의 정수, 시간은 밀리초, 거리는 CSS px이며 비율은 0~1이다. `outside_tap_ratio`, `outside_nearest_distance_mean_px`, `screen_revisit_count`, `since_last_input_ms`, `order_busy_ms`, `options_open`, `voice_enabled`, `microphone_active`는 관측 불충분 시 `null`을 제안한다. `vision`은 측정값이 없으면 `null`이다. 이 예시는 서버 수신·저장·Jev 판단 완료를 의미하지 않는다.
+위 예시의 모든 횟수는 0 이상의 정수, 시간은 밀리초, 거리는 CSS px이며 비율은 0~1이다. `outside_tap_ratio`, `outside_nearest_distance_mean_px`, `screen_revisit_count`, `since_last_input_ms`, `order_busy_ms`, `options_open`, `voice_enabled`, `microphone_active`, `voice_processing`은 관측 불충분 시 `null`을 제안한다. `voice_auto_off`의 `null`은 자동 종료 이유가 없거나 관측되지 않았음을 뜻한다. `vision`은 측정값이 없으면 `null`이다. 이 예시는 서버 수신·저장·Jev 판단 완료를 의미하지 않는다.
 
 ## 7. 검증 범위
 
