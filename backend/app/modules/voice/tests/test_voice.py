@@ -932,6 +932,17 @@ class ToolExecutionApiTests(VoiceApiCase):
         self.assertEqual((body["status"], body["reply_text"], body["actions"]),
                          ("needs_confirmation", "아이스 아메리카노 20잔 담을까요?", []))
         self.assertEqual(self.cart()["total_quantity"], 1)
+        # The customer corrects the count; the model repeats the offered twenty. The
+        # correction is checked, not the offer.
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 20))
+        body = self.status(self.say("아이스 아메리카노 한 잔만 주세요")).json()
+        self.assertEqual((body["status"], body["reply_text"], body["actions"]),
+                         ("needs_confirmation", "아이스 아메리카노 1잔 담을까요?", []))
+        self.assertEqual(body["tool_calls"], [call("add_cart_item", "americano", "iced", 1)])
+        self.assertEqual(self.cart()["total_quantity"], 1)
+        body = self.status(self.say("네")).json()
+        self.assertEqual((body["status"], body["actions"]), ("completed", ["cart_updated"]))
+        self.assertEqual(self.cart()["total_quantity"], 2)
 
     def test_wrong_increment_beside_a_removal_is_confirmed_not_run(self):
         # The reviewer's reproduction: "빼" in the sentence must not switch the count check off.
