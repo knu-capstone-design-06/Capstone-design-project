@@ -184,6 +184,13 @@ class IntegrationTests(unittest.TestCase):
         for timeout in (0, -1, float("inf"), float("nan")):
             with self.assertRaises(ValidationError):
                 Settings(_env_file=None, ai_engine_timeout_seconds=timeout)
+        for url in (
+            "postgresql://postgres:secret@db.example:5432/postgres",
+            "postgresql://kiosk_backend:secret@db.example:5432/other",
+            "http://kiosk_backend:secret@db.example/postgres",
+        ):
+            with self.assertRaises(ValidationError):
+                Settings(_env_file=None, database_url=url)
 
     def test_window_requires_timezone_and_positive_duration(self):
         for override in (
