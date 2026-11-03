@@ -2,7 +2,7 @@ import hashlib
 import logging
 import re
 from collections import Counter
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from uuid import UUID
 
 from app.modules.ordering.repository import OrderingRepository
@@ -253,7 +253,7 @@ def _with_quantity(call, quantity: int):
 
 def match_spoken_details(
     result: VoiceInterpretation, request: VoiceRequestCreate, cart: Iterable[CartLine],
-    menu: list[MenuItem] = (),
+    menu: list[MenuItem] = (), history: Sequence[VoiceTurn] = (), confirmed: list | None = None,
 ) -> VoiceInterpretation:
     """The counts and temperatures the customer said must be what the tool inputs do.
 
@@ -268,11 +268,22 @@ def match_spoken_details(
     a count for a product the model left out, two different counts for one product) turns
     the whole result into a confirmation, so nothing the customer did not hear runs. A
     count past the cart limit is refused with the limit and never stored as a proposal.
+
+    An addition with no spoken count is one ("아이스 아메리카노 주세요"); any other model
+    quantity, and any quantity change with no count, is read back first. When this
+    utterance answers the kiosk's question ("카페라떼 두 잔이요" → "아이스로요"), the counts
+    of the utterance that was asked about still hold. Tool inputs equal to what the kiosk
+    already read back (confirmed) run as they are.
     """
     menu = list(menu)
-    counts, temperatures = spoken_mentions(request.text, menu)
-    if not result.tool_calls or not (counts or temperatures):
+    if not result.tool_calls or (confirmed is not None and result.tool_calls == confirmed):
         return result
+    counts, temperatures = spoken_mentions(request.text, menu)
+    last = history[-1] if history else None
+    if (not counts and last is not None and last.result.status == "needs_clarification"
+            and (last.result.reply_text or "").endswith("?")):
+        # An answer to the kiosk's question keeps the counts of the utterance asked about.
+        counts = spoken_mentions(last.request.text, menu)[0]
     products = {item.product_id: item for item in menu}
     in_cart = {(line.product_id, line.temperature): line.quantity for line in cart}
     said = {call.arguments.product_id for call in result.tool_calls}
@@ -310,7 +321,7 @@ def match_spoken_details(
         logger.warning("voice interpretation: spoken counts or temperatures could not be matched; confirming")
         return VoiceInterpretation(status="needs_confirmation", tool_calls=result.tool_calls, reply_text="?")
 
-    calls, changed = [], False
+    calls, changed, unspoken = [], False, False
     for call in result.tool_calls:
         product_id = call.arguments.product_id
         item = products.get(product_id)
@@ -348,9 +359,15 @@ def match_spoken_details(
             elif call.arguments.quantity != expected:
                 logger.warning("voice interpretation quantity disagrees with the spoken count; confirming")
                 call, changed = _with_quantity(call, expected), True
+        elif isinstance(call, UpdateCartItemCall) or (
+                isinstance(call, AddCartItemCall) and call.arguments.quantity != 1):
+            # No count was said; the model's number is its own, so the customer hears it first.
+            unspoken = True
         calls.append(call)
-    if not changed:
+    if not (changed or unspoken):
         return result
+    if unspoken:
+        logger.warning("voice interpretation quantity was not spoken; confirming")
     return VoiceInterpretation(status="needs_confirmation", tool_calls=calls, reply_text="?")
 
 
@@ -561,7 +578,8 @@ class VoiceService:
                 result = drop_repeated_calls(result)
                 result = require_named_products(result, request, history, menu, cart)
                 result = ask_for_missing_temperature(result, menu, cart)
-                result = match_spoken_details(result, request, cart, menu)
+                result = match_spoken_details(
+                    result, request, cart, menu, history, proposal.tool_calls if proposal else None)
                 result = require_cart_items(result, cart, menu)
             if result is not None and not matches_menu(result, menu):
                 logger.warning("voice interpretation rejected (not on menu)")
