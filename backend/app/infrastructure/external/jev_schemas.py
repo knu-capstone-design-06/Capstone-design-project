@@ -45,7 +45,7 @@ class ScoreAnswer(_Answer):
     """score is a number on the scale the question gave; legend names each step."""
 
     type: Literal["score"]
-    score: float = Field(allow_inf_nan=False)
+    score: float = Field(strict=True, allow_inf_nan=False)  # a JSON number: "3" and true are refused
     confidence: Probability
     probabilities: dict[str, Probability]
     legend: dict[str, JsonValue]
