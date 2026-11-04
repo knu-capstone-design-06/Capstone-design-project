@@ -25,6 +25,12 @@ Columns (names = the ones events.py reads, then observation-only columns no rule
                         anew at this frame); observation only. primary_box is None while the main user's track is alive
                         but has no box in this frame.
   primary_track         track id of the main user (also while its track has no box in this frame); observation only
+  face_in_primary       whether the centre of the face the Face Landmarker tracks lies inside the main user's box: True,
+                        False, or None when the face or the main user's box is not there. False = the face is someone
+                        else's: the chain (chain.FrameChain) then blanks the face values of the row (FACE_VALUE_COLUMNS)
+                        and mouth_motion, so the events layer reads them as missing, not as the main user's
+  face_track            track id of the largest head box around the face centre (the box choose_primary takes by the
+                        face), or None; observation only (whose face the landmarker follows)
   head_boxes            every head box of the frame in H1 order, one dict each: track (id), cx, cy, w, h (fractions of
                         the frame), score (H1), role ('primary' | 'companion' | 'behind' | 'other' | 'unknown') and the
                         cues against the main user - rel_dist, lateral of this frame and rel_dist_med, lateral_med of
@@ -45,7 +51,10 @@ stays the main user, and only after it ended is a new one chosen among the boxes
 face_cy), so the yaw, the mouth and the head box belong to the same person at the moment of choice; without such a box
 (face not seen, or no box around it) the largest box, ties broken by the distance of the box centre to the frame's
 vertical centre line. 'largest' = always the largest box. The Face Landmarker follows one face on its own, so after the
-choice a face centre outside the main user's box (primary_box) means the face and the head box are two people.
+choice a face centre outside the main user's box (primary_box) means the face and the head box are two people; that
+frame's face values are not the main user's (face_in_primary). A new touch-log session (chain.FrameChain) starts the
+tracks, the main user and the cue history again (HeadPeople.reset; tree section 4 ①: a new session is judged from the
+start); track ids keep counting, so an id names one track in a run.
 
 Cues of every other track against the main user (relative_cues), in frames where both have a box: rel_dist = h_primary /
 h_box (box heights; a pinhole camera images a head at a size inversely proportional to its distance, so with heads of
@@ -75,8 +84,14 @@ from .events import SEEN
 SHOULDERS = (11, 12)   # left / right shoulder in the 33-point pose map [D3]; = features.SHOULDERS
 DIR_COLUMNS = tuple(f"head_dir_{k}" for k in DIR_KEYS)
 HEAD_COLUMNS = ("people_behind_count", "companion_box", "head_count", "primary_box", "primary_score",
-                "primary_from", "primary_track") + DIR_COLUMNS + ("head_boxes",)
+                "primary_from", "primary_track", "face_in_primary", "face_track") + DIR_COLUMNS + ("head_boxes",)
 OPTIONAL_COLUMNS = HEAD_COLUMNS + ("shoulder_cx", "shoulder_cy", "mouth_motion")
+# features.COLUMNS that the Face Landmarker's face gives (its position, size, angles and the face box's image
+# statistics): blanked where that face is not the main user's (face_in_primary False). face_state, the face detector's
+# columns (face_count, face_det_score, det_box_w_frac) and the run counters stay.
+FACE_VALUE_COLUMNS = ("iod_px", "iod_frac_w", "iod_ratio_start", "yaw_deg", "pitch_deg", "roll_deg", "dyaw_start_deg",
+                      "dpitch_start_deg", "face_cx", "face_cy", "face_y_max", "face_shift", "iod_step", "bright_face",
+                      "lapvar_face")
 SMALLER_THAN_USER = 1.0   # decision table 3 '주 사용자보다 작은 상자': rel_dist > 1 = a head box smaller than the user's
 ROLES = ("primary", "companion", "behind", "other", "unknown")
 
@@ -108,6 +123,26 @@ def _areas(boxes: np.ndarray) -> np.ndarray:
     return (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])          # fraction units: ratios = pixel ratios
 
 
+def _order(boxes: np.ndarray) -> list:
+    """Box indices largest first; ties by distance to the vertical centre line, then index (stable)."""
+    areas = _areas(boxes)
+    centre_x = (boxes[:, 0] + boxes[:, 2]) / 2.0
+    return sorted(range(len(boxes)), key=lambda i: (-areas[i], abs(centre_x[i] - 0.5), i))
+
+
+def inside(face_xy, box) -> bool:
+    """Whether the point (x, y) lies inside the box (x0, y0, x1, y1), edges included."""
+    return bool(box[0] <= face_xy[0] <= box[2] and box[1] <= face_xy[1] <= box[3])
+
+
+def face_box(boxes, face_xy):
+    """Index of the largest head box around the face centre (ordered as choose_primary), or None."""
+    boxes = np.asarray(boxes, dtype=np.float64).reshape(-1, 4)
+    if face_xy is None or not len(boxes):
+        return None
+    return next((i for i in _order(boxes) if inside(face_xy, boxes[i])), None)
+
+
 def choose_primary(boxes, face_xy, rule: str) -> tuple:
     """(index, how) of the main user among one frame's head boxes (fractions x0, y0, x1, y1) by primary_rule (module
     docstring), how = 'face' | 'largest'; (None, None) without boxes. face_xy = (face_cx, face_cy) of the tracked face,
@@ -115,16 +150,11 @@ def choose_primary(boxes, face_xy, rule: str) -> tuple:
     boxes = np.asarray(boxes, dtype=np.float64).reshape(-1, 4)
     if not len(boxes):
         return None, None
-    areas = _areas(boxes)
-    centre_x = (boxes[:, 0] + boxes[:, 2]) / 2.0
-    # largest first; ties by distance to the vertical centre line, then index (stable)
-    order = sorted(range(len(boxes)), key=lambda i: (-areas[i], abs(centre_x[i] - 0.5), i))
-    if rule == "face_then_largest" and face_xy is not None:
-        fx, fy = face_xy
-        around = [i for i in order if boxes[i, 0] <= fx <= boxes[i, 2] and boxes[i, 1] <= fy <= boxes[i, 3]]
-        if around:
-            return around[0], "face"
-    return order[0], "largest"
+    if rule == "face_then_largest":
+        k = face_box(boxes, face_xy)
+        if k is not None:
+            return k, "face"
+    return _order(boxes)[0], "largest"
 
 
 def box_iou(a, b) -> float:
@@ -218,6 +248,13 @@ class HeadPeople:
         self.tracker = HeadTracker(params.track_iou_min, params.track_max_gap_s)
         self.primary_track = None
         self.history = {}        # track id -> deque of (t, rel_dist, lateral) against the current main user
+
+    def reset(self):
+        """Forget the tracks, the main user and the cue history (a new session); the next frame chooses the main user
+        anew. Track ids keep counting."""
+        self.tracker.live.clear()
+        self.primary_track = None
+        self.history.clear()
 
     def update(self, t: float, boxes, frame_wh: tuple, face_xy) -> HeadRoles:
         boxes = np.asarray(boxes, dtype=np.float64).reshape(-1, 4)

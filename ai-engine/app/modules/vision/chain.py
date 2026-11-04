@@ -3,7 +3,9 @@
 Per frame (FrameChain.process): features.Observer row (MediaPipe face / face detector / pose, plus blendshapes when
 on) -> H1 head boxes (app/inference/head.py) -> head tracks, the main user as a track, companion and people behind
 from the tracks' cues, and the main user's P1 direction (columns.py HeadPeople; its state lives as long as the
-FrameChain) -> shoulders, mouth_motion -> touch counts since the previous row (touch.py). Each part that is not
+FrameChain and starts again when the touch log's sessionId changes) -> the face values blanked where the tracked face
+is not inside the main user's box (columns.FACE_VALUE_COLUMNS, face_in_primary False) -> shoulders, mouth_motion ->
+touch counts since the previous row (touch.py). Each part that is not
 available (no ONNX model, blendshapes off, no touch log) leaves its columns blank or absent, so the events layer treats
 the cue as missing ('모름'), never as 'absent'.
 
@@ -68,6 +70,7 @@ class FrameChain:
         self.source_kind = source_kind
         self.mouth = C.MouthMotion(params.mouth_dials, params.mouth_baseline_s)
         self.people = C.HeadPeople(params)
+        self.session = None                     # the touch log's sessionId at the previous row
         self.prev_t = None
 
     def process(self, frame) -> dict:
@@ -75,18 +78,33 @@ class FrameChain:
         row, _ = self.observer.process(frame, source_kind=self.source_kind)
         inf = self.capture.last
         t = float(row["t_s"])
+        if self.timeline is not None:           # tree section 4 ①: a new session is judged from the start
+            session = self.timeline.session_at(t)
+            if session is not None and self.session is not None and session != self.session:
+                self.people.reset()
+            if session is not None:
+                self.session = session
         if self.heads is not None:
             heads = self.heads(frame.image)
-            roles = self.people.update(t, heads.boxes, heads.frame_wh, C.face_xy(row))
+            face = C.face_xy(row)
+            roles = self.people.update(t, heads.boxes, heads.frame_wh, face)
             probs = None
             row["ms_head_dir"] = 0.0
             if self.direction is not None and roles.primary is not None:
                 probs = self.direction.probs(frame.image, heads.boxes_px[[roles.primary]])[0]
                 row["ms_head_dir"] = sum(self.direction.last_ms.values())
             row.update(C.head_columns(heads, roles, probs))
+            k = C.face_box(heads.boxes, face)
+            row["face_track"] = None if k is None else roles.tracks[k]
+            row["face_in_primary"] = None if face is None or roles.primary is None else \
+                C.inside(face, heads.boxes[roles.primary])
+            if row["face_in_primary"] is False:  # someone else's face: its values are not the main user's
+                for col in C.FACE_VALUE_COLUMNS:
+                    if col in row:
+                        row[col] = None
             row["ms_heads"] = sum(heads.ms.values())
         row.update(C.shoulder_columns(inf.pose if inf is not None else None))
-        face_seen = row.get("face_state") == SEEN
+        face_seen = row.get("face_state") == SEEN and row.get("face_in_primary") is not False
         scores = inf.blendshapes if (self.blendshapes and face_seen and inf is not None) else None
         row["mouth_motion"] = self.mouth.update(t, scores)
         if self.timeline is not None:
