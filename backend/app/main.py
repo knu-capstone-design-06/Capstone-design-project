@@ -1,4 +1,5 @@
 from contextlib import AsyncExitStack, asynccontextmanager
+import logging
 from typing import Literal
 
 import httpx
@@ -30,6 +31,17 @@ from app.modules.voice.service import VoiceService, menu_from_products
 class HealthResponse(BaseModel):
     status: Literal["ok"] = "ok"
     service: Literal["backend"] = "backend"
+
+
+def _database_voice_menu(repository: PostgresOrderingRepository):
+    """A catalog outage fails the voice request instead of stranding it as processing."""
+    try:
+        return menu_from_products(repository.products())
+    except Exception:
+        # The voice service already turns an empty menu into a terminal failed
+        # response. Do not log the exception: connection errors can contain URLs.
+        logging.getLogger(__name__).warning("Voice menu unavailable")
+        return []
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -73,14 +85,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     OrderingService(session_repository.exists, app.state.ordering_repository),
                     app.state.ordering_repository,
                 )
+            if settings.database_url is not None:
+                menu_provider = lambda: _database_voice_menu(app.state.ordering_repository)
+            else:
+                menu_provider = lambda: menu_from_products(PRODUCTS)
             app.state.voice_service = VoiceService(
                 session_repository.exists, VoiceRepository(),
                 build_voice_interpreter(openai),
                 # Same demo catalog the ordering API sells.
-                menu_provider=lambda: menu_from_products(
-                    app.state.ordering_repository.products()
-                    if settings.database_url is not None else PRODUCTS
-                ),
+                menu_provider=menu_provider,
                 ordering=app.state.ordering_repository,
                 executor=executor,
             )
