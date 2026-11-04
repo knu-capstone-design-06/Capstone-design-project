@@ -204,6 +204,25 @@ _TEMPERATURE = re.compile("|".join(sorted(SPOKEN_TEMPERATURES, key=len, reverse=
 TEMPERATURE_LINKS = ("", "로", "으로")
 QUANTITY_MAX = 20  # as Quantity in schemas.py and the ordering API
 QUANTITY_LIMIT_REPLY = f"한 상품은 {QUANTITY_MAX}개까지 담을 수 있어요."
+# Words that ask to take something out of the cart, and what right after one turns it
+# into the opposite ("빼지 말아 주세요", "빼면 안 돼요").
+REMOVAL_MARKS = ("빼", "취소", "삭제", "없애", "지워", "지우", "제거", "말고")
+NEGATED_AFTER = ("지마", "지말", "면안", "지않", "는안", "진마", "진말", "하지마", "하지말", "하면안", "하지않", "하는안")
+
+
+def removal_intent(text: str) -> str:
+    """"yes" when the utterance asks to take something out, "no" when it says not to,
+    "unclear" when it says neither ("아메리카노요")."""
+    compact = _compact(text)
+    found = False
+    for mark in REMOVAL_MARKS:
+        start = compact.find(mark)
+        while start != -1:
+            found = True
+            if not compact[start + len(mark):].startswith(NEGATED_AFTER):
+                return "yes"
+            start = compact.find(mark, start + 1)
+    return "no" if found else "unclear"
 
 
 def _count(found: re.Match) -> int:
@@ -411,6 +430,15 @@ def match_spoken_details(
                 isinstance(call, AddCartItemCall) and call.arguments.quantity != 1):
             # No count was said; the model's number is its own, so the customer hears it first.
             unspoken = True
+        elif isinstance(call, RemoveCartItemCall):
+            # A removal runs only on words that ask for one: "빼지 말아 주세요" says the
+            # opposite and "아메리카노요" says nothing, whatever the model made of them.
+            intent = removal_intent(request.text)
+            if intent == "no":
+                logger.warning("voice interpretation removed what the customer said to keep; asking")
+                return VoiceInterpretation(status="needs_clarification", tool_calls=[], reply_text=ASK_MENU_REPLY)
+            if intent == "unclear":
+                unspoken = True
         calls.append(call)
     if not (changed or unspoken):
         return result
