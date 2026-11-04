@@ -53,9 +53,14 @@ class Settings(BaseSettings):
     @classmethod
     def validate_jev_api_url(cls, value: str) -> str:
         try:
-            return cls.validate_ai_engine_url(value)
+            origin = cls.validate_ai_engine_url(value)
         except ValueError:
             raise ValueError("JEV_API_URL must be an HTTP(S) origin") from None
+        parsed = urlsplit(origin)
+        # The key goes in a header: plain HTTP only to a mock server on this machine.
+        if parsed.scheme != "https" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
+            raise ValueError("JEV_API_URL must use HTTPS unless it is a loopback address")
+        return origin
 
     @field_validator("cors_origins")
     @classmethod
