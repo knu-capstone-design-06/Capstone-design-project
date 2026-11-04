@@ -1056,6 +1056,30 @@ class ToolExecutionApiTests(VoiceApiCase):
                 self.assertEqual((body["status"], body["actions"], body["tool_calls"]), ("needs_clarification", [], []))
                 self.assertEqual(self.cart()["total_quantity"], 2)
 
+    def test_removal_runs_only_on_words_that_ask_for_one(self):
+        # The reviewer's reproduction: "빼지 말아 주세요" with the model removing anyway.
+        self.add_by_touch("americano", "iced", 2)
+        self.interpreter.result = interpretation(call("remove_cart_item", "americano", "iced"))
+        body = self.status(self.say("아이스 아메리카노 빼지 말아 주세요")).json()
+        self.assertEqual((body["status"], body["reply_text"], body["actions"], body["tool_calls"]),
+                         ("needs_clarification", "어떤 메뉴를 주문할까요?", [], []))
+        self.assertEqual(self.cart()["total_quantity"], 2)
+        # Nothing about removing at all: the removal is read back, not run.
+        self.interpreter.result = interpretation(call("remove_cart_item", "americano", "iced"))
+        body = self.status(self.say("아메리카노요")).json()
+        self.assertEqual((body["status"], body["reply_text"], body["actions"]),
+                         ("needs_confirmation", "아이스 아메리카노 뺄까요?", []))
+        self.assertEqual(self.cart()["total_quantity"], 2)
+        body = self.status(self.say("네")).json()
+        self.assertEqual((body["status"], body["actions"]), ("completed", ["cart_updated"]))
+        self.assertEqual(self.cart()["items"], [])
+        # Words that ask for a removal still run it.
+        self.add_by_touch("americano", "iced", 1)
+        self.interpreter.result = interpretation(call("remove_cart_item", "americano", "iced"))
+        body = self.status(self.say("아이스 아메리카노 취소해 주세요")).json()
+        self.assertEqual((body["status"], body["actions"]), ("completed", ["cart_updated"]))
+        self.assertEqual(self.cart()["items"], [])
+
     def test_worded_acceptance_with_the_same_tool_inputs_runs_once(self):
         self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
         self.say("아이스 아메리카노 두 개")
@@ -1185,6 +1209,21 @@ class AcceptanceWordsTests(unittest.TestCase):
                 self.assertFalse(is_rejection(text))
 
 
+class RemovalIntentTests(unittest.TestCase):
+    def test_removal_words_and_their_negations(self):
+        from app.modules.voice.service import removal_intent
+
+        for text, expected in [
+            ("아이스 아메리카노 빼 주세요", "yes"), ("그거 취소해 주세요", "yes"), ("아메리카노 말고 라떼로요", "yes"),
+            ("하나 더 빼 주세요", "yes"), ("빼지 말고 하나 더요", "yes"),
+            ("아이스 아메리카노 빼지 말아 주세요", "no"), ("빼지 마세요", "no"), ("취소하면 안 돼요", "no"),
+            ("지우지 않을래요", "no"),
+            ("아메리카노요", "unclear"), ("네", "unclear"), ("아이스 아메리카노 주세요", "unclear"),
+        ]:
+            with self.subTest(text=text):
+                self.assertEqual(removal_intent(text), expected)
+
+
 class SpokenIncrementTests(unittest.TestCase):
     def test_counts_before_더_are_read(self):
         from app.modules.voice.service import spoken_increment
@@ -1207,7 +1246,7 @@ class SpokenIncrementTests(unittest.TestCase):
     def test_removal_in_the_same_breath_is_left_alone(self):
         from app.modules.voice.service import match_spoken_details
 
-        request = VoiceRequestCreate(text="샌드위치 하나 더요", alternatives=[], screen_id="menu_list")
+        request = VoiceRequestCreate(text="샌드위치 하나 더요, 아메리카노는 빼 주세요", alternatives=[], screen_id="menu_list")
         result = interpretation(call("add_cart_item", "sandwich", None, 1), call("remove_cart_item", "americano", "iced"))
         self.assertIs(match_spoken_details(result, request, []), result)
 
