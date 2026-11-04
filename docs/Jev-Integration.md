@@ -80,7 +80,7 @@
 |---|---|---|---|
 | 1 | 설정 4개: `jev_api_key`(SecretStr, 없으면 None), `jev_api_url`(기본 `https://api.typesafe.ai`), `jev_model`(기본 `jev-1.13.0`), `jev_timeout_seconds`(제안 3) | `backend/app/common/config/settings.py` | 공용 영역에 **추가**. OpenAI 항목과 같은 꼴 |
 | 2 | `.env.example`에 `JEV_API_KEY=`, `JEV_API_URL=`, `JEV_MODEL=`, `JEV_TIMEOUT_SECONDS=`(값 없음), `docker-compose.yml` backend 환경에 같은 4개 | `backend/.env.example`, 루트 `docker-compose.yml` | 공용 영역에 **추가** |
-| 3 | `JevClient.ask(request)`: 답(`answers`)이면 dict, 실패면 None. `Authorization: Bearer`로 `/v1/systemone` 호출, `asyncio.timeout`으로 전체 제한, 재시도 없음. 4xx·5xx·429·529·시간 초과·형식 오류는 모두 `None`. 로그에는 예외 종류와 상태 코드만 남기고 `state`·`answers`·키 원문은 남기지 않음 | `backend/app/infrastructure/external/jev_client.py` | `openai_client.py`와 같은 구조. 키가 없으면 클라이언트를 만들지 않고 호출 자체를 건너뜀 |
+| 3 | `JevClient.ask(request)`: 답이면 검증된 `JevResponse`(`model`, `answers`, `usage`), 실패면 None. `Authorization: Bearer`로 `/v1/systemone` 호출, `asyncio.timeout`으로 전체 제한, 재시도 없음. 4xx·5xx·429·529·시간 초과·형식 오류는 모두 `None`. 로그에는 예외 종류와 상태 코드만 남기고 `state`·`answers`·키 원문은 남기지 않음 | `backend/app/infrastructure/external/jev_client.py` | `openai_client.py`와 같은 구조. 키가 없으면 클라이언트를 만들지 않고 호출 자체를 건너뜀 |
 | 4 | 응답 검증 스키마: `model`, `answers`(이름별 `type`과 유형별 필드), `usage`. 어긋나면 `None` | `backend/app/infrastructure/external/jev_schemas.py` | 질문 이름은 비전이 정함(`proposal_fits`, `queue_support`) |
 | 5 | 호출 위치: `sessions/service.analyze`가 ai-engine 결과에 `jev_request`가 있으면 `JevClient.ask()`를 부르고 답을 기록. 임계값이 없으면 결정은 그대로, `decided_by`는 `rule_placeholder` 유지 | `backend/app/modules/sessions/service.py` 또는 새 모듈 `decision/` | 모듈 자리는 8장 결정 항목. 전제: 2장의 `extension` 계약 |
 | 6 | 기록: 세션 ID, 창 시각, 질문 종류, 요청 모델, 응답 `model`, 답(확률·confidence), `usage`, 지연(ms), 결과(답 있음·없음·오류 종류) | 저장 위치는 8장 결정 항목 | DB 전에는 메모리 또는 파일. 보관 기간은 세션 정책(#62)을 따름 |
@@ -120,15 +120,15 @@
 - [ ] **실험 동의 안내**: 상황 태그와 터치 통계가 외부 API로 간다는 점을 안내 문구에 넣을지(원본 영상·음성은 가지 않음).
 - [ ] **공용 영역 변경 합의**: `settings.py`·`.env.example`·`docker-compose.yml`은 항목 **추가**라 PR 리뷰로 충분합니다. `contract/`는 이 설계에서 바꾸지 않습니다(`decided_by: jev`가 이미 enum에 있음).
 
-## 10. 멀티모달 상태 판단 제안 (2026-11-04, AI 담당)
+## 9. 멀티모달 상태 판단 제안 (2026-11-04, AI 담당)
 
 지금 설계(4~6장)는 **규칙표가 먼저 지원을 고르고 Jev는 그 제안이 맞는지(`proposal_fits`) 또는 후보 중 무엇인지(`queue_support`)** 답합니다. 터치 로그와 비전 관측을 **함께 보고 손님의 상태를 판단**하는 일은 아직 아무도 하지 않습니다. 계약의 불편 상태 점수 5개(`StateScores`: `normal`, `touch_difficulty`, `navigation_difficulty`, `visual_difficulty`, `hesitation`)는 ai-engine의 자리표시자가 고정 예시 값을 내고, 비전 파이프라인은 "상태 점수 모델이 없다"고 적어 두었습니다(`contract_view.py`). 이 빈자리를 Jev로 채우자는 제안입니다.
 
-### 10.1 자리
+### 9.1 자리
 
 backend입니다. 터치 통계는 프론트 → backend로, 비전 창 결과는 ai-engine → backend로 오므로 둘이 만나는 곳이 backend뿐이고, 외부 AI는 backend만 부릅니다(AGENTS.md 4장). 비전의 `jev_request`가 이미 `state`에 상황·화면·터치·시선·세션을 한 덩어리로 넣고 있어, 입력 모양은 그대로 쓰고 **질문만 더합니다**.
 
-### 10.2 질문: 상태 점수 5개
+### 9.2 질문: 상태 점수 5개
 
 `noul`(예/아니오 확률) 질문 5개를 한 요청에 넣습니다. 답 `noul`(0~1)을 그대로 `StateScores`의 각 값으로 씁니다. 계약·프론트는 바뀌지 않고, `model_version`에 응답의 `model`(예: `jev-1.13.0`)을 적습니다.
 
@@ -160,11 +160,11 @@ backend입니다. 터치 통계는 프론트 → backend로, 비전 창 결과�
 - 질문과 기준은 영어이고 `state` 값은 코드 이름입니다(비전 테스트가 한글 없음을 확인하는 것과 같은 이유). 기준 문구는 초안이며 촬영 데이터로 고칩니다.
 - `hesitation`과 `touch_difficulty`의 `false` 기준에 "일행과 대화 중", "뒤를 봄", "시스템 처리 중"을 둔 것이 멀티모달의 핵심입니다. 터치만 보면 모두 "멈춤"이지만 비전·음성 상태가 그 멈춤의 이유를 가릅니다.
 
-### 10.3 질문: 지원 선택
+### 9.3 질문: 지원 선택
 
 지금 비전이 만드는 `proposal_fits`(규칙표 제안이 맞는지) 또는 `queue_support`(후보 중 선택)를 같은 요청에 함께 넣습니다. 둘을 한 번에 물으면 요청 한 번, 입력 토큰 한 번입니다.
 
-### 10.4 순서
+### 9.4 순서
 
 | 단계 | 하는 것 | 화면 |
 |---|---|---|
@@ -175,13 +175,13 @@ backend입니다. 터치 통계는 프론트 → backend로, 비전 창 결과�
 
 0단계는 비전과 무관하게 지금 할 수 있습니다. `sessions/service.analyze`에서 ai-engine 응답을 받은 뒤 Jev를 부르고, 결과는 기록만 합니다. 이 호출 위치는 8장의 "호출 위치" 결정과 같이 정합니다.
 
-### 10.5 지키는 것
+### 9.5 지키는 것
 
 - 임계값 비교, 횟수·시간 계산, 필수 적용 조건, 거절한 지원을 다시 열지 않는 규칙은 모두 코드입니다. Jev는 확률만 냅니다.
 - Jev가 실패하면(시간 초과·오류) 그 창은 자리표시자 점수 또는 "측정 불가"로 돌아가고 자동 재시도는 없습니다.
 - 상황 태그 이름, 지원 이름, 표시 문구는 비전·프론트 담당의 어휘를 그대로 쓰고 여기서 새로 만들지 않습니다.
 
-## 9. 참고 링크
+## 10. 참고 링크
 
 - TypeSafe System One API: https://docs.typesafe.ai/api/system-one.md
 - 오류와 한도: https://docs.typesafe.ai/api/errors.md
