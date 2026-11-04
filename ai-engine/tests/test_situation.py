@@ -14,7 +14,7 @@ import tokenize
 import unittest
 
 from app.modules.vision.events import PilotParams, detect_events, observe_window
-from app.modules.vision.situation import DISPLAY_TEXT, NONE, TAGS, UNKNOWN, assess, check_output
+from app.modules.vision.situation import DISPLAY_TEXT, NONE, TAGS, UNKNOWN, assess, check_output, consulting_companion
 
 NAN = float("nan")
 DT = 0.1                                     # synthetic frame interval (s)
@@ -397,6 +397,20 @@ class ConsultingCompanionTests(unittest.TestCase):
         out, _ = run(rows)
         self.assertEqual(out["name"], COMPANION)
         self.assertEqual(out["confidence"], {"events": 3, "quality_ok": False})
+
+    def test_blendshapes_off_drop_the_mouth_condition_and_the_evidence_shows_the_cues_used(self):
+        """Fallback (README tag table, situation.py): with blendshapes off the chain writes mouth_motion blank on every
+        row. The mouth condition of the conjunction is then missing (결측) and dropped: the tag stands on the other
+        cues, the evidence holds only those three kinds, the verdict records the skipped cue, quality_ok is false."""
+        rows = put(companion_window(sweep(+1)), 0, 18, mouth_motion=None)
+        out, events = run(rows)
+        self.assertEqual(out["name"], COMPANION)
+        self.assertEqual(sorted({k.split("@")[0] for k in ids(out)}),
+                         ["companion_present", "dwell_no_touch", "yaw_toward_companion"])
+        self.assertEqual(out["confidence"], {"events": 3, "quality_ok": False})
+        cues = observe_window(rows, (rows[0]["t_s"], rows[-1]["t_s"]), P, landmarker_num_faces=1)
+        self.assertEqual(consulting_companion(cues, P).skipped, ("mouth_moving",))
+        self.assertEqual(check_output(out, events, P), [])
 
     def test_turning_away_from_the_companion(self):
         out, _ = run(companion_window(sweep(-1)))
