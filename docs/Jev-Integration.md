@@ -120,6 +120,67 @@
 - [ ] **실험 동의 안내**: 상황 태그와 터치 통계가 외부 API로 간다는 점을 안내 문구에 넣을지(원본 영상·음성은 가지 않음).
 - [ ] **공용 영역 변경 합의**: `settings.py`·`.env.example`·`docker-compose.yml`은 항목 **추가**라 PR 리뷰로 충분합니다. `contract/`는 이 설계에서 바꾸지 않습니다(`decided_by: jev`가 이미 enum에 있음).
 
+## 10. 멀티모달 상태 판단 제안 (2026-11-04, AI 담당)
+
+지금 설계(4~6장)는 **규칙표가 먼저 지원을 고르고 Jev는 그 제안이 맞는지(`proposal_fits`) 또는 후보 중 무엇인지(`queue_support`)** 답합니다. 터치 로그와 비전 관측을 **함께 보고 손님의 상태를 판단**하는 일은 아직 아무도 하지 않습니다. 계약의 불편 상태 점수 5개(`StateScores`: `normal`, `touch_difficulty`, `navigation_difficulty`, `visual_difficulty`, `hesitation`)는 ai-engine의 자리표시자가 고정 예시 값을 내고, 비전 파이프라인은 "상태 점수 모델이 없다"고 적어 두었습니다(`contract_view.py`). 이 빈자리를 Jev로 채우자는 제안입니다.
+
+### 10.1 자리
+
+backend입니다. 터치 통계는 프론트 → backend로, 비전 창 결과는 ai-engine → backend로 오므로 둘이 만나는 곳이 backend뿐이고, 외부 AI는 backend만 부릅니다(AGENTS.md 4장). 비전의 `jev_request`가 이미 `state`에 상황·화면·터치·시선·세션을 한 덩어리로 넣고 있어, 입력 모양은 그대로 쓰고 **질문만 더합니다**.
+
+### 10.2 질문: 상태 점수 5개
+
+`noul`(예/아니오 확률) 질문 5개를 한 요청에 넣습니다. 답 `noul`(0~1)을 그대로 `StateScores`의 각 값으로 씁니다. 계약·프론트는 바뀌지 않고, `model_version`에 응답의 `model`(예: `jev-1.13.0`)을 적습니다.
+
+```json
+{"model": "jev-1.13.0",
+ "state": {
+   "screen": {"name": "menu", "steps_left": 2, "since_last_input_ms": 4500, "order_busy": false},
+   "touch": {"tap_count": 4, "miss_tap_count": 3, "repeat_tap_count": 2, "back_count": 1, "dwell_ms": 12000,
+             "outside_tap_ratio": 0.75, "outside_nearest_distance_mean_px": 9.5,
+             "screen_revisit_count": 1, "scroll_event_count": 0, "category_change_count": 0},
+   "voice": {"enabled": false, "processing": false, "auto_off": null},
+   "ui_settings": {"large_text": false, "large_button": false, "simple_screen": false, "step_guide": false},
+   "vision": {"situation": "looking_around", "evidence": {"yaw_sweep_offscreen": 2, "dwell_no_touch": 1},
+              "confidence": {"events": 3, "quality_ok": true}, "facing_screen": false,
+              "people_behind_max": 0, "companion_frames": 0},
+   "session": {"active": [], "refused": [], "withdrawn": []}},
+ "questions": {
+   "touch_difficulty": {"type": "noul", "instructions": "Is the user having trouble physically hitting the buttons in this window?",
+                        "criteria": {"true": "Taps land outside targets near their edges, repeated taps on the same spot, the user keeps facing the screen.", "false": "Taps land on targets, or there are no taps because the user is reading or talking."}},
+   "navigation_difficulty": {"type": "noul", "instructions": "Is the user lost in the order flow?",
+                        "criteria": {"true": "Going back, revisiting screens, long pauses with no selection while facing the screen.", "false": "Steady progress through the screens, or a pause explained by the system being busy."}},
+   "visual_difficulty": {"type": "noul", "instructions": "Does the user seem unable to read or see the screen well?", "criteria": {"true": "Leaning in, large text or high contrast already on, taps far from any target.", "false": "Normal distance and accurate taps."}},
+   "hesitation": {"type": "noul", "instructions": "Is the user hesitating rather than acting?",
+                        "criteria": {"true": "No input for a long time while facing the screen, options opened and closed without choosing.", "false": "The user is talking to a companion, looking behind, or the kiosk is processing."}},
+   "normal": {"type": "noul", "instructions": "Is the user ordering without any sign of trouble?", "criteria": {"true": "Accurate taps, steady progress, no long pauses.", "false": "Any of the difficulties above."}}}}
+```
+
+- `touch`는 기존 5개와 #72의 `touch.interaction` 필드(대상 밖 비율, 가장 가까운 대상까지 거리, 재방문, 마지막 입력 뒤 시간, 음성 처리 중, 자동 꺼짐)를 씁니다. `vision`은 비전 창 결과의 `situation`과 `vision` 요약입니다(README '창 한 줄'). 값은 전부 이름과 숫자이고 원본 영상·음성·인식 문장은 없습니다.
+- 질문과 기준은 영어이고 `state` 값은 코드 이름입니다(비전 테스트가 한글 없음을 확인하는 것과 같은 이유). 기준 문구는 초안이며 촬영 데이터로 고칩니다.
+- `hesitation`과 `touch_difficulty`의 `false` 기준에 "일행과 대화 중", "뒤를 봄", "시스템 처리 중"을 둔 것이 멀티모달의 핵심입니다. 터치만 보면 모두 "멈춤"이지만 비전·음성 상태가 그 멈춤의 이유를 가릅니다.
+
+### 10.3 질문: 지원 선택
+
+지금 비전이 만드는 `proposal_fits`(규칙표 제안이 맞는지) 또는 `queue_support`(후보 중 선택)를 같은 요청에 함께 넣습니다. 둘을 한 번에 물으면 요청 한 번, 입력 토큰 한 번입니다.
+
+### 10.4 순서
+
+| 단계 | 하는 것 | 화면 |
+|---|---|---|
+| 0 | 터치 통계만으로 상태 점수 5개를 묻고 기록(비전 없이도 가능). 자리표시자 점수와 나란히 저장 | 그대로 |
+| 1 | 비전 `extension` 계약 뒤 `state.vision`을 채움. 진짜 멀티모달 | 그대로 |
+| 2 | 촬영 데이터로 Jev 점수와 실제 상황을 맞춰 보고 임계값 결정 | 그대로 |
+| 3 | `StateScores`를 Jev 답으로 바꾸고(`model_version`에 Jev 버전), 지원 결정도 `decided_by: jev` | 바뀜 |
+
+0단계는 비전과 무관하게 지금 할 수 있습니다. `sessions/service.analyze`에서 ai-engine 응답을 받은 뒤 Jev를 부르고, 결과는 기록만 합니다. 이 호출 위치는 8장의 "호출 위치" 결정과 같이 정합니다.
+
+### 10.5 지키는 것
+
+- 임계값 비교, 횟수·시간 계산, 필수 적용 조건, 거절한 지원을 다시 열지 않는 규칙은 모두 코드입니다. Jev는 확률만 냅니다.
+- Jev가 실패하면(시간 초과·오류) 그 창은 자리표시자 점수 또는 "측정 불가"로 돌아가고 자동 재시도는 없습니다.
+- 상황 태그 이름, 지원 이름, 표시 문구는 비전·프론트 담당의 어휘를 그대로 쓰고 여기서 새로 만들지 않습니다.
+
 ## 9. 참고 링크
 
 - TypeSafe System One API: https://docs.typesafe.ai/api/system-one.md
