@@ -15,7 +15,7 @@ export interface InteractionFeatures {
   screen_transition_count: number;
   screen_revisit_count: number | null;
   cart_change_count: number;
-  selection_change_count: number;
+  selection_change_count: number | null;
   ui_settings_change_count: number;
   voice_state_change_count: number;
   since_last_input_ms: number | null;

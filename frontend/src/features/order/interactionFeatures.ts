@@ -80,7 +80,9 @@ export function buildTouchFeatureWindow(saved: SavedLog, now: number, sequence: 
         category_change_count: count('category_change'), options_open_count: count('options_open'), options_close_count: count('options_close'),
         screen_transition_count: window.filter(e => e.kind === 'screen_enter' && typeof data(e).from === 'string').length,
         screen_revisit_count: revisits, cart_change_count: cartChanges,
-        selection_change_count: changed('selection_state_change').length,
+        selection_change_count: events.some(e => e.kind === 'session_start')
+          && events.some(e => e.kind === 'selection_state_change' && data(e).before === null)
+          ? changed('selection_state_change').length : null,
         ui_settings_change_count: count('ui_settings_change'), voice_state_change_count: changed('voice_state_change').length,
         since_last_input_ms: pilot.sinceLastInputMs, order_busy_ms: orderBusyMs === null ? null : Math.round(orderBusyMs),
         options_open: selectionEvent ? data(selectionEvent).after !== null : null,

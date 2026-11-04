@@ -171,3 +171,14 @@ test('voice processing and automatic shutdown are context, not touch inactivity'
   assert.equal(extra.voice_auto_off, 'silence');
   assert.equal(extra.voice_enabled, false);
 });
+
+
+test('selection count is unknown after its session baseline is truncated', () => {
+  const f = fixture();
+  f.record(1400, 'selection_state_change', { before: null, after: { productId: 'americano' } });
+  const saved = f.recorder.read();
+  assert.equal(buildTouchFeatureWindow(saved, 3000, 1).touch.interaction.selection_change_count, 1);
+  saved.events = saved.events.filter(e => e.kind !== 'session_start' &&
+    !(e.kind === 'selection_state_change' && e.data.after === null));
+  assert.equal(buildTouchFeatureWindow(saved, 3000, 1).touch.interaction.selection_change_count, null);
+});
