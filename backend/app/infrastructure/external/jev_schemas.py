@@ -13,12 +13,12 @@ Probability = Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
 
 
 class JevRequest(BaseModel):
-    """model is the version to ask; state is any JSON; questions map a name to a question."""
+    """model is the version to ask; state is a string, object or array; questions map a name to a question."""
 
     model_config = ConfigDict(extra="forbid")
 
     model: str = Field(min_length=1)
-    state: JsonValue
+    state: str | dict[str, JsonValue] | list[JsonValue]
     questions: dict[str, dict[str, JsonValue]] = Field(min_length=1)
 
 
@@ -42,11 +42,13 @@ class ChoiceAnswer(_Answer):
 
 
 class ScoreAnswer(_Answer):
+    """score is a number on the scale the question gave; legend names each step."""
+
     type: Literal["score"]
-    score: JsonValue
+    score: float = Field(allow_inf_nan=False)
     confidence: Probability
     probabilities: dict[str, Probability]
-    legend: JsonValue = None
+    legend: dict[str, JsonValue]
 
 
 JevAnswer = Annotated[NoulAnswer | ChoiceAnswer | ScoreAnswer, Field(discriminator="type")]
