@@ -922,6 +922,21 @@ class WindowJudgeTests(unittest.TestCase):
         events.append((3500, "options_open", "review", {"productId": "1"}))
         self.assertEqual((screen_at(3.0)["options_open"], screen_at(3.9)["options_open"]), (False, True))
 
+    def test_the_window_record_lists_its_head_turns_with_the_loss_context(self):
+        """'turns' = the window's look_back / yaw_sweep_offscreen events and their observations; the pre-loss head
+        pose uses the chain's mouth_baseline_s (2.0 s by default) as its window. No value bundle: no events, None."""
+        from app.modules.vision.chain import WindowJudge
+        rows = rows_of(facing(5), look_back(), facing(10))
+        rec = WindowJudge(bundle()).evaluate(rows, 2.2)
+        (turn,) = rec["turns"]
+        self.assertEqual((turn["event_id"], turn["kind"]), ("look_back@5", "look_back"))
+        self.assertEqual(turn["obs"]["pre_loss_yaw_deg"], 0.0)              # the five facing frames before 0.5 s
+        self.assertIsNone(turn["obs"]["pre_loss_pitch_deg"])                # the synthetic rows carry no pitch
+        self.assertAlmostEqual(turn["obs"]["loss_duration_s"], 0.4)         # lost frames at 0.7 .. 1.1 s
+        self.assertAlmostEqual(turn["obs"]["shoulder_vis_mean"], 0.9)
+        self.assertNotIn("turns", rec["contract"]["extension"])
+        self.assertIsNone(WindowJudge(bundle(situation=False)).evaluate(rows, 2.2)["turns"])
+
     def test_a_new_touch_log_session_starts_the_state_again(self):
         from app.modules.vision.chain import WindowJudge
         from app.modules.vision.touch import load_timeline

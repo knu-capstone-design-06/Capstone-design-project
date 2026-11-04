@@ -172,6 +172,22 @@ class EventTests(unittest.TestCase):
         self.assertAlmostEqual(event["obs"]["face_lost_s"], 0.5)            # first lost frame 0.5 -> return 1.0
         self.assertEqual(event["obs"]["pose_vis_shoulders"], 0.9)
 
+    def test_a_face_lost_turn_records_its_context(self):
+        """pre_loss_yaw_deg / pre_loss_pitch_deg = median of the facing frames in baseline_s before the onset (here
+        0.25 s before 0.4 s: frames at 0.2 and 0.3 s), loss_duration_s = first to last lost frame, shoulder_vis_mean
+        over the lost frames; without baseline_s the two pre-loss values stay empty."""
+        facing = [(1, {"yaw_deg": y, "pitch_deg": p}) for y, p in ((2.0, 20.0), (4.0, 22.0), (6.0, 24.0), (8.0, 26.0))]
+        lost = [(1, {**LOST, "pose_vis_shoulders": v}) for v in (0.6, 0.8, 0.7, 0.9)]
+        rows = rows_of(facing, lost, face(3))
+        (event,) = [e for e in detect_events(rows, P, landmarker_num_faces=1, baseline_s=0.25)
+                    if e["kind"] == "look_back"]
+        self.assertEqual((event["obs"]["pre_loss_yaw_deg"], event["obs"]["pre_loss_pitch_deg"]), (7.0, 25.0))
+        self.assertAlmostEqual(event["obs"]["loss_duration_s"], 0.3)        # lost frames at 0.4 .. 0.7 s
+        self.assertAlmostEqual(event["obs"]["face_lost_s"], 0.4)            # to the return at 0.8 s
+        self.assertAlmostEqual(event["obs"]["shoulder_vis_mean"], 0.75)
+        (plain,) = [e for e in detect_events(rows, P, landmarker_num_faces=1) if e["kind"] == "look_back"]
+        self.assertEqual((plain["obs"]["pre_loss_yaw_deg"], plain["obs"]["pre_loss_pitch_deg"]), (None, None))
+
     def test_both_onset_paths_in_one_sequence(self):
         """Yaw path (the face passes offscreen_yaw_deg, then is lost) and face-lost path (lost straight from facing):
         two look_backs, the first with its largest visible yaw and side, the second without."""
@@ -300,7 +316,9 @@ class LookingBackWithPeopleBehindTests(unittest.TestCase):
         self.assertEqual(out["alternatives"], [])
         self.assertEqual(check_output(out, events, P), [])
         look = [item for item in out["evidence"] if item["event_id"] == "look_back@5"]
-        self.assertEqual([item["obs"] for item in look], ["yaw_deg", "side", "face_lost_s", "pose_vis_shoulders"])
+        self.assertEqual([item["obs"] for item in look], ["yaw_deg", "side", "face_lost_s", "pose_vis_shoulders",
+                                                          "pre_loss_yaw_deg", "pre_loss_pitch_deg", "loss_duration_s",
+                                                          "shoulder_vis_mean"])
         self.assertEqual({item["t"] for item in look}, {1.3})        # the event's time = its end (the return)
 
     def test_low_face_visibility_does_not_block_it(self):
