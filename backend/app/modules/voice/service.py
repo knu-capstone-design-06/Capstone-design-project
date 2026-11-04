@@ -207,8 +207,11 @@ QUANTITY_LIMIT_REPLY = f"한 상품은 {QUANTITY_MAX}개까지 담을 수 있어
 # Words that ask to take something out of the cart, and what right after one turns it
 # into the opposite ("빼지 말아 주세요", "빼면 안 돼요").
 REMOVAL_MARKS = ("빼", "취소", "삭제", "없애", "지워", "지우", "제거", "말고", "줄여", "줄이", "덜")
-NEGATED_AFTER = tuple(sorted(
-    ("지마", "지말", "면안", "지않", "는안", "진마", "진말", "하지마", "하지말", "하면안", "하지않", "하는안"),
+# A removal word counts as a request only with a requesting ending right after it ("빼
+# 주세요", "빼 줘", "취소해 주세요", "빼고"); "빼지 마세요", "빼시면 안 돼요", "삭제 안 해도
+# 돼요" and every other continuation are not requests, whatever negation they use.
+REQUEST_AFTER = tuple(sorted(
+    ("주세요", "주시", "줘", "줄래", "달라", "해주세요", "해줘", "해주", "해요", "할게", "할래", "해", "고", "요", ""),
     key=len, reverse=True))
 _REMOVAL = re.compile("|".join(map(re.escape, sorted(REMOVAL_MARKS, key=len, reverse=True))))
 
@@ -218,8 +221,8 @@ def removal_intents(text: str, menu: list[MenuItem]) -> dict[str | None, str]:
 
     Each removal word goes with the product named last before it since the previous one,
     so "아메리카노 빼지 말고 샌드위치 빼 주세요" is {americano: no, sandwich: yes}; a word with
-    no product before it ("그거 빼 줘") is keyed None. A negated word swallows what follows
-    it, so the 말고 inside 빼지 말고 is not a second removal. Any "no" for a product wins.
+    no product before it ("그거 빼 줘") is keyed None. "말고" ("아메리카노 말고 라떼") is a
+    request by itself. Any "no" for a product wins.
     """
     compact = _compact(text)
     names = _name_positions(compact, menu)
@@ -227,12 +230,15 @@ def removal_intents(text: str, menu: list[MenuItem]) -> dict[str | None, str]:
     position = start = 0
     while (found := _REMOVAL.search(compact, position)) is not None:
         after = compact[found.end():]
-        negation = next((n for n in NEGATED_AFTER if after.startswith(n)), None)
+        if found.group() == "말고" and compact[:found.start()].endswith("지"):
+            position = found.end()  # the 말고 of "빼지 말고": part of a negation, not a request
+            continue
+        requested = found.group() == "말고" or (
+            after == "" or any(after.startswith(ending) for ending in REQUEST_AFTER if ending))
         before = [product_id for p, product_id in names if start <= p < found.start()]
         key = before[-1] if before else None
-        intents[key] = "no" if negation or intents.get(key) == "no" else "yes"
-        position = found.end() + (len(negation) if negation else 0)
-        start = found.end()
+        intents[key] = "yes" if requested and intents.get(key) != "no" else "no"
+        position = start = found.end()
     return intents
 
 
@@ -451,6 +457,11 @@ def match_spoken_details(
                 isinstance(call, AddCartItemCall) and call.arguments.quantity != 1):
             # No count was said; the model's number is its own, so the customer hears it first.
             unspoken = True
+        elif isinstance(call, AddCartItemCall) and (removals.get(product_id) or removals.get(None)) == "yes":
+            # "아이스 아메리카노 빼 주세요" answered with an addition: the action disagrees
+            # with the words, so it is read back, never run.
+            logger.warning("voice interpretation added what the customer asked to remove; confirming")
+            unspoken = True
         elif isinstance(call, RemoveCartItemCall):
             # A removal runs only on words that ask for one: "빼지 말아 주세요" says the
             # opposite and "아메리카노요" says nothing, whatever the model made of them.
@@ -474,13 +485,17 @@ PENDING = {"needs_confirmation", "needs_clarification"}
 CART_REFERENCE_MARKS = ("더", "빼", "그거", "그것", "저거", "이거", "바꿔", "추가", "취소", "줄여", "늘려", "으로")
 
 
-def answers_question(text: str) -> bool:
-    """Whether the utterance answers what the kiosk asked: a temperature, a count or "그거".
+def answers_question(text: str, question: str = "") -> bool:
+    """Whether the utterance answers what the kiosk asked.
 
-    "화면 아래로 내려주세요" after "따뜻한 것과 아이스 중?" answers nothing, so the question's
-    product and count must not become its order.
+    A temperature question ("따뜻한 것과 아이스 중?") is answered only by a temperature word:
+    "화면 아래로 내려주세요", "네네" and "하나도 모르겠어요" answer nothing, so the question's
+    product and count must not become their order. Any other question is answered by a
+    temperature, a count, "그거" or an acceptance.
     """
     compact = _compact(text)
+    if _TEMPERATURE.search(_compact(question)):
+        return bool(_TEMPERATURE.search(compact))
     return bool(is_acceptance(text) or _TEMPERATURE.search(compact) or _COUNT.search(compact)
                 or any(mark in compact for mark in ("그거", "그것", "그걸로", "이거", "저거")))
 
@@ -554,7 +569,8 @@ def require_named_products(
     # open offer (which is only ever read back again, never run, unless accepted).
     asked = ([_compact(history[-1].result.reply_text)]
              if history and history[-1].result.reply_text
-             and (answers_question(request.text) or history[-1].result.status == "needs_confirmation") else [])
+             and (answers_question(request.text, history[-1].result.reply_text)
+                  or history[-1].result.status == "needs_confirmation") else [])
     allowed = named_in(now) or named_in(alternatives) or named_in(asked)
     lines = list(cart)
     sole = lines[0] if len(lines) == 1 else None
@@ -562,15 +578,19 @@ def require_named_products(
     # The cart stands in for a product only in an instruction about the cart ("하나 더요",
     # "그거 빼 줘", "두 잔으로") that names no product at all: "라떼 하나 주세요" names one
     # (even if only a shared word) and "화면 좀 내려줘" asks for nothing in the cart.
+    # The one cart line stands in for a product only in an instruction that attaches to
+    # it: a count ("하나 더요", "두 잔으로") or, for a removal, a removal word ("그거 빼 줘").
+    # Words such as "더", "이거", "추가" alone are not enough: "글씨 더 크게 해 주세요",
+    # "이거 얼마예요?" and a stray "네네" with no offer open name nothing in the cart.
     mentions_product = any(w in text for item_words in words.values() for w in item_words for text in now)
-    about_cart = not mentions_product and (is_acceptance(request.text) or any(
-        any(mark in text for mark in CART_REFERENCE_MARKS) or _COUNT.search(text) for text in now))
+    counted = not mentions_product and any(_COUNT.search(text) for text in now)
+    removing = not mentions_product and any(_REMOVAL.search(text) for text in now)
     for call in result.tool_calls:
         product_id = call.arguments.product_id
         if allowed:
             if product_id in allowed:
                 continue
-        elif product_id in in_cart and about_cart:
+        elif product_id in in_cart and (counted or (removing and isinstance(call, RemoveCartItemCall))):
             if sole is not None and call.arguments.temperature in (None, sole.temperature):
                 continue  # the one thing in the cart is the only thing "그거" can mean
             return VoiceInterpretation(
