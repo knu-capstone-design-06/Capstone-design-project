@@ -157,7 +157,7 @@ export function useTouchLog(screen: string, category: string, productId: string 
       if (before && before.x === position.x && before.y === position.y) return;
       positions.set(element, position);
       record('scroll', {
-        container: element === document.scrollingElement ? 'document' : (element as HTMLElement).dataset.logTarget ?? null,
+        container: element === document.scrollingElement ? 'document' : (element as HTMLElement).dataset.logScroll ?? (element as HTMLElement).dataset.logTarget ?? null,
         before: before ?? null, after: position,
         // 시간상 겹치는 후보일 뿐, 프로그램 스크롤이나 입력 의도를 확정하지 않습니다.
         inputCandidates: [...gestures.values(), ...cancelled.values()].map(gesture => gesture.id),

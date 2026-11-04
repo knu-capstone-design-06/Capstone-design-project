@@ -109,3 +109,30 @@ test('development sample never uploads telemetry', { skip: !process.env.TOUCH_FE
     assert.equal(await page.evaluate(() => window.kioskTouchLogDraft.transmission()), null);
   } finally { await page.close(); await browser.close(); }
 });
+
+test('local scroll records distinguish low-screen main, support panel and options dialog', async () => {
+  const browser = await launch();
+  const page = await browser.newPage({ viewport: { width: 1080, height: 1920 } });
+  try {
+    await page.route('https://fonts.googleapis.com/**', route => route.abort());
+    await page.addInitScript(() => localStorage.setItem('kiosk-ui-settings-v1', JSON.stringify({ largeText: true, largeButton: true, lowScreen: true })));
+    const fixture = await installOrderResponses(page, bootstrap('scroll-areas'));
+    await page.goto(url);
+    await page.locator('[data-log-target="product:americano"]').waitFor();
+    const scroll = async name => {
+      await page.locator(`[data-log-scroll="${name}"]`).evaluate(element => {
+        element.style.maxHeight = '100px'; element.style.overflowY = 'auto';
+        element.scrollTop = 50;
+        element.dispatchEvent(new Event('scroll'));
+      });
+      await page.waitForFunction(area => window.kioskTouchLogDraft.read().events.some(e => e.kind === 'scroll' && e.data.container === area && e.data.after.y > 0), name);
+    };
+    await scroll('order-main');
+    await page.locator('[data-log-target="support-toggle"]').click();
+    await scroll('support-panel');
+    await page.locator('[data-log-target="support-toggle"]').click();
+    await page.locator('[data-log-target="product:americano"]').click();
+    await scroll('options-dialog');
+    fixture.verify();
+  } finally { await page.close(); await browser.close(); }
+});

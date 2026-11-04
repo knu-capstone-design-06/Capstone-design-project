@@ -158,7 +158,7 @@ export function OrderPage() {
 
   return <>{settings.lowScreen && <div className="low-screen-banner" aria-hidden="true"><strong>온기 카페</strong><p>메뉴와 버튼을 아래로 내렸어요.</p></div>}<div ref={touchLog.root} className={`kiosk ${settings.largeText ? 'large-text' : ''} ${settings.largeButton ? 'large-button' : ''} ${settings.simpleScreen ? 'simple-screen' : ''} ${settings.lowScreen ? 'low-screen' : ''} ${settings.highContrast ? 'high-contrast' : ''}`}>
     <header className="header"><a data-log-target="menu-home" className="brand" href="#" onClick={event => { event.preventDefault(); if (screen !== 'complete') setScreen('menu'); }}>온기 카페</a><span className="sample-badge">{sampleMode ? '개발용 샘플' : '샘플 주문'} · 실제 결제 없음</span><button data-log-target="support-toggle" className="support-trigger" aria-expanded={supportOpen} aria-controls="support-panel" onClick={() => setSupportOpen(!supportOpen)}>화면 도움 {supportOpen ? '닫기' : '열기'}</button></header>
-    <section id="support-panel" className="support-panel" hidden={!supportOpen} aria-label="화면 도움 설정">
+    <section id="support-panel" data-log-scroll="support-panel" className="support-panel" hidden={!supportOpen} aria-label="화면 도움 설정">
       <div><h2>편한 화면으로 주문해 주세요</h2><p>설정을 바꿔도 담은 메뉴는 그대로예요.</p></div>
       <div className="support-options">
         {(Object.keys(supportLabels) as (keyof Settings)[]).map(key => <button data-log-target={`support:${key}`} key={key} aria-pressed={settings[key]} onClick={() => setSettings(current => ({ ...current, [key]: !current[key] }))}>{settings[key] ? '✓ ' : ''}{supportLabels[key]}</button>)}
@@ -167,7 +167,7 @@ export function OrderPage() {
       </div>
       <ReadAloudControls root={touchLog.root} voiceController={voiceController} screenKey={`${state.session?.session_id}:${screen}:${selected?.product_id ?? ''}:${restartOpen}`} />
     </section>
-    <main>
+    <main data-log-scroll="order-main">
       {!selected && feedback}
       {screen === 'menu' && <VoiceModeToggle controller={voiceController} ready={(state.status === 'ready' || state.status === 'saving') && state.session !== null && state.order === null} sampleMode={sampleMode} />}
       <div className="cart-notice" role="status" aria-live="polite" hidden={!state.notice || screen !== 'menu'}>{state.notice}<button data-log-target="notice-close" aria-label="안내 닫기" onClick={() => controller.clearNotice()}>✕</button></div>
@@ -190,7 +190,7 @@ export function OrderPage() {
       {screen !== 'complete' && <button ref={restartTrigger} data-log-target="order-restart" className="order-restart" disabled={busy || state.status === 'uncertain'} onClick={() => { voiceController.setEnabled(false); setRestartOpen(true); }}>처음으로</button>}
       <button data-log-target={screen === 'complete' ? 'new-order' : screen === 'menu' ? 'review-open' : 'simulate-payment'} className="primary order-confirm" disabled={screen === 'complete' ? busy : !count || writeDisabled} onClick={() => screen === 'complete' ? void startNewOrder() : screen === 'menu' ? openReview() : void controller.checkout()}>{screen === 'complete' ? '새 주문 시작' : screen === 'menu' ? '주문 확인' : '샘플 주문 완료'}</button>
     </div></section>
-    <dialog ref={dialog} className="options-dialog" onCancel={event => { event.preventDefault(); closeOptions(); }} onClick={event => { if (event.target === event.currentTarget) closeOptions(); }} aria-labelledby="option-title">
+    <dialog ref={dialog} data-log-scroll="options-dialog" className="options-dialog" onCancel={event => { event.preventDefault(); closeOptions(); }} onClick={event => { if (event.target === event.currentTarget) closeOptions(); }} aria-labelledby="option-title">
       {selected && <><div className="dialog-heading"><h2 id="option-title">{selected.name}</h2><button data-log-target="options-close" aria-label="옵션 창 닫기" onClick={closeOptions}>✕</button></div><p>{selected.temperatures.length ? '원하는 옵션을 골라 주세요.' : '원하는 수량을 골라 주세요.'}</p>{feedback}
         {selected.temperatures.length > 0 && <fieldset><legend>온도</legend><div className="option-buttons">{selected.temperatures.map(option => <button data-log-target={`temperature:${temperatureLabel(option)}`} key={option} aria-pressed={temperature === option} disabled={writeDisabled} onClick={() => { setTemperature(option); setQuantity(1); }}>{temperatureLabel(option)}</button>)}</div></fieldset>}
         <div className="dialog-quantity"><span>수량 (최대 {MAX_QUANTITY}개)</span><div className="quantity"><button data-log-target="options-decrease" disabled={writeDisabled || quantity === 1} aria-label="선택 수량 줄이기" onClick={() => setQuantity(quantity - 1)}>−</button><span>{quantity}</span><button data-log-target="options-increase" disabled={writeDisabled || quantity >= remaining} aria-label="선택 수량 늘리기" onClick={() => setQuantity(quantity + 1)}>+</button></div></div>
