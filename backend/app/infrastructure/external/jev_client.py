@@ -16,7 +16,6 @@ from app.infrastructure.external.jev_schemas import JevRequest, JevResponse
 logger = logging.getLogger(__name__)
 
 JEV_BASE_URL = "https://api.typesafe.ai"
-JEV_MODEL = "jev-1.13.0"
 
 
 class JevClient:
@@ -26,7 +25,8 @@ class JevClient:
     backend settings, so a question built elsewhere never picks a moving alias.
     """
 
-    def __init__(self, http: httpx.AsyncClient, model: str = JEV_MODEL, timeout_seconds: float = 3.0):
+    def __init__(self, http: httpx.AsyncClient, model: str, timeout_seconds: float = 3.0):
+        # model comes from Settings.jev_model: the one place the pinned version lives.
         self._http = http
         self._model = model
         self._timeout_seconds = timeout_seconds
