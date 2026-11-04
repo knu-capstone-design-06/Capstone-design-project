@@ -12,6 +12,7 @@ app/modules/vision/requirements.txt + onnxruntime):
   python -m app.modules.vision.tools.companion_eval sheets  --runs RUNS --truth TRUTH.csv --videos DIR --out DIR
   python -m app.modules.vision.tools.companion_eval ablation --runs RUNS --truth TRUTH.csv --videos DIR --out DIR
   python -m app.modules.vision.tools.companion_eval inventory --runs RUNS --truth TRUTH.csv --scenes SCENES.csv --out DIR
+  python -m app.modules.vision.tools.companion_eval rewindow --runs RUNS --params BUNDLE.json
 
 replay   one replay.py run per DIR/*.mp4 (no value bundle, so the situation output is 'unknown' and only the frame
          rows matter) into RUNS/<take>/ (rows.csv, windows.jsonl, meta.json). The defaults step 3, width 960 and
@@ -63,6 +64,8 @@ ablation the four combinations of cues and tracking on the same recorded H1 boxe
          tracking, every frame, no median) and d_window, the agreement of each label class and, apart from them, the
          helper acceptance rate (the share of helpers passing that rule's condition; helpers are neither companion nor
          queue, so it is not an agreement); and fig_e1_paper.png (7.0 x 2.4 in, 300 dpi, fonts 8 pt and up).
+rewindow windows_<bundle>.jsonl beside every RUNS/<take>/rows.csv: the window layer (situation, rule table, the
+         'turns' list) run again with a value bundle on the recorded rows, no video (row_from_csv, cmd_rewindow).
 inventory inclusion_table.csv (one row per replayed take: scene and people from the scene labels, role instances and
          frames from the person labels and the rows, labelled or not and why) and parameter_sources.csv (every value
          the chain's head part and this tool use, with its source tag). Needs --scenes (the scene label CSV: video,
@@ -493,6 +496,67 @@ def behind_only(out: str, cue_points: dict) -> None:
         "경계 후보 x (상대 거리 = 주 사용자 머리 높이 ÷ 그 머리 높이)",
         "뒤 사람인지 아닌지를 상대 거리만으로 가를 때의 라벨 일치율\n실선: 트랙별 2초 중앙값, 점선: 프레임마다. "
         "일행 조건 없이. 10-28 팀 촬영, 평가 전용")
+
+
+# --- rewindow: the window layer again on recorded rows ------------------------------------------------------------
+def row_from_csv(r: dict) -> dict:
+    """One rows.csv line as the chain held it in memory: blank cells None, box cells tuples, head_boxes a list, and
+    the companion_box key left out where no companion was found and another head's role is unknown (a CSV cell cannot
+    be absent; events.py reads a missing key as 'the companion cannot be told'). Exact for the 2026-11-04 chain with
+    the role boundaries unset; with boundaries set, a head decided 'not a companion' but 'behind unknown' is read as
+    companion-unknown too."""
+    row = {k: (None if v == "" else v) for k, v in r.items()}
+    for key in ("primary_box", "companion_box"):
+        if row.get(key):
+            row[key] = tuple(float(x) for x in row[key].split(";"))
+    if row.get("head_boxes") is not None:
+        row["head_boxes"] = json.loads(row["head_boxes"])
+        if row.get("companion_box") is None and any(b["role"] == "unknown" for b in row["head_boxes"]):
+            row.pop("companion_box", None)
+    return row
+
+
+def cmd_rewindow(a) -> int:
+    """windows_<bundle>.jsonl next to every RUNS/<take>/rows.csv: the windows the replay would have written with the
+    value bundle --params (one every segment_s from the first frame, the input's last stretch as a partial window),
+    from the recorded rows alone (no video, no models). No touch log: the touch columns stay missing as in the replay."""
+    from app.modules.vision.chain import WindowJudge, history_s
+    from app.modules.vision.params import load_bundle
+    from app.modules.vision.replay import jsonable
+    bundle = load_bundle(a.params)
+    tag = bundle.bundle_id or os.path.splitext(os.path.basename(a.params))[0]
+    keep, seg = history_s(bundle), bundle.chain.segment_s
+    summary = {}
+    for take in sorted(d for d in os.listdir(a.runs) if os.path.isfile(os.path.join(a.runs, d, "rows.csv"))):
+        with open(os.path.join(a.runs, take, "rows.csv"), encoding="utf-8-sig", newline="") as f:
+            rows = [row_from_csv(r) for r in csv.DictReader(f)]
+        judge = WindowJudge(bundle, None, session_id=take)
+        records, next_t, start = [], None, 0
+
+        def emit(t_end, upto, seg_len=None):
+            window_rows = [r for r in rows[:upto + 1] if float(r["t_s"]) >= t_end - keep]
+            records.append(judge.evaluate(window_rows, t_end, segment_s=seg_len))
+        for k, r in enumerate(rows):
+            t = float(r["t_s"])
+            if next_t is None:
+                next_t = t + seg
+            while t >= next_t:
+                emit(next_t, k)
+                next_t += seg
+        last_end = None if next_t is None else next_t - seg
+        if rows and last_end is not None and float(rows[-1]["t_s"]) > last_end:
+            emit(float(rows[-1]["t_s"]), len(rows) - 1, float(rows[-1]["t_s"]) - last_end)
+        with open(os.path.join(a.runs, take, f"windows_{tag}.jsonl"), "w", encoding="utf-8") as f:
+            for rec in records:
+                rec.pop("ms_window", None)                   # wall time of this offline run, not of the replay
+                f.write(json.dumps(jsonable(rec), ensure_ascii=False) + "\n")
+        names = collections.Counter(rec["situation"]["name"] for rec in records)
+        summary[take] = {"windows": len(records), "situation": dict(names),
+                         "turn_events": len({t["event_id"] for rec in records for t in (rec["turns"] or [])})}
+    with open(os.path.join(a.runs, f"rewindow_{tag}.json"), "w", encoding="utf-8") as f:
+        json.dump({"bundle": bundle.to_dict(), "takes": summary}, f, ensure_ascii=False, indent=2)
+    print(f"{len(summary)} takes -> windows_{tag}.jsonl", flush=True)
+    return 0
 
 
 # --- inventory: which takes, which values -------------------------------------------------------------------------
@@ -1058,9 +1122,12 @@ def main(argv=None) -> int:
     i.add_argument("--truth", required=True)
     i.add_argument("--scenes", required=True)
     i.add_argument("--out", required=True)
+    w = sub.add_parser("rewindow")
+    w.add_argument("--runs", required=True)
+    w.add_argument("--params", required=True)
     a = ap.parse_args(argv)
     return {"replay": cmd_replay, "analyze": cmd_analyze, "sheets": cmd_sheets, "ablation": cmd_ablation,
-            "inventory": cmd_inventory}[a.cmd](a)
+            "inventory": cmd_inventory, "rewindow": cmd_rewindow}[a.cmd](a)
 
 
 if __name__ == "__main__":
