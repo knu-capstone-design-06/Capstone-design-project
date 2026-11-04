@@ -10,7 +10,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from app.modules.decision.schemas import PILOT_PARAMS, Decision, DecisionParams, SessionState, WindowInput
+from app.modules.decision.schemas import (
+    FORECAST_HORIZON_S, PILOT_PARAMS, Decision, DecisionParams, SessionState, WindowInput,
+)
 from app.modules.decision.rule_table import WHAT, allowed_supports, jev_state
 from app.modules.sessions.schemas import StateScores, TouchFeatures
 
@@ -168,7 +170,7 @@ class NextDifficultyStage:
             "type": "choice",
             "instructions": "`history` lists the previous windows of this session, oldest first, ending just before the "
                             "current state. If nothing changes, which difficulty will this user most likely run into "
-                            "within the next ten seconds?",
+                            f"within the next {FORECAST_HORIZON_S} seconds?",
             "criteria": dict(DIFFICULTIES),
         }}
 

@@ -71,7 +71,7 @@ API 문서: http://127.0.0.1:8000/docs
 | JEV_API_URL | https://api.typesafe.ai | HTTPS 오리진만. 평문 HTTP는 localhost·127.0.0.1 모의 서버에만 허용 |
 | JEV_MODEL | jev-1.13.0 | 버전 ID. 별칭(jev-latest)은 실험 기록을 위해 쓰지 않음 |
 | JEV_TIMEOUT_SECONDS | 3 | Jev 호출 한 번의 전체 제한, 재시도 없음 |
-| JEV_STAGES | state_scores | 실험 조건. 창마다 돌릴 Jev 단계를 쉼표로 나열(`state_scores`, `support_choice`, `next_difficulty`). `off`면 키가 있어도 규칙표만 |
+| JEV_STAGES | off | 실험 조건. 창마다 돌릴 Jev 단계를 쉼표로 나열(`state_scores`, `support_choice`, `next_difficulty`). 기본 `off`는 키가 있어도 규칙표만 돌리고 Jev를 부르지 않음 |
 
 판단 층(`app/modules/decision/`)은 `/features` 창마다 규칙표 v0를 돌려 세션 상태를 갱신하고, `JEV_API_KEY`가 있으면 백그라운드에서 Jev에 상태 점수와 제안 적합성을 물어 기록만 남깁니다(그림자 모드). 응답은 바뀌지 않습니다. 설계와 현황은 [`docs/Jev-Integration.md`](../docs/Jev-Integration.md) 9·10장입니다.
 

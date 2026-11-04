@@ -29,6 +29,7 @@ from app.modules.decision.schemas import (
 )
 
 WHAT = {   # one English line per support for Jev (names and English only)
+    WAIT: "Wait and show nothing while the user talks with a companion",
     NOTICE: "Tell the user how many steps are left before payment, without a popup",
     DELAY: "Tell the user that waiting customers are the store's matter, without a popup",
     BIG: "Ask the user whether the buttons should become bigger",
@@ -147,17 +148,27 @@ def evidence_counts(situation: dict | None) -> dict:
     return dict(sorted(kinds.items()))
 
 
+def situation_known(situation: dict | None) -> bool:
+    """A judged situation with a tag other than unknown. Not judged and unknown both mean "do not know"."""
+    return situation is not None and situation.get("name") not in (None, UNKNOWN)
+
+
 def jev_state(inp: WindowInput, state: SessionState) -> dict:
-    """The Jev state of a window: code-made names and values only, in the vision rule table's field names."""
+    """The Jev state of a window: code-made names and values only, in the vision rule table's field names.
+
+    Nothing is asserted that was not observed: without a known situation the tag and looking_around are null,
+    not "no tag" and "not looking around".
+    """
     sit = inp.situation or {}
+    known = situation_known(inp.situation)
     conf = sit.get("confidence")
     return {
-        "situation": {"tag": sit.get("name"), "evidence": evidence_counts(sit),
+        "situation": {"tag": sit.get("name") if known else None, "evidence": evidence_counts(sit) if known else {},
                       "dropped_cues": ["mouth_moving"] if isinstance(conf, dict) and not conf.get("quality_ok") else []},
         "screen": {"name": inp.screen, "steps_left": inp.steps_left},
         "touch": {"misses_recent": inp.misses_recent, "fixes_recent": inp.fixes_recent, "backs_recent": inp.backs_recent,
                   "pause_s": None if inp.pause_s is None else round(inp.pause_s, 1)},
-        "vision": {"facing_screen": inp.gaze, "looking_around": sit.get("name") == AROUND},
+        "vision": {"facing_screen": inp.gaze, "looking_around": (sit.get("name") == AROUND) if known else None},
         "session": {"active": list(state.active), "held": state.held.support if state.held else None,
                     "refused": list(state.refused), "withdrawn": [w["support"] for w in state.withdrawn]},
     }
@@ -193,19 +204,34 @@ def _policy(row: Row, asked: bool, p: DecisionParams) -> dict:
             "jev_deadline": "next_segment", "no_response_s": p.no_response_s}
 
 
-def decide(inp: WindowInput, state: SessionState, params: DecisionParams) -> Decision:
-    """One decision for one window (JP 0-3 order: not measurable -> keep / none; withdraw; no row -> keep / none;
-    nothing held -> open; a held ask stays unless a 3-2 wait ranked ahead comes; otherwise replace when the row ranks
-    ahead or a shown quiet notice meets an ask; else keep)."""
-    sit = inp.situation
-    known = sit is not None and sit.get("name") != UNKNOWN
-    name = sit.get("name") if known else None
+def _window_scopes(inp: WindowInput, state: SessionState) -> tuple[bool, str | None, tuple, tuple, dict]:
+    """(situation known, tag of this window, tag scope, screen scope, meta): the one place the scopes are made."""
+    known = situation_known(inp.situation)
+    name = inp.situation.get("name") if known else None
     tag = name if known else state.tag_last                 # an unknown window continues the previous tag
     screen_changed = inp.screen != state.screen_last
     tag_since = inp.t if (tag != state.tag_last or screen_changed or state.tag_since is None) else state.tag_since
     screen_since = inp.t if (screen_changed or state.screen_since is None) else state.screen_since
     meta = {"t": inp.t, "tag": tag, "tag_since": tag_since, "screen": inp.screen, "screen_since": screen_since,
             "situation_known": known}
+    return known, name, ("tag", tag, tag_since), ("screen", inp.screen, screen_since), meta
+
+
+def _transition(held: Held | None, row: Row) -> str:
+    """open | replace | keep for the best row against the held decision (JP 0-3 ④⑤⑥)."""
+    if held is None:
+        return "open"
+    if held.action == "propose":                                                    # an open ask stays
+        return "replace" if (row.action == "wait" and row.rank < held.rank) else "keep"
+    quiet_shown = held.status == "shown" and held.action == "apply" and held.support in QUIET_APPLY
+    return "replace" if (row.rank < held.rank or (quiet_shown and row.action == "propose")) else "keep"
+
+
+def decide(inp: WindowInput, state: SessionState, params: DecisionParams) -> Decision:
+    """One decision for one window (JP 0-3 order: not measurable -> keep / none; withdraw; no row -> keep / none;
+    nothing held -> open; a held ask stays unless a 3-2 wait ranked ahead comes; otherwise replace when the row ranks
+    ahead or a shown quiet notice meets an ask; else keep)."""
+    known, name, tag_scope, screen_scope, meta = _window_scopes(inp, state)
     held = state.held
     if not inp.measurable:
         if held is not None and held.status == "shown":
@@ -214,20 +240,12 @@ def decide(inp: WindowInput, state: SessionState, params: DecisionParams) -> Dec
     if held is not None and _withdraw_met(held.withdraw_on, inp):
         return Decision("withdraw", meta, held.support, None, held.action, held.rank, held.scope, held.withdraw_on,
                         decision_id=held.decision_id, reason=f"withdraw condition {held.withdraw_on}")
-    tag_scope = ("tag", tag, tag_since)
-    screen_scope = ("screen", inp.screen, screen_since)
     rows = candidate_rows(inp, state, params, name if name in TAGS else None, tag_scope, screen_scope)
     if not rows:
         return _keep(held, meta, "no candidate row", measurable=True) if held is not None else Decision(
             "none", meta, reason="no candidate row")
     row = min(rows, key=lambda r: r.rank)
-    if held is None:
-        transition = "open"
-    elif held.action == "propose":                                                  # an open ask stays
-        transition = "replace" if (row.action == "wait" and row.rank < held.rank) else "keep"
-    else:
-        quiet_shown = held.status == "shown" and held.action == "apply" and held.support in QUIET_APPLY
-        transition = "replace" if (row.rank < held.rank or (quiet_shown and row.action == "propose")) else "keep"
+    transition = _transition(held, row)
     if transition == "keep":
         return _keep(held, meta, f"held {held.support} stays; row {row.support} waits", measurable=True)
     scope = tag_scope if row.from_tag else screen_scope
@@ -240,23 +258,27 @@ def decide(inp: WindowInput, state: SessionState, params: DecisionParams) -> Dec
 
 
 def allowed_supports(inp: WindowInput, state: SessionState, params: DecisionParams) -> list[str]:
-    """The supports this window could open after the JP 0-2 filter, ranked: the choice set for a Jev stage.
+    """What the rule table could open in this window, ranked, options included: the choice set for a Jev stage.
 
-    Same scopes as decide() uses; the held support is not a candidate again. Empty when the window is not
-    measurable or no row opens.
+    The same scopes, filter and transition as decide(): nothing when the window is not measurable, when the
+    held decision is being withdrawn, when no row opens, or when the table would keep the held decision (an
+    open ask stays). The 3-1 row's options (notice, defer) are listed as separate choices.
     """
     if not inp.measurable:
         return []
-    sit = inp.situation
-    known = sit is not None and sit.get("name") != UNKNOWN
-    name = sit.get("name") if known else None
-    tag = name if known else state.tag_last
-    screen_changed = inp.screen != state.screen_last
-    tag_since = inp.t if (tag != state.tag_last or screen_changed or state.tag_since is None) else state.tag_since
-    screen_since = inp.t if (screen_changed or state.screen_since is None) else state.screen_since
-    rows = candidate_rows(inp, state, params, name if name in TAGS else None, ("tag", tag, tag_since),
-                          ("screen", inp.screen, screen_since))
-    return [row.support for row in sorted(rows, key=lambda r: r.rank)]
+    known, name, tag_scope, screen_scope, _ = _window_scopes(inp, state)
+    held = state.held
+    if held is not None and _withdraw_met(held.withdraw_on, inp):
+        return []
+    rows = candidate_rows(inp, state, params, name if name in TAGS else None, tag_scope, screen_scope)
+    if not rows or _transition(held, min(rows, key=lambda r: r.rank)) == "keep":
+        return []
+    supports: list[str] = []
+    for row in sorted(rows, key=lambda r: r.rank):
+        for support in (row.options or (row.support,)):
+            if support not in supports:
+                supports.append(support)
+    return supports
 
 
 def _keep(held: Held, meta: dict, reason: str, measurable: bool) -> Decision:

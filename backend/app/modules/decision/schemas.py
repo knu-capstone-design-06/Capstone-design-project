@@ -46,11 +46,23 @@ class DecisionParams:
     defer_option_on: bool        # evaluation switch: 3-1 may defer the big-button question
 
 
-# [파일럿] the same starting values as ai-engine/app/modules/vision/params.py, with their sources there.
+# The same values as ai-engine/app/modules/vision/params.py, source by source (that file quotes each):
 PILOT_PARAMS = DecisionParams(
-    touch_span_s=5.0, tremor_miss_min=2, tremor_miss_min_no_gaze=3, lost_back_min=1,
-    lost_pause_s=8.0, lost_pause_s_vision=4.0, no_response_s=10.0, delay_notice_on=False, defer_option_on=True,
+    touch_span_s=5.0,            # [파일럿] starting value: the recent span for the touch cues
+    tremor_miss_min=2,           # [파일럿] reading of tree table 3-가 4-1 '반복' as two or more
+    tremor_miss_min_no_gaze=3,   # [파일럿] starting value: one more than tremor_miss_min when the gaze is unknown
+    lost_back_min=1,             # definition: tree table 3-가 4-2 '되돌아감이 한 번이라도 있음'
+    lost_pause_s=8.0,            # [파일럿] starting value: 4-2 '고른 뒤 멈춤'
+    lost_pause_s_vision=4.0,     # [파일럿] starting value: the lowered pause with looking_around or a gaze
+    no_response_s=10.0,          # [파일럿] starting value: JP 0-6 '무응답은 policy의 시간'
+    delay_notice_on=False,       # evaluation switch (decision list 2026-10-10 §14)
+    defer_option_on=True,        # evaluation switch (JP 0-2)
 )
+
+# Shadow-stage settings with no source yet ("기준 없음"): experiment settings, not agreed thresholds.
+HISTORY_WINDOWS = 5         # windows kept for the trajectory stage (2 s windows: about ten seconds)
+FORECAST_HORIZON_S = 10     # how far ahead next_difficulty asks about
+SCREEN_FLOW = ("menu", "review", "complete")   # OrderPage.tsx screen order (vision touch.py SCREEN_FLOW)
 
 
 @dataclass(frozen=True)
@@ -176,3 +188,26 @@ class JevRecord:
     usage: dict | None = None
     decision_id: str | None = None
     stage: str = "state_scores"            # which Jev stage asked (stages can be stacked)
+    previous_missing: tuple[str, ...] = ()  # earlier stages that had no answer when this one ran
+
+
+@dataclass
+class WindowRecord:
+    """One judged window, kept for the whole session: the comparison row of the experiment (docs 7.1).
+
+    inputs is the rule table's input line, decision the rule table's result, jev why Jev was or was not asked
+    ("off", "not_measurable", "skipped_in_flight", "asked"), answers the stage answers as they arrive. Windows
+    the rule table alone judged are rows too, so the rule-only arm has the same denominator.
+    """
+
+    session_id: str
+    window_end: datetime
+    t: float
+    inputs: dict
+    decision: dict
+    stages: tuple[str, ...]
+    jev: str
+    model: str | None = None
+    timed_out: str | None = None           # a shown ask withdrawn for no response before this window
+    answers: dict = field(default_factory=dict)   # stage name -> {question: answer}
+    outcomes: dict = field(default_factory=dict)  # stage name -> answered | no_answer | skipped

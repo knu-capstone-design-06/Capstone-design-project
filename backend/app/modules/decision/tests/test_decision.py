@@ -135,7 +135,7 @@ class ShadowQuestionTests(unittest.TestCase):
         state = shadow_state(inp, SessionState(), request.touch)
         self.assertEqual(state["touch"], {"misses_recent": 3, "fixes_recent": None, "backs_recent": 1, "pause_s": None,
                                           "tap_count": 4, "miss_tap_count": 3, "repeat_tap_count": 2, "back_count": 1, "dwell_ms": 12000})
-        self.assertEqual(state["screen"], {"name": "menu", "steps_left": None})
+        self.assertEqual(state["screen"], {"name": "menu", "steps_left": 2}, "menu -> review -> complete")
         self.assertEqual(state["situation"]["tag"], None)
         self.assertEqual(json.dumps(state), json.dumps(json.loads(json.dumps(state))), "plain JSON only")
 
@@ -265,7 +265,8 @@ class StageArmTests(unittest.IsolatedAsyncioTestCase):
     def test_jev_stages_setting_builds_the_chain_or_turns_jev_off(self):
         from app.modules.decision.jev_questions import build_stages
 
-        self.assertEqual(Settings(_env_file=None).jev_stages, "state_scores")
+        self.assertEqual(Settings(_env_file=None).jev_stages, "off", "a key alone never starts paid calls")
+        self.assertEqual(build_stages(Settings(_env_file=None, jev_api_key="jev-secret-value").jev_stages), ())
         self.assertEqual([s.name for s in build_stages("state_scores")], ["state_scores"])
         self.assertEqual([s.name for s in build_stages(" state_scores , support_choice ")], ["state_scores", "support_choice"])
         self.assertEqual(build_stages("off"), ())
@@ -356,11 +357,169 @@ class TrajectoryStageTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("t", first)
         self.assertEqual(forecast["state"]["jev"]["state_scores"]["normal"], 0.5, "and this window's own scores are beside it")
         self.assertEqual(repository.records("s1")[-1].answers["next_difficulty"]["choice"], "navigation_difficulty")
-        # The history keeps at most HISTORY_WINDOWS windows.
-        from app.modules.decision.repository import HISTORY_WINDOWS
+        # The trajectory sees at most HISTORY_WINDOWS windows; every window stays in the session's records.
+        from app.modules.decision.schemas import HISTORY_WINDOWS
         for i in range(HISTORY_WINDOWS + 3):
             service.observe("s1", feature_window(), measurable=False)   # remembered, not asked
         self.assertEqual(len(repository.history("s1")), HISTORY_WINDOWS)
+        self.assertEqual(len(repository.windows("s1")), HISTORY_WINDOWS + 5)
+
+
+class ObservationTests(unittest.TestCase):
+    """What the Jev state asserts, and what the backend fills from the screen id (vision review of #77)."""
+
+    def test_an_unknown_or_missing_situation_asserts_nothing_about_looking_around(self):
+        from app.modules.decision.rule_table import jev_state
+
+        for sit, expected in [(None, (None, None)), ({"name": "unknown"}, (None, None)),
+                              (situation(BUSY), (BUSY, False)), (situation(AROUND), (AROUND, True))]:
+            with self.subTest(situation=sit):
+                state = jev_state(window(10.0, situation=sit), SessionState())
+                self.assertEqual((state["situation"]["tag"], state["vision"]["looking_around"]), expected)
+
+    def test_screen_order_gives_steps_left_and_progress_withdraws_the_highlight(self):
+        repository = DecisionRepository()
+        service = DecisionService(repository, P, None)
+
+        def at(seconds, screen, back_count=0):
+            return FeatureWindowRequest(screen_id=screen, window_start=T0 + timedelta(seconds=seconds - 2), window_end=T0 + timedelta(seconds=seconds),
+                                        touch={"tap_count": 1, "miss_tap_count": 0, "repeat_tap_count": 0, "back_count": back_count, "dwell_ms": 1000})
+
+        opened = service.observe("s1", at(2, "menu", back_count=1), measurable=True)
+        self.assertEqual((opened.transition, opened.support, opened.execution["steps_left"]), ("open", HIGHLIGHT, 2))
+        withdrawn = service.observe("s1", at(4, "review"), measurable=True)
+        self.assertEqual((withdrawn.transition, withdrawn.reason), ("withdraw", "withdraw condition cart_progress"))
+        done = service.observe("s1", at(6, "complete"), measurable=True)
+        self.assertEqual((done.transition, done.meta["screen"]), ("none", "complete"))
+        inputs = [w.inputs for w in repository.windows("s1")]
+        self.assertEqual([i["steps_left"] for i in inputs], [2, 1, 0])
+        self.assertEqual([i["progress_segment"] for i in inputs], [None, True, True])
+        # A back to the menu is not progress; an unknown screen id gives no steps.
+        back = service.observe("s1", at(8, "menu"), measurable=True)
+        self.assertIs(repository.windows("s1")[-1].inputs["progress_segment"], False)
+        self.assertIsNone(service.observe("s1", at(10, "menu_list"), measurable=True).execution.get("steps_left"))
+
+    def test_an_unanswered_ask_lapses_before_the_next_window_is_judged(self):
+        repository = DecisionRepository()
+        service = DecisionService(repository, P, None)
+        quiet = service.judge("s1", feature_window(back_count=0), measurable=True, situation=situation(AROUND))
+        self.assertEqual(quiet.transition, "none", "no fixes_recent from the contract: no ask yet")
+        # Put an ask in place the way 4-1 would, then move past no_response_s.
+        state, (ask,) = run(repository.state("s1"), window(2.0, fixes_recent=2, gaze=True))
+        repository.save_state("s1", state)
+        later = FeatureWindowRequest(screen_id="menu", window_start=T0 + timedelta(seconds=P.no_response_s), window_end=T0 + timedelta(seconds=P.no_response_s + 2),
+                                     touch={"tap_count": 0, "miss_tap_count": 0, "repeat_tap_count": 0, "back_count": 0, "dwell_ms": 1000})
+        service.observe("s1", later, measurable=True)
+        record = repository.windows("s1")[-1]
+        self.assertEqual(record.timed_out, ask.decision_id)
+        self.assertEqual(repository.state("s1").withdrawn[-1]["reason"], "no_response")
+
+    def test_allowed_supports_match_what_the_table_would_open(self):
+        from app.modules.decision.rule_table import WHAT, allowed_supports
+
+        # Nothing held: the rows that open, options included.
+        self.assertEqual(allowed_supports(window(10.0, situation=situation(QUEUE), fixes_recent=2, gaze=True), SessionState(), P),
+                         [NOTICE, "defer_big_button_question", BIG])
+        self.assertEqual(allowed_supports(window(10.0, situation=situation(BUSY)), SessionState(), P), [WAIT])
+        self.assertIn(WAIT, WHAT)
+        # An open ask stays: the table keeps, so there is nothing to choose.
+        state, (asked,) = run(SessionState(), window(10.0, fixes_recent=2, gaze=True))
+        self.assertEqual(asked.action, "propose")
+        self.assertEqual(allowed_supports(window(12.0, backs_recent=1), state, P), [])
+        # A withdraw window offers nothing either.
+        state, (opened,) = run(SessionState(), window(10.0, backs_recent=1))
+        self.assertEqual(allowed_supports(window(12.0, progress_segment=True), state, P), [])
+
+
+class WindowRecordTests(unittest.IsolatedAsyncioTestCase):
+    """Every window is a comparison row, in every arm, for the whole session (backend review P2 of #77)."""
+
+    async def test_rule_only_arm_records_every_window_with_inputs_and_decision(self):
+        repository = DecisionRepository()
+        service = DecisionService(repository, P, None, stages=())
+        for i in range(8):
+            service.observe("s1", feature_window(back_count=1 if i == 0 else 0), measurable=True)
+        rows = repository.windows("s1")
+        self.assertEqual(len(rows), 8)
+        self.assertEqual({r.jev for r in rows}, {"off"})
+        self.assertEqual((rows[0].decision["transition"], rows[0].decision["support"], rows[0].decision["decision_id"]), ("open", HIGHLIGHT, "d0001"))
+        self.assertEqual(rows[0].inputs["backs_recent"], 1)
+        self.assertEqual(rows[7].decision["transition"], "keep")
+        self.assertEqual(rows[0].stages, ())
+
+    async def test_asked_skipped_and_missing_stages_are_marked_on_the_window(self):
+        gate = asyncio.Event()
+        calls = []
+
+        async def handler(request):
+            body = json.loads(request.content)
+            calls.append(list(body["questions"]))
+            await gate.wait()
+            if "support_choice" in body["questions"]:
+                return httpx.Response(200, json={"model": "jev-1.13.0", "usage": {"input_tokens": 1, "output_tokens": 0},
+                                                 "answers": {"support_choice": {"type": "choice", "choice": "none", "confidence": 0.6,
+                                                                                "probabilities": {HIGHLIGHT: 0.4, "none": 0.6}}}})
+            return httpx.Response(529, json={"error": "busy"})   # stage 1 fails
+
+        from app.modules.decision.jev_questions import ScoreStage, SupportChoiceStage
+        http = httpx.AsyncClient(base_url="https://api.typesafe.ai", transport=httpx.MockTransport(handler))
+        repository = DecisionRepository()
+        service = DecisionService(repository, P, JevClient(http, "jev-1.13.0", 3.0), stages=(ScoreStage(), SupportChoiceStage(P)))
+        service.observe("s1", feature_window(back_count=1), measurable=True)
+        await asyncio.sleep(0)
+        later = FeatureWindowRequest(screen_id="menu", window_start=T0 + timedelta(seconds=2), window_end=T0 + timedelta(seconds=4),
+                                     touch={"tap_count": 1, "miss_tap_count": 0, "repeat_tap_count": 0, "back_count": 0, "dwell_ms": 3000})
+        service.observe("s1", later, measurable=True)   # while stage 1 is in flight
+        gate.set()
+        await service.drain()
+        await http.aclose()
+        first, second = repository.windows("s1")
+        self.assertEqual((first.jev, first.stages, first.model), ("asked", ("state_scores", "support_choice"), "jev-1.13.0"))
+        self.assertEqual(first.outcomes, {"state_scores": "no_answer", "support_choice": "answered"})
+        self.assertEqual(first.answers["support_choice"]["support_choice"]["choice"], "none")
+        self.assertEqual(second.jev, "skipped_in_flight")
+        self.assertEqual(second.outcomes, {})
+        choice_record = repository.records("s1")[-1]
+        self.assertEqual((choice_record.stage, choice_record.previous_missing), ("support_choice", ("state_scores",)))
+
+
+class ResponseInvarianceTests(unittest.TestCase):
+    """The /features response with a measurable ai-engine answer is the same with the layer, without it, and when it raises."""
+
+    BODY = {"screen_id": "menu", "window_start": "2026-11-04T10:00:00Z", "window_end": "2026-11-04T10:00:02Z",
+            "touch": {"tap_count": 1, "miss_tap_count": 0, "repeat_tap_count": 0, "back_count": 1, "dwell_ms": 3000}}
+    SCORES = {"normal": 0.2, "touch_difficulty": 0.5, "navigation_difficulty": 0.1, "visual_difficulty": 0.1, "hesitation": 0.1}
+
+    def features(self, decision_patch=None):
+        from unittest.mock import patch
+
+        async def handler(request):
+            if request.url.path == "/v1/systemone":   # the patched client class is also the Jev client's
+                return httpx.Response(200, json=RESPONSE)
+            payload = json.loads(request.content)
+            return httpx.Response(200, json={"session_id": payload["session_id"], "measurable": True, "states": self.SCORES, "model_version": "dummy-0.1"})
+
+        app = create_app(Settings(_env_file=None, openai_api_key=None, jev_api_key="jev-secret-value", jev_stages="state_scores"))
+        real_client = httpx.AsyncClient   # app.main.httpx is this module: keep the class before patching it
+        with patch("app.main.httpx.AsyncClient",
+                   side_effect=lambda **kw: real_client(base_url="http://ai-engine:8001", transport=httpx.MockTransport(handler))), \
+                TestClient(app) as client:
+            session_id = client.post("/api/v1/sessions").json()["session_id"]
+            if decision_patch == "raise":
+                with patch.object(DecisionService, "observe", side_effect=RuntimeError("decision boom")):
+                    body = client.post(f"/api/v1/sessions/{session_id}/features", json=self.BODY).json()
+            else:
+                body = client.post(f"/api/v1/sessions/{session_id}/features", json=self.BODY).json()
+                if decision_patch == "with_layer":
+                    self.assertEqual(client.app.state.decision_repository.windows(session_id)[0].jev, "asked")
+        body.pop("session_id")
+        return body
+
+    def test_measurable_response_is_identical_with_the_layer_and_when_it_raises(self):
+        expected = {"ai_available": True, "states": self.SCORES, "model_version": "dummy-0.1",
+                    "support": {"preset": "none", "requires_confirmation": False, "decided_by": "rule_placeholder"}}
+        self.assertEqual(self.features("with_layer"), expected)
+        self.assertEqual(self.features("raise"), expected)
 
 
 class FeaturesEndpointTests(unittest.TestCase):
@@ -376,7 +535,8 @@ class FeaturesEndpointTests(unittest.TestCase):
     def test_the_response_is_unchanged_while_the_table_runs_beside_it(self):
         for key in (None, "jev-secret-value"):
             with self.subTest(jev_key=bool(key)):
-                settings = Settings(_env_file=None, openai_api_key=None, jev_api_key=key, ai_engine_url="http://127.0.0.1:9")
+                settings = Settings(_env_file=None, openai_api_key=None, jev_api_key=key, ai_engine_url="http://127.0.0.1:9",
+                                    jev_stages="state_scores" if key else "off")
                 with TestClient(create_app(settings)) as client:
                     session_id = client.post("/api/v1/sessions").json()["session_id"]
                     body = client.post(f"/api/v1/sessions/{session_id}/features", json=self.BODY).json()
