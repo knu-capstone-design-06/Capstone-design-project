@@ -32,6 +32,24 @@ def is_bare_yes(text: str) -> bool:
     return "".join(ch for ch in text if ch.isalnum()) in BARE_YES
 
 
+# Words that take an offer ("네 그걸로 주세요") and words that turn it down ("아니요 그거 말고요").
+ACCEPT_MARKS = ("그걸로", "그렇게", "그대로", "맞아요", "좋아요")
+REJECT_MARKS = ("아니", "아뇨", "말고", "싫", "취소", "다시", "빼")
+
+
+def is_rejection(text: str) -> bool:
+    compact = "".join(ch for ch in text if ch.isalnum())
+    return any(mark in compact for mark in REJECT_MARKS)
+
+
+def is_acceptance(text: str) -> bool:
+    """A yes at the start ("네 그걸로"), or a taking word, with nothing that turns it down."""
+    compact = "".join(ch for ch in text if ch.isalnum())
+    if is_rejection(text):
+        return False
+    return any(compact.startswith(yes) for yes in BARE_YES) or any(mark in compact for mark in ACCEPT_MARKS)
+
+
 SPLIT_ORDER_REPLY = "주문이 길어요. 두 가지씩 나눠서 말씀해 주세요."
 
 
@@ -583,11 +601,21 @@ class VoiceService:
                 result = require_named_products(result, request, history, menu, cart)
                 result = ask_for_missing_temperature(result, menu, cart)
                 result = match_spoken_details(
-                    result, request, cart, menu, history, proposal.tool_calls if proposal else None)
+                    result, request, cart, menu, history,
+                    proposal.tool_calls if proposal is not None and is_acceptance(request.text) else None)
                 result = require_cart_items(result, cart, menu)
             if result is not None and not matches_menu(result, menu):
                 logger.warning("voice interpretation rejected (not on menu)")
                 result = None
+            if (result is not None and result.status in ("completed", "needs_confirmation") and proposal is not None
+                    and result.tool_calls == proposal.tool_calls and not is_acceptance(request.text)):
+                # The model repeated the offer, but the customer did not take it: "아니요 그거
+                # 말고요" turns it down, so ask what to order; "음 잠깐만요" is unclear, so
+                # read the offer back again. Only a yes runs it.
+                if is_rejection(request.text):
+                    result = VoiceInterpretation(status="needs_clarification", tool_calls=[], reply_text=ASK_MENU_REPLY)
+                else:
+                    result = VoiceInterpretation(status="needs_confirmation", tool_calls=result.tool_calls, reply_text="?")
             if (result is not None and result.status == "completed"
                     and self._repository.needs_reconfirm(session_id)
                     and (proposal is None or result.tool_calls != proposal.tool_calls)):
