@@ -244,8 +244,12 @@ def spoken_mentions(
         after = compact[found.end():]
         if after.startswith("더"):
             kind = "less" if after[1:].startswith(DECREASE_AFTER) else "more"
+        elif after.startswith(DECREASE_AFTER):
+            kind = "less"
+        elif after.startswith(("으로", "로")):
+            kind = "to"  # "세 잔으로": the line becomes three, whatever it holds now
         else:
-            kind = "less" if after.startswith(DECREASE_AFTER) else "abs"
+            kind = "abs"
         before = [product_id for position, product_id in names if start <= position < found.start()]
         counts.append((before[-1] if before else None, kind, _count(found)))
         start = found.end()
@@ -380,9 +384,16 @@ def match_spoken_details(
                     return VoiceInterpretation(status="needs_confirmation", tool_calls=result.tool_calls, reply_text="?")
                 expected = current - n  # "하나 빼 주세요" over three cups leaves two, not none
             elif isinstance(call, UpdateCartItemCall):
-                expected = {"more": current + n, "less": current - n, "abs": n}[kind]
+                expected = {"more": current + n, "less": current - n, "abs": n, "to": n}[kind]
             elif kind == "less":
                 return VoiceInterpretation(status="needs_confirmation", tool_calls=result.tool_calls, reply_text="?")
+            elif kind == "to" and (product_id, call.arguments.temperature) in in_cart:
+                # "세 잔으로" over two cups is a change to three, not three more: the model's
+                # addition becomes that change and is read back.
+                logger.warning("voice interpretation added where the spoken count set a total; confirming")
+                call, changed = UpdateCartItemCall(tool="update_cart_item", arguments=CartItemQuantity(
+                    product_id=product_id, temperature=call.arguments.temperature, quantity=n)), True
+                expected = n
             else:
                 expected = n
             if expected > QUANTITY_MAX:
@@ -410,6 +421,8 @@ def match_spoken_details(
 
 ASK_MENU_REPLY = "어떤 메뉴를 주문할까요?"
 PENDING = {"needs_confirmation", "needs_clarification"}
+# Words of an instruction about what is already in the cart.
+CART_REFERENCE_MARKS = ("더", "빼", "그거", "그것", "저거", "이거", "바꿔", "추가", "취소", "줄여", "늘려", "으로", "로")
 
 
 def _compact(text: str) -> str:
@@ -479,12 +492,18 @@ def require_named_products(
     lines = list(cart)
     sole = lines[0] if len(lines) == 1 else None
     in_cart = {line.product_id for line in lines}
+    # The cart stands in for a product only in an instruction about the cart ("하나 더요",
+    # "그거 빼 줘", "두 잔으로") that names no product at all: "라떼 하나 주세요" names one
+    # (even if only a shared word) and "화면 좀 내려줘" asks for nothing in the cart.
+    mentions_product = any(w in text for item_words in words.values() for w in item_words for text in now)
+    about_cart = not mentions_product and any(
+        any(mark in text for mark in CART_REFERENCE_MARKS) or _COUNT.search(text) for text in now)
     for call in result.tool_calls:
         product_id = call.arguments.product_id
         if allowed:
             if product_id in allowed:
                 continue
-        elif product_id in in_cart:
+        elif product_id in in_cart and about_cart:
             if sole is not None and call.arguments.temperature in (None, sole.temperature):
                 continue  # the one thing in the cart is the only thing "그거" can mean
             return VoiceInterpretation(
@@ -631,6 +650,11 @@ class VoiceService:
                     result = VoiceInterpretation(status="needs_clarification", tool_calls=[], reply_text=ASK_MENU_REPLY)
                 else:
                     result = VoiceInterpretation(status="needs_confirmation", tool_calls=result.tool_calls, reply_text="?")
+            if (result is not None and result.status == "completed" and proposal is not None
+                    and result.tool_calls == proposal.tool_calls and is_acceptance(request.text)):
+                # "네 그걸로 주세요" takes the offer as read back, like a bare "네": it runs on
+                # the cart the offer was checked against, so a touch in between is caught.
+                expected = proposal.cart
             if (result is not None and result.status == "completed"
                     and self._repository.needs_reconfirm(session_id)
                     and (proposal is None or result.tool_calls != proposal.tool_calls)):
