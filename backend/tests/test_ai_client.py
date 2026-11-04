@@ -192,6 +192,14 @@ class IntegrationTests(unittest.TestCase):
             with self.assertRaises(ValidationError):
                 Settings(_env_file=None, database_url=url)
 
+    def test_accepts_dedicated_role_session_pooler_url(self):
+        url = (
+            "postgresql://kiosk_backend.example:placeholder@"
+            "aws-0-ap-northeast-2.pooler.supabase.com:5432/postgres"
+        )
+        settings = Settings(_env_file=None, database_url=url)
+        self.assertEqual(settings.database_url.get_secret_value(), url)
+
     def test_window_requires_timezone_and_positive_duration(self):
         for override in (
             {"window_start": "2026-10-01T10:00:00"},
