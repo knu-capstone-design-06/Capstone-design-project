@@ -28,6 +28,7 @@ services:
       JEV_API_URL: ${JEV_API_URL:-}
       JEV_MODEL: ${JEV_MODEL:-}
       JEV_TIMEOUT_SECONDS: ${JEV_TIMEOUT_SECONDS:-}
+      JEV_STAGES: ${JEV_STAGES:-}
     depends_on:
       ai-engine:
         condition: service_healthy
