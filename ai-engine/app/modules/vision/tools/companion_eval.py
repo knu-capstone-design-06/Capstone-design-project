@@ -11,6 +11,7 @@ app/modules/vision/requirements.txt + onnxruntime):
   python -m app.modules.vision.tools.companion_eval analyze --runs RUNS --truth TRUTH.csv --out DIR [--behind-only]
   python -m app.modules.vision.tools.companion_eval sheets  --runs RUNS --truth TRUTH.csv --videos DIR --out DIR
   python -m app.modules.vision.tools.companion_eval ablation --runs RUNS --truth TRUTH.csv --videos DIR --out DIR
+  python -m app.modules.vision.tools.companion_eval inventory --runs RUNS --truth TRUTH.csv --scenes SCENES.csv --out DIR
 
 replay   one replay.py run per DIR/*.mp4 (no value bundle, so the situation output is 'unknown' and only the frame
          rows matter) into RUNS/<take>/ (rows.csv, windows.jsonl, meta.json). The defaults step 3, width 960 and
@@ -58,6 +59,14 @@ ablation the four combinations of cues and tracking on the same recorded H1 boxe
          user's box), old_roles (a, b: the old roles per label class), separation (c, d: rel_dist and |lateral| per
          class, d per frame and per window) and grid (c, d: the sweep agreements at every grid value). Checks against
          the recorded replay (d's tracks, roles and medians; a's main user) go to ablation_checks.json.
+         Also ablation_grid_wide.csv: one row per cue, rule and grid value with, for c_frame, d_frame (new cues and
+         tracking, every frame, no median) and d_window, the agreement of each label class and, apart from them, the
+         helper acceptance rate (the share of helpers passing that rule's condition; helpers are neither companion nor
+         queue, so it is not an agreement); and fig_e1_paper.png (7.0 x 2.4 in, 300 dpi, fonts 8 pt and up).
+inventory inclusion_table.csv (one row per replayed take: scene and people from the scene labels, role instances and
+         frames from the person labels and the rows, labelled or not and why) and parameter_sources.csv (every value
+         the chain's head part and this tool use, with its source tag). Needs --scenes (the scene label CSV: video,
+         user, others, scene_key, scene_label).
 
 Labels (TRUTH.csv, columns clip,track,frame_from,frame_to,person,role,note): one row per labelled track and frame range.
 Their track ids come from the linking the labels were made with (research/56, 56_tracks.py: per take, a box joins the
@@ -84,6 +93,7 @@ import json
 import math
 import os
 import sys
+from dataclasses import fields as fields_of
 
 import numpy as np
 
@@ -485,6 +495,124 @@ def behind_only(out: str, cue_points: dict) -> None:
         "일행 조건 없이. 10-28 팀 촬영, 평가 전용")
 
 
+# --- inventory: which takes, which values -------------------------------------------------------------------------
+def _people(text: str) -> list:
+    """The person codes A-D named in a scene-label field ('2 behind (B·A)' -> ['A', 'B'])."""
+    return sorted(set(ch for ch in (text or "") if ch in "ABCD"))
+
+
+def cmd_inventory(a) -> int:
+    from app.modules.vision.columns import FACE_VALUE_COLUMNS, SMALLER_THAN_USER
+    from app.modules.vision.params import PilotParams
+    truth = load_truth(a.truth)
+    with open(a.scenes, encoding="utf-8-sig", newline="") as f:
+        scenes = {r["video"]: r for r in csv.DictReader(f)}
+    os.makedirs(a.out, exist_ok=True)
+    rows, settings = [], None
+    roles_of = {"companion": "companion", "behind_standing": "queue", "helper": "helper", "behind_passing": "passer"}
+    for take in sorted(d for d in os.listdir(a.runs) if os.path.isfile(os.path.join(a.runs, d, "rows.csv"))):
+        frames, meta = load_run(os.path.join(a.runs, take))
+        settings = settings or meta["settings"]
+        sc = scenes.get(take, {})
+        row = {"take": take, "scene_key": sc.get("scene_key"), "scene_label": sc.get("scene_label"),
+               "user_in_plan": sc.get("user"), "others_in_plan": sc.get("others"), "frames": len(frames),
+               "frames_with_heads": sum(bool(fr["boxes"]) for fr in frames),
+               "frames_2plus_heads": sum(len(fr["boxes"]) >= 2 for fr in frames),
+               "max_heads": max((len(fr["boxes"]) for fr in frames), default=0)}
+        if take in truth:
+            label_tracks(frames)
+            attach_labels(frames, truth[take])
+            persons = collections.defaultdict(set)
+            for _, _, _, person, role in truth[take]:
+                persons[roles_of.get(role, role)].add(person)
+            row["identities"] = " ".join(sorted({p for _, _, _, p, _ in truth[take]}))
+            for r in ("companion", "queue", "helper", "passer"):
+                row[f"{r}_n"] = None if "X" in persons[r] else len(persons[r])
+            row["user_frames"] = sum(any(b["label"] == "user" for b in fr["boxes"]) for fr in frames)
+            row["role_box_frames"] = sum(b["label"] in CLASSES for fr in frames for b in fr["boxes"])
+            row["labelled"] = "yes"
+            notes = []
+            if "X" in persons["passer"]:
+                notes.append("지나간 사람은 라벨에서 사람을 나누지 않음(X; 라벨 메모: B · A · D가 뒤로 지나감)")
+            if any(lo > 0 for _, lo, _, _, _ in truth[take]):
+                notes.append("사용자 교체 프레임은 확인 시트를 보고 정한 값(56_truth.csv)")
+            row["note"] = "; ".join(notes)
+        else:
+            row["identities"] = " ".join(_people(sc.get("user", "")) + [p for p in _people(sc.get("others", ""))
+                                                                          if p not in _people(sc.get("user", ""))])
+            for r in ("companion", "queue", "helper", "passer"):
+                row[f"{r}_n"] = 0 if str(sc.get("others", "")).strip() == "0" else None
+            row["labelled"] = "no"
+            reason = "장면 라벨의 다른 사람 0명(사람 라벨은 다른 사람이 있는 영상에만 붙임)" \
+                if str(sc.get("others", "")).strip() == "0" else "사람 라벨 없음"
+            if row["max_heads"] >= 2:
+                reason += f"; 그래도 머리 상자가 2개 이상인 프레임 {row['frames_2plus_heads']}개"
+            row["reason_not_labelled"] = reason
+        rows.append(row)
+    fields = ["take", "scene_key", "scene_label", "user_in_plan", "others_in_plan", "identities", "companion_n",
+              "queue_n", "helper_n", "passer_n", "frames", "frames_with_heads", "frames_2plus_heads", "max_heads",
+              "user_frames", "role_box_frames", "labelled", "reason_not_labelled", "note"]
+    _write_csv(os.path.join(a.out, "inclusion_table.csv"), rows, fields)
+
+    src = PilotParams.sources()
+    unit = {f.name: f.metadata["unit"] for f in fields_of(PilotParams)}
+    p = PilotParams()
+
+    def tag(text):
+        if text.startswith("정할 수 없음"):
+            return "정할 수 없음"
+        for key, t in (("[파일럿]", "[파일럿]"), ("관행값", "[관행값]"), ("데이터", "[데이터]")):
+            if key in text:
+                return t
+        return "[결정]" if "결정" in text else "[출처]"
+    params = []
+    for name in ("head_score_min", "head_nms_iou", "primary_rule", "track_iou_min", "track_max_gap_s", "role_window_s",
+                 "companion_rel_dist_max", "companion_lateral_min", "behind_rel_dist_min", "segment_s",
+                 "mouth_baseline_s"):
+        params.append({"name": name, "value": getattr(p, name), "unit": unit[name], "where": "params.PilotParams",
+                       "used_by": "코드(머리 상자 · 트랙 · 역할)" if name not in ("segment_s", "mouth_baseline_s")
+                       else "코드(다른 용도) · 위 두 시작값의 출처", "source_tag": tag(src[name]), "source": src[name]})
+    params += [
+        {"name": "SMALLER_THAN_USER", "value": SMALLER_THAN_USER, "unit": "상대 거리", "where": "columns.py",
+         "used_by": "코드(뒤 사람 조건)", "source_tag": "[결정]",
+         "source": "결정 §3 '주 사용자보다 작은 상자': 상대 거리 > 1 = 주 사용자보다 작은 머리 상자(정의)"},
+        {"name": "FACE_VALUE_COLUMNS", "value": len(FACE_VALUE_COLUMNS), "unit": "열 개수", "where": "columns.py",
+         "used_by": "코드(얼굴 포함 검사에서 비우는 열)", "source_tag": "[비전 담당]",
+         "source": "Face Landmarker 얼굴에서 나오는 features.COLUMNS: " + " ".join(FACE_VALUE_COLUMNS)},
+        {"name": "replay step / width / threads", "value": f"{settings['step']} / {settings['width']} / "
+                                                          f"{settings['threads']}",
+         "unit": "프레임 · px · 스레드", "where": "companion_eval replay(기본값)", "used_by": "평가(재생)",
+         "source_tag": "[재현]", "source": "10-29 팀 재생(저장소 밖, 테이크마다 meta.json)과 조사 56의 "
+                                         "설정과 같음: 같은 H1 상자를 얻으려고"},
+        {"name": "LABEL_GAP_FRAMES", "value": LABEL_GAP_FRAMES, "unit": "처리 프레임", "where": "companion_eval",
+         "used_by": "평가(사람 라벨을 읽는 연결)", "source_tag": "[비전 담당]",
+         "source": "조사 56 56_tracks.py의 연결(IoU > 0, 1초 = 10 처리 프레임): 라벨을 만든 방식 그대로 읽으려고"},
+        {"name": "GRID_REL", "value": f"{GRID_REL[0]}~{GRID_REL[-1]}, 0.05 간격", "unit": "상대 거리",
+         "where": "companion_eval", "used_by": "평가(경계 후보 격자)", "source_tag": "[비전 담당]",
+         "source": "조사 56의 사람별 값 범위(0.8~2.6)를 넉넉히 덮는 평가 격자. 값을 고르지 않음"},
+        {"name": "GRID_LAT", "value": f"{GRID_LAT[0]}~{GRID_LAT[-1]}, 0.05 간격", "unit": "주 사용자 머리 높이",
+         "where": "companion_eval", "used_by": "평가(경계 후보 격자)", "source_tag": "[비전 담당]",
+         "source": "같은 평가 격자. 값을 고르지 않음"},
+        {"name": "OLD_COMPANION_AREA / OLD_COMPANION_DIST / OLD_BEHIND_AREA",
+         "value": f"{OLD_COMPANION_AREA} / {OLD_COMPANION_DIST} / {OLD_BEHIND_AREA}", "unit": "넓이 비 · 머리 폭 · 넓이 비",
+         "where": "companion_eval", "used_by": "평가(ablation의 a · b, 바꾸기 전 동작을 되살림)",
+         "source_tag": "[파일럿] · [파일럿] · [결정]",
+         "source": "2026-11-04 전 params.py(커밋 3705060)의 companion_min_area_ratio · companion_max_dist_widths · "
+                   "behind_max_area_ratio"},
+        {"name": "HANDOVER 171844", "value": HANDOVER["20261028_171844"], "unit": "처리 프레임",
+         "where": "companion_eval (56_truth.csv)", "used_by": "평가(사용자 교체 지연)", "source_tag": "[비전 담당]",
+         "source": "사용자 교체 시점: 확인 시트를 보고 붙인 라벨(조사 56)"},
+        {"name": "percentile", "value": "선형 보간", "unit": "", "where": "companion_eval _quart",
+         "used_by": "평가(사분위)", "source_tag": "[관행값]", "source": "numpy.percentile 기본 방법(linear)"},
+        {"name": "제외 영상", "value": "20261028_171615", "unit": "", "where": "companion_eval replay --exclude",
+         "used_by": "평가(재생 대상)", "source_tag": "[비전 담당]", "source": "비전 담당이 rejected로 정한 테이크"},
+    ]
+    _write_csv(os.path.join(a.out, "parameter_sources.csv"), params,
+               ["name", "value", "unit", "where", "used_by", "source_tag", "source"])
+    print(f"inclusion_table.csv {len(rows)} takes, parameter_sources.csv {len(params)} rows", flush=True)
+    return 0
+
+
 # --- ablation: cues x tracking on the same boxes -------------------------------------------------------------------
 # The values of the roles before 2026-11-04 (params.py at 3705060, removed with them): companion_min_area_ratio 0.5
 # ([파일럿]), companion_max_dist_widths 3.0 ([파일럿]), behind_max_area_ratio 1.0 (decision table 3 '주 사용자보다 작은
@@ -672,11 +800,105 @@ def cmd_ablation(a) -> int:
                         emit("grid", name, "all", GRID_CLASS[m], cue, r["boundary"], m, x)
     _write_csv(os.path.join(a.out, "ablation_geometry_tracking.csv"), out,
                ["section", "variant", "take", "class", "cue", "boundary", "measure", "value"])
+    _grid_wide(os.path.join(a.out, "ablation_grid_wide.csv"), pts)
+    _paper_figure(os.path.join(a.out, "fig_e1_paper.png"), out, pts)
     with open(os.path.join(a.out, "ablation_checks.json"), "w", encoding="utf-8") as f:
         json.dump(checks, f, ensure_ascii=False, indent=2)
     _ablation_plot(os.path.join(a.out, "ablation_geometry_tracking.png"), out, figure)
     print(json.dumps({k: v for k, v in checks.items() if k != "frame_size"}), flush=True)
     return 0
+
+
+def _grid_wide(path: str, pts: dict) -> None:
+    """ablation_grid_wide.csv (module docstring): agreement per class and the helper acceptance rate apart."""
+    from app.modules.vision.columns import SMALLER_THAN_USER
+    behind = lambda v, g: v > SMALLER_THAN_USER and v >= g            # columns.decide_role's behind condition
+    rules = [("rel_dist", "companion_rel_dist_max", GRID_REL,
+              {"companion_agree": ("companion", lambda v, g: v <= g), "queue_agree": ("behind_standing", lambda v, g: v > g),
+               "passer_agree": ("behind_passing", lambda v, g: v > g), "helper_accept": ("helper", lambda v, g: v <= g)}),
+             ("rel_dist", "behind_rel_dist_min", GRID_REL,
+              {"companion_agree": ("companion", lambda v, g: not behind(v, g)),
+               "queue_agree": ("behind_standing", behind), "passer_agree": ("behind_passing", behind),
+               "helper_accept": ("helper", behind)}),
+             ("abs_lateral", "companion_lateral_min", GRID_LAT,
+              {"companion_agree": ("companion", lambda v, g: v >= g), "queue_agree": ("behind_standing", lambda v, g: v < g),
+               "passer_agree": ("behind_passing", lambda v, g: v < g), "helper_accept": ("helper", lambda v, g: v >= g)})]
+    rows = []
+    for cue, rule, grid, cols in rules:
+        for g in grid:
+            row = {"cue": cue, "rule": rule, "boundary": g}
+            for var in ("c_frame", "d_frame", "d_window"):
+                v, stage = var.split("_")
+                for col, (cls, test) in cols.items():
+                    vals = [x for x in pts.get((v, stage, cue, cls), []) if x is not None]
+                    row[f"{var}_{col}"] = round(sum(test(x, g) for x in vals) / len(vals), 4) if vals else None
+            rows.append(row)
+    _write_csv(path, rows, list(rows[0]))
+
+
+def _paper_figure(path: str, out: list, pts: dict) -> None:
+    """fig_e1_paper.png: 7.0 x 2.4 in at 300 dpi, three panels, one shared legend, every font 8 pt or larger."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib import font_manager
+    from matplotlib.lines import Line2D
+    for reg in (r"C:\Windows\Fonts\malgun.ttf", "/usr/share/fonts/truetype/nanum/NanumGothic.ttf"):
+        if os.path.isfile(reg):
+            font_manager.fontManager.addfont(reg)
+            plt.rcParams["font.family"] = font_manager.FontProperties(fname=reg).get_name()
+            break
+    plt.rcParams.update({"axes.unicode_minus": False, "font.size": 8, "axes.titlesize": 8.5, "axes.labelsize": 8,
+                         "xtick.labelsize": 8, "ytick.labelsize": 8, "legend.fontsize": 8})
+    ink, muted, grid, surface = "#0b0b0b", "#898781", "#e1e0d9", "#ffffff"
+    blue, orange = "#2a78d6", "#eb6834"
+    fig, axes = plt.subplots(1, 3, figsize=(7.0, 2.4), dpi=300, facecolor=surface,
+                             gridspec_kw={"width_ratios": [1.15, 1, 1]})
+    ax = axes[0]
+    takes = sorted({r["take"] for r in out if r["section"] == "primary" and r["take"] != "all"})
+    share = lambda v, t: next(r["value"] for r in out if r["section"] == "primary" and r["variant"] == v
+                              and r["take"] == t and r["measure"] == "primary_is_user_share")
+    xs = range(len(takes))
+    ax.scatter([x - 0.14 for x in xs], [share("a", t) for t in takes], s=16, facecolors="none", edgecolors=ink,
+               linewidths=0.9, zorder=3)
+    ax.scatter([x + 0.14 for x in xs], [share("b", t) for t in takes], s=16, color=ink, zorder=3)
+    ax.set_xticks(list(xs))
+    ax.set_xticklabels([t[-4:] for t in takes], rotation=90)
+    ax.set_ylim(-0.05, 1.08)
+    ax.set_title("주 사용자 정확도", loc="left", color=ink)
+    ax.set_ylabel("비율", color=ink)
+    sweeps = [(axes[1], "rel_dist", GRID_REL, "상대 거리",
+               [("companion", lambda v, g: v <= g, blue), ("behind_standing", lambda v, g: v >= g, orange)]),
+              (axes[2], "abs_lateral", GRID_LAT, "|옆 거리|",
+               [("companion", lambda v, g: v >= g, blue), ("behind_standing", lambda v, g: v < g, orange)])]
+    for ax, cue, gridv, title, lines in sweeps:
+        for var, ls in (("c_frame", (0, (3, 1.5))), ("d_window", "-")):
+            v, stage = var.split("_")
+            for cls, test, col in lines:
+                vals = [x for x in pts.get((v, stage, cue, cls), []) if x is not None]
+                ax.plot(gridv, [sum(test(x, g) for x in vals) / len(vals) for g in gridv], color=col, ls=ls, lw=1.2)
+        ax.set_title(title, loc="left", color=ink)
+        ax.set_xlabel("경계 후보", color=ink)
+        ax.set_ylim(-0.03, 1.03)
+    axes[1].set_ylabel("라벨 일치율", color=ink)
+    for ax in axes:
+        ax.set_facecolor(surface)
+        ax.grid(True, color=grid, lw=0.5)
+        for s in ("top", "right"):
+            ax.spines[s].set_visible(False)
+        for s in ("left", "bottom"):
+            ax.spines[s].set_color(muted)
+        ax.tick_params(colors=ink, length=2)
+    handles = [Line2D([], [], ls="none", marker="o", mfc="none", mec=ink, ms=4, label="a · c 추적 없음"),
+               Line2D([], [], ls="none", marker="o", color=ink, ms=4, label="b · d 트랙"),
+               Line2D([], [], color=blue, lw=1.2, label="일행"), Line2D([], [], color=orange, lw=1.2, label="뒤에 선 사람"),
+               Line2D([], [], color=ink, lw=1.2, ls=(0, (3, 1.5)), label="c 프레임마다"),
+               Line2D([], [], color=ink, lw=1.2, label="d 2초 중앙값")]
+    fig.legend(handles=handles, loc="lower center", ncol=6, frameon=False, bbox_to_anchor=(0.5, -0.01),
+               handlelength=1.8, columnspacing=1.2)
+    fig.tight_layout(rect=(0, 0.09, 1, 1), w_pad=1.0)
+    fig.savefig(path, dpi=300, facecolor=surface)
+    plt.close(fig)
 
 
 def _ablation_plot(path: str, out: list, figure: dict) -> None:
@@ -831,8 +1053,14 @@ def main(argv=None) -> int:
     b.add_argument("--truth", required=True)
     b.add_argument("--videos", required=True)
     b.add_argument("--out", required=True)
+    i = sub.add_parser("inventory")
+    i.add_argument("--runs", required=True)
+    i.add_argument("--truth", required=True)
+    i.add_argument("--scenes", required=True)
+    i.add_argument("--out", required=True)
     a = ap.parse_args(argv)
-    return {"replay": cmd_replay, "analyze": cmd_analyze, "sheets": cmd_sheets, "ablation": cmd_ablation}[a.cmd](a)
+    return {"replay": cmd_replay, "analyze": cmd_analyze, "sheets": cmd_sheets, "ablation": cmd_ablation,
+            "inventory": cmd_inventory}[a.cmd](a)
 
 
 if __name__ == "__main__":
