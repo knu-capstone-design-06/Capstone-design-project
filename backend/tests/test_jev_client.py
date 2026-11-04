@@ -111,6 +111,10 @@ class JevClientTests(unittest.IsolatedAsyncioTestCase):
                 "type": "score", "score": "high", "confidence": 0.5, "probabilities": {"1": 0.5}, "legend": {"1": "low"}}}},
             "score without a legend": {**RESPONSE, "answers": {"q": {
                 "type": "score", "score": 3, "confidence": 0.5, "probabilities": {"3": 0.5}}}},
+            "score as a numeric string": {**RESPONSE, "answers": {"q": {
+                "type": "score", "score": "3", "confidence": 0.5, "probabilities": {"3": 0.5}, "legend": {"3": "mid"}}}},
+            "score as a boolean": {**RESPONSE, "answers": {"q": {
+                "type": "score", "score": True, "confidence": 0.5, "probabilities": {"1": 0.5}, "legend": {"1": "low"}}}},
         }
         for name, body in cases.items():
             with self.subTest(case=name):
@@ -134,6 +138,9 @@ class JevClientTests(unittest.IsolatedAsyncioTestCase):
         answer = await self.ask(lambda request: httpx.Response(200, json=response))
         score = answer.answers["how_hard"]
         self.assertEqual((score.type, score.score, score.legend["3"]), ("score", 3.0, "some trouble"))
+        # A decimal score is a number too.
+        response["answers"]["how_hard"]["score"] = 2.5
+        self.assertEqual((await self.ask(lambda request: httpx.Response(200, json=response))).answers["how_hard"].score, 2.5)
 
     def test_http_client_sends_the_key_only_to_the_configured_origin(self):
         http = create_jev_http("secret", "https://api.typesafe.ai", 3.0)
