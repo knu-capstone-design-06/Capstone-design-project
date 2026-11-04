@@ -124,8 +124,8 @@ class PostgresOrderingTests(unittest.TestCase):
         with self.database.connect() as connection:
             replay_count = connection.execute(
                 "select count(*) as count from kiosk.order_request_replays "
-                "where session_id = %s and request_key like 'voice:vr_rollback:%'",
-                (self.session_id,),
+                "where session_id = %s and request_key like %s",
+                (self.session_id, "voice:vr_rollback:%"),
             ).fetchone()["count"]
         self.assertEqual(replay_count, 0)
 
