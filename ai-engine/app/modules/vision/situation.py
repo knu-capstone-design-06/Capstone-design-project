@@ -214,15 +214,17 @@ def _decide(c: Cues, verdicts: dict, p: PilotParams) -> tuple:
     return name, [n for n in open_tags if n != name and verdicts[n].support]   # no evidence, no alternative
 
 
-def assess(rows: list, t_end: float, params: PilotParams, *, landmarker_num_faces: int) -> tuple:
+def assess(rows: list, t_end: float, params: PilotParams, *, landmarker_num_faces: int,
+           baseline_s: float | None = None) -> tuple:
     """(output, events) for the window [t_end - window_s, t_end] of the observation rows (features.COLUMNS plus the
     optional columns of events.py). Events come from all rows up to t_end and are kept when their time (end) lies in
     the window; the evidence ids point into the returned events. The output passes check_output, or this raises
     ValueError.
 
-    landmarker_num_faces = the num_faces setting of the Face Landmarker behind the rows (app/inference/vision.py: 1)."""
+    landmarker_num_faces = the num_faces setting of the Face Landmarker behind the rows (app/inference/vision.py: 1).
+    baseline_s = the window of a look_back's pre-loss head pose (events._loss_context; observation only)."""
     window = (t_end - params.window_s, t_end)
-    cues = observe_window(rows, window, params, landmarker_num_faces=landmarker_num_faces)
+    cues = observe_window(rows, window, params, landmarker_num_faces=landmarker_num_faces, baseline_s=baseline_s)
     verdicts = {name: rule(cues, params) for name, rule in RULES.items()}
     name, alternatives = _decide(cues, verdicts, params)
     chosen = verdicts.get(name)

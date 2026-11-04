@@ -271,7 +271,7 @@ def _hides_head(stretch: list) -> bool:
                or (not _face(r) and _body(r) and _num(r, "pose_vis_shoulders") is None) for r in stretch)
 
 
-def _head_turn_scan(rows: list, p: PilotParams) -> tuple:
+def _head_turn_scan(rows: list, p: PilotParams, baseline_s: float | None = None) -> tuple:
     """(events, onsets of broken turns). One event per head turn. It starts right after a frame facing the screen,
     on either of two paths: the visible face passes the off-screen yaw (OFF), or the face points are lost while the
     shoulders stay (LOST: body seen, shoulder visibility at least shoulder_vis_min). It ends when the face is back
@@ -286,7 +286,7 @@ def _head_turn_scan(rows: list, p: PilotParams) -> tuple:
     apart (time, adjacent rows too) break the turn: no event, and when the stretch between them hides the head
     (_hides_head) the turn's onset time is returned - whether it was a look_back cannot be told. A turn that has not
     come back yet gives no event; nor does a face lost together with the body or the shoulders (UNTRACKED: no
-    onset)."""
+    onset). baseline_s: see _loss_context."""
     classes = [_turn_class(r, p) for r in rows]
     events, broken, turn, last = [], [], None, None
     for i, c in enumerate(classes):
@@ -301,7 +301,7 @@ def _head_turn_scan(rows: list, p: PilotParams) -> tuple:
             if c in (OFF, LOST) and joined and classes[last] == FACING:
                 turn = [i]                                   # onset: yaw path (OFF) or face-lost path (LOST)
         elif c == FACING:                                    # return
-            event = _turn_event(rows, classes, turn + [i])
+            event = _turn_event(rows, classes, turn + [i], baseline_s)
             if event["obs"]["yaw_deg"] is not None or event["obs"]["face_lost_s"] > p.gap_s:
                 events.append(event)                         # (a face-lost-only turn: longer than gap_s)
             turn = None
@@ -313,7 +313,28 @@ def _head_turn_scan(rows: list, p: PilotParams) -> tuple:
     return events, broken
 
 
-def _turn_event(rows: list, classes: list, frames: list) -> dict:
+def _loss_context(rows: list, classes: list, frames: list, lost: list, baseline_s: float | None) -> dict:
+    """Context of a face-lost turn, recorded so that a look-back can be told from looking down or a covered face
+    without a value here: pre_loss_yaw_deg / pre_loss_pitch_deg = the median yaw / pitch of the facing frames in the
+    baseline_s seconds before the turn's first frame (the caller's per-person baseline window: the chain passes
+    params.mouth_baseline_s; None leaves both empty, as does a window without such frames or values),
+    loss_duration_s = first to last face-lost frame of the turn (face_lost_s runs to the return), shoulder_vis_mean =
+    the mean shoulder visibility over the face-lost frames."""
+    before = []
+    if baseline_s is not None:
+        onset = _t(rows[frames[0]])
+        before = [r for r, c in zip(rows[:frames[0]], classes[:frames[0]])
+                  if c == FACING and _t(r) >= onset - baseline_s]
+
+    def median(key):
+        values = [v for v in (_num(r, key) for r in before) if v is not None]
+        return statistics.median(values) if values else None
+    return {"pre_loss_yaw_deg": median("yaw_deg"), "pre_loss_pitch_deg": median("pitch_deg"),
+            "loss_duration_s": _t(rows[lost[-1]]) - _t(rows[lost[0]]),
+            "shoulder_vis_mean": statistics.fmean(_num(rows[i], "pose_vis_shoulders") for i in lost)}
+
+
+def _turn_event(rows: list, classes: list, frames: list, baseline_s: float | None = None) -> dict:
     off = [i for i in frames if classes[i] == OFF]
     lost = [i for i in frames if classes[i] == LOST]
     # largest visible yaw; None on the face-lost path when no off-screen yaw was seen (then the side is not known)
@@ -323,6 +344,7 @@ def _turn_event(rows: list, classes: list, frames: list) -> dict:
     if lost:
         obs["face_lost_s"] = back - _t(rows[lost[0]])                                 # loss -> return
         obs["pose_vis_shoulders"] = min(_num(rows[i], "pose_vis_shoulders") for i in lost)
+        obs.update(_loss_context(rows, classes, frames, lost, baseline_s))
         return _event("look_back", rows, frames, obs)
     obs["offscreen_s"] = back - _t(rows[frames[0]])
     return _event("yaw_sweep_offscreen", rows, frames, obs)
@@ -385,19 +407,21 @@ def _split(rows: list, window: tuple | None) -> tuple:
     return rows, next((i for i, r in enumerate(rows) if _t(r) >= t0), len(rows))
 
 
-def detect_events(rows: list, params: PilotParams, *, landmarker_num_faces: int, window: tuple | None = None) -> list:
+def detect_events(rows: list, params: PilotParams, *, landmarker_num_faces: int, window: tuple | None = None,
+                  baseline_s: float | None = None) -> list:
     """Events of these rows, sorted by start time. With window = (t0, t1): rows after t1 are dropped first, head
     turns use the rows before t0 as context and count when their rows all lie inside, and every other event is found
     on the rows inside the window (see the module docstring). Without a window: all rows.
 
     landmarker_num_faces = the num_faces setting of the Face Landmarker that produced the face columns. With more
     than one face it does not smooth [D1], so mouth_motion is not turned into events (dec section 3,
-    consulting_companion exclusion: jitter is not counted as mouth motion)."""
+    consulting_companion exclusion: jitter is not counted as mouth motion). baseline_s = the window of a look_back's
+    pre-loss head pose (_loss_context); None leaves those two observations empty."""
     p = params
     rows, first = _split(rows, window)
     inside = rows[first:]
     t0 = _t(inside[0]) if inside else math.inf
-    events = [e for e in _head_turn_scan(rows, p)[0] if e["t_start"] >= t0]
+    events = [e for e in _head_turn_scan(rows, p, baseline_s)[0] if e["t_start"] >= t0]
     events += _companion_events(inside, companion_sides(rows, p)[0][first:], p)
 
     counts = [_count_value(r, "people_behind_count") for r in inside]
@@ -467,7 +491,8 @@ def _body_still(rows: list, p: PilotParams):
     return None
 
 
-def observe_window(rows: list, window: tuple, params: PilotParams, *, landmarker_num_faces: int) -> Cues:
+def observe_window(rows: list, window: tuple, params: PilotParams, *, landmarker_num_faces: int,
+                   baseline_s: float | None = None) -> Cues:
     """Events and window-level checks for window = (t0, t1): rows after t1 are never read; detect_events says which
     rows each event comes from; the checks read the rows inside the window."""
     t0, t1 = window
@@ -482,7 +507,8 @@ def observe_window(rows: list, window: tuple, params: PilotParams, *, landmarker
     undetermined = companion_sides(rows, params)[1][first:]
     broken = _head_turn_scan(rows, params)[1]
     return Cues(
-        events=detect_events(rows, params, landmarker_num_faces=landmarker_num_faces, window=window),
+        events=detect_events(rows, params, landmarker_num_faces=landmarker_num_faces, window=window,
+                             baseline_s=baseline_s),
         face_visible_ratio=face_ratio,
         track_conf=sum(map(_body, inside)) / n if n else None,
         measured=measured,

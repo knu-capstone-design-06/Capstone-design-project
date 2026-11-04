@@ -34,6 +34,7 @@ from .touch import SCREEN_FLOW
 LANDMARKER_NUM_FACES = 1        # app/inference/vision.py runs the Face Landmarker with num_faces=1 (smoothing on)
 SOURCE_KIND = {"video": "영상", "folder": "이미지", "camera": "카메라"}   # run.py's source_kind column values
 BEHIND, COMPANION, AROUND = TAGS
+TURN_KINDS = ("look_back", "yaw_sweep_offscreen")   # the window record's 'turns': these events with their observations
 
 
 def finite(v):
@@ -299,11 +300,15 @@ class WindowJudge:
         if session_start is not None:
             rows = [r for r in rows if float(r["t_s"]) >= session_start]
         seg_rows = [r for r in rows if t_end - seg_len < float(r["t_s"]) <= t_end]
+        turns = None                                   # head turns of the window (observation only)
         if sp is None:
             out, reasons = None, [{"code": "no_value_bundle"}]
         else:
-            out, _ = assess(rows, t_end, sp, landmarker_num_faces=LANDMARKER_NUM_FACES)
+            out, events = assess(rows, t_end, sp, landmarker_num_faces=LANDMARKER_NUM_FACES,
+                                 baseline_s=p.mouth_baseline_s)
             reasons = unknown_reasons(rows, t_end, sp) if out["name"] == UNKNOWN else []
+            turns = [{"event_id": e["event_id"], "kind": e["kind"], "t_start": e["t_start"], "t_end": e["t_end"],
+                      "obs": e["obs"]} for e in events if e["kind"] in TURN_KINDS]
         situation = situation_view(out, reasons)
         seg, recent, screen, progress, _ = self._touch(t_end, seg_len)
         face_seen = any(r.get("face_state") == SEEN for r in seg_rows)
@@ -335,7 +340,7 @@ class WindowJudge:
             "t": round(t_end, 4), "segment_s": [round(t_end - seg_len, 4), round(t_end, 4)],
             "frames": len(seg_rows), "situation": situation, "touch": seg,
             "screen": {**screen, "pause_s": None if screen["pause_s"] is None else round(screen["pause_s"], 3)},
-            "vision": vision_summary(seg_rows, gaze), "measurable": measurable, "decision": d,
+            "vision": vision_summary(seg_rows, gaze), "turns": turns, "measurable": measurable, "decision": d,
             "session": self.state.snapshot(), "session_reset": session_reset, "jev": jev,
         }
         if seg_len != p.segment_s:
