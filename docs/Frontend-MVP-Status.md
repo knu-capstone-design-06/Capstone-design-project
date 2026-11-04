@@ -27,6 +27,8 @@
 | [#72 터치 통계 파일럿 및 연동 검토 요청](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/72) | 초안·미병합. 확인한 head `501447b` | 프론트에서 추가 통계와 음성 처리·자동 종료 맥락을 준비. 전송은 기본 꺼짐. 계약·백엔드·AI 담당자에게 후속 검토를 요청하며 `main`의 전송 완료로 보지 않는다. 기존 backend는 추가 `interaction`을 무시할 수 있어 HTTP 200만으로 전달을 확인할 수 없다 |
 | [#70 키오스크 메뉴와 음성 모드 화면 개선](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/70) | 초안·미병합. 확인한 head `f299a73` | 화면 개편과 비교용 시안을 검토 중이다. PR 본문에는 주문 브라우저 검사 실패와 재검증 필요가 남아 있다. 시안의 모든 동작이 구현·확정된 것으로 보지 않는다 |
 
+공용 [루트 README의 음성 현황](../README.md#음성-인터페이스)과 [음성 MCP 구현 계획](Voice-MCP-Implementation.md)은 Cart 재조회 연결 전 설명이 남아 있다. PR #71의 프론트 재조회와 실제 서버 음성 실행·SSE의 미완료 범위를 구분해 관련 담당자 확인 후 별도로 갱신한다.
+
 PR 상태·head는 시간이 지나면 바뀔 수 있다. #70과 #72는 `OrderPage.tsx`가 겹치므로 작성자들이 병합 순서를 정하고, 뒤에 병합하는 쪽에서 앞선 변경을 반영·검증해야 한다. 이 현황 문서 PR도 #72와 `frontend/README.md`가 겹치므로 병합 전 같은 절차를 따른다.
 
 ## MVP까지 남은 프론트 과업
