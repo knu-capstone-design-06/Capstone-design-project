@@ -1,8 +1,9 @@
 """The runtime chain shared by replay.py and live.py.
 
 Per frame (FrameChain.process): features.Observer row (MediaPipe face / face detector / pose, plus blendshapes when
-on) -> H1 head boxes (app/inference/head.py) -> main user, companion, people behind and the main user's P1 direction
-(columns.py) -> shoulders, mouth_motion -> touch counts since the previous row (touch.py). Each part that is not
+on) -> H1 head boxes (app/inference/head.py) -> head tracks, the main user as a track, companion and people behind
+from the tracks' cues, and the main user's P1 direction (columns.py HeadPeople; its state lives as long as the
+FrameChain) -> shoulders, mouth_motion -> touch counts since the previous row (touch.py). Each part that is not
 available (no ONNX model, blendshapes off, no touch log) leaves its columns blank or absent, so the events layer treats
 the cue as missing ('모름'), never as 'absent'.
 
@@ -66,6 +67,7 @@ class FrameChain:
         self.blendshapes = bool(blendshapes)
         self.source_kind = source_kind
         self.mouth = C.MouthMotion(params.mouth_dials, params.mouth_baseline_s)
+        self.people = C.HeadPeople(params)
         self.prev_t = None
 
     def process(self, frame) -> dict:
@@ -75,7 +77,7 @@ class FrameChain:
         t = float(row["t_s"])
         if self.heads is not None:
             heads = self.heads(frame.image)
-            roles = C.assign_heads(heads.boxes, heads.frame_wh, C.face_xy(row), self.p)
+            roles = self.people.update(t, heads.boxes, heads.frame_wh, C.face_xy(row))
             probs = None
             row["ms_head_dir"] = 0.0
             if self.direction is not None and roles.primary is not None:

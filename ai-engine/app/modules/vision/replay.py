@@ -71,6 +71,8 @@ def jsonable(v):
 def cell(v):
     if v is None:
         return ""
+    if isinstance(v, dict) or (isinstance(v, list) and all(isinstance(x, dict) for x in v)):
+        return json.dumps(jsonable(v), ensure_ascii=False, separators=(",", ":"))   # head_boxes: one JSON cell
     if isinstance(v, float):
         return "" if not math.isfinite(v) else f"{v:.6g}"
     if isinstance(v, (tuple, list)):
