@@ -392,7 +392,7 @@ out, events = assess(rows, t_end, params, landmarker_num_faces=1)  # 창 = [t_en
 
 | 사건 | 찾는 방법 | 쓰는 규칙 |
 |---|---|---|
-| `look_back` 뒤돌아봄 | 화면을 보던 얼굴이 `offscreen_yaw_deg`를 넘어 돌아가고, 얼굴 점이 사라진 동안 어깨 점이 남고(`shoulder_vis_min`), 다시 화면 쪽으로 돌아옴. yaw 변화 · 얼굴 사라짐 · 어깨 남음을 따로 세지 않고 사건 하나로 셈 | 1 · 3 |
+| `look_back` 뒤돌아봄 | 화면을 보던 얼굴이 돌아가는 동안 얼굴 점이 사라지고 어깨 점이 남고(`shoulder_vis_min`), 다시 화면 쪽으로 돌아옴. 시작은 두 길: 얼굴이 `offscreen_yaw_deg`를 넘어 돌아감, 또는 화면을 보던 얼굴의 점이 어깨 점을 남긴 채 바로 사라짐(크게 돌린 고개는 yaw가 커지기 전에 얼굴 점이 사라지기 때문). 두 번째 길에서 화면 밖 yaw가 한 번도 보이지 않은 돌림은 얼굴이 `gap_s`보다 오래 사라졌을 때만 셈(더 짧은 사라짐은 `gap_s`가 잇는 잠깐 끊김). 그 사건은 `yaw_deg` · `side`가 비어 있음. yaw 변화 · 얼굴 사라짐 · 어깨 남음을 따로 세지 않고 사건 하나로 셈 | 1 · 3 |
 | `yaw_sweep_offscreen` 화면 밖 고개 돌림 | 같은 돌림인데 얼굴이 끝까지 보임. 돌아간 쪽(왼쪽 · 오른쪽)을 함께 적음 | 3 |
 | `people_behind` 뒤에 선 사람 | `people_behind_count`가 1 이상인 구간이 `stay_min_s` 이상 이어짐. 더 짧으면 지나가는 사람으로 보고 세지 않음 | 1 · 3(빼는 조건) |
 | `companion_present` 동행자 | `companion_box`가 있는 구간(머문 시간 조건 없음) | 2 |

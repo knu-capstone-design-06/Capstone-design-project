@@ -4,9 +4,9 @@ Layers: 관측값 features.py -> 사건 this file -> 상황 situation.py. Plain 
 
 An event is one thing that happened, with the observations that show it:
     {event_id, kind, t_start, t_end, obs: {name: value}, source_frames}
-Observations with one cause make ONE event (sem section 4, '근거 중복'): a head turn whose yaw grows, whose face
-points are then lost while the shoulders stay, and which comes back is one look_back - not a yaw event plus a
-face-loss event. event_id = '<kind>@<frame_idx of the event's first frame>'. source_frames = the frames whose
+Observations with one cause make ONE event (sem section 4, '근거 중복'): a head turn whose yaw grows (or whose face
+points are lost straight from facing the screen) while the shoulders stay, and which comes back is one look_back - not
+a yaw event plus a face-loss event. event_id = '<kind>@<frame_idx of the event's first frame>'. source_frames = the frames whose
 observations the event used.
 
 Windows (dec section 3: '전부 같은 창 안'; sem section 4, rule 1: '시간 범위(창 안)'): an event is evidence for a
@@ -272,13 +272,21 @@ def _hides_head(stretch: list) -> bool:
 
 
 def _head_turn_scan(rows: list, p: PilotParams) -> tuple:
-    """(events, onsets of broken turns). One event per head turn: it starts when the visible face passes the
-    off-screen yaw right after facing the screen and ends when the face is back inside it. A turn with face-lost
-    frames is a look_back (research/33: 'yaw가 커지다 얼굴 점이 사라지고 어깨 점은 남음 -> 얼굴이 돌아오면 1회'); a turn
-    with the face seen throughout is a yaw_sweep_offscreen. Two tracked frames more than gap_s apart (time, adjacent
-    rows too) break the turn: no event, and when the stretch between them hides the head (_hides_head) the turn's
-    onset time is returned - whether it was a look_back cannot be told. A turn that has not come back yet gives no
-    event; nor does a face that disappears without first turning (an occlusion, not a turn)."""
+    """(events, onsets of broken turns). One event per head turn. It starts right after a frame facing the screen,
+    on either of two paths: the visible face passes the off-screen yaw (OFF), or the face points are lost while the
+    shoulders stay (LOST: body seen, shoulder visibility at least shoulder_vis_min). It ends when the face is back
+    inside the off-screen yaw. The second path follows the decision table's look-back (dec section 3: '고개 방향 변화와
+    얼굴 점의 소실, 어깨 점의 유지 및 복귀를 함께 읽는다'): a head turned far enough loses the face points before any
+    yaw beyond offscreen_yaw_deg is seen. It adds no value: LOST, the return and gap_s are the yaw path's own. A turn
+    on this path that never shows an off-screen yaw counts only when the face stays lost for longer than gap_s (from
+    the first lost frame to the return): a shorter loss is the brief break gap_s bridges (doc 28 section 3: '잠깐 끊김을
+    거르는 시간 창'; gap_s is a [파일럿] value of the bundle), not a turn. A turn
+    with face-lost frames is a look_back (research/33: 'yaw가 커지다 얼굴 점이 사라지고 어깨 점은 남음 -> 얼굴이
+    돌아오면 1회'); a turn with the face seen throughout is a yaw_sweep_offscreen. Two tracked frames more than gap_s
+    apart (time, adjacent rows too) break the turn: no event, and when the stretch between them hides the head
+    (_hides_head) the turn's onset time is returned - whether it was a look_back cannot be told. A turn that has not
+    come back yet gives no event; nor does a face lost together with the body or the shoulders (UNTRACKED: no
+    onset)."""
     classes = [_turn_class(r, p) for r in rows]
     events, broken, turn, last = [], [], None, None
     for i, c in enumerate(classes):
@@ -290,10 +298,12 @@ def _head_turn_scan(rows: list, p: PilotParams) -> tuple:
                 broken.append(_t(rows[turn[0]]))
             turn = None                                      # tracking gone too long: no return seen
         if turn is None:
-            if c == OFF and joined and classes[last] == FACING:
-                turn = [i]                                   # onset
-        elif c == FACING:
-            events.append(_turn_event(rows, classes, turn + [i]))   # return
+            if c in (OFF, LOST) and joined and classes[last] == FACING:
+                turn = [i]                                   # onset: yaw path (OFF) or face-lost path (LOST)
+        elif c == FACING:                                    # return
+            event = _turn_event(rows, classes, turn + [i])
+            if event["obs"]["yaw_deg"] is not None or event["obs"]["face_lost_s"] > p.gap_s:
+                events.append(event)                         # (a face-lost-only turn: longer than gap_s)
             turn = None
         else:
             turn.append(i)
@@ -306,9 +316,10 @@ def _head_turn_scan(rows: list, p: PilotParams) -> tuple:
 def _turn_event(rows: list, classes: list, frames: list) -> dict:
     off = [i for i in frames if classes[i] == OFF]
     lost = [i for i in frames if classes[i] == LOST]
-    yaw = _num(rows[max(off, key=lambda i: abs(_num(rows[i], "yaw_deg")))], "yaw_deg")   # largest visible yaw
+    # largest visible yaw; None on the face-lost path when no off-screen yaw was seen (then the side is not known)
+    yaw = _num(rows[max(off, key=lambda i: abs(_num(rows[i], "yaw_deg")))], "yaw_deg") if off else None
     back = _t(rows[frames[-1]])
-    obs = {"yaw_deg": yaw, "side": _side(yaw)}
+    obs = {"yaw_deg": yaw, "side": None if yaw is None else _side(yaw)}
     if lost:
         obs["face_lost_s"] = back - _t(rows[lost[0]])                                 # loss -> return
         obs["pose_vis_shoulders"] = min(_num(rows[i], "pose_vis_shoulders") for i in lost)
