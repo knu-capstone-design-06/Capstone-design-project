@@ -34,7 +34,8 @@ def is_bare_yes(text: str) -> bool:
 
 # Words that take an offer ("네 그걸로 주세요") and words that turn it down ("아니요 그거 말고요").
 ACCEPT_MARKS = ("그걸로", "그렇게", "그대로", "맞아요", "좋아요")
-REJECT_MARKS = ("아니", "아뇨", "말고", "싫", "취소", "다시", "빼")
+# Any of these anywhere turns the offer down, even beside a taking word ("그대로 하면 안 돼요").
+REJECT_MARKS = ("아니", "아뇨", "말고", "싫", "취소", "다시", "빼", "안돼", "안되", "안해", "안할", "않", "못", "됐어", "괜찮", "그만")
 
 
 def is_rejection(text: str) -> bool:
