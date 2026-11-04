@@ -16,7 +16,8 @@ const errorCopy: Record<VoiceInputError, string> = {
 
 function resultCopy(result: VoiceRequestStatus): string {
   switch (result.status) {
-    case 'completed': return '말씀을 확인했어요. 음성으로 주문을 변경하는 기능은 아직 준비 중이에요.';
+    case 'completed': return result.actions.includes('cart_updated')
+      ? '음성 주문 결과를 장바구니에 반영하고 있어요.' : '말씀을 확인했어요.';
     case 'needs_confirmation': return result.reply_text || '말씀하신 내용을 확인해 주세요.';
     case 'needs_clarification': return result.reply_text || '원하는 메뉴와 옵션을 다시 말씀해 주세요.';
     case 'ignored': return '';

@@ -92,8 +92,9 @@ test('메뉴에서 마이크·질문·해석 결과를 표시하고 주문 확�
   const { browser, page, errors, fixture } = await open([
     ...bootstrap(session),
     voicePost(session), voiceGet(session, voiceStatus('needs_clarification', { reply_text: '온도를 골라 주세요.' })),
-    voicePost(session), voiceGet(session, voiceStatus('completed', { tool_calls: [{ tool: 'add_cart_item', arguments: { product_id: 'americano', temperature: 'hot', quantity: 1 } }] })),
-    mutation(session, '/cart/items', cart),
+    voicePost(session), voiceGet(session, voiceStatus('completed', { actions: ['cart_updated'], tool_calls: [{ tool: 'add_cart_item', arguments: { product_id: 'americano', temperature: 'hot', quantity: 1 } }] })),
+    { method: 'GET', path: `/api/v1/sessions/${session}/cart`, body: cart },
+    mutation(session, '/cart/items', cartResponse(session, 2, [iced(2)])),
   ]);
   try {
     const toggle = page.locator('[data-log-target="voice-mode-toggle"]');
@@ -111,9 +112,9 @@ test('메뉴에서 마이크·질문·해석 결과를 표시하고 주문 확�
     assert.match(await page.locator('.voice-mode-feedback').innerText(), /온도를 골라 주세요.*듣는 중: 따뜻한/);
     await screenshot(page, 'voice-question-menu', 450);
     await page.evaluate(() => window.voiceFakes.at(-1).final('핫'));
-    await page.locator('.voice-mode-feedback').getByText(/주문을 변경하는 기능은 아직 준비 중/).waitFor();
+    await page.locator('.cart-notice').getByText(/음성 주문을 장바구니에 반영/).waitFor();
     assert.match(await page.locator('.voice-mode-transcript').innerText(), /인식한 말\s+핫/);
-    assert.match(await page.locator('.total').innerText(), /0원/, '해석만으로 장바구니를 변경하지 않음');
+    assert.match(await page.locator('.total').innerText(), /3,500원/, 'cart_updated 뒤 최신 장바구니를 다시 읽음');
     await screenshot(page, 'voice-result-menu');
     const submitted = fixture.requests.filter(request => request.path.endsWith('/voice/requests') && request.method === 'POST');
     assert.deepEqual(submitted.map(request => [request.body.text, request.body.screen_id]), [
@@ -231,6 +232,54 @@ test('터치로 상품 추가·수량 변경·삭제를 저장하는 동안과 �
     assert.deepEqual(errors, []);
   } finally { release?.(); await browser.close(); }
 });
+
+for (const enlarged of [false, true]) {
+  test(`터치 응답이 늦어도 음성 변경을 다시 조회하고 다음 터치에 최신 버전을 쓴다 (${enlarged ? '큰 글씨·큰 버튼' : '기본'})`, async () => {
+    const session = `voice-concurrent-${enlarged}`;
+    const { browser, page, errors, fixture } = await open([
+      ...bootstrap(session),
+      voicePost(session), voiceGet(session, voiceStatus('completed', { actions: ['cart_updated'] })),
+      mutation(session, '/cart/items', cartResponse(session, 1, [iced()])),
+      { method: 'GET', path: `/api/v1/sessions/${session}/cart`, body: cartResponse(session, 2, [iced(2)]) },
+      mutation(session, '/cart/items/item-iced', cartResponse(session, 3, [iced(3)]), { method: 'PATCH' }),
+    ]);
+    let release, touchStarted;
+    const started = new Promise(resolve => { touchStarted = resolve; });
+    try {
+      await page.route('**/cart/items', async route => {
+        await new Promise(resolve => { release = resolve; touchStarted(); });
+        await route.fallback();
+      });
+      if (enlarged) {
+        await page.locator('[data-log-target="support-toggle"]').click();
+        await page.locator('[data-log-target="support:largeText"]').click();
+        await page.locator('[data-log-target="support:largeButton"]').click();
+        await page.locator('[data-log-target="support-toggle"]').click();
+      }
+      await page.locator('[data-log-target="voice-mode-toggle"]').click();
+      await page.locator('[data-log-target="product:americano"]').click();
+      await page.locator('[data-log-target="cart-add"]').click();
+      await started;
+      await page.evaluate(() => window.voiceFakes.at(-1).final('아메리카노 하나 더요'));
+      await page.locator('.voice-mode-feedback').getByText(/음성 주문 결과를 장바구니에 반영하고/).waitFor();
+      assert.equal(fixture.requests.filter(request => request.method === 'GET' && request.path.endsWith('/cart')).length, 1,
+        '터치 저장이 끝나기 전에는 새 Cart 조회를 보내지 않음');
+      assert.equal(await page.locator('.order-progress').isVisible(), true);
+      release();
+      await page.locator('dialog[open]').waitFor({ state: 'hidden' });
+      await page.locator('.cart-notice').getByText(/음성 주문을 장바구니에 반영/).waitFor();
+      await page.locator('[data-log-target="review-open"]:not([disabled])').waitFor();
+      assert.equal(await page.locator('.order-progress').count(), 0);
+      assert.match(await page.locator('.total').innerText(), /7,000원/, '늦은 터치 응답의 3,500원 대신 음성 결과까지 표시');
+      await screenshot(page, enlarged ? 'voice-cart-concurrent-large' : 'voice-cart-concurrent');
+      await page.locator('[data-log-target="cart:americano:아이스:increase"]').click();
+      await page.waitForFunction(() => document.querySelector('.total')?.textContent.includes('10,500원'));
+      assert.equal(fixture.requests.find(request => request.method === 'PATCH').body.expected_version, 2);
+      fixture.verify();
+      assert.deepEqual(errors, []);
+    } finally { release?.(); await browser.close(); }
+  });
+}
 
 test('마이크 권한 오류를 알리고 큰 글씨·큰 버튼·낮은 화면에서도 조작할 수 있다', async () => {
   const { browser, page, errors, fixture } = await open(bootstrap('voice-layout'));

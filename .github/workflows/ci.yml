@@ -1,6 +1,6 @@
 # 세 서비스의 테스트·빌드와 Docker Compose 실행을 확인합니다.
-# compose-smoke는 저장소 secret OPENAI_API_KEY를 backend 컨테이너에 넘겨 음성 해석을 한 번 호출합니다.
-# secret이 없으면(등록 전이거나 fork에서 올린 PR) 같은 요청을 backend의 개발용 응답으로 확인합니다.
+# PR 실행과 main push 실행은 OpenAI를 부르지 않습니다. compose-smoke의 음성 요청 1건은 키 없이 backend의 개발용 응답으로 확인합니다.
+# Actions 탭의 CI를 수동 실행(Run workflow)하며 call_openai를 켜면, 저장소 secret OPENAI_API_KEY를 backend 컨테이너에 넘겨 음성 해석을 한 번 호출합니다.
 # secret 등록 위치: Settings → Secrets and variables → Actions → Repository secrets, 이름 OPENAI_API_KEY
 name: CI
 
@@ -10,6 +10,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      call_openai:
+        description: "저장소 secret OPENAI_API_KEY로 OpenAI 음성 해석을 한 번 호출합니다"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -99,8 +104,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
+      # call_openai를 켠 수동 실행에만 저장소 secret을 넣습니다. PR·push 실행과 call_openai를 끈 수동 실행에는 빈 값입니다.
       # docker-compose.yml이 이 값을 backend 컨테이너에 넘깁니다. 값은 GitHub가 로그에서 가립니다.
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_API_KEY: ${{ github.event_name == 'workflow_dispatch' && inputs.call_openai && secrets.OPENAI_API_KEY || '' }}
       BASE_URL: http://127.0.0.1:8080/backend
     steps:
       - uses: actions/checkout@v7
@@ -141,16 +147,17 @@ jobs:
           jq . <<< "$result"
           echo "$result" > "$RUNNER_TEMP/voice.json"
           case "$status" in accepted|processing) echo "::error::30초 안에 처리가 끝나지 않았습니다 (status=$status)"; exit 1 ;; esac
-      - name: 개발용 응답 확인 (secret 없음)
+      - name: 개발용 응답 확인 (키 없음)
         if: env.OPENAI_API_KEY == ''
         run: |
-          echo "::notice title=OPENAI_API_KEY 없음::이 실행에는 저장소 secret OPENAI_API_KEY가 없어(미등록이거나 fork에서 올린 PR) backend의 개발용 응답으로 확인했습니다. OpenAI는 호출하지 않았습니다."
+          echo "::notice title=OpenAI 호출 없음::이 실행에는 OPENAI_API_KEY를 넘기지 않아 backend의 개발용 응답으로 확인했습니다. OpenAI까지 확인하려면 Actions 탭의 CI를 수동 실행하며 call_openai를 켭니다. 켜고 실행했는데 이 알림이 보이면 저장소 secret OPENAI_API_KEY가 등록돼 있는지 확인합니다."
           # 개발용 응답(StubVoiceInterpreter)은 tool_calls 없는 추가 질문입니다.
           jq -e '.status == "needs_clarification" and .tool_calls == [] and .error == null and (.reply_text | length > 0)' "$RUNNER_TEMP/voice.json"
-      - name: OpenAI 응답 확인 (secret 있음)
+      - name: OpenAI 응답 확인 (call_openai를 켠 수동 실행)
         if: env.OPENAI_API_KEY != ''
         run: |
-          # 해석 결과는 실행마다 달라질 수 있어 상태만 봅니다. OpenAI 호출이 실패하면 failed(ai_unavailable)가 됩니다.
+          # 해석 결과는 실행마다 달라질 수 있어 상태만 봅니다. OpenAI 호출이 실패하거나 backend가 모델 답을
+          # 메뉴 대조에서 거절하면 failed(ai_unavailable)가 됩니다.
           jq -e '.status | IN("completed", "needs_confirmation", "needs_clarification", "ignored")' "$RUNNER_TEMP/voice.json"
       - name: 실패 시 서비스 로그
         if: failure()

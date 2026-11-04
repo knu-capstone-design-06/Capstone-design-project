@@ -27,6 +27,7 @@ export class OrderController {
   private initializing: Promise<boolean> | null = null;
   private pending: Pending | null = null;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  private voiceCartRefreshSession: string | null = null;
 
   constructor(api: Api, onInvalidOrder: (fields: readonly string[]) => void = () => {}) {
     this.api = api; this.onInvalidOrder = onInvalidOrder;
@@ -35,6 +36,16 @@ export class OrderController {
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   private set(patch: Partial<OrderSnapshot>) {
     this.state = { ...this.state, ...patch };
+    const { session, status, order } = this.state;
+    if (this.voiceCartRefreshSession !== session?.session_id || order || status === 'ended' || status === 'disconnected') {
+      this.voiceCartRefreshSession = null;
+    }
+    if (this.voiceCartRefreshSession && status === 'ready' && !this.pending) {
+      // Start the queued read before notifying the screen, so stale Cart data never
+      // opens a brief ready state between a touch response and the latest snapshot.
+      void this.refreshCartAfterVoice();
+      return;
+    }
     this.listeners.forEach(listener => listener());
   }
 
@@ -93,6 +104,36 @@ export class OrderController {
   checkout(): Promise<boolean> {
     if (!this.state.cart?.items.length) return Promise.resolve(false);
     return this.write('order', (session, cart, key) => this.api.createOrder(session, { expected_version: cart.version }, key), '');
+  }
+
+  /** Server-side voice tools changed the Cart; read the confirmed snapshot before the screen accepts another change. */
+  async refreshCartAfterVoice(): Promise<boolean> {
+    const { session, status, order } = this.state;
+    if (!session || order || status === 'ended' || status === 'disconnected') return false;
+    // Coalesce notifications for this session while a touch request, its manual
+    // retry, or another voice refresh is running. set() drains this once ready.
+    this.voiceCartRefreshSession = session.session_id;
+    if (status !== 'ready' || this.pending) return false;
+    this.voiceCartRefreshSession = null;
+    const sessionId = session.session_id;
+    this.set({ status: 'saving', message: '', notice: '', retryAt: 0, canAbandonPending: false, abandonWarning: '' });
+    try {
+      const cart = await this.api.getCart(sessionId);
+      if (this.state.session?.session_id !== sessionId || this.state.order) return false;
+      if (cart.session_id !== sessionId) throw new Error('세션 응답 불일치');
+      this.set({ cart: this.acceptCart(cart), status: 'ready', notice: orderCopy.voiceCartUpdated });
+      return true;
+    } catch (error) {
+      if (this.state.session?.session_id !== sessionId || this.state.order) return false;
+      const apiError = error instanceof ApiError ? error : null;
+      const body = apiError && typeof apiError.body === 'object' && apiError.body !== null
+        ? apiError.body as Partial<OrderApiError> : null;
+      const ended = apiError !== null && (apiError.status === 401 || apiError.status === 403 || apiError.status === 410
+        || ['session_not_found', 'session_expired'].includes(body?.code ?? '')
+        || (apiError.status === 404 && !['product_not_found', 'cart_item_not_found'].includes(body?.code ?? '')));
+      this.set({ status: ended ? 'ended' : 'ready', message: ended ? orderCopy.ended : orderCopy.voiceCartSyncFailed });
+      return false;
+    }
   }
 
   private write(kind: Pending['kind'], run: (session: string, cart: Cart, key: string) => Promise<Cart | Order>, notice: string): Promise<boolean> {

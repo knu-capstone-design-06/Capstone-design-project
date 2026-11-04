@@ -23,7 +23,11 @@ export function OrderPage() {
     if (import.meta.env.DEV) console.warn('주문 응답 검증 실패 필드:', fields);
   }));
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
-  const [voiceController] = useState(() => new VoiceController({ api: createVoiceApi(), recognitionOnly: sampleMode }));
+  const [voiceController] = useState(() => new VoiceController({
+    api: createVoiceApi(), recognitionOnly: sampleMode,
+    // tool_calls are only an explanation. The backend marks a completed Cart write with this action.
+    onResult: result => { if (result.actions.includes('cart_updated')) void controller.refreshCartAfterVoice(); },
+  }));
   const voice = useSyncExternalStore(voiceController.subscribe, voiceController.getSnapshot);
   const [settings, setSettings] = useState(() => {
     try { return readSettings(localStorage.getItem(settingsStorageKey) ?? localStorage.getItem('kiosk-sample-order-v1')); }

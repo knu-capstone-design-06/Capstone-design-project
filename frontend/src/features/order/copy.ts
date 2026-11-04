@@ -7,6 +7,8 @@ export const orderCopy = {
   added: '메뉴를 담았어요.',
   quantityChanged: '수량을 바꿨어요.',
   removed: '메뉴를 뺐어요.',
+  voiceCartUpdated: '음성 주문을 장바구니에 반영했어요.',
+  voiceCartSyncFailed: '음성 주문 결과를 불러오지 못했어요. 장바구니를 확인해 주세요.',
   ended: '이 주문을 계속할 수 없어요. 처음부터 다시 주문해 주세요.',
   failed: '주문 내용을 반영하지 못했어요. 담은 메뉴를 확인하고 다시 시도해 주세요.',
 };
