@@ -29,6 +29,13 @@ class Settings(BaseSettings):
     # dedicated kiosk_backend login, never the Supabase postgres/admin account.
     database_url: SecretStr | None = None
 
+    # Jev (TypeSafe AI) decision model, called by the backend only. Unset key: never called.
+    jev_api_key: SecretStr | None = None
+    jev_api_url: str = "https://api.typesafe.ai"
+    # A version ID, not a moving alias, so experiments record what answered.
+    jev_model: str = "jev-1.13.0"
+    jev_timeout_seconds: float = Field(default=3.0, gt=0, allow_inf_nan=False)
+
     @field_validator("database_url")
     @classmethod
     def validate_database_url(cls, value: SecretStr | None) -> SecretStr | None:
@@ -63,6 +70,14 @@ class Settings(BaseSettings):
             raise ValueError("AI_ENGINE_URL must be an HTTP(S) origin")
         _ = parsed.port
         return value.rstrip("/")
+
+    @field_validator("jev_api_url")
+    @classmethod
+    def validate_jev_api_url(cls, value: str) -> str:
+        try:
+            return cls.validate_ai_engine_url(value)
+        except ValueError:
+            raise ValueError("JEV_API_URL must be an HTTP(S) origin") from None
 
     @field_validator("cors_origins")
     @classmethod

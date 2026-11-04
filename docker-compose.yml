@@ -25,6 +25,11 @@ services:
       VOICE_EXECUTE_TOOLS: ${VOICE_EXECUTE_TOOLS:-}
       # Optional Supabase persistence; keep the value in the uncommitted root .env.
       DATABASE_URL: ${DATABASE_URL:-}
+      # Jev decision model (TypeSafe AI). Empty key = never called.
+      JEV_API_KEY: ${JEV_API_KEY:-}
+      JEV_API_URL: ${JEV_API_URL:-}
+      JEV_MODEL: ${JEV_MODEL:-}
+      JEV_TIMEOUT_SECONDS: ${JEV_TIMEOUT_SECONDS:-}
     depends_on:
       ai-engine:
         condition: service_healthy

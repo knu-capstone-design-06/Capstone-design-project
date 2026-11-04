@@ -68,6 +68,10 @@ API 문서: http://127.0.0.1:8000/docs
 | OPENAI_TIMEOUT_SECONDS | 10 | 양의 유한한 초 단위 숫자 |
 | VOICE_EXECUTE_TOOLS | false | true면 completed 음성 결과의 tool_calls를 장바구니에 반영 |
 | DATABASE_URL | 미설정 | 서버 전용 `kiosk_backend` PostgreSQL URL. 미설정 시 메모리 저장 |
+| JEV_API_KEY | 미설정 | 서버 전용 비밀값. 없으면 Jev를 호출하지 않음 |
+| JEV_API_URL | https://api.typesafe.ai | HTTP(S) 오리진만 |
+| JEV_MODEL | jev-1.13.0 | 버전 ID. 별칭(jev-latest)은 실험 기록을 위해 쓰지 않음 |
+| JEV_TIMEOUT_SECONDS | 3 | Jev 호출 한 번의 전체 제한, 재시도 없음 |
 
 예: `CORS_ORIGINS=["http://localhost:5173","http://127.0.0.1:5173"]`. 실제 프론트 출처에 맞춰 설정하며 경로나 와일드카드는 허용하지 않습니다. CORS는 GET·POST·PATCH·DELETE를 허용합니다. 기본 허용 출처는 localhost이므로 127.0.0.1에서 직접 교차 출처 요청을 보낼 때는 위 설정이 필요합니다. CORS는 사용자 인증 기능이 아닙니다.
 
