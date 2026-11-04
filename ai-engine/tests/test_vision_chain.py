@@ -389,6 +389,17 @@ class ColumnsTests(unittest.TestCase):
         self.assertEqual((r.primary, r.primary_track, r.primary_from), (0, 2, "face"))
         self.assertEqual(r.roles, ("primary",))
 
+    def test_reset_starts_the_main_user_again_and_ids_keep_counting(self):
+        user, other = [0.40, 0.30, 0.55, 0.50], [0.70, 0.30, 0.75, 0.40]
+        people = self.people()
+        r = people.update(0.0, [user, other], (640, 480), (0.47, 0.40))
+        self.assertEqual((r.tracks, r.primary_from), ((1, 2), "face"))
+        people.update(0.1, [user, other], (640, 480), (0.47, 0.40))
+        people.reset()
+        r = people.update(0.2, [user, other], (640, 480), None)
+        self.assertEqual((r.tracks, r.primary_from, r.primary_track), ((3, 4), "largest", 3))
+        self.assertEqual(r.cues[1][2], r.cues[1][0])       # the window median starts from this frame alone
+
     def test_roles_from_boundaries_and_unknown_without_them(self):
         user = [0.40, 0.30, 0.55, 0.50]                    # height 0.20
         mate = [0.62, 0.32, 0.75, 0.48]                    # rel 1.25, lateral 0.21 x 640 / 96 = 1.4: beside
@@ -1059,6 +1070,22 @@ class FakeHeads:
                      {"pre": 0.0, "infer": 0.0, "post": 0.0})
 
 
+class ScheduledHeads:
+    """Head boxes (fractions) per call from a schedule: frame k gets schedule[min(k, last)]."""
+
+    def __init__(self, schedule):
+        self.schedule, self.calls = schedule, 0
+
+    def __call__(self, img):
+        import numpy as np
+        from app.inference.head import Heads
+        H, W = img.shape[:2]
+        frac = np.array(self.schedule[min(self.calls, len(self.schedule) - 1)], float).reshape(-1, 4)
+        self.calls += 1
+        return Heads(frac, np.array([0.9] * len(frac)), frac * [W, H, W, H], (W, H),
+                     {"pre": 0.0, "infer": 0.0, "post": 0.0})
+
+
 class FakeDirection:
     last_ms = {"crop": 0.0, "infer": 0.0}
 
@@ -1108,6 +1135,56 @@ class FrameChainTests(unittest.TestCase):
         self.assertEqual([x["miss_tap_count"] for x in rows[4:10]], [0, 1, 0, 0, None, 0])   # 0.8 s: no target field
         for key in ("ms_heads", "ms_head_dir", "ms_chain", "cpu_ms_chain", "ms_total"):
             self.assertGreaterEqual(r[key], 0.0, key)
+
+    def test_a_face_outside_the_main_user_box_is_missing(self):
+        """The main user's track is a head box left of the face (chosen while it was the only box); a box around the
+        face comes later. The face is then someone else's: its values and mouth_motion are blank, face_in_primary is
+        False, and the events layer finds no yaw it could use (yaw_ok False), so the turn cues are missing."""
+        from app.modules.vision.chain import FrameChain
+        from app.modules.vision.columns import FACE_VALUE_COLUMNS
+        from app.modules.vision.events import observe_window
+        from app.modules.vision.params import PilotParams
+        left, around = [0.02, 0.10, 0.30, 0.45], [0.40, 0.25, 0.60, 0.55]   # the fake face centre is (0.5, 0.4)
+        blend = {name: 0.1 for name in PilotParams().mouth_dials}
+        chain = FrameChain(FakeModels([fake_inference(yaw=10.0, blend=blend) for _ in range(12)]),
+                           PilotParams(mouth_baseline_s=0.3), ScheduledHeads([[left]] * 3 + [[left, around]]),
+                           blendshapes=True)
+        rows = [chain.process(f) for f in frames(12)]
+        r = rows[-1]
+        self.assertEqual((r["primary_from"], r["primary_track"], r["face_track"], r["face_in_primary"]),
+                         ("track", 1, 2, False))
+        self.assertEqual(r["face_state"], SEEN)                       # a face is seen, but not the main user's
+        self.assertTrue(all(r[c] is None for c in FACE_VALUE_COLUMNS), [c for c in FACE_VALUE_COLUMNS if r[c] is not None])
+        self.assertTrue(all(x["mouth_motion"] is None for x in rows))
+        cues = observe_window(rows, (0.0, 1.1), sit_params(), landmarker_num_faces=1)
+        self.assertFalse(cues.yaw_ok)
+        same = FrameChain(FakeModels([fake_inference(yaw=10.0) for _ in range(3)]), PilotParams(), FakeHeads())
+        r = [same.process(f) for f in frames(3)][-1]                  # the face inside the main user's box
+        self.assertEqual((r["face_in_primary"], r["face_track"]), (True, 1))
+        self.assertAlmostEqual(abs(r["yaw_deg"]), 10.0, places=3)
+
+    def test_face_value_columns_are_feature_columns(self):
+        from app.modules.vision.columns import FACE_VALUE_COLUMNS
+        from app.modules.vision.features import COLUMNS
+        self.assertLessEqual(set(FACE_VALUE_COLUMNS), set(COLUMNS))
+        self.assertNotIn("face_state", FACE_VALUE_COLUMNS)
+
+    def test_a_new_touch_log_session_starts_the_head_tracks_again(self):
+        from app.modules.vision.chain import FrameChain
+        from app.modules.vision.params import PilotParams
+        from app.modules.vision.touch import load_timeline
+        folder = tempfile.mkdtemp()
+        video = os.path.join(folder, "take.mp4")
+        events = [(-1000, "session_start", "menu", None), (-900, "screen_enter", "menu", None),
+                  (500, "session_end", "menu", {"reason": "server_session_change"}),
+                  (550, "session_start", "menu", {"reason": "server_session_change"}, "s2")]
+        tl = load_timeline(touch_log(folder, events, video), video)
+        chain = FrameChain(FakeModels([fake_inference() for _ in range(9)]), PilotParams(), FakeHeads(behind=True),
+                           timeline=tl)
+        rows = [chain.process(f) for f in frames(9)]
+        seen = [(r["primary_from"], [b["track"] for b in r["head_boxes"]]) for r in rows[4:8]]
+        self.assertEqual(seen, [("track", [1, 2]), ("track", [1, 2]),     # 0.4 s, 0.5 s: session s1
+                                ("face", [3, 4]), ("track", [3, 4])])      # 0.6 s: s2 chooses anew
 
     def test_without_boundary_values_the_head_behind_is_unknown(self):
         from app.modules.vision.chain import FrameChain
