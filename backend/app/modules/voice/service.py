@@ -32,10 +32,20 @@ def is_bare_yes(text: str) -> bool:
     return "".join(ch for ch in text if ch.isalnum()) in BARE_YES
 
 
-# Words that take an offer ("네 그걸로 주세요") and words that turn it down ("아니요 그거 말고요").
-ACCEPT_MARKS = ("그걸로", "그렇게", "그대로", "맞아요", "좋아요")
-# Any of these anywhere turns the offer down, even beside a taking word ("그대로 하면 안 돼요").
-REJECT_MARKS = ("아니", "아뇨", "말고", "싫", "취소", "다시", "빼", "안돼", "안되", "안해", "안할", "않", "못", "됐어", "괜찮", "그만")
+# The whole utterances that take an offer, optionally after a yes ("네 그걸로 주세요").
+# Anything else is not an acceptance: no word list can catch every "하지 마세요", so the
+# offer runs only on these, and any other utterance makes the kiosk ask again.
+ACCEPT_UTTERANCES = {
+    "그걸로", "그걸로요", "그걸로주세요", "그걸로해주세요", "그걸로할게요", "그걸로부탁해요",
+    "그렇게", "그렇게요", "그렇게주세요", "그렇게해주세요", "그렇게할게요", "그렇게해줘",
+    "그대로", "그대로요", "그대로주세요", "그대로해주세요", "그대로할게요",
+    "맞아요", "맞아", "맞습니다", "좋아요", "좋아", "좋습니다", "그래요", "그래", "응", "예", "네", "넵",
+    "담아주세요", "담아줘", "주세요", "해주세요", "할게요", "부탁해요", "부탁합니다",
+}
+# Words that turn an offer down; they only pick the reply (ask for the menu instead of
+# reading the offer back), never whether it runs.
+REJECT_MARKS = ("아니", "아뇨", "말고", "싫", "취소", "다시", "빼", "안돼", "안되", "안해", "안할", "않", "못",
+                "됐어", "괜찮", "그만", "하지마", "마세요", "말아")
 
 
 def is_rejection(text: str) -> bool:
@@ -44,11 +54,15 @@ def is_rejection(text: str) -> bool:
 
 
 def is_acceptance(text: str) -> bool:
-    """A yes at the start ("네 그걸로"), or a taking word, with nothing that turns it down."""
+    """Only a whole utterance from the acceptance list, optionally led by a yes, accepts an offer."""
     compact = "".join(ch for ch in text if ch.isalnum())
-    if is_rejection(text):
-        return False
-    return any(compact.startswith(yes) for yes in BARE_YES) or any(mark in compact for mark in ACCEPT_MARKS)
+    if compact in BARE_YES:
+        return True
+    for yes in sorted(BARE_YES, key=len, reverse=True):
+        if compact.startswith(yes):
+            compact = compact[len(yes):]
+            break
+    return compact in ACCEPT_UTTERANCES
 
 
 SPLIT_ORDER_REPLY = "주문이 길어요. 두 가지씩 나눠서 말씀해 주세요."
