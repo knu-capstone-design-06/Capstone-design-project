@@ -3,8 +3,8 @@
 The rule table builds the Jev question of a decision (`jev_request`, JP section 2-2: model, state, questions); this
 stub only records it. Nothing is sent anywhere: external AI APIs (STT, LLM, Jev) are called by the backend, never by
 ai-engine (AGENTS.md section 4), and the screen follows the rule result while no threshold (T_LOWER, T_AID, T_CHOICE)
-has a value (JP section 0-5: 기준 없음). `answer` stays None in this local stub; in the target design the backend
-builds and sends the Jev question.
+has a value (JP section 0-5: 기준 없음). `answer` stays None in this local stub; in the proposed target design
+(pending team agreement) the backend builds and sends the Jev question.
 """
 from __future__ import annotations
 
