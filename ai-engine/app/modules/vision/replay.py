@@ -20,8 +20,8 @@ From ai-engine/ (runtime environment: requirements.txt + app/modules/vision/requ
 - Windows: one every segment_s from the first frame; the rows after the last full window get one shorter window at
   the last frame (its record has 'partial': {segment_s}; meta last_window_partial_s), so the end of the take is judged.
 - Outputs in --out: windows.jsonl, rows.csv (one line per processed frame), meta.json (inputs, bundle with sources,
-  model hashes, versions, timing p50 / p95, counts per tag and decision, frames with a face / a head box / a head
-  direction).
+  model hashes, versions, timing p50 / p95, counts per tag and decision, frames with a face / a head box / P1
+  viewpoint probabilities).
 """
 from __future__ import annotations
 
@@ -108,7 +108,7 @@ def load_perception(models_dir: str, params, threads: int, heads_on: bool, log) 
     info = {}
     detector = direction = None
     if not heads_on:
-        log("머리 탐지기 끔(--no-heads): 뒤 사람 · 동행자 · 머리 방향 열은 결측입니다")
+        log("머리 탐지기 끔(--no-heads): 뒤 사람 · 동행자 · P1 카메라 시점(head_dir_*) 열은 결측입니다")
         return None, None, info
     h1, p1 = os.path.join(models_dir, H1_ONNX), os.path.join(models_dir, P1_ONNX)
     if os.path.isfile(h1):
@@ -122,7 +122,7 @@ def load_perception(models_dir: str, params, threads: int, heads_on: bool, log) 
         direction = HeadDirection(p1, threads)
         info[P1_ONNX] = {"bytes": os.path.getsize(p1), "sha256": sha256(p1)}
     elif detector is not None:
-        log(f"머리 방향 파일이 없습니다({p1}): head_dir_* 열은 비어 있습니다")
+        log(f"P1 카메라 시점 분류기 파일이 없습니다({p1}): head_dir_* 열은 비어 있습니다")
     return detector, direction, info
 
 
