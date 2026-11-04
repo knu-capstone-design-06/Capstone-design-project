@@ -99,12 +99,28 @@ class ParamsTests(unittest.TestCase):   # plain Python: runs with the server pac
             self.assertIsNot(f.default, dataclasses.MISSING, f.name)
             self.assertTrue(sources[f.name].strip(), f.name)
         pilot = PilotParams.pilot_fields()
-        self.assertIn("companion_min_area_ratio", pilot)
+        self.assertIn("track_max_gap_s", pilot)
+        self.assertIn("role_window_s", pilot)
         self.assertIn("lost_pause_s", pilot)
         self.assertNotIn("head_score_min", pilot)               # data-derived (E3b), not [파일럿]
-        self.assertNotIn("behind_max_area_ratio", pilot)        # decision table 3
+        self.assertNotIn("track_iou_min", pilot)                # convention value (SORT's public code)
         self.assertTrue(all(PILOT in sources[name] for name in pilot))
         self.assertEqual(p.to_dict()["segment_s"]["value"], p.segment_s)
+
+    def test_role_boundaries_have_no_value_and_say_so(self):
+        from app.modules.vision.params import ROLE_BOUNDARIES, UNDECIDED, Bundle, PilotParams
+        p = PilotParams()
+        for name in ROLE_BOUNDARIES:
+            self.assertIsNone(getattr(p, name), name)
+            self.assertTrue(PilotParams.sources()[name].startswith(UNDECIDED), name)
+            self.assertNotIn(name, PilotParams.pilot_fields())
+            self.assertEqual(Bundle(p, None).to_dict()["chain"][name]["origin"], "default")
+            for bad in (0, -1.0, float("nan"), "1.5", True):
+                with self.assertRaises(ValueError, msg=f"{name}={bad!r}"):
+                    PilotParams(**{name: bad})
+            self.assertEqual(getattr(PilotParams(**{name: 1.5}), name), 1.5)
+        with self.assertRaises(ValueError):
+            PilotParams(track_iou_min=1.2)
 
     def test_values_are_checked(self):
         from app.modules.vision.params import PilotParams
@@ -297,65 +313,140 @@ class HeadDirectionInputTests(unittest.TestCase):
 
 @unittest.skipUnless(HAS_NUMPY, SKIP)
 class ColumnsTests(unittest.TestCase):
-    def roles(self, boxes, face=None, **over):
-        import numpy as np
-        from app.modules.vision.columns import assign_heads
+    def people(self, **over):
+        from app.modules.vision.columns import HeadPeople
         from app.modules.vision.params import PilotParams
-        return assign_heads(np.array(boxes, float), (640, 480), face, PilotParams(**over))
+        return HeadPeople(PilotParams(**over))
 
     def test_no_head_one_head(self):
-        r = self.roles([])
+        from app.modules.vision.columns import choose_primary
+        self.assertEqual(choose_primary([], None, "face_then_largest"), (None, None))
+        self.assertEqual(choose_primary([[0.4, 0.2, 0.6, 0.5]], None, "face_then_largest"), (0, "largest"))
+        people = self.people()
+        r = people.update(0.0, [], (640, 480), None)
         self.assertEqual((r.primary, r.companion, r.behind, r.primary_from), (None, None, (), None))
-        r = self.roles([[0.4, 0.2, 0.6, 0.5]])
-        self.assertEqual((r.primary, r.companion, r.behind, r.primary_from), (0, None, (), "largest"))
-
-    def test_companion_beside_and_people_behind(self):
-        user = [0.40, 0.20, 0.55, 0.45]           # 0.15 x 0.25
-        mate = [0.60, 0.22, 0.74, 0.46]           # similar size, beside: centre 1.3 user widths away (in pixels)
-        far = [0.10, 0.30, 0.15, 0.37]            # small: behind
-        r = self.roles([far, mate, user])
-        self.assertEqual((r.primary, r.companion, r.behind), (2, 1, (0,)))
-        r = self.roles([far, mate, user], companion_max_dist_widths=1.0)   # too far for the companion rule
-        self.assertEqual((r.companion, r.behind), (None, (0, 1)))
-        r = self.roles([far, mate, user], companion_min_area_ratio=0.95)    # not similar enough
-        self.assertEqual((r.companion, r.behind), (None, (0, 1)))
-        r = self.roles([far, user], behind_max_area_ratio=0.05)             # far head not small enough
-        self.assertEqual(r.behind, ())
-        user2 = [0.45, 0.30, 0.55, 0.50]          # 0.10 x 0.20
-        big_far = [0.85, 0.25, 0.945, 0.455]      # second largest, about 4 user widths away: not beside
-        near = [0.60, 0.30, 0.69, 0.49]           # smaller, beside (about 1.5 user widths)
-        r = self.roles([big_far, near, user2])
-        self.assertEqual((r.primary, r.companion, r.behind), (2, 1, (0,)))   # the larger far head does not hide it
+        r = people.update(0.1, [[0.4, 0.2, 0.6, 0.5]], (640, 480), None)
+        self.assertEqual((r.primary, r.companion, r.behind, r.primary_from, r.tracks), (0, None, (), "largest", (1,)))
+        self.assertTrue(r.behind_known and r.companion_known)          # nobody else: 0 behind, no companion
 
     def test_main_user_follows_the_tracked_face(self):
+        from app.modules.vision.columns import choose_primary
         big = [0.05, 0.05, 0.35, 0.55]
         small = [0.60, 0.20, 0.70, 0.35]
-        r = self.roles([big, small], face=(0.65, 0.28))
-        self.assertEqual((r.primary, r.primary_from), (1, "face"))
-        self.assertEqual(r.behind, ())                              # the big head is not smaller than the user
-        r = self.roles([big, small], face=(0.65, 0.28), primary_rule="largest")
-        self.assertEqual((r.primary, r.primary_from, r.behind), (0, "largest", (1,)))
-        r = self.roles([big, small], face=(0.95, 0.95))             # no box around the face: largest
-        self.assertEqual((r.primary, r.primary_from), (0, "largest"))
+        self.assertEqual(choose_primary([big, small], (0.65, 0.28), "face_then_largest"), (1, "face"))
+        self.assertEqual(choose_primary([big, small], (0.65, 0.28), "largest"), (0, "largest"))
+        self.assertEqual(choose_primary([big, small], (0.95, 0.95), "face_then_largest"), (0, "largest"))
+
+    def test_tracker_keeps_ids_and_ends_a_track_after_the_gap(self):
+        from app.modules.vision.columns import HeadTracker, box_iou
+        self.assertAlmostEqual(box_iou([0, 0, 2, 2], [1, 0, 3, 2]), 2 / 6)
+        self.assertEqual(box_iou([0, 0, 1, 1], [2, 2, 3, 3]), 0.0)
+        tr = HeadTracker(iou_min=0.3, max_gap_s=1.0)
+        a, b = [0.10, 0.10, 0.30, 0.40], [0.60, 0.20, 0.70, 0.35]
+        self.assertEqual(tr.update(0.0, [a, b]), [1, 2])
+        self.assertEqual(tr.update(0.125, [[0.61, 0.20, 0.71, 0.35], [0.11, 0.10, 0.31, 0.40]]), [2, 1])   # any order
+        self.assertEqual(tr.update(0.25, [[0.30, 0.10, 0.50, 0.40]]), [3])    # IoU with track 1 below 0.3: new track
+        self.assertEqual(tr.update(1.125, [a]), [1])      # track 1 last seen at 0.125 s: 1.0 s unseen keeps it
+        self.assertEqual(tr.update(2.25, [a]), [4])       # 1.125 s unseen: track 1 ended, a new id
+        self.assertEqual(sorted(tr.live), [4])
+
+    def test_cues_of_hand_built_boxes(self):
+        from app.modules.vision.columns import relative_cues
+        user = [0.40, 0.30, 0.55, 0.50]                    # height 0.20 x 480 = 96 px, centre x 0.475
+        far = [0.25, 0.25, 0.30, 0.35]                     # height 0.10: twice as far; centre x 0.275
+        rel, lat = relative_cues(far, user, (640, 480))
+        self.assertAlmostEqual(rel, 2.0)
+        self.assertAlmostEqual(lat, -0.2 * 640 / 96)       # left of the user: negative, in user head heights
+        rel, lat = relative_cues([0.65, 0.26, 0.85, 0.54], user, (640, 480))   # taller head on the right
+        self.assertAlmostEqual(rel, 0.2 / 0.28)
+        self.assertAlmostEqual(lat, 0.275 * 640 / 96)
+        self.assertEqual(relative_cues(far, [0.4, 0.3, 0.5, 0.3], (640, 480)), (None, None))   # no height
+
+    def test_window_median_of_one_track(self):
+        user = [0.40, 0.30, 0.55, 0.50]                    # height 0.20
+        people = self.people(role_window_s=0.25)
+        rels = []
+        for k, h in enumerate((0.20, 0.10, 0.05, 0.10)):   # rel_dist 1, 2, 4, 2 at 0.0 ... 0.3 s
+            r = people.update(k * 0.1, [user, [0.70, 0.30, 0.75, 0.30 + h]], (640, 480), (0.47, 0.40))
+            rels.append(r.cues[1][2])
+        for got, want in zip(rels, (1.0, 1.5, 2.0, 2.0)):   # medians of 1 | 1, 2 | 1, 2, 4 | 2, 4, 2 (0.0 s left)
+            self.assertAlmostEqual(got, want)
+
+    def test_sticky_main_user_switches_only_after_the_gap(self):
+        user = [0.40, 0.40, 0.50, 0.55]                    # seated user, small box
+        helper = [0.35, 0.05, 0.60, 0.42]                  # larger head above, around the face in later frames
+        people = self.people()                             # track_max_gap_s = 1.0 (default)
+        r = people.update(0.0, [user], (640, 480), (0.45, 0.47))
+        self.assertEqual((r.primary_track, r.primary_from), (1, "face"))
+        r = people.update(0.1, [helper, user], (640, 480), (0.47, 0.20))    # the face now inside the helper's box
+        self.assertEqual((r.primary, r.primary_track, r.primary_from), (1, 1, "track"))
+        self.assertEqual(r.roles[0], "unknown")            # no boundary value: the helper's role is not decided
+        self.assertTrue(r.behind_known)                    # a head larger than the user's is not behind (dec 3)
+        for k in range(2, 11):                             # the user's box is lost: 1.0 s, the main user stays
+            r = people.update(k * 0.1, [helper], (640, 480), (0.47, 0.20))
+            self.assertEqual((r.primary, r.primary_track), (None, 1), k)
+        r = people.update(1.2, [helper], (640, 480), (0.47, 0.20))          # 1.1 s unseen: the helper's turn
+        self.assertEqual((r.primary, r.primary_track, r.primary_from), (0, 2, "face"))
+        self.assertEqual(r.roles, ("primary",))
+
+    def test_roles_from_boundaries_and_unknown_without_them(self):
+        user = [0.40, 0.30, 0.55, 0.50]                    # height 0.20
+        mate = [0.62, 0.32, 0.75, 0.48]                    # rel 1.25, lateral 0.21 x 640 / 96 = 1.4: beside
+        far = [0.45, 0.20, 0.50, 0.28]                     # rel 2.5, lateral 0: right behind
+        boxes = [far, mate, user]
+        r = self.people().update(0.0, boxes, (640, 480), (0.47, 0.40))
+        self.assertEqual((r.primary, r.roles), (2, ("unknown", "unknown", "primary")))
+        self.assertFalse(r.behind_known or r.companion_known)
+        bounds = dict(companion_rel_dist_max=1.6, companion_lateral_min=1.0, behind_rel_dist_min=1.8)  # test values
+        r = self.people(**bounds).update(0.0, boxes, (640, 480), (0.47, 0.40))
+        self.assertEqual((r.companion, r.behind, r.roles), (1, (0,), ("behind", "companion", "primary")))
+        self.assertTrue(r.behind_known and r.companion_known)
+        r = self.people(**{**bounds, "companion_lateral_min": 2.0}).update(0.0, boxes, (640, 480), (0.47, 0.40))
+        self.assertEqual((r.companion, r.behind, r.roles[1]), (None, (0,), "other"))   # not beside enough, not far
+        r = self.people(behind_rel_dist_min=1.8).update(0.0, boxes, (640, 480), (0.47, 0.40))
+        self.assertEqual(r.roles[:2], ("unknown", "unknown"))   # behind needs 'not a companion', still undecided
 
     def test_head_and_shoulder_columns(self):
         import numpy as np
         from app.modules.vision.columns import DIR_COLUMNS, HeadRoles, head_columns, shoulder_columns
         heads = SimpleNamespace(boxes=np.array([[0.1, 0.1, 0.3, 0.4], [0.5, 0.1, 0.7, 0.4]]),
                                 scores=np.array([0.9, 0.8]))
-        cols = head_columns(heads, HeadRoles(0, 1, (), "face"), np.array([0.6, 0.1, 0.1, 0.1, 0.1]))
+        roles = HeadRoles(0, 1, (), "face", (3, 4), ("primary", "companion"), (None, (1.0, 2.0, 1.1, 2.1)), 3)
+        cols = head_columns(heads, roles, np.array([0.6, 0.1, 0.1, 0.1, 0.1]))
         self.assertEqual(cols["people_behind_count"], 0)
         self.assertEqual(cols["companion_box"], (0.5, 0.1, 0.7, 0.4))
         self.assertEqual((cols["head_count"], cols["primary_score"], cols["primary_from"]), (2, 0.9, "face"))
+        self.assertEqual(cols["primary_track"], 3)
         self.assertEqual(cols["head_dir_middle"], 0.6)
+        self.assertEqual(cols["head_boxes"][1], {"track": 4, "cx": 0.6, "cy": 0.25, "w": 0.2, "h": 0.3, "score": 0.8,
+                                                 "role": "companion", "rel_dist": 1.0, "lateral": 2.0,
+                                                 "rel_dist_med": 1.1, "lateral_med": 2.1})
+        self.assertIsNone(cols["head_boxes"][0]["rel_dist"])            # the main user's own box has no cue
+        unknown = HeadRoles(0, None, (), "track", (3, 4), ("primary", "unknown"), (None, (2.0, 0.1, 2.0, 0.1)), 3,
+                            behind_known=False, companion_known=False)
+        cols = head_columns(heads, unknown, None)
+        self.assertIsNone(cols["people_behind_count"])                  # blank: the cue is missing
+        self.assertNotIn("companion_box", cols)                         # no key: the companion cannot be told
         cols = head_columns(SimpleNamespace(boxes=np.zeros((0, 4)), scores=np.zeros(0)),
                             HeadRoles(None, None, (), None), None)
         self.assertEqual((cols["people_behind_count"], cols["companion_box"], cols["primary_box"]), (0, None, None))
+        self.assertEqual(cols["head_boxes"], [])
         self.assertTrue(all(cols[c] is None for c in DIR_COLUMNS))
         pose = np.zeros((33, 4))
         pose[11, :2], pose[12, :2] = (0.4, 0.6), (0.6, 0.62)
         self.assertEqual(shoulder_columns(pose), {"shoulder_cx": 0.5, "shoulder_cy": 0.61})
         self.assertEqual(shoulder_columns(None), {"shoulder_cx": None, "shoulder_cy": None})
+
+    def test_unknown_roles_reach_the_situation_rules_as_missing_cues(self):
+        """people_behind_count None and a row without companion_box (columns.head_columns) are what events.py reads
+        as missing: the window does not measure them, so 'nobody behind' and 'no companion' are not concluded."""
+        from app.modules.vision.events import observe_window
+        rows = rows_of(facing(20), extra={**FULL, "people_behind_count": None})
+        for r in rows:
+            r.pop("companion_box")
+        cues = observe_window(rows, (0.0, 1.9), sit_params(), landmarker_num_faces=1)
+        self.assertNotIn("people_behind_count", cues.measured)
+        self.assertNotIn("companion_box", cues.measured)
 
     def test_mouth_motion_needs_a_full_baseline_run_and_resets_on_face_loss(self):
         from app.modules.vision.columns import MouthMotion
@@ -1000,12 +1091,16 @@ class FrameChainTests(unittest.TestCase):
         tl = load_timeline(touch_log(folder, MENU_EVENTS, video), video)
         blend = {name: 0.1 for name in PilotParams().mouth_dials}
         schedule = [fake_inference(blend=blend) for _ in range(12)]
-        chain = FrameChain(FakeModels(schedule), PilotParams(mouth_baseline_s=0.5), FakeHeads(behind=True),
+        bounds = dict(companion_rel_dist_max=1.6, companion_lateral_min=1.0, behind_rel_dist_min=1.8)  # test values
+        chain = FrameChain(FakeModels(schedule), PilotParams(mouth_baseline_s=0.5, **bounds), FakeHeads(behind=True),
                            FakeDirection(), tl, blendshapes=True)
         rows = [chain.process(f) for f in frames(12)]
         r = rows[-1]
         self.assertEqual((r["people_behind_count"], r["companion_box"], r["head_count"]), (1, None, 2))
-        self.assertEqual((r["primary_from"], r["head_dir_middle"]), ("face", 0.8))
+        self.assertEqual((rows[0]["primary_from"], r["primary_from"], r["head_dir_middle"]), ("face", "track", 0.8))
+        self.assertEqual(([b["track"] for b in r["head_boxes"]], r["primary_track"]), ([1, 2], 1))
+        self.assertEqual(r["head_boxes"][1]["role"], "behind")
+        self.assertAlmostEqual(r["head_boxes"][1]["rel_dist"], 4.5)          # 0.36 / 0.08
         self.assertAlmostEqual(r["shoulder_cx"], 0.5)
         self.assertEqual(r["mouth_motion"], 0.0)                  # an unchanged face after a 0.5-s baseline
         self.assertIsNone(rows[0]["mouth_motion"])
@@ -1013,6 +1108,16 @@ class FrameChainTests(unittest.TestCase):
         self.assertEqual([x["miss_tap_count"] for x in rows[4:10]], [0, 1, 0, 0, None, 0])   # 0.8 s: no target field
         for key in ("ms_heads", "ms_head_dir", "ms_chain", "cpu_ms_chain", "ms_total"):
             self.assertGreaterEqual(r[key], 0.0, key)
+
+    def test_without_boundary_values_the_head_behind_is_unknown(self):
+        from app.modules.vision.chain import FrameChain
+        from app.modules.vision.params import PilotParams
+        chain = FrameChain(FakeModels([fake_inference() for _ in range(3)]), PilotParams(), FakeHeads(behind=True))
+        rows = [chain.process(f) for f in frames(3)]
+        self.assertIsNone(rows[-1]["people_behind_count"])          # blank: missing, not 0
+        self.assertNotIn("companion_box", rows[-1])                 # absent: the companion cannot be told
+        self.assertEqual(rows[-1]["head_boxes"][1]["role"], "unknown")
+        self.assertAlmostEqual(rows[-1]["head_boxes"][1]["rel_dist_med"], 4.5)   # the cues are still written
 
     def test_missing_sources_leave_their_columns_missing(self):
         from app.modules.vision.chain import FrameChain
