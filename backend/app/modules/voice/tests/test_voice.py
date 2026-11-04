@@ -1006,6 +1006,56 @@ class ToolExecutionApiTests(VoiceApiCase):
         self.assertEqual((body["status"], body["actions"]), ("completed", ["cart_updated"]))
         self.assertEqual(self.cart()["total_quantity"], 20)
 
+    def test_worded_acceptance_after_a_touch_change_confirms_again(self):
+        # The reviewers' reproduction: "네 그걸로 주세요" must run on the cart the offer was
+        # checked against, exactly like a bare "네".
+        self.add_by_touch("americano", "iced", 2)
+        self.interpreter.result = interpretation(call("update_cart_item", "americano", "iced", 3))
+        self.interpreter.result = interpretation(call("update_cart_item", "americano", "iced", 3), reply_text="?")
+        self.say("하나 더요")
+        self.add_by_touch("americano", "iced", 3)
+        total = 5
+        for text in ["네 그걸로 주세요", "네네", "응 그렇게 해주세요", "네, 담아 주세요"]:
+            self.interpreter.result = interpretation(call("update_cart_item", "americano", "iced", 3))
+            body = self.status(self.say(text)).json()
+            self.assertEqual((body["status"], body["reply_text"], body["actions"]),
+                             ("needs_confirmation", "아이스 아메리카노 3잔으로 바꿀까요?", []), text)
+            self.assertEqual(self.cart()["total_quantity"], total, text)
+            self.add_by_touch("americano", "iced", 1)  # changed again before the next answer
+            total += 1
+        # With the cart as read back, the worded acceptance runs.
+        self.interpreter.result = interpretation(call("update_cart_item", "americano", "iced", 3))
+        body = self.status(self.say("네 그걸로 주세요")).json()
+        self.assertEqual((body["status"], body["reply_text"]), ("needs_confirmation", "아이스 아메리카노 3잔으로 바꿀까요?"))
+        self.interpreter.result = interpretation(call("update_cart_item", "americano", "iced", 3))
+        body = self.status(self.say("네 그걸로 주세요")).json()
+        self.assertEqual((body["status"], body["actions"]), ("completed", ["cart_updated"]))
+        self.assertEqual(self.cart()["total_quantity"], 3)
+
+    def test_target_count_with_an_add_from_the_model_is_confirmed_as_a_change(self):
+        # The reviewer's reproduction: "세 잔으로" over two cups is three in all, not three more.
+        self.add_by_touch("americano", "iced", 2)
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 3))
+        body = self.status(self.say("세 잔으로 바꿔 주세요")).json()
+        self.assertEqual((body["status"], body["reply_text"], body["actions"]),
+                         ("needs_confirmation", "아이스 아메리카노 3잔으로 바꿀까요?", []))
+        self.assertEqual(body["tool_calls"], [call("update_cart_item", "americano", "iced", 3)])
+        self.assertEqual(self.cart()["total_quantity"], 2)
+        body = self.status(self.say("네")).json()
+        self.assertEqual((body["status"], body["actions"]), ("completed", ["cart_updated"]))
+        self.assertEqual(self.cart()["total_quantity"], 3)
+
+    def test_sole_cart_line_does_not_stand_in_for_an_unrelated_request(self):
+        # The reviewer's reproduction: one line in the cart must not license a request for
+        # another product or for nothing in the cart.
+        self.add_by_touch("americano", "iced", 2)
+        for text in ["라떼 하나 주세요", "화면 좀 내려줘"]:
+            with self.subTest(text=text):
+                self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 1))
+                body = self.status(self.say(text)).json()
+                self.assertEqual((body["status"], body["actions"], body["tool_calls"]), ("needs_clarification", [], []))
+                self.assertEqual(self.cart()["total_quantity"], 2)
+
     def test_worded_acceptance_with_the_same_tool_inputs_runs_once(self):
         self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
         self.say("아이스 아메리카노 두 개")
@@ -1184,7 +1234,8 @@ class SpokenIncrementTests(unittest.TestCase):
                 MenuItem(product_id="latte", name="카페 라떼", available=True, temperatures=["iced", "hot"])]
         for text, counts, temperatures in [
             ("아이스 아메리카노 한 잔 주세요", [("americano", "abs", 1)], [("americano", "iced")]),
-            ("아메리카노 세 잔으로", [("americano", "abs", 3)], []),
+            ("아메리카노 세 잔으로", [("americano", "to", 3)], []),
+            ("아메리카노 세 잔", [("americano", "abs", 3)], []),
             ("아메리카노 하나 빼 주세요", [("americano", "less", 1)], []),
             ("하나 더 빼 주세요", [(None, "less", 1)], []),
             ("아메리카노 아이스로 바꿔 주세요", [], [("americano", "iced")]),
