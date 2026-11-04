@@ -107,6 +107,14 @@ class JevClientTests(unittest.IsolatedAsyncioTestCase):
             "probability out of range": {**RESPONSE, "answers": {"proposal_fits": {"type": "noul", "noul": 1.5}}},
             "unknown type": {**RESPONSE, "answers": {"proposal_fits": {"type": "guess", "noul": 0.5}}},
             "no usage": {"model": "jev-1.13.0", "answers": RESPONSE["answers"]},
+            "score that is not a number": {**RESPONSE, "answers": {"q": {
+                "type": "score", "score": "high", "confidence": 0.5, "probabilities": {"1": 0.5}, "legend": {"1": "low"}}}},
+            "score without a legend": {**RESPONSE, "answers": {"q": {
+                "type": "score", "score": 3, "confidence": 0.5, "probabilities": {"3": 0.5}}}},
+            "score as a numeric string": {**RESPONSE, "answers": {"q": {
+                "type": "score", "score": "3", "confidence": 0.5, "probabilities": {"3": 0.5}, "legend": {"3": "mid"}}}},
+            "score as a boolean": {**RESPONSE, "answers": {"q": {
+                "type": "score", "score": True, "confidence": 0.5, "probabilities": {"1": 0.5}, "legend": {"1": "low"}}}},
         }
         for name, body in cases.items():
             with self.subTest(case=name):
@@ -115,10 +123,24 @@ class JevClientTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNone(await self.ask(lambda request, response=response: response))
 
     def test_request_shape_is_checked_before_sending(self):
-        with self.assertRaises(ValidationError):
-            JevRequest.model_validate({**REQUEST, "questions": {}})
-        with self.assertRaises(ValidationError):
-            JevRequest.model_validate({**REQUEST, "extra": 1})
+        for bad in ({**REQUEST, "questions": {}}, {**REQUEST, "extra": 1}, {**REQUEST, "state": None},
+                    {**REQUEST, "state": 3}):
+            with self.subTest(bad=bad), self.assertRaises(ValidationError):
+                JevRequest.model_validate(bad)
+        for state in ("plain text", ["a", 1], {"k": "v"}):
+            with self.subTest(state=state):
+                self.assertEqual(JevRequest.model_validate({**REQUEST, "state": state}).state, state)
+
+    async def test_score_answer_is_parsed(self):
+        response = {**RESPONSE, "answers": {"how_hard": {
+            "type": "score", "score": 3, "confidence": 0.6, "probabilities": {"1": 0.1, "3": 0.6, "5": 0.3},
+            "legend": {"1": "easy", "3": "some trouble", "5": "cannot"}}}}
+        answer = await self.ask(lambda request: httpx.Response(200, json=response))
+        score = answer.answers["how_hard"]
+        self.assertEqual((score.type, score.score, score.legend["3"]), ("score", 3.0, "some trouble"))
+        # A decimal score is a number too.
+        response["answers"]["how_hard"]["score"] = 2.5
+        self.assertEqual((await self.ask(lambda request: httpx.Response(200, json=response))).answers["how_hard"].score, 2.5)
 
     def test_http_client_sends_the_key_only_to_the_configured_origin(self):
         http = create_jev_http("secret", "https://api.typesafe.ai", 3.0)
@@ -140,9 +162,14 @@ class JevSettingsTests(unittest.TestCase):
         settings = Settings(_env_file=None, jev_api_key="jev-secret-value", jev_api_url="https://example.test/")
         self.assertNotIn("jev-secret-value", repr(settings))
         self.assertEqual(settings.jev_api_url, "https://example.test")
-        for bad in ("api.typesafe.ai", "https://api.typesafe.ai/v1", "https://user:pw@api.typesafe.ai"):
+        for bad in ("api.typesafe.ai", "https://api.typesafe.ai/v1", "https://user:pw@api.typesafe.ai",
+                    "http://api.typesafe.ai", "http://example.com"):
             with self.subTest(url=bad), self.assertRaises(ValidationError):
                 Settings(_env_file=None, jev_api_url=bad)
+        # The key travels in a header, so plain HTTP is only for a mock server on this machine.
+        for local in ("http://localhost:8089", "http://127.0.0.1:8089", "http://[::1]:8089"):
+            with self.subTest(url=local):
+                self.assertEqual(Settings(_env_file=None, jev_api_url=local).jev_api_url, local)
         with self.assertRaises(ValidationError):
             Settings(_env_file=None, jev_timeout_seconds=0)
 

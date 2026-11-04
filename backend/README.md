@@ -68,7 +68,7 @@ API 문서: http://127.0.0.1:8000/docs
 | OPENAI_TIMEOUT_SECONDS | 10 | 양의 유한한 초 단위 숫자 |
 | VOICE_EXECUTE_TOOLS | false | true면 completed 음성 결과의 tool_calls를 장바구니에 반영 |
 | JEV_API_KEY | 미설정 | 서버 전용 비밀값. 없으면 Jev를 호출하지 않음 |
-| JEV_API_URL | https://api.typesafe.ai | HTTP(S) 오리진만 |
+| JEV_API_URL | https://api.typesafe.ai | HTTPS 오리진만. 평문 HTTP는 localhost·127.0.0.1 모의 서버에만 허용 |
 | JEV_MODEL | jev-1.13.0 | 버전 ID. 별칭(jev-latest)은 실험 기록을 위해 쓰지 않음 |
 | JEV_TIMEOUT_SECONDS | 3 | Jev 호출 한 번의 전체 제한, 재시도 없음 |
 
