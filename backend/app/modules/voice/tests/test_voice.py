@@ -976,12 +976,23 @@ class ToolExecutionApiTests(VoiceApiCase):
         self.assertEqual(self.cart()["items"], [])
 
     def test_negated_taking_word_does_not_accept_the_offer(self):
-        # The reviewer's reproduction: "그대로" beside "안 돼요" is a no, not a yes.
+        # The reviewer's reproductions: "그대로" beside "안 돼요" or "하지 마세요" is a no, not a yes.
+        for text in ["그대로 하면 안 돼요", "그대로 하지 마세요"]:
+            with self.subTest(text=text):
+                self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 20))
+                self.say("아이스 아메리카노 주세요")
+                body = self.status(self.say(text)).json()
+                self.assertEqual((body["status"], body["reply_text"], body["actions"]),
+                                 ("needs_clarification", "어떤 메뉴를 주문할까요?", []))
+                self.assertEqual(self.cart()["items"], [])
+
+    def test_anything_off_the_acceptance_list_reads_the_offer_back_instead_of_running(self):
+        # Not a listed acceptance, no rejection word either: the offer is never run on it.
         self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 20))
         self.say("아이스 아메리카노 주세요")
-        body = self.status(self.say("그대로 하면 안 돼요")).json()
+        body = self.status(self.say("그대로 하면 좀 그런데요")).json()
         self.assertEqual((body["status"], body["reply_text"], body["actions"]),
-                         ("needs_clarification", "어떤 메뉴를 주문할까요?", []))
+                         ("needs_confirmation", "아이스 아메리카노 20잔 담을까요?", []))
         self.assertEqual(self.cart()["items"], [])
 
     def test_unclear_answer_to_an_offer_reads_it_back_again(self):
@@ -1106,16 +1117,19 @@ class AcceptanceWordsTests(unittest.TestCase):
     def test_yes_and_taking_words_accept_unless_something_turns_the_offer_down(self):
         from app.modules.voice.service import is_acceptance, is_rejection
 
-        for text in ["네", "네 그걸로 주세요", "그걸로요", "좋아요 그렇게 해 주세요", "응 맞아요"]:
+        for text in ["네", "네 그걸로 주세요", "그걸로요", "그렇게 해 주세요", "응 맞아요", "네, 담아 주세요"]:
             with self.subTest(text=text):
                 self.assertTrue(is_acceptance(text))
                 self.assertFalse(is_rejection(text))
         for text in ["아니요 그거 말고요", "아뇨", "그거 말고 다른 거요", "취소해 주세요", "네 아니요",
-                     "그대로 하면 안 돼요", "그렇게 하지 않을래요", "그걸로는 못 해요", "괜찮아요 됐어요", "좋아요 근데 그만할래요"]:
+                     "그대로 하면 안 돼요", "그대로 하지 마세요", "그렇게 하지 않을래요", "그걸로는 못 해요",
+                     "괜찮아요 됐어요", "좋아요 근데 그만할래요"]:
             with self.subTest(text=text):
                 self.assertFalse(is_acceptance(text))
                 self.assertTrue(is_rejection(text))
-        for text in ["음 잠깐만요", "아이스 아메리카노 주세요", "얼마예요"]:
+        # Neither: not on the acceptance list, so an offer is read back, never run.
+        for text in ["음 잠깐만요", "아이스 아메리카노 주세요", "얼마예요", "그대로 하면 좀 그런데요", "네 잔 더요",
+                     "좋아요 근데 하나만요"]:
             with self.subTest(text=text):
                 self.assertFalse(is_acceptance(text))
                 self.assertFalse(is_rejection(text))
