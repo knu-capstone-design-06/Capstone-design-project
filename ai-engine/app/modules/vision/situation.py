@@ -39,7 +39,10 @@ this code, [설계 제안] (not in sem section 4):
   frames that should carry it) observed throughout - for the turns, no turn broken by a stretch that hides the head;
   for the yaw toward the companion, the companion's side known on every face frame with a yaw - otherwise the cue is
   missing
-- missing mouth motion is left out and the tag is judged on the rest (sem section 3 says so; quality_ok says false)
+- missing mouth motion is left out and the tag is judged on the rest (sem section 3 says so; quality_ok says false):
+  the decision table lists the mouth as one condition of consulting_companion's conjunction, and when its
+  observation is absent the condition is treated as missing (결측) and dropped from the conjunction - the evidence
+  then lists only the cues used (no mouth_moving event) and confidence.quality_ok is false
 """
 from __future__ import annotations
 
@@ -132,8 +135,11 @@ def consulting_companion(c: Cues, p: PilotParams) -> Verdict:
     Face Landmarker that does not smooth (num_faces of 2 or more) - events.detect_events then makes no mouth_moving,
     so jitter is not counted as mouth motion. A mouth movement seen counts; no movement needs a mouth value on every
     face frame. Otherwise (no values, no smoothing, face_visible_ratio below face_visible_min) mouth motion is left
-    out and the tag is judged on the rest (sem section 3). A yaw toward the companion seen counts; none needs the
-    companion's side known on every face frame with a yaw, otherwise that cue is missing."""
+    out and the tag is judged on the rest (sem section 3): the decision table's conjunction lists the mouth, but an
+    absent mouth observation is treated as missing (결측) and dropped from the conjunction, so the evidence shows the
+    cues that were used (no mouth_moving) and Verdict.skipped / confidence.quality_ok record the drop. A yaw toward the
+    companion seen counts; none needs the companion's side known on every face frame with a yaw, otherwise that cue is
+    missing."""
     companions = c.of("companion_present")
     toward = c.of("yaw_toward_companion") if c.face_ok else []
     mouth = c.of("mouth_moving") if c.mouth_usable else []
