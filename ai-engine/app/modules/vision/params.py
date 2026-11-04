@@ -73,7 +73,8 @@ class PilotParams:
                              "시작하는 이름 27개); 결정 §3 '입 움직임(jawOpen 등 입 다이얼)'")
     mouth_baseline_s: float = _p(
         2.0, f"{PILOT} 시작값: 입 다이얼의 사람별 기준선 = 직전 이만큼(초)의 얼굴 프레임 중앙값(결정 목록 2026-10-10 "
-             "§16: 기준선을 뺀 창 안 변동)", "s")
+             "§16: 기준선을 뺀 창 안 변동). 뒤돌아봄 사건의 사라지기 전 고개 방향(pre_loss_yaw_deg · pre_loss_pitch_deg)도 "
+             "같은 창의 화면 보는 프레임 중앙값(관측만)", "s")
 
     # --- head tracks and the roles of the other heads (columns.py HeadTracker, HeadPeople; 2026-11-04) -----------
     track_iou_min: float = _p(
