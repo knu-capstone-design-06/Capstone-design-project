@@ -132,13 +132,15 @@ ai-engine의 호스트 포트를 공개하지 않습니다. 두 서버를
 
 ## 테스트
 
-의존성 설치 후 `backend/`에서 실행합니다. 표준 라이브러리 unittest와 HTTPX
-MockTransport를 사용하므로 실제 ai-engine·DB·Docker가 필요하지 않습니다.
+의존성 설치 후 `backend/`에서 실행합니다. 일반 테스트는 표준 라이브러리 unittest와 HTTPX
+MockTransport를 사용하므로 실제 ai-engine·DB·Docker가 필요하지 않습니다. `TEST_DATABASE_URL`이 없으면 PostgreSQL 통합 테스트 3개는 건너뜁니다.
 
 ```powershell
 python -m unittest discover -s tests -v
 python -m unittest discover -s app/modules -p 'test_*.py' -v
 ```
+
+별도 CI 작업 `Backend DB integration`은 일회용 PostgreSQL 17에 저장소의 마이그레이션 3개와 상품 17개 시드를 적용한 뒤 `python -m unittest tests.test_postgres_ordering -v`를 실행합니다. 실제 Supabase 접속 정보는 사용하지 않고, Cart·주문 성공 응답의 재시작 뒤 재생, 두 저장소 인스턴스의 동시 주문, 실패한 음성 도구 묶음의 롤백을 검사합니다.
 
 기존 AI 클라이언트 테스트는 정상 요청·응답, vision 생략/null, 판단 불가, HTTP 오류,
 연결 실패, 전체 타임아웃, 잘못된 응답·세션 불일치, 호출 취소, health 응답과 연결 종료를 확인합니다.
@@ -153,8 +155,8 @@ python -m unittest discover -s app/modules -p 'test_*.py' -v
 | POST /api/v1/sessions | 201, session_id와 UTC started_at |
 | POST /api/v1/sessions/{session_id}/features | 200, AI 점수 또는 판단 없는 응답 |
 
-세션은 단일 프로세스 메모리에만 보관하며 재시작하면 초기화됩니다.
-세션 만료·정리·영속 저장은 아직 없으므로 장기 운영 또는 여러 worker/인스턴스에 사용하지 않습니다.
+`DATABASE_URL`이 없으면 세션은 단일 프로세스 메모리에만 보관하며 재시작하면 초기화됩니다. 전용 역할의 `DATABASE_URL`을 설정하면 세션·Cart·주문·성공 요청 재생 기록을 DB에 저장하고 재시작 뒤에도 조회할 수 있습니다. 음성 요청·대화 이력은 두 모드 모두 메모리에만 남습니다.
+세션 만료·정리와 공개 접속자의 세션 접근 통제는 아직 없으므로, DB 모드에서도 공개 장기 운영 준비가 끝난 것은 아닙니다.
 터치 원시 로그의 통계 계산과 비전 추출은 구현하지 않고 계약에 정의된 특징만 전달합니다.
 주문 완료 세션의 새 특징 요청은 AI 호출 전에 410 `{ "detail": "session_expired" }`로 거절합니다. AI 호출 중 주문이 완료된 경우에도 결과를 반환하지 않고 410으로 처리합니다. 프론트가 이미 수신한 늦은 결과의 화면 적용 차단은 특징 전송 연결 시 함께 확인해야 합니다.
 AI 측정 불가는 ai_available=true, states=null입니다. 통신 오류·타임아웃·잘못된 AI 응답은
@@ -197,7 +199,7 @@ Invoke-RestMethod -Method Post "$base/api/v1/sessions/$($session.session_id)/fea
 
 팀과 결정하고 이후 구현할 사항:
 - 프론트 요청 타임아웃은 15초입니다. 최종 시간과 시간 초과 후 처리 중 응답·재시도 정책은 백엔드 담당자와 합의할 항목입니다.
-- 처리 중 중복 요청의 오류·간격, 실패 결과와 성공 키의 보관 기간, DB 전환 시 원자적 저장
+- 처리 중 중복 요청의 오류·간격, 실패 결과와 성공 키의 보관 기간. DB 모드의 Cart·주문·성공 응답은 트랜잭션으로 원자적 저장을 구현했습니다.
 - 서버 주문번호의 장기 보관 범위, 세션 시간 만료·복원, 프론트의 늦은 특징·음성 결과 화면 적용 차단
 - 공개 주소의 세션 접근·인증·쿠키 및 배포 정책
 
