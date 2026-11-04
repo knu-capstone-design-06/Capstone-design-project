@@ -56,13 +56,20 @@ class OrderingRepository:
         request with several tool inputs must change the cart entirely or not at all.
         """
         with self.lock:
-            state = self.state(session_id)
-            cart = state.cart.model_copy(deep=True)
+            state = self.states.get(session_id)
+            cart = state.cart.model_copy(deep=True) if state is not None else None
+            completed = state.completed if state is not None else False
             keys = set(self.replays)
             try:
                 yield
             except BaseException:
-                state.cart = cart
+                if state is None:
+                    # A rejected request must not allocate an orphan cart for a
+                    # session that the session repository does not recognize.
+                    self.states.pop(session_id, None)
+                else:
+                    state.cart = cart
+                    state.completed = completed
                 for key in set(self.replays) - keys:
                     del self.replays[key]
                 raise
