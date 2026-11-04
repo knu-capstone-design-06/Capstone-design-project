@@ -8,7 +8,7 @@ app/modules/vision/requirements.txt + onnxruntime):
 
   python -m app.modules.vision.tools.companion_eval replay  --videos DIR --out RUNS [--exclude NAME,...]
                                                            [--step 3 --width 960 --threads 2] [--models DIR]
-  python -m app.modules.vision.tools.companion_eval analyze --runs RUNS --truth TRUTH.csv --out DIR
+  python -m app.modules.vision.tools.companion_eval analyze --runs RUNS --truth TRUTH.csv --out DIR [--behind-only]
   python -m app.modules.vision.tools.companion_eval sheets  --runs RUNS --truth TRUTH.csv --videos DIR --out DIR
 
 replay   one replay.py run per DIR/*.mp4 (no value bundle, so the situation output is 'unknown' and only the frame
@@ -23,12 +23,19 @@ analyze  reads RUNS/<take>/rows.csv (its head_boxes column) and meta.json and wr
            sweep_lateral.csv/png   if the boundary were companion_rel_dist_max / behind_rel_dist_min /
                                    companion_lateral_min (columns.decide_role), per frame and per window
            primary_stability.csv   per labelled take: frames where the main user's box is the labelled user's, the
-                                   per-frame rule (columns.choose_primary every frame, the chain before 2026-11-04) and
-                                   the sticky track (the chain now); frames whose tracked face centre lies outside the
-                                   main user's box (the yaw and the head box are then two people's)
+                                   per-frame rule (columns.choose_primary every frame, the chain before 2026-11-04;
+                                   its face box is read from the face_track column, since the face values of a face
+                                   outside the main user's box are blank) and the sticky track (the chain now); frames
+                                   whose tracked face centre lies outside the main user's box (face_in_primary False:
+                                   the face values of those frames are blank in the rows)
            primary_changes.csv     per take: how often the main-user track changes and how many tracks there are
            track_fragments.csv     per labelled person: how many chain tracks carry the person's boxes
            summary.json            counts, the checks below, the grid and the settings read from meta.json
+         with --behind-only also
+           sweep_behind_only.csv/png  behind or not from rel_dist alone (rel_dist > 1 and >= the boundary, i.e.
+                                   decide_role's behind rule without its 'not a companion' condition): per boundary the
+                                   share of behind frames (standing, passing) caught and of the others (companion,
+                                   helper) left out, per frame and per window
 sheets   contact sheets (JPEG) of sampled frames with every box, its track, role and window cues and the label. They
          show the people in the takes: write them only where those people agreed to (not into a repository).
 
@@ -112,9 +119,12 @@ def load_run(folder: str) -> tuple:
             for b in boxes:
                 b["x0"], b["x1"] = b["cx"] - b["w"] / 2.0, b["cx"] + b["w"] / 2.0
                 b["y0"], b["y1"] = b["cy"] - b["h"] / 2.0, b["cy"] + b["h"] / 2.0
+            in_primary = {"True": True, "False": False}.get(r.get("face_in_primary"))
             frames.append({"frame_idx": int(r["frame_idx"]), "t_s": float(r["t_s"]), "src_frame": r["src_frame"],
                            "face_xy": face_xy(r), "primary_track": None if r["primary_track"] == ""
                            else int(float(r["primary_track"])), "primary_from": r["primary_from"] or None,
+                           "face_in_primary": in_primary, "has_face_track": "face_track" in r,
+                           "face_track": None if not r.get("face_track") else int(float(r["face_track"])),
                            "boxes": boxes})
     return frames, meta
 
@@ -297,14 +307,21 @@ def cmd_analyze(a) -> int:
         sticky_wrong = collections.Counter()
         for fr in frames:
             boxes = fr["boxes"]
-            k, _ = choose_primary([(b["x0"], b["y0"], b["x1"], b["y1"]) for b in boxes], fr["face_xy"],
-                                  chain["primary_rule"])
+            xyxy = [(b["x0"], b["y0"], b["x1"], b["y1"]) for b in boxes]
+            k, _ = choose_primary(xyxy, fr["face_xy"], chain["primary_rule"])
+            if fr["has_face_track"] and boxes:        # the face's own box (face values may be blank in the row)
+                by_face = [i for i, b in enumerate(boxes) if b["track"] == fr["face_track"]]
+                k = by_face[0] if by_face and chain["primary_rule"] == "face_then_largest" else \
+                    choose_primary(xyxy, None, chain["primary_rule"])[0]
             prim = next((b for b in boxes if b["role"] == "primary"), None)
             for i, b in enumerate(boxes):
                 b["primary_old"] = i == k
                 all_boxes.append({"take": take, "frame_idx": fr["frame_idx"], "t_s": fr["t_s"], **b})
             user = _user_box(fr)
-            if prim is not None and fr["face_xy"] is not None:
+            if fr["has_face_track"]:
+                n_face += fr["face_in_primary"] is not None
+                n_face_out += fr["face_in_primary"] is False
+            elif prim is not None and fr["face_xy"] is not None:
                 n_face += 1
                 fx, fy = fr["face_xy"]
                 n_face_out += not (prim["x0"] <= fx <= prim["x1"] and prim["y0"] <= fy <= prim["y1"])
@@ -398,6 +415,8 @@ def cmd_analyze(a) -> int:
           ("frame_latmin_behind_lt", "behind_standing", "뒤에 선 사람, 프레임마다", True)])],
         "경계 후보 x (|옆 거리| = 머리 중심 가로 차 ÷ 주 사용자 머리 높이)",
         "옆 거리 경계 후보별 라벨 일치율\n실선: 트랙별 2초 중앙값, 점선: 프레임마다. 10-28 팀 촬영, 평가 전용")
+    if a.behind_only:
+        behind_only(a.out, cue_points)
     _write_csv(os.path.join(a.out, "primary_stability.csv"), stability, list(stability[0]) if stability else ["take"])
     _write_csv(os.path.join(a.out, "primary_changes.csv"), changes, list(changes[0]) if changes else ["take"])
     _write_csv(os.path.join(a.out, "track_fragments.csv"), fragments,
@@ -416,6 +435,34 @@ def cmd_analyze(a) -> int:
         json.dump(summary, f, ensure_ascii=False, indent=2, default=str)
     print(json.dumps({k: summary[k] for k in ("takes", "labelled_takes")}), flush=True)
     return 0
+
+
+def behind_only(out: str, cue_points: dict) -> None:
+    """sweep_behind_only.csv / .png (module docstring): rel_dist alone, behind = rel_dist > 1 and >= boundary."""
+    from app.modules.vision.columns import SMALLER_THAN_USER
+    caught = lambda v, g: v > SMALLER_THAN_USER and v >= g
+    left_out = lambda v, g: not caught(v, g)
+    rows = []
+    for stage in ("frame", "window"):
+        pts = {c: cue_points.get((stage, "rel_dist", c), []) for c in CLASSES}
+        pts["behind"] = pts["behind_standing"] + pts["behind_passing"]
+        pts["not_behind"] = pts["companion"] + pts["helper"]
+        part = _sweep(pts, GRID_REL, [
+            (f"{stage}_behind_caught", "behind", caught), (f"{stage}_not_behind_left_out", "not_behind", left_out),
+            (f"{stage}_behind_standing_caught", "behind_standing", caught),
+            (f"{stage}_behind_passing_caught", "behind_passing", caught),
+            (f"{stage}_companion_left_out", "companion", left_out), (f"{stage}_helper_left_out", "helper", left_out)])
+        rows = part if not rows else [x | y for x, y in zip(rows, part)]
+    _write_csv(os.path.join(out, "sweep_behind_only.csv"), rows, list(rows[0]))
+    _plot(os.path.join(out, "sweep_behind_only.png"), rows, [
+        ("behind_rel_dist_min = x일 때, 상대 거리만으로 (상대 거리 > 1이고 ≥ x → 뒤 사람)",
+         [("window_behind_caught", "behind_standing", "뒤 사람(줄 · 지나감): 잡힘(맞음)", False),
+          ("window_not_behind_left_out", "companion", "뒤 사람 아님(일행 · 돕는 사람): 빠짐(맞음)", False),
+          ("frame_behind_caught", "behind_standing", "뒤 사람, 프레임마다", True),
+          ("frame_not_behind_left_out", "companion", "뒤 사람 아님, 프레임마다", True)])],
+        "경계 후보 x (상대 거리 = 주 사용자 머리 높이 ÷ 그 머리 높이)",
+        "뒤 사람인지 아닌지를 상대 거리만으로 가를 때의 라벨 일치율\n실선: 트랙별 2초 중앙값, 점선: 프레임마다. "
+        "일행 조건 없이. 10-28 팀 촬영, 평가 전용")
 
 
 # --- contact sheets -------------------------------------------------------------------------------------------------
@@ -495,6 +542,8 @@ def main(argv=None) -> int:
     n.add_argument("--runs", required=True)
     n.add_argument("--truth", required=True)
     n.add_argument("--out", required=True)
+    n.add_argument("--behind-only", action="store_true",
+                   help="also write sweep_behind_only.csv / .png: behind or not from rel_dist alone")
     s = sub.add_parser("sheets")
     s.add_argument("--runs", required=True)
     s.add_argument("--truth", required=True)
