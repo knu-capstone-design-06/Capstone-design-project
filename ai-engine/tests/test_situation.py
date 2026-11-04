@@ -158,9 +158,32 @@ class EventTests(unittest.TestCase):
         self.assertEqual(turns[0]["obs"]["side"], "left")
         self.assertAlmostEqual(turns[0]["obs"]["offscreen_s"], 0.4)
 
+    def test_face_lost_straight_from_facing_is_a_look_back(self):
+        """Face-lost onset path (dec section 3: face points lost, shoulders kept, return): facing, then the face points
+        are lost while the shoulders stay, then facing again - one look_back without a visible off-screen yaw, so its
+        yaw and side are empty."""
+        rows = rows_of(face(5), [(5, LOST)], face(5))
+        turns = [e for e in detect_events(rows, P, landmarker_num_faces=1)
+                 if e["kind"] in ("look_back", "yaw_sweep_offscreen")]
+        self.assertEqual([(e["kind"], e["event_id"]) for e in turns], [("look_back", "look_back@5")])
+        event = turns[0]
+        self.assertEqual(event["source_frames"], list(range(5, 11)))       # first lost frame 5 .. return 10
+        self.assertEqual((event["obs"]["yaw_deg"], event["obs"]["side"]), (None, None))
+        self.assertAlmostEqual(event["obs"]["face_lost_s"], 0.5)            # first lost frame 0.5 -> return 1.0
+        self.assertEqual(event["obs"]["pose_vis_shoulders"], 0.9)
+
+    def test_both_onset_paths_in_one_sequence(self):
+        """Yaw path (the face passes offscreen_yaw_deg, then is lost) and face-lost path (lost straight from facing):
+        two look_backs, the first with its largest visible yaw and side, the second without."""
+        rows = rows_of(face(5), look_back(), face(5), [(4, LOST)], face(5))
+        turns = [e for e in detect_events(rows, P, landmarker_num_faces=1) if e["kind"] == "look_back"]
+        self.assertEqual([(e["event_id"], e["obs"]["yaw_deg"], e["obs"]["side"]) for e in turns],
+                         [("look_back@5", 60.0, "right"), ("look_back@18", None, None)])
+
     def test_face_loss_that_is_not_a_turn_gives_no_turn_event(self):
         cases = {
-            "no onset (occlusion)": rows_of(face(5), [(5, LOST)], face(5)),
+            "face and body lost from facing (no shoulders)": rows_of(face(5), [(5, GONE)], face(5)),
+            "face lost for gap_s or less (face-lost path)": rows_of(face(5), [(2, LOST)], face(5)),   # 0.2 <= 0.25
             "body lost too, longer than gap_s": rows_of(face(5), [(1, {"yaw_deg": 50.0}), (5, GONE)], face(5)),
             "no return in the window": rows_of(face(5), [(1, {"yaw_deg": 50.0}), (5, LOST)]),
             "small yaw (menu reading)": rows_of(face(3), [(4, {"yaw_deg": 15.0}), (4, {"yaw_deg": -15.0})], face(3)),
