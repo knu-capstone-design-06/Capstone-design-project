@@ -85,15 +85,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     OrderingService(session_repository.exists, app.state.ordering_repository),
                     app.state.ordering_repository,
                 )
-            if settings.database_url is not None:
-                menu_provider = lambda: _database_voice_menu(app.state.ordering_repository)
-            else:
-                menu_provider = lambda: menu_from_products(PRODUCTS)
             app.state.voice_service = VoiceService(
                 session_repository.exists, VoiceRepository(),
                 build_voice_interpreter(openai),
                 # Same demo catalog the ordering API sells.
-                menu_provider=menu_provider,
+                menu_provider=lambda: (
+                    _database_voice_menu(app.state.ordering_repository)
+                    if settings.database_url is not None else menu_from_products(PRODUCTS)
+                ),
                 ordering=app.state.ordering_repository,
                 executor=executor,
             )
