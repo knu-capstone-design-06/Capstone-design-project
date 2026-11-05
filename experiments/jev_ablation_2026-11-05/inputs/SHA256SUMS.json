@@ -1,0 +1,1285 @@
+{
+ "what": "packaged inputs: sha256 of the file; for files gzipped for the package (gzip -n -9) also content_sha256 of the uncompressed bytes; source = the file in the author's workspace; recorded_sha256 = the hash the recorded set wrote for that source (results/manifest.json inputs; the vision runs' run_settings); equal_to_recorded compares it with the content (null: the set recorded no hash for that file)",
+ "files": [
+  {
+   "file": "inputs/aligned/20261028_165108.jsonl.gz",
+   "sha256": "4b567cb852dfff4a17bae681ecb4937b436e93e159e10c90fcf745cd2b624b38",
+   "content_sha256": "65e562fbd388401d6d3b5b23685e3ccca3bd8437579d86dea75f4c22df258905",
+   "source": "4_vision/eval_ab_2026-11-04/aligned/20261028_165108.jsonl",
+   "recorded_sha256": "65e562fbd388401d6d3b5b23685e3ccca3bd8437579d86dea75f4c22df258905",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned/20261028_165312.jsonl.gz",
+   "sha256": "0e6fdf7360595d288574effcd3820807bf4351cfb16b9a2f8b84c1f8488c6fa1",
+   "content_sha256": "7f4a7623e2583813df7cec4ed09577742588a3e1b7ba3ea34e03966384fbd019",
+   "source": "4_vision/eval_ab_2026-11-04/aligned/20261028_165312.jsonl",
+   "recorded_sha256": "7f4a7623e2583813df7cec4ed09577742588a3e1b7ba3ea34e03966384fbd019",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned/20261028_165413.jsonl.gz",
+   "sha256": "94243e0807a645ce0b84d6e38ce57af7bf38be238c0c4bbd8b119da9486abdee",
+   "content_sha256": "4e8b909cc3f88923683501a96b8e84c264ec8e46ac763ffa1c40ecad3f26c7b4",
+   "source": "4_vision/eval_ab_2026-11-04/aligned/20261028_165413.jsonl",
+   "recorded_sha256": "4e8b909cc3f88923683501a96b8e84c264ec8e46ac763ffa1c40ecad3f26c7b4",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned/20261028_165453.jsonl.gz",
+   "sha256": "f7597851092f2d5f12552a6bd59b2b61bde5d8cd451ba7104fa8d71e6f92d352",
+   "content_sha256": "ee3e1b00bba278af6f9b67c1c8ac87dd848d711c2652acc9921fc700dc0ead6d",
+   "source": "4_vision/eval_ab_2026-11-04/aligned/20261028_165453.jsonl",
+   "recorded_sha256": "ee3e1b00bba278af6f9b67c1c8ac87dd848d711c2652acc9921fc700dc0ead6d",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned/20261028_165545.jsonl.gz",
+   "sha256": "719c138d712fe9b7feac95e4e9701788e7c25aad00da83a20c8a100b76fc3990",
+   "content_sha256": "57ff24d38f354bab32414d57aa7f68b9e9aad15cc1a4e213dfe48432a00ad1fd",
+   "source": "4_vision/eval_ab_2026-11-04/aligned/20261028_165545.jsonl",
+   "recorded_sha256": "57ff24d38f354bab32414d57aa7f68b9e9aad15cc1a4e213dfe48432a00ad1fd",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned/20261028_165633.jsonl.gz",
+   "sha256": "2dbe562d010a81385b27ed24b91f901e7d1bbd89b33d0a2cafd2aab1d9067b08",
+   "content_sha256": "1ef032bcd1927318a900b9d65f47e16420538a39a166ed1dfebce93aaf0852cf",
+   "source": "4_vision/eval_ab_2026-11-04/aligned/20261028_165633.jsonl",
+   "recorded_sha256": "1ef032bcd1927318a900b9d65f47e16420538a39a166ed1dfebce93aaf0852cf",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned/20261028_165701.jsonl.gz",
+   "sha256": "8d408518a2a1b98200f02a379772eaf91caebacc3cbefd24c6354d26f10cf049",
+   "content_sha256": "3fa38d15639dd05de84adfe154cf987fe8d88fcfd262f4c484420d13c1150f4b",
+   "source": "4_vision/eval_ab_2026-11-04/aligned/20261028_165701.jsonl",
+   "recorded_sha256": "3fa38d15639dd05de84adfe154cf987fe8d88fcfd262f4c484420d13c1150f4b",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned/20261028_165726.jsonl.gz",
+   "sha256": "48a2065c73b6e24822687d5ecf917c2b6e98c86e265c8319ffb373ccd9683735",
+   "content_sha256": "a82ca3efb8b79f612028059fa31d545fd8770c1340da5ea440461d57f1ea1386",
+   "source": "4_vision/eval_ab_2026-11-04/aligned/20261028_165726.jsonl",
+   "recorded_sha256": "a82ca3efb8b79f612028059fa31d545fd8770c1340da5ea440461d57f1ea1386",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned/20261028_165752.jsonl.gz",
+   "sha256": "31a7144c7e7b465951c3a4ef4b0a6bcad7f18d9f212e885275a05efca1aa0795",
+   "content_sha256": "826b018ffd4e1e6ddaa70e460914fc6f43040e0cb2968889607b24fed7ffb43e",
+   "source": "4_vision/eval_ab_2026-11-04/aligned/20261028_165752.jsonl",
+   "recorded_sha256": "826b018ffd4e1e6ddaa70e460914fc6f43040e0cb2968889607b24fed7ffb43e",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned/20261028_165843.jsonl.gz",
+   "sha256": "f4a0da2a9b4124d8fe9acde49876b6c1d85e0d4269d1f292473938408e769676",
+   "content_sha256": "c7b971e371602802caf91befdc75428fe717916450090a34d891203d2d541f24",
+   "source": "4_vision/eval_ab_2026-11-04/aligned/20261028_165843.jsonl",
+   "recorded_sha256": "c7b971e371602802caf91befdc75428fe717916450090a34d891203d2d541f24",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned/20261028_165912.jsonl.gz",
+   "sha256": "3bb1c4b52ddc18e2aae3274e1c186f3bf6bbd9fbe38b117b587f61826d976354",
+   "content_sha256": "47491d06aabdcf605322ccea33fe90ad6fb838a4a7c38ff2afbe75e9ce796185",
+   "source": "4_vision/eval_ab_2026-11-04/aligned/20261028_165912.jsonl",
+   "recorded_sha256": "47491d06aabdcf605322ccea33fe90ad6fb838a4a7c38ff2afbe75e9ce796185",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned/20261028_165940.jsonl.gz",
+   "sha256": "37e21972cf7c59553292dc4d0c12fc91ecaef67d8e6e5e3517a2253539c1d173",
+   "content_sha256": "bbab6052a164318a015c4c8bbfd5f50fc5c735efbfc27fcf0a62d68c62a109e5",
+   "source": "4_vision/eval_ab_2026-11-04/aligned/20261028_165940.jsonl",
+   "recorded_sha256": "bbab6052a164318a015c4c8bbfd5f50fc5c735efbfc27fcf0a62d68c62a109e5",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned/20261028_170011.jsonl.gz",
+   "sha256": "b7ef697cdf9d12667cdbbc2887ce8cb7901a0f0b0427b0321459f08caf9fc17f",
+   "content_sha256": "a9659843bafd276a3d3ab1e65acad914eb2f4d38494849c94d7e114a7f28e30b",
+   "source": "4_vision/eval_ab_2026-11-04/aligned/20261028_170011.jsonl",
+   "recorded_sha256": "a9659843bafd276a3d3ab1e65acad914eb2f4d38494849c94d7e114a7f28e30b",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned/20261028_170207.jsonl.gz",
+   "sha256": "4dbfe434bda71d13ec527d818470c9c3a712b39a8ccbb5108445409a428a0983",
+   "content_sha256": "41f9519a98540d1ab12b3943f6220462584577756211297fae8b19fbe366476a",
+   "source": "4_vision/eval_ab_2026-11-04/aligned/20261028_170207.jsonl",
+   "recorded_sha256": "41f9519a98540d1ab12b3943f6220462584577756211297fae8b19fbe366476a",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned/20261028_170232.jsonl.gz",
+   "sha256": "86c70d0e2e53af79c3682faac6c68d10cda4d8ce814c683f8c7fb1fa5b7b597e",
+   "content_sha256": "bf3b38adf98a3f778a6afa403ace2dffc33bec0dfd460456ec5d1765410922c3",
+   "source": "4_vision/eval_ab_2026-11-04/aligned/20261028_170232.jsonl",
+   "recorded_sha256": "bf3b38adf98a3f778a6afa403ace2dffc33bec0dfd460456ec5d1765410922c3",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned/20261028_170304.jsonl.gz",
+   "sha256": "0048356578de61d7b7315641eca2c9239cc6d9198ddcd835fc8ca0169df19bf7",
+   "content_sha256": "3dd56942734f4e71376b1d2fe2ea1133645663039676fa892ba074f06354c492",
+   "source": "4_vision/eval_ab_2026-11-04/aligned/20261028_170304.jsonl",
+   "recorded_sha256": "3dd56942734f4e71376b1d2fe2ea1133645663039676fa892ba074f06354c492",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned/20261028_170337.jsonl.gz",
+   "sha256": "b7bdcf3d83c85839772916eb16823101ede06f8a3561add57739e8e836496a7e",
+   "content_sha256": "65852b57170a3a32fdfe40607032809a8c4c95ea19e1c9280ecae992bb43abb8",
+   "source": "4_vision/eval_ab_2026-11-04/aligned/20261028_170337.jsonl",
+   "recorded_sha256": "65852b57170a3a32fdfe40607032809a8c4c95ea19e1c9280ecae992bb43abb8",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned/20261028_170423.jsonl.gz",
+   "sha256": "c014d536432fd86e125877e8547f7f89f4ffeaed429fdba6ce4a9b56341d7989",
+   "content_sha256": "2256940938c402356b24df9797e0342c37dbfc9c073b14f6b6e9f38962dae375",
+   "source": "4_vision/eval_ab_2026-11-04/aligned/20261028_170423.jsonl",
+   "recorded_sha256": "2256940938c402356b24df9797e0342c37dbfc9c073b14f6b6e9f38962dae375",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned/20261028_170453.jsonl.gz",
+   "sha256": "59d49b66e7c1e1f54e7e153e1bbe453ae88affc58cce7e078ff687083dc65ae1",
+   "content_sha256": "32a443d6d6bbe945bb743cce2162499d1390e1322dc8dfd6a4abc9ff2e1cc227",
+   "source": "4_vision/eval_ab_2026-11-04/aligned/20261028_170453.jsonl",
+   "recorded_sha256": "32a443d6d6bbe945bb743cce2162499d1390e1322dc8dfd6a4abc9ff2e1cc227",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned/20261028_170531.jsonl.gz",
+   "sha256": "e96f1dde8ca6525b7cba471290a572926653077454bf81931f9341bc6590c8ce",
+   "content_sha256": "37aaf4aff36820a2117842489884a0a44a9c07068f25879296cc73a31da9fb38",
+   "source": "4_vision/eval_ab_2026-11-04/aligned/20261028_170531.jsonl",
+   "recorded_sha256": "37aaf4aff36820a2117842489884a0a44a9c07068f25879296cc73a31da9fb38",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned/20261028_170612.jsonl.gz",
+   "sha256": "cb3d43f8c6703c63f939bdd552f28e1d3491886299dee7250c3bf4455ce39083",
+   "content_sha256": "e7233385d05237e3eab5a8e08d01a6992c1436204368c27f8ccafe75e431ddb7",
+   "source": "4_vision/eval_ab_2026-11-04/aligned/20261028_170612.jsonl",
+   "recorded_sha256": "e7233385d05237e3eab5a8e08d01a6992c1436204368c27f8ccafe75e431ddb7",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned/20261028_170701.jsonl.gz",
+   "sha256": "680f66bb74188d26b4f7ce4b68457f1333089dc5ab30f4b1ef8a1f7f15967117",
+   "content_sha256": "c8a44640847d3aa5213e688e650f919461a99240ea7b92c9dd454e050189a1ac",
+   "source": "4_vision/eval_ab_2026-11-04/aligned/20261028_170701.jsonl",
+   "recorded_sha256": "c8a44640847d3aa5213e688e650f919461a99240ea7b92c9dd454e050189a1ac",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned/20261028_170751.jsonl.gz",
+   "sha256": "4ae160bcfbe55a25e4ce27abd78a4cc4bea12bda3a9be892d3fd6bdeaf17ee38",
+   "content_sha256": "ae92153f41fc9ff8556ab94fb7aab6042374827f225d4a9d624508fbeff71ff4",
+   "source": "4_vision/eval_ab_2026-11-04/aligned/20261028_170751.jsonl",
+   "recorded_sha256": "ae92153f41fc9ff8556ab94fb7aab6042374827f225d4a9d624508fbeff71ff4",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned/20261028_170846.jsonl.gz",
+   "sha256": "e7a340b9a29a7357ddf97784bce071322ce5b44fe6eca5b8b19d8710abc1ea5e",
+   "content_sha256": "3c04da431e2e5b2a29fc94727281f9b18b983be6559192ef2b9e7fbbf0c694e0",
+   "source": "4_vision/eval_ab_2026-11-04/aligned/20261028_170846.jsonl",
+   "recorded_sha256": "3c04da431e2e5b2a29fc94727281f9b18b983be6559192ef2b9e7fbbf0c694e0",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned/20261028_170929.jsonl.gz",
+   "sha256": "65cb61bbb445ab0e099e414bb3c7aa5f0d9f99ddcf418e8597195de5659b3414",
+   "content_sha256": "b6234886f71609cb2ce970bef09389910b0f62b4f101d3da7b71e3fa0eb491ad",
+   "source": "4_vision/eval_ab_2026-11-04/aligned/20261028_170929.jsonl",
+   "recorded_sha256": "b6234886f71609cb2ce970bef09389910b0f62b4f101d3da7b71e3fa0eb491ad",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned/20261028_171049.jsonl.gz",
+   "sha256": "618530063c2e1e393be70ddab3be7e042cb8da7e91048d6eba02ad69886184e3",
+   "content_sha256": "f0042d74438a93a312e31092e677ccd0aa6a9df10765ff913abb33f3ce778a92",
+   "source": "4_vision/eval_ab_2026-11-04/aligned/20261028_171049.jsonl",
+   "recorded_sha256": "f0042d74438a93a312e31092e677ccd0aa6a9df10765ff913abb33f3ce778a92",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned/20261028_171147.jsonl.gz",
+   "sha256": "782aae093abac2383ed32c0e204e55e8b09b76395c2e744a2cd0efa57554ccc3",
+   "content_sha256": "9ae61d928efc4ca3acb38df6e19e6795238a1d5c622e4aeb2bca52de87ca2a93",
+   "source": "4_vision/eval_ab_2026-11-04/aligned/20261028_171147.jsonl",
+   "recorded_sha256": "9ae61d928efc4ca3acb38df6e19e6795238a1d5c622e4aeb2bca52de87ca2a93",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned/20261028_171259.jsonl.gz",
+   "sha256": "e93fa435215b36ba7407637f90fa5f25e0e58a066e58bda94b36e16ba9112192",
+   "content_sha256": "f42e6a050811e0c5a1cf95bd4c91e5a4cc673c98de1b475238663f7a28363f12",
+   "source": "4_vision/eval_ab_2026-11-04/aligned/20261028_171259.jsonl",
+   "recorded_sha256": "f42e6a050811e0c5a1cf95bd4c91e5a4cc673c98de1b475238663f7a28363f12",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned/20261028_171348.jsonl.gz",
+   "sha256": "a313f14d14396209d2b94ec999c01a576cfbf5bf199c966a74f8e8c8b7b1e96c",
+   "content_sha256": "5f95ef86417e585f8035149f3e4d3748df011989062d4322c26809eaa0221240",
+   "source": "4_vision/eval_ab_2026-11-04/aligned/20261028_171348.jsonl",
+   "recorded_sha256": "5f95ef86417e585f8035149f3e4d3748df011989062d4322c26809eaa0221240",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned/20261028_171512.jsonl.gz",
+   "sha256": "3d3d9e82449686d9582d4f0dd54df8bff4217d4f6d039d5343a2a3f32234e50d",
+   "content_sha256": "6d650bf07e205ae400f4e8deb5dbeed6b2efb8459d77ae48aabdbc65db3916d4",
+   "source": "4_vision/eval_ab_2026-11-04/aligned/20261028_171512.jsonl",
+   "recorded_sha256": "6d650bf07e205ae400f4e8deb5dbeed6b2efb8459d77ae48aabdbc65db3916d4",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned/20261028_171703.jsonl.gz",
+   "sha256": "1e2a91e234044a498bf3f78785c5886583fe161ab8fa069fcab0a2d6ceb99140",
+   "content_sha256": "f6c2dec22cf6ef44415bfdb71214f4ebb2d51ad1259a8e7539b37dca85bd3bdc",
+   "source": "4_vision/eval_ab_2026-11-04/aligned/20261028_171703.jsonl",
+   "recorded_sha256": "f6c2dec22cf6ef44415bfdb71214f4ebb2d51ad1259a8e7539b37dca85bd3bdc",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned/20261028_171807.jsonl.gz",
+   "sha256": "38c0f8be48d3c4270ce864f30577c7eb998626174a21e39ceef5b25f858989b1",
+   "content_sha256": "4152993a615d3652ee111a0203598cb5859b91c2451415c7c2968f169c4919f0",
+   "source": "4_vision/eval_ab_2026-11-04/aligned/20261028_171807.jsonl",
+   "recorded_sha256": "4152993a615d3652ee111a0203598cb5859b91c2451415c7c2968f169c4919f0",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned/20261028_171844.jsonl.gz",
+   "sha256": "3b6eb17589c23f287e8be3939e44e5bbfc80cd4f6e7e66f7e5397866dd85dcee",
+   "content_sha256": "8ca19b8d7f8d06b01e12447195371d12f2efeb43f72838557dfb7fadea79f836",
+   "source": "4_vision/eval_ab_2026-11-04/aligned/20261028_171844.jsonl",
+   "recorded_sha256": "8ca19b8d7f8d06b01e12447195371d12f2efeb43f72838557dfb7fadea79f836",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned/20261028_171936.jsonl.gz",
+   "sha256": "f0ccf0937c9e318ef81199f79d67662b8537728c6a0aeee0467adcc133249a02",
+   "content_sha256": "9dffb3034d15ba8766b8a24354058787c8cd3f26601c998beae147b2f9de597c",
+   "source": "4_vision/eval_ab_2026-11-04/aligned/20261028_171936.jsonl",
+   "recorded_sha256": "9dffb3034d15ba8766b8a24354058787c8cd3f26601c998beae147b2f9de597c",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned/20261028_172008.jsonl.gz",
+   "sha256": "5a85dc1ba7f13a2d6545b244751f1ceb2604363a86d2d2c0539fbdf8ca82b519",
+   "content_sha256": "5664fdae696549c30854e7f57bd07018e83a455bf0be34a015ac48a378465adf",
+   "source": "4_vision/eval_ab_2026-11-04/aligned/20261028_172008.jsonl",
+   "recorded_sha256": "5664fdae696549c30854e7f57bd07018e83a455bf0be34a015ac48a378465adf",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned_touch_none/20261028_165108.jsonl.gz",
+   "sha256": "513428dece4d9d2f23784ad4fb5d01a243d88e72cb1aae1d8ccfa3c45d4ebd8a",
+   "content_sha256": "535add57b1690e52697718cd21269b03120294ed651c7ee407848dbddb2dd7ae",
+   "source": "4_vision/eval_ab_2026-11-04/aligned_touch_none/20261028_165108.jsonl",
+   "recorded_sha256": "535add57b1690e52697718cd21269b03120294ed651c7ee407848dbddb2dd7ae",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned_touch_none/20261028_165312.jsonl.gz",
+   "sha256": "c3f11d6138e47f497c37707cb56f9f5cfa6a034c1ffac0fa30ca52df967eefef",
+   "content_sha256": "029e8e699aed05f8838c0a79a03b18c624352b076e25d61a5e567a4f59f5e3ab",
+   "source": "4_vision/eval_ab_2026-11-04/aligned_touch_none/20261028_165312.jsonl",
+   "recorded_sha256": "029e8e699aed05f8838c0a79a03b18c624352b076e25d61a5e567a4f59f5e3ab",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned_touch_none/20261028_165413.jsonl.gz",
+   "sha256": "4345e69131617130cf2b4bd086bdf0fa9d0b049c680d6138b04f668e9bf1f08d",
+   "content_sha256": "e6e7dd38de7f6d97c276294160874a8abc4f863e98f0c1aafd77e2bb2d4363b8",
+   "source": "4_vision/eval_ab_2026-11-04/aligned_touch_none/20261028_165413.jsonl",
+   "recorded_sha256": "e6e7dd38de7f6d97c276294160874a8abc4f863e98f0c1aafd77e2bb2d4363b8",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned_touch_none/20261028_165453.jsonl.gz",
+   "sha256": "ca244693042d6c3e0b713a8bcfb15bec687ee00bdb50982af1c29424f68475a6",
+   "content_sha256": "059c58a21609e7a6b7289165093e9916acf1cd7f69329ec2f6f07d0f77e96d2b",
+   "source": "4_vision/eval_ab_2026-11-04/aligned_touch_none/20261028_165453.jsonl",
+   "recorded_sha256": "059c58a21609e7a6b7289165093e9916acf1cd7f69329ec2f6f07d0f77e96d2b",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned_touch_none/20261028_165545.jsonl.gz",
+   "sha256": "1f6c79598800fcee0425de3d2b0073f43f3e4821a603842fd252af4a7c37e807",
+   "content_sha256": "b268e253b83ab23acbb68e12e3c461797d03b60e5c586c1c2e2212dd57b70657",
+   "source": "4_vision/eval_ab_2026-11-04/aligned_touch_none/20261028_165545.jsonl",
+   "recorded_sha256": "b268e253b83ab23acbb68e12e3c461797d03b60e5c586c1c2e2212dd57b70657",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned_touch_none/20261028_165633.jsonl.gz",
+   "sha256": "f1ec96cdc8fda07958dc843b13a9d26b85ab018771be3f0ecb27a1a13789b217",
+   "content_sha256": "171f0f90ddf98683afdcef307fc193ac90abe87d852df3bc88566140e307075c",
+   "source": "4_vision/eval_ab_2026-11-04/aligned_touch_none/20261028_165633.jsonl",
+   "recorded_sha256": "171f0f90ddf98683afdcef307fc193ac90abe87d852df3bc88566140e307075c",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned_touch_none/20261028_165701.jsonl.gz",
+   "sha256": "2f9194c7115393becab24c99b361244e2ec1ef4713a748d82dc8354c6613bf3c",
+   "content_sha256": "d067059836bc85f537163c7ac12607f69ac38f0060255f52ea63d46f2f838346",
+   "source": "4_vision/eval_ab_2026-11-04/aligned_touch_none/20261028_165701.jsonl",
+   "recorded_sha256": "d067059836bc85f537163c7ac12607f69ac38f0060255f52ea63d46f2f838346",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned_touch_none/20261028_165726.jsonl.gz",
+   "sha256": "964ac2c0b4bd73fc96fd6c5590aa1e2c3dc188d5176db50dd66a7bec34fb30d5",
+   "content_sha256": "f2e2e4aff69c2497af8288e0ed11ad045c5cd90ad5a1a9627c9f6f769e13c585",
+   "source": "4_vision/eval_ab_2026-11-04/aligned_touch_none/20261028_165726.jsonl",
+   "recorded_sha256": "f2e2e4aff69c2497af8288e0ed11ad045c5cd90ad5a1a9627c9f6f769e13c585",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned_touch_none/20261028_165752.jsonl.gz",
+   "sha256": "5a5faf587bc02ee41d9a0baf32dc321e05822f97c37ca325c67b618fa5815486",
+   "content_sha256": "781bf60b5a094f830b8b7e3dda110148f8ee261dead7d632d8a93bc335a9652d",
+   "source": "4_vision/eval_ab_2026-11-04/aligned_touch_none/20261028_165752.jsonl",
+   "recorded_sha256": "781bf60b5a094f830b8b7e3dda110148f8ee261dead7d632d8a93bc335a9652d",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned_touch_none/20261028_165843.jsonl.gz",
+   "sha256": "484d4b7621fe0d5ee491501fe7c47153fc33be08252f9fc53fe07d9b4292d113",
+   "content_sha256": "96222bd0d8f7aa804e774bc1389fe30e0a5bf34d4bed10ffc57d28f291ab6818",
+   "source": "4_vision/eval_ab_2026-11-04/aligned_touch_none/20261028_165843.jsonl",
+   "recorded_sha256": "96222bd0d8f7aa804e774bc1389fe30e0a5bf34d4bed10ffc57d28f291ab6818",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned_touch_none/20261028_165912.jsonl.gz",
+   "sha256": "b19ce913ab69912b8dfb1bed7e879e91361be8a9a9be554335cf3d15b4479c9e",
+   "content_sha256": "4297cc415ed4f14f52cf3ec6c6424d2dbac3894e5dbc1a6a95c46bf887acd40c",
+   "source": "4_vision/eval_ab_2026-11-04/aligned_touch_none/20261028_165912.jsonl",
+   "recorded_sha256": "4297cc415ed4f14f52cf3ec6c6424d2dbac3894e5dbc1a6a95c46bf887acd40c",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned_touch_none/20261028_165940.jsonl.gz",
+   "sha256": "f653212f817a493fbe44c9d7c3e54327f0b0d71f2e58035bde2c144426559ae3",
+   "content_sha256": "ac58432b5d786acfa3a0c73fa9ce54d10e26caa75c75c49586a7988e1d41c9ce",
+   "source": "4_vision/eval_ab_2026-11-04/aligned_touch_none/20261028_165940.jsonl",
+   "recorded_sha256": "ac58432b5d786acfa3a0c73fa9ce54d10e26caa75c75c49586a7988e1d41c9ce",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned_touch_none/20261028_170011.jsonl.gz",
+   "sha256": "4c6d3739dcbf6511b50e1444a7e4b30eae660d5cc15bc3cda9fb7101cf363acb",
+   "content_sha256": "3d4eea6e53e7efc02e50cfc986b6ec79fb067e9f32b8dff66b755fcb0ddf8460",
+   "source": "4_vision/eval_ab_2026-11-04/aligned_touch_none/20261028_170011.jsonl",
+   "recorded_sha256": "3d4eea6e53e7efc02e50cfc986b6ec79fb067e9f32b8dff66b755fcb0ddf8460",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned_touch_none/20261028_170207.jsonl.gz",
+   "sha256": "a2f0593483c3c3a9350f04b9eec8c224979f1df6f3d4559fe7584f7c5153a44c",
+   "content_sha256": "f6779796edb340c7ed3bfe1029bded958ddf14650952425d113f18d67745b049",
+   "source": "4_vision/eval_ab_2026-11-04/aligned_touch_none/20261028_170207.jsonl",
+   "recorded_sha256": "f6779796edb340c7ed3bfe1029bded958ddf14650952425d113f18d67745b049",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned_touch_none/20261028_170232.jsonl.gz",
+   "sha256": "e7e47adeb41ef709a90c519c3eb896f1c5c9cb6599f75e80c9ec76e2a220be16",
+   "content_sha256": "f96bc367e8c5d1b89ddd87313ba4abac3cd209903303ec8a4e25e10e94e0eaf7",
+   "source": "4_vision/eval_ab_2026-11-04/aligned_touch_none/20261028_170232.jsonl",
+   "recorded_sha256": "f96bc367e8c5d1b89ddd87313ba4abac3cd209903303ec8a4e25e10e94e0eaf7",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned_touch_none/20261028_170304.jsonl.gz",
+   "sha256": "a2a89dd19e3fc601fe78c79e0a2b7bd0d5de2a7ffd7e82deea1fe94280a8a57b",
+   "content_sha256": "d1ce5b8d4621cc71c7fb3f52591d8bae0a01740618407144a525460d3bdc82d4",
+   "source": "4_vision/eval_ab_2026-11-04/aligned_touch_none/20261028_170304.jsonl",
+   "recorded_sha256": "d1ce5b8d4621cc71c7fb3f52591d8bae0a01740618407144a525460d3bdc82d4",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned_touch_none/20261028_170337.jsonl.gz",
+   "sha256": "c8e9ff25a3ad521dac0487d7a4ca071e2b54797e893d658bf4c472c642b7a67d",
+   "content_sha256": "96461483909e1681f03a6f4cc57572436addbff667a74d73cd8978d7bad793af",
+   "source": "4_vision/eval_ab_2026-11-04/aligned_touch_none/20261028_170337.jsonl",
+   "recorded_sha256": "96461483909e1681f03a6f4cc57572436addbff667a74d73cd8978d7bad793af",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned_touch_none/20261028_170423.jsonl.gz",
+   "sha256": "812a6eda42ed2f6d195a3564218e7f79373e93eac07c3b5634e454b85759d111",
+   "content_sha256": "ee29135d883c3b8bdeabb6376279df39d16ffd718976440bc6889c7ba6e58cd7",
+   "source": "4_vision/eval_ab_2026-11-04/aligned_touch_none/20261028_170423.jsonl",
+   "recorded_sha256": "ee29135d883c3b8bdeabb6376279df39d16ffd718976440bc6889c7ba6e58cd7",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned_touch_none/20261028_170453.jsonl.gz",
+   "sha256": "c02a4d35cb3d5a512d8f3b93f8740ac70badfe98c14a071593af86112a08e1bd",
+   "content_sha256": "303f06ffa313fe81004f17c6c31080cdf6ca6b05f82d32dd2f89722f69c0c090",
+   "source": "4_vision/eval_ab_2026-11-04/aligned_touch_none/20261028_170453.jsonl",
+   "recorded_sha256": "303f06ffa313fe81004f17c6c31080cdf6ca6b05f82d32dd2f89722f69c0c090",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned_touch_none/20261028_170531.jsonl.gz",
+   "sha256": "64d2a6637405a31bf470888a472f6eef28b9659dc974a9c2ad2bc2bbe3efa2c6",
+   "content_sha256": "b53269892ffed3df213881a13b0ac1212cb1f2a97cb32e74d7344f7ea6f92ffc",
+   "source": "4_vision/eval_ab_2026-11-04/aligned_touch_none/20261028_170531.jsonl",
+   "recorded_sha256": "b53269892ffed3df213881a13b0ac1212cb1f2a97cb32e74d7344f7ea6f92ffc",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned_touch_none/20261028_170612.jsonl.gz",
+   "sha256": "55276655ef8e3122af8b007b4eab19eab7d734b9d66faea31da7ac4237be116c",
+   "content_sha256": "df1cc746797a7cbe160b8622959eb294d63beb7a33e181ed91e3bb6cd8f21cdb",
+   "source": "4_vision/eval_ab_2026-11-04/aligned_touch_none/20261028_170612.jsonl",
+   "recorded_sha256": "df1cc746797a7cbe160b8622959eb294d63beb7a33e181ed91e3bb6cd8f21cdb",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned_touch_none/20261028_170701.jsonl.gz",
+   "sha256": "5a4fcedacf1c5a97271ea5fb466a6ef8dd98199d0d6778b1a4e8be6bef76f28d",
+   "content_sha256": "6bd76bbb506b2a57351033afc032207f2175f27abffc3b0d6be395f5506ad44d",
+   "source": "4_vision/eval_ab_2026-11-04/aligned_touch_none/20261028_170701.jsonl",
+   "recorded_sha256": "6bd76bbb506b2a57351033afc032207f2175f27abffc3b0d6be395f5506ad44d",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned_touch_none/20261028_170751.jsonl.gz",
+   "sha256": "29126ca4ca529818f7366996d62069abcc6204829db4a5b6b1f60edfc4409b01",
+   "content_sha256": "8dbabb24edfd7064b1e198a58f89d4a784f89e83ef8be95add541e967d338e1b",
+   "source": "4_vision/eval_ab_2026-11-04/aligned_touch_none/20261028_170751.jsonl",
+   "recorded_sha256": "8dbabb24edfd7064b1e198a58f89d4a784f89e83ef8be95add541e967d338e1b",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned_touch_none/20261028_170846.jsonl.gz",
+   "sha256": "7b27cd155b0e44527b7c3f20807599bc5df8edc657000e2d1bfcd6dfc0e2f9b2",
+   "content_sha256": "9eb8ec7344114f43613bb65e32ba4055510282b9e6b22a2f02d2861b94ae089c",
+   "source": "4_vision/eval_ab_2026-11-04/aligned_touch_none/20261028_170846.jsonl",
+   "recorded_sha256": "9eb8ec7344114f43613bb65e32ba4055510282b9e6b22a2f02d2861b94ae089c",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned_touch_none/20261028_170929.jsonl.gz",
+   "sha256": "934e1e94b2ccb7cb0a440dc54559473d8b260959acb5de4259650a0921a8c494",
+   "content_sha256": "90f87152fa5478b07759c5d4b3b34c22756c166b5831f7724a50227b4337146f",
+   "source": "4_vision/eval_ab_2026-11-04/aligned_touch_none/20261028_170929.jsonl",
+   "recorded_sha256": "90f87152fa5478b07759c5d4b3b34c22756c166b5831f7724a50227b4337146f",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned_touch_none/20261028_171049.jsonl.gz",
+   "sha256": "e2f75700be224d10f7ca5ddcc6218966039770f76e8ac8ba394d28721a4da81b",
+   "content_sha256": "f5de365eb7054ce64722c7ce1abad90847435d929c7465bce57cc311cbd472b7",
+   "source": "4_vision/eval_ab_2026-11-04/aligned_touch_none/20261028_171049.jsonl",
+   "recorded_sha256": "f5de365eb7054ce64722c7ce1abad90847435d929c7465bce57cc311cbd472b7",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned_touch_none/20261028_171147.jsonl.gz",
+   "sha256": "2f4fc5f11f11e93d87350aceeebf7802ae140fd567b073d3cb50fd31f23aae2f",
+   "content_sha256": "b095a191b207bf5e594a8d2a4765c7af38a75b8c5879f2f626a16a5a46b13df3",
+   "source": "4_vision/eval_ab_2026-11-04/aligned_touch_none/20261028_171147.jsonl",
+   "recorded_sha256": "b095a191b207bf5e594a8d2a4765c7af38a75b8c5879f2f626a16a5a46b13df3",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned_touch_none/20261028_171259.jsonl.gz",
+   "sha256": "21b8c40a8b947f4c6f4a432a843ae5c944bd1fb061afe2e93de0170a24822d26",
+   "content_sha256": "4b6c42fedfcf104e3f01779d2f5310631e0eaa59228c27b3da5ef3d7dbb49da8",
+   "source": "4_vision/eval_ab_2026-11-04/aligned_touch_none/20261028_171259.jsonl",
+   "recorded_sha256": "4b6c42fedfcf104e3f01779d2f5310631e0eaa59228c27b3da5ef3d7dbb49da8",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned_touch_none/20261028_171348.jsonl.gz",
+   "sha256": "cbb6a87b42f7014a3afd6066fe15380291c7b51a9973c1def8bc0bc03bab727c",
+   "content_sha256": "a7b45275e2a95473841ea2c584b2e044e89a3d71defc8970b51d1ae0f8a011ac",
+   "source": "4_vision/eval_ab_2026-11-04/aligned_touch_none/20261028_171348.jsonl",
+   "recorded_sha256": "a7b45275e2a95473841ea2c584b2e044e89a3d71defc8970b51d1ae0f8a011ac",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned_touch_none/20261028_171512.jsonl.gz",
+   "sha256": "defd423f0d84d70a7a6b044a2fb44524d7936ea37ad04fdd67bdb31371fa73db",
+   "content_sha256": "12845ad9a9cf6a55d851abd8dbab2c90a2ab3e5de34a9727d5669d6e00f281c6",
+   "source": "4_vision/eval_ab_2026-11-04/aligned_touch_none/20261028_171512.jsonl",
+   "recorded_sha256": "12845ad9a9cf6a55d851abd8dbab2c90a2ab3e5de34a9727d5669d6e00f281c6",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned_touch_none/20261028_171703.jsonl.gz",
+   "sha256": "78a72a135045b4dcbccec79a876989d07b478b6c15f98504d3548f40cfaf1195",
+   "content_sha256": "522e55334b3e87f2364f7ffafd20c46e14117a394075d7622e7b982ae4925ee0",
+   "source": "4_vision/eval_ab_2026-11-04/aligned_touch_none/20261028_171703.jsonl",
+   "recorded_sha256": "522e55334b3e87f2364f7ffafd20c46e14117a394075d7622e7b982ae4925ee0",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned_touch_none/20261028_171807.jsonl.gz",
+   "sha256": "22e890b5eea710990ac4c3c560dafad637a2d9fb44879d0008d1badac277e6ed",
+   "content_sha256": "d7babed20164532c58765bf42dda81278472c38aca71e9fa3b6ddf9fe7c3d4c8",
+   "source": "4_vision/eval_ab_2026-11-04/aligned_touch_none/20261028_171807.jsonl",
+   "recorded_sha256": "d7babed20164532c58765bf42dda81278472c38aca71e9fa3b6ddf9fe7c3d4c8",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned_touch_none/20261028_171844.jsonl.gz",
+   "sha256": "eb1865858439efa88008147745212c863bdd7d2d96617e9a5190f06f2ec238a3",
+   "content_sha256": "9e1490b121ff056010f320abd9eb9ed94d37de3ce0a0b31d4521cbf8e47940f9",
+   "source": "4_vision/eval_ab_2026-11-04/aligned_touch_none/20261028_171844.jsonl",
+   "recorded_sha256": "9e1490b121ff056010f320abd9eb9ed94d37de3ce0a0b31d4521cbf8e47940f9",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned_touch_none/20261028_171936.jsonl.gz",
+   "sha256": "2943f2f984e28bc2a1e47538aa50ca2f05dfae5c6a713d6018fd5124a7c74e84",
+   "content_sha256": "6189e5e415bd1bce26333eee8cc8addf607c3876ead43dd6b978710425995173",
+   "source": "4_vision/eval_ab_2026-11-04/aligned_touch_none/20261028_171936.jsonl",
+   "recorded_sha256": "6189e5e415bd1bce26333eee8cc8addf607c3876ead43dd6b978710425995173",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/aligned_touch_none/20261028_172008.jsonl.gz",
+   "sha256": "40fe3fd6919ceda77c7943a640feedc37fb07ce0e8e6e30339d47915568e30b3",
+   "content_sha256": "8fe32a14e093c858e55f9c1f6a42dc77293793733eaccc646476c6dcfedb1808",
+   "source": "4_vision/eval_ab_2026-11-04/aligned_touch_none/20261028_172008.jsonl",
+   "recorded_sha256": "8fe32a14e093c858e55f9c1f6a42dc77293793733eaccc646476c6dcfedb1808",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/bundles/b0_r0.json",
+   "sha256": "ae94b0ae2b988d6953732a25fd1eac1e66a942d2278fbf1d50322aa233eebd31",
+   "content_sha256": null,
+   "source": "4_vision/eval_ab_2026-11-04/bundles/b0_r0.json",
+   "recorded_sha256": "ae94b0ae2b988d6953732a25fd1eac1e66a942d2278fbf1d50322aa233eebd31",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/bundles/b0_rA.json",
+   "sha256": "f436210c48a27d3feda29936ef6aac3fdccf87dc56135e3e77ee52642dac3318",
+   "content_sha256": null,
+   "source": "4_vision/eval_ab_2026-11-04/bundles/b0_rA.json",
+   "recorded_sha256": "f436210c48a27d3feda29936ef6aac3fdccf87dc56135e3e77ee52642dac3318",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/bundles/b0_rB.json",
+   "sha256": "f8da1b02fbb9b245b9b85d22b4d6fb834f39c803012f52847f20cf9810caf180",
+   "content_sha256": null,
+   "source": "4_vision/eval_ab_2026-11-04/bundles/b0_rB.json",
+   "recorded_sha256": "f8da1b02fbb9b245b9b85d22b4d6fb834f39c803012f52847f20cf9810caf180",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/bundles/b0_rC.json",
+   "sha256": "89b7e2ec221b8c75961ce4af89ef43697cf7ce95b114653527b66756fdbe6f73",
+   "content_sha256": null,
+   "source": "4_vision/eval_ab_2026-11-04/bundles/b0_rC.json",
+   "recorded_sha256": "89b7e2ec221b8c75961ce4af89ef43697cf7ce95b114653527b66756fdbe6f73",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/bundles/b1_r0.json",
+   "sha256": "c37595a24d7e6c01168cf7a5e22c7951f46150f949396e331b5737784a31e3fd",
+   "content_sha256": null,
+   "source": "4_vision/eval_ab_2026-11-04/bundles/b1_r0.json",
+   "recorded_sha256": "c37595a24d7e6c01168cf7a5e22c7951f46150f949396e331b5737784a31e3fd",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/bundles/b1_rA.json",
+   "sha256": "0c6bf70f595460a670fdbe076d0c323c475aabc85218f08a9babfb5b5e3b120a",
+   "content_sha256": null,
+   "source": "4_vision/eval_ab_2026-11-04/bundles/b1_rA.json",
+   "recorded_sha256": "0c6bf70f595460a670fdbe076d0c323c475aabc85218f08a9babfb5b5e3b120a",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/bundles/b1_rB.json",
+   "sha256": "010bc2205e1809f1da9d4660b168015b8abda2866bd8feb68ea2641b46c7b71a",
+   "content_sha256": null,
+   "source": "4_vision/eval_ab_2026-11-04/bundles/b1_rB.json",
+   "recorded_sha256": "010bc2205e1809f1da9d4660b168015b8abda2866bd8feb68ea2641b46c7b71a",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/bundles/b1_rC.json",
+   "sha256": "36be8ce5fb33f85e4cdc2ecdbcd0f85311142eacab977330b41e3198c0459940",
+   "content_sha256": null,
+   "source": "4_vision/eval_ab_2026-11-04/bundles/b1_rC.json",
+   "recorded_sha256": "36be8ce5fb33f85e4cdc2ecdbcd0f85311142eacab977330b41e3198c0459940",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/bundles/b2_r0.json",
+   "sha256": "0ccbb8d6883d280798f64e4711a913ea606b646382b7434e835943d1af79746f",
+   "content_sha256": null,
+   "source": "4_vision/eval_ab_2026-11-04/bundles/b2_r0.json",
+   "recorded_sha256": "0ccbb8d6883d280798f64e4711a913ea606b646382b7434e835943d1af79746f",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/bundles/b2_rA.json",
+   "sha256": "d9001f88c583f11486f4889d04c0ecf53b258a7328a171beb22ca22f9770d37c",
+   "content_sha256": null,
+   "source": "4_vision/eval_ab_2026-11-04/bundles/b2_rA.json",
+   "recorded_sha256": "d9001f88c583f11486f4889d04c0ecf53b258a7328a171beb22ca22f9770d37c",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/bundles/b2_rB.json",
+   "sha256": "a8c8b7377597064e0ba6bd81b2bc9d8d1e2dc2bca70c8357adea67c62204d367",
+   "content_sha256": null,
+   "source": "4_vision/eval_ab_2026-11-04/bundles/b2_rB.json",
+   "recorded_sha256": "a8c8b7377597064e0ba6bd81b2bc9d8d1e2dc2bca70c8357adea67c62204d367",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/bundles/b2_rC.json",
+   "sha256": "0c4aed1b33295538bbc6bb9005b522c079f6f03fd47cbc420c8b7eaa07de914c",
+   "content_sha256": null,
+   "source": "4_vision/eval_ab_2026-11-04/bundles/b2_rC.json",
+   "recorded_sha256": "0c4aed1b33295538bbc6bb9005b522c079f6f03fd47cbc420c8b7eaa07de914c",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/e3_windows/windows_b0_r0.csv.gz",
+   "sha256": "d8bab6dea54deb2b94fdf6fa06dc0c4cae358436cf9fc017b86d1f47bdeff9d8",
+   "content_sha256": null,
+   "source": "4_vision/eval_ab_2026-11-04/results/labels_v2/windows_b0_r0.csv.gz",
+   "recorded_sha256": "d8bab6dea54deb2b94fdf6fa06dc0c4cae358436cf9fc017b86d1f47bdeff9d8",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/e3_windows/windows_b0_rA.csv.gz",
+   "sha256": "015b95aca8cd77edfd9fcdf8b2ee6bf037b23d2ef6cd9d3a32fa7ed69c1afacc",
+   "content_sha256": null,
+   "source": "4_vision/eval_ab_2026-11-04/results/labels_v2/windows_b0_rA.csv.gz",
+   "recorded_sha256": "015b95aca8cd77edfd9fcdf8b2ee6bf037b23d2ef6cd9d3a32fa7ed69c1afacc",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/e3_windows/windows_b2_rA.csv.gz",
+   "sha256": "769492b165c8f5ed1a7e3025dc2d470fc0306f461f3f79cf6b1f77cc92c9009c",
+   "content_sha256": null,
+   "source": "4_vision/eval_ab_2026-11-04/results/labels_v2/windows_b2_rA.csv.gz",
+   "recorded_sha256": "769492b165c8f5ed1a7e3025dc2d470fc0306f461f3f79cf6b1f77cc92c9009c",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/labels/admissible_v4.csv",
+   "sha256": "683c4784df049dad1014b3ff6719a8aa5650ab8ff0f086b435cfef34dd16e2f3",
+   "content_sha256": null,
+   "source": "4_vision/eval_ab_2026-11-04/admissible_v4.csv",
+   "recorded_sha256": "683c4784df049dad1014b3ff6719a8aa5650ab8ff0f086b435cfef34dd16e2f3",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/labels/judgment_labels_v4.csv",
+   "sha256": "97e81a53b17b0eb73248150c772861e5b27d3ea415c9a118141d9257680b059f",
+   "content_sha256": null,
+   "source": "4_vision/eval_ab_2026-11-04/judgment_labels_v4.csv",
+   "recorded_sha256": "97e81a53b17b0eb73248150c772861e5b27d3ea415c9a118141d9257680b059f",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/labels/ledger.csv",
+   "sha256": "6f23ad1ffbe560835b9efba531303bf6fda4808b46fea8ffc895aae4168deff9",
+   "content_sha256": null,
+   "source": "4_vision/eval_ab_2026-11-04/ledger.csv",
+   "recorded_sha256": null,
+   "equal_to_recorded": null
+  },
+  {
+   "file": "inputs/labels/window_labels_v1_verified.csv",
+   "sha256": "997ff9e65f2e2d87b193cd8c4eae2391bbe6f07506a455977a5c5323a85f08e4",
+   "content_sha256": null,
+   "source": "datasets/team_recording_2026-10-28/labels/window_labels_v1_verified.csv",
+   "recorded_sha256": "997ff9e65f2e2d87b193cd8c4eae2391bbe6f07506a455977a5c5323a85f08e4",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_165108/windows.jsonl.gz",
+   "sha256": "1b1315ffd989ecca15454dde20c5afc575c6174ff0217398b9fcd795e1fc668e",
+   "content_sha256": "1d2bff83c6ca6ea2b4ed6758f4b821fde3581ce94a2e7d47ca2b1a3c42e6dda6",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_165108/windows.jsonl",
+   "recorded_sha256": "1d2bff83c6ca6ea2b4ed6758f4b821fde3581ce94a2e7d47ca2b1a3c42e6dda6",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_165108/windows_b0.jsonl.gz",
+   "sha256": "299564853d7330f19a87abdff8f3677bfd5d6d0fd3f0cc73de5fac889e479d27",
+   "content_sha256": "f8a373cff8f59d3e9cc8a505fc958142c1053a7ca36c743cb0a4f1e7044dd3b8",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_165108/windows_b0.jsonl",
+   "recorded_sha256": "f8a373cff8f59d3e9cc8a505fc958142c1053a7ca36c743cb0a4f1e7044dd3b8",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_165312/windows.jsonl.gz",
+   "sha256": "3c14b5ef652674f942eb18c7177b77a89d921d026d9d500b12430df4e3140d8b",
+   "content_sha256": "2b16dc24ab3f4fccb9ad1d8e5fd36181df247b3ab0022d1f8574e8ab563d945f",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_165312/windows.jsonl",
+   "recorded_sha256": "2b16dc24ab3f4fccb9ad1d8e5fd36181df247b3ab0022d1f8574e8ab563d945f",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_165312/windows_b0.jsonl.gz",
+   "sha256": "c6100f79485b0c862360d54bdd64e3c1ecab8517292b55d79637cc84d34063e1",
+   "content_sha256": "58b78daea6b4d1f2f955a0f15f72eb1baf34583fd6175db8752ab017ade6dffc",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_165312/windows_b0.jsonl",
+   "recorded_sha256": "58b78daea6b4d1f2f955a0f15f72eb1baf34583fd6175db8752ab017ade6dffc",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_165413/windows.jsonl.gz",
+   "sha256": "061d1dbef5ed5a158b878dc3302744d76d6e843a1f118d6883eb742da5ce53eb",
+   "content_sha256": "e96e9e422c7422991c83c5ed50ed11bfc2bbd22620ac120ea1a04c9f6f2bd254",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_165413/windows.jsonl",
+   "recorded_sha256": "e96e9e422c7422991c83c5ed50ed11bfc2bbd22620ac120ea1a04c9f6f2bd254",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_165413/windows_b0.jsonl.gz",
+   "sha256": "b08898909130e3c42d3b02c9ef8ef3909e29a3c99863697ae3342d60d377c91a",
+   "content_sha256": "111234ec085c4730f629c179ecfbae6148039794b04d177e4c851b956042a4f5",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_165413/windows_b0.jsonl",
+   "recorded_sha256": "111234ec085c4730f629c179ecfbae6148039794b04d177e4c851b956042a4f5",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_165453/windows.jsonl.gz",
+   "sha256": "9e07474dd98ee3040e6d2aa90f5e447238d10ffc564ec2ae6a24689da7451d28",
+   "content_sha256": "22d5aca3e766ce151cebd1be519b292347c0ab6eeffa133181259a34c968f0fa",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_165453/windows.jsonl",
+   "recorded_sha256": "22d5aca3e766ce151cebd1be519b292347c0ab6eeffa133181259a34c968f0fa",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_165453/windows_b0.jsonl.gz",
+   "sha256": "4a213a97594fd14297ec2c42f53c96eab4fb8acd28fe2407161b83ac4578807c",
+   "content_sha256": "638a6f2ddfbd59ac28f91e955a553db946f247ce0941d783772eca614d39b17f",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_165453/windows_b0.jsonl",
+   "recorded_sha256": "638a6f2ddfbd59ac28f91e955a553db946f247ce0941d783772eca614d39b17f",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_165545/windows.jsonl.gz",
+   "sha256": "6b1b64ccec7db08f23b104b74f92ab1e7085c90b69833196bbfe748deb187eea",
+   "content_sha256": "f8e198c933f72e267a3c0aa4324b1e6de8caec5e197a495f59965f5c796bfac9",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_165545/windows.jsonl",
+   "recorded_sha256": "f8e198c933f72e267a3c0aa4324b1e6de8caec5e197a495f59965f5c796bfac9",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_165545/windows_b0.jsonl.gz",
+   "sha256": "5f5c65ab8c8c3d794988b604c4069023f678e44db8f27b9e06d80345d809994b",
+   "content_sha256": "77d83dd15e0d6d063ee29c63a76fc44cbf94c61a10f980b1759e8ad70cfb0d14",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_165545/windows_b0.jsonl",
+   "recorded_sha256": "77d83dd15e0d6d063ee29c63a76fc44cbf94c61a10f980b1759e8ad70cfb0d14",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_165633/windows.jsonl.gz",
+   "sha256": "749a9c41315168abc7204ba110c8bf363b1079b99fc382cc355776ddc0eef1ba",
+   "content_sha256": "884188ecd228b65bf2be0089fef1967badfc0b7d9cfeb7970c0016b7957af9c0",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_165633/windows.jsonl",
+   "recorded_sha256": "884188ecd228b65bf2be0089fef1967badfc0b7d9cfeb7970c0016b7957af9c0",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_165633/windows_b0.jsonl.gz",
+   "sha256": "822c238089b79404f62c73a882978ebca704c8dd886cc5b6c735d49826433779",
+   "content_sha256": "2867909235ea7104af495149c22c5cd135f32a6907ef6273ae88c489129ebf8a",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_165633/windows_b0.jsonl",
+   "recorded_sha256": "2867909235ea7104af495149c22c5cd135f32a6907ef6273ae88c489129ebf8a",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_165701/windows.jsonl.gz",
+   "sha256": "cd9ff38054fe319554105dec1b6dcb6a7f91c39d5686f4b812ff19d502289e49",
+   "content_sha256": "bfbfd680669f6d2be797063255f74e48b1af78ddfaa91e5ee9ebc35bd118bd59",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_165701/windows.jsonl",
+   "recorded_sha256": "bfbfd680669f6d2be797063255f74e48b1af78ddfaa91e5ee9ebc35bd118bd59",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_165701/windows_b0.jsonl.gz",
+   "sha256": "9d267d614a6bdd9cf15e92d0a5a1bd4694808b0fb99af6ab3bd0665d98715d94",
+   "content_sha256": "b7219b9e79df10e4721cf9cb95273885a39ed688f753b36f2623fe3fc76b1eee",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_165701/windows_b0.jsonl",
+   "recorded_sha256": "b7219b9e79df10e4721cf9cb95273885a39ed688f753b36f2623fe3fc76b1eee",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_165726/windows.jsonl.gz",
+   "sha256": "93f7ef25707ce83ed98dbc4714a441519be30eafccc4d1348b2b8564462566aa",
+   "content_sha256": "839c2809daf086adecb5178d203d713eb332653581ba2d7e28f48fc9ac6ae148",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_165726/windows.jsonl",
+   "recorded_sha256": "839c2809daf086adecb5178d203d713eb332653581ba2d7e28f48fc9ac6ae148",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_165726/windows_b0.jsonl.gz",
+   "sha256": "0fea26549bfaad752cd39701b762f0fd6b396ccecdb345e48d7b2485f8554937",
+   "content_sha256": "b1b68ed1af445b16b5e4dda69dcd3c043341be4cebb331afa0c931a747d3b725",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_165726/windows_b0.jsonl",
+   "recorded_sha256": "b1b68ed1af445b16b5e4dda69dcd3c043341be4cebb331afa0c931a747d3b725",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_165752/windows.jsonl.gz",
+   "sha256": "29088f962d6664a2eb71bb5959471c79ff1b796d9f566b49ae1ce67949b5c895",
+   "content_sha256": "6eb77e5db7881c9375d39a53013dc41a9e811b4afb4a06d4139b39256c728ee6",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_165752/windows.jsonl",
+   "recorded_sha256": "6eb77e5db7881c9375d39a53013dc41a9e811b4afb4a06d4139b39256c728ee6",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_165752/windows_b0.jsonl.gz",
+   "sha256": "9fba37ce4dea1dcd13af7d02b8777300d2738a9ddae817cfc74581a125f8d815",
+   "content_sha256": "47f5df076bb866fdf4d31d8f0b706801c4f89c775d6b6a4ce6a2adae153393c0",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_165752/windows_b0.jsonl",
+   "recorded_sha256": "47f5df076bb866fdf4d31d8f0b706801c4f89c775d6b6a4ce6a2adae153393c0",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_165843/windows.jsonl.gz",
+   "sha256": "798a0c3da1b182c9b394805ff94ca0ec09a51cc492c73111be2afaae7923b3a3",
+   "content_sha256": "85a7e841b75f8d6e714006e862d237682e2ad29544d0cd7de54771fb39938672",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_165843/windows.jsonl",
+   "recorded_sha256": "85a7e841b75f8d6e714006e862d237682e2ad29544d0cd7de54771fb39938672",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_165843/windows_b0.jsonl.gz",
+   "sha256": "6393de5e6f91b5a5f738f701c14ac7c6afaaa4e4890a9f3baf1566b4a76e34b9",
+   "content_sha256": "d890f0dddc6b16b3a2f3cd89739017fe8ca033288b7e0014af95c3b4352c1039",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_165843/windows_b0.jsonl",
+   "recorded_sha256": "d890f0dddc6b16b3a2f3cd89739017fe8ca033288b7e0014af95c3b4352c1039",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_165912/windows.jsonl.gz",
+   "sha256": "218e4c71b4ef076ca880b88f29eb0b42b0d6a85a14bca1c949df3f0b16b11086",
+   "content_sha256": "57a879780fe4e0feba80c803ad6590471e2eb29d39cb9a8d8531451c6dfddc07",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_165912/windows.jsonl",
+   "recorded_sha256": "57a879780fe4e0feba80c803ad6590471e2eb29d39cb9a8d8531451c6dfddc07",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_165912/windows_b0.jsonl.gz",
+   "sha256": "54197006f41001346ca876381c47dc267720eb1563ac92a655fa4467d4c35d25",
+   "content_sha256": "97b7d3daba03466eb029981d8c5d21344ddeebf5c068a17948900998bda86aa1",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_165912/windows_b0.jsonl",
+   "recorded_sha256": "97b7d3daba03466eb029981d8c5d21344ddeebf5c068a17948900998bda86aa1",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_165940/windows.jsonl.gz",
+   "sha256": "db266918f71c07e84c8023ed991715e10022d3cc2d090edcada8dd643549ba63",
+   "content_sha256": "aa74cf5e4cd4f03123242075d2475d06942f659b1e2f80005921bfd162f6c5b0",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_165940/windows.jsonl",
+   "recorded_sha256": "aa74cf5e4cd4f03123242075d2475d06942f659b1e2f80005921bfd162f6c5b0",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_165940/windows_b0.jsonl.gz",
+   "sha256": "353e7f90a8dacde3b942f34ead0db37cf7057290cd5b5f79bb1c37756f92ab70",
+   "content_sha256": "00109d7c3ff67a7f8e4a65c0456301a84adfed937aa0402d6a0a389b8a982625",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_165940/windows_b0.jsonl",
+   "recorded_sha256": "00109d7c3ff67a7f8e4a65c0456301a84adfed937aa0402d6a0a389b8a982625",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_170011/windows.jsonl.gz",
+   "sha256": "f8978ea00dacadfbbc25b6ab7c506d081f278da978a203f9a48132bb278a6b17",
+   "content_sha256": "d58d6d92b94690a307fa9bfc0f2910ceb09557cef384354e170fac209c116529",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_170011/windows.jsonl",
+   "recorded_sha256": "d58d6d92b94690a307fa9bfc0f2910ceb09557cef384354e170fac209c116529",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_170011/windows_b0.jsonl.gz",
+   "sha256": "94ed9756b40590514c6d7b10b986ad76defd36cb4b28ef53394ba251b17cb75a",
+   "content_sha256": "a2118e9971b199cb559e0c08b8fa78634ccd91112c416f9147b9cfd2b6614307",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_170011/windows_b0.jsonl",
+   "recorded_sha256": "a2118e9971b199cb559e0c08b8fa78634ccd91112c416f9147b9cfd2b6614307",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_170207/windows.jsonl.gz",
+   "sha256": "cdada3f5b28ec13d25e84f46797889076849dbe22e427604c8361955df9ad083",
+   "content_sha256": "4529b5f06e0502f7e5fc022068b4f2112c40e5c015c3808c46697d2d326c259e",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_170207/windows.jsonl",
+   "recorded_sha256": "4529b5f06e0502f7e5fc022068b4f2112c40e5c015c3808c46697d2d326c259e",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_170207/windows_b0.jsonl.gz",
+   "sha256": "1631a72a1ac6c624b02ac5cc63239f4217b7c9c301ea6ba0253e3acd256b112f",
+   "content_sha256": "147ce5c5657e6ed8b0a1cd25f7a93fa9672be9c530d7a1dbc703bea696e4c0dc",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_170207/windows_b0.jsonl",
+   "recorded_sha256": "147ce5c5657e6ed8b0a1cd25f7a93fa9672be9c530d7a1dbc703bea696e4c0dc",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_170232/windows.jsonl.gz",
+   "sha256": "152b68403e242245554bacff8be7442cca69810013ee2b3c998677c8e7bdc81f",
+   "content_sha256": "98bec8131d86239737885850ad1db587a92cad49210ca94c8623db6c3578b7ce",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_170232/windows.jsonl",
+   "recorded_sha256": "98bec8131d86239737885850ad1db587a92cad49210ca94c8623db6c3578b7ce",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_170232/windows_b0.jsonl.gz",
+   "sha256": "7c93f5c9503688d57674e8e6ab8ef8a505dc2ff486b37aff286f1ba9d9bb480f",
+   "content_sha256": "2d684e9e7f9f30191edebbb249839d907280ed08324e4c037fadefed44bf6c7f",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_170232/windows_b0.jsonl",
+   "recorded_sha256": "2d684e9e7f9f30191edebbb249839d907280ed08324e4c037fadefed44bf6c7f",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_170304/windows.jsonl.gz",
+   "sha256": "5f37ad3cc891be87f763c6a8d471b758cf9eb6e78640514d4129ef9fe3979e0d",
+   "content_sha256": "a58a0207f41addd4e923be28f25feac6183b9627b2fa52e0c25a75e2ff52f9d3",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_170304/windows.jsonl",
+   "recorded_sha256": "a58a0207f41addd4e923be28f25feac6183b9627b2fa52e0c25a75e2ff52f9d3",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_170304/windows_b0.jsonl.gz",
+   "sha256": "625053ffb5e86ba9ef894a4cfbadff08339238e641df698215d2460d0a18d9af",
+   "content_sha256": "319dcadf6da13d66e6d6d9e9c2b516f5f8e95bb75e2009bfb8978acd6e6cc8af",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_170304/windows_b0.jsonl",
+   "recorded_sha256": "319dcadf6da13d66e6d6d9e9c2b516f5f8e95bb75e2009bfb8978acd6e6cc8af",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_170337/windows.jsonl.gz",
+   "sha256": "fa106d3d03cfb688e6be61352b06198b76cc9202c414cbf883f9b177f7f1795b",
+   "content_sha256": "051ea3a40122fbff8085cf4d3d8d7a300ebcb757511ad242c455b9083ba33df6",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_170337/windows.jsonl",
+   "recorded_sha256": "051ea3a40122fbff8085cf4d3d8d7a300ebcb757511ad242c455b9083ba33df6",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_170337/windows_b0.jsonl.gz",
+   "sha256": "4f8b6e673a107ed67d9a78d2ee9146e6e2fafab45f28632452c1d2ee2b0b971b",
+   "content_sha256": "fa322b464e8f167354a2cab7d7331ab23eea4699747e40d306ba8427e3532727",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_170337/windows_b0.jsonl",
+   "recorded_sha256": "fa322b464e8f167354a2cab7d7331ab23eea4699747e40d306ba8427e3532727",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_170423/windows.jsonl.gz",
+   "sha256": "086d7265e246e84458d70f06854d34509361ef014e41ce71451a62f3f5860057",
+   "content_sha256": "bf68438854639fa05a47c5a98b6dcce0fedd4ac76b031f8cae829ae14d3098f8",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_170423/windows.jsonl",
+   "recorded_sha256": "bf68438854639fa05a47c5a98b6dcce0fedd4ac76b031f8cae829ae14d3098f8",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_170423/windows_b0.jsonl.gz",
+   "sha256": "1e2dbbd5ecaadd03467f12f1afd0d35bf4ec488e3a1bac074168ad6da7393840",
+   "content_sha256": "3b09152364639b54495fd3cc5f76e8c589b1f87f9f80aa48ff39b82d95f35254",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_170423/windows_b0.jsonl",
+   "recorded_sha256": "3b09152364639b54495fd3cc5f76e8c589b1f87f9f80aa48ff39b82d95f35254",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_170453/windows.jsonl.gz",
+   "sha256": "74f09d4c58f9a5931939c8b60e4c358160ce5064d4d41455d3cd719bf7e6a147",
+   "content_sha256": "20001a8b1a49e48191864c2b6e6c12ce8ccadfffad207d13a2206c1304825d5b",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_170453/windows.jsonl",
+   "recorded_sha256": "20001a8b1a49e48191864c2b6e6c12ce8ccadfffad207d13a2206c1304825d5b",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_170453/windows_b0.jsonl.gz",
+   "sha256": "cdec7873471b43656cc82354278ebc15a61ded562d8a5c8ccf4f37e0d9d993be",
+   "content_sha256": "dde30efcfd2788b8b92d90cadf6350293039ce6682015dd9a9c67c0afe5e9b96",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_170453/windows_b0.jsonl",
+   "recorded_sha256": "dde30efcfd2788b8b92d90cadf6350293039ce6682015dd9a9c67c0afe5e9b96",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_170531/windows.jsonl.gz",
+   "sha256": "f0567070a45fd09f5a15ed8e951589fd979e1ad621717447a04b5c4f3849c3fd",
+   "content_sha256": "24390e8cdfd4d670f58e0842dc1d6f8437470d70537ffdf522b4c238fa04d98e",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_170531/windows.jsonl",
+   "recorded_sha256": "24390e8cdfd4d670f58e0842dc1d6f8437470d70537ffdf522b4c238fa04d98e",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_170531/windows_b0.jsonl.gz",
+   "sha256": "c55ba36163c332230961fb1ff5f28775552a955937144ced9e461f4d7dfdad98",
+   "content_sha256": "47be4a85808522a48b1298a11ed197e4c1bae7d238da45b6fdd181a8165b1248",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_170531/windows_b0.jsonl",
+   "recorded_sha256": "47be4a85808522a48b1298a11ed197e4c1bae7d238da45b6fdd181a8165b1248",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_170612/windows.jsonl.gz",
+   "sha256": "e2f11df1867d945811054c96e73811cff6977746481d16f581e77a797caca6eb",
+   "content_sha256": "68bfebb68392b111c936f84b68437059f01c81e2a1ff316e839be92cec0fead6",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_170612/windows.jsonl",
+   "recorded_sha256": "68bfebb68392b111c936f84b68437059f01c81e2a1ff316e839be92cec0fead6",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_170612/windows_b0.jsonl.gz",
+   "sha256": "5187c4c81c477560ca1456c5a34e972470705c72acfaae7b8a14ac9282ffd7cb",
+   "content_sha256": "d89c55604f6dd1841ec97a5b0ef0fa33b2d467cb06b511421985407bb9f42e16",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_170612/windows_b0.jsonl",
+   "recorded_sha256": "d89c55604f6dd1841ec97a5b0ef0fa33b2d467cb06b511421985407bb9f42e16",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_170701/windows.jsonl.gz",
+   "sha256": "9ba7aedfa3048edb5c00bf18818fa77653a8bd18e34e2099c82e83e5329dcb91",
+   "content_sha256": "ff584e7ac855c214d3d60368b20dd2dd122273b8a778de3765020597d9bba332",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_170701/windows.jsonl",
+   "recorded_sha256": "ff584e7ac855c214d3d60368b20dd2dd122273b8a778de3765020597d9bba332",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_170701/windows_b0.jsonl.gz",
+   "sha256": "48d0716592b424b79b0477f3336c4302fe49a5f0b15d7a8075202a067c8c1921",
+   "content_sha256": "423ea1655465aa7aefe58998ce0dbe895f3d2703feb0db87e4b8010bf794ed71",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_170701/windows_b0.jsonl",
+   "recorded_sha256": "423ea1655465aa7aefe58998ce0dbe895f3d2703feb0db87e4b8010bf794ed71",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_170751/windows.jsonl.gz",
+   "sha256": "64211e52264720da053c0745c3d4f8b8480aa13466b3a1aae0eeeeb43fd22d15",
+   "content_sha256": "c62a658bd0f8486ff8c65c731618114e0aa75ca57f90468cfe712044b23a26b9",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_170751/windows.jsonl",
+   "recorded_sha256": "c62a658bd0f8486ff8c65c731618114e0aa75ca57f90468cfe712044b23a26b9",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_170751/windows_b0.jsonl.gz",
+   "sha256": "9bd4c672ec9f7fcbfc5698741785826fc6c1ac1c2f012cce2261561aa8059f4f",
+   "content_sha256": "21934858a610ea2753ff5bf235f359c2f04998b5dc64a400d4a1ce3f59aa606d",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_170751/windows_b0.jsonl",
+   "recorded_sha256": "21934858a610ea2753ff5bf235f359c2f04998b5dc64a400d4a1ce3f59aa606d",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_170846/windows.jsonl.gz",
+   "sha256": "144bd3fcb4dd7806180d19af2691005c947e1ebde7a515ab580a2da0ac70349b",
+   "content_sha256": "dc0158952adf3ff364bf25df7c6c45d82d022cd2c94ea8672586e309fe422065",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_170846/windows.jsonl",
+   "recorded_sha256": "dc0158952adf3ff364bf25df7c6c45d82d022cd2c94ea8672586e309fe422065",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_170846/windows_b0.jsonl.gz",
+   "sha256": "e6185ad48bb30e3150d541447b6185255b2c1f61c36ed6683d8ed4f7899be350",
+   "content_sha256": "ff78f1b44a9d1c1bfdd63d9365e8b0bb2d97bd12f26fd56f18f3a93ad12ccf5e",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_170846/windows_b0.jsonl",
+   "recorded_sha256": "ff78f1b44a9d1c1bfdd63d9365e8b0bb2d97bd12f26fd56f18f3a93ad12ccf5e",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_170929/windows.jsonl.gz",
+   "sha256": "49c8faa1e7fe409191efbe14742f4c5d35c2dc979941f1a43644e6ec0b713c1b",
+   "content_sha256": "9916cc225a48fc70a007345ffcaff34760ff3bff484bf81e1e5e08aa065a1d38",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_170929/windows.jsonl",
+   "recorded_sha256": "9916cc225a48fc70a007345ffcaff34760ff3bff484bf81e1e5e08aa065a1d38",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_170929/windows_b0.jsonl.gz",
+   "sha256": "3b1467351e413e20efbd42f54e26c5e54938608ba2eb504c45bd4af8ce936c6a",
+   "content_sha256": "d8b41018d6b8358352c03a658211d46426b63f87276be01cf37f3b5408b9202e",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_170929/windows_b0.jsonl",
+   "recorded_sha256": "d8b41018d6b8358352c03a658211d46426b63f87276be01cf37f3b5408b9202e",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_171049/windows.jsonl.gz",
+   "sha256": "d3fbb2d0b13cbbbc02fd0ed978466bbc9c9470ca19e7a703403d667022c6e9ee",
+   "content_sha256": "91aa0c5d06248b34454c5d3bbaa10888aa194ad1ba2d84f37f032d2bcc350394",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_171049/windows.jsonl",
+   "recorded_sha256": "91aa0c5d06248b34454c5d3bbaa10888aa194ad1ba2d84f37f032d2bcc350394",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_171049/windows_b0.jsonl.gz",
+   "sha256": "822019fa1567982001fa9f2e153ec999f6316905de911339ee76adf95e98584f",
+   "content_sha256": "390fefa5be367d24e9cef6a404df17d70842bdd07e60c91c4e77679334f3e05c",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_171049/windows_b0.jsonl",
+   "recorded_sha256": "390fefa5be367d24e9cef6a404df17d70842bdd07e60c91c4e77679334f3e05c",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_171147/windows.jsonl.gz",
+   "sha256": "b7c1e5e617cf97678e622012b6f8320064a6038f26bba317f2e1167b89a99c85",
+   "content_sha256": "fd9320c6721668cd44f6780ee8e10efb79fc6c741d7a585cbc7199bfd7189d4c",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_171147/windows.jsonl",
+   "recorded_sha256": "fd9320c6721668cd44f6780ee8e10efb79fc6c741d7a585cbc7199bfd7189d4c",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_171147/windows_b0.jsonl.gz",
+   "sha256": "d752dc1625e065f9f20ea6ed7d5b39d32970d69bded1faf7d4c5ef462af145e6",
+   "content_sha256": "330483d2ad563f923f708f8ece44c0c5331e42029603cb867a68e6fdb161d901",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_171147/windows_b0.jsonl",
+   "recorded_sha256": "330483d2ad563f923f708f8ece44c0c5331e42029603cb867a68e6fdb161d901",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_171259/windows.jsonl.gz",
+   "sha256": "7b6207c36a80eea78e9f7cf9d7ec6f2e2ff7f887866c05517767b54a33f85af1",
+   "content_sha256": "7e5264992d74d802c261236a25c5ed6e363c6818b41abab17a2b7305ae72dda8",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_171259/windows.jsonl",
+   "recorded_sha256": "7e5264992d74d802c261236a25c5ed6e363c6818b41abab17a2b7305ae72dda8",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_171259/windows_b0.jsonl.gz",
+   "sha256": "695023f04d17b746b9a79f78903d5f37daef555b08ebce71a099d0e4490b8b3c",
+   "content_sha256": "94b79317f4c17927c52318b5c1efe3f8961fe8c9584894771030054b0fa7d42e",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_171259/windows_b0.jsonl",
+   "recorded_sha256": "94b79317f4c17927c52318b5c1efe3f8961fe8c9584894771030054b0fa7d42e",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_171348/windows.jsonl.gz",
+   "sha256": "0aeb46252ba0f57e3be3aa9c5e6fc59be7b0d4aa5ef63a0e7c2140340daabe6b",
+   "content_sha256": "a23e2e5af1bc687999d90245725b1580c7c31f6929a6b7142623394ce5830948",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_171348/windows.jsonl",
+   "recorded_sha256": "a23e2e5af1bc687999d90245725b1580c7c31f6929a6b7142623394ce5830948",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_171348/windows_b0.jsonl.gz",
+   "sha256": "009c56360aafada913acd8fcdbcb0b84f638a44a061c1ab1d4dbf54e8ca77e3d",
+   "content_sha256": "9c3b1cb695f5bd94bd0d80904d93ff884e3ffe6424639efaa53c26bffd07358f",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_171348/windows_b0.jsonl",
+   "recorded_sha256": "9c3b1cb695f5bd94bd0d80904d93ff884e3ffe6424639efaa53c26bffd07358f",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_171512/windows.jsonl.gz",
+   "sha256": "50cba072a05fd132a8332d72081337da6c67725b8edaedd9bf1cc5a2ae062b2d",
+   "content_sha256": "386ec59c3a0f9c383435af6b2ef655f665b810624177b0f6eabc57a7f019a7e8",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_171512/windows.jsonl",
+   "recorded_sha256": "386ec59c3a0f9c383435af6b2ef655f665b810624177b0f6eabc57a7f019a7e8",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_171512/windows_b0.jsonl.gz",
+   "sha256": "7f81e6a86f54f4116392266b5511a987dda057ac49b67d20b4aebd2c0724874a",
+   "content_sha256": "23b22d7eedfb14883981b880e72eae077e33ca7ea9c5f846db9bac83a83d3add",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_171512/windows_b0.jsonl",
+   "recorded_sha256": "23b22d7eedfb14883981b880e72eae077e33ca7ea9c5f846db9bac83a83d3add",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_171703/windows.jsonl.gz",
+   "sha256": "9778eda2366360b744a79d9b425fdd072ca17b8ef83d4f40131d146e71b18c90",
+   "content_sha256": "560105eaa912c5f3eb30b3b528db1b18f8cddabccf7c6ec71f45da675560ba9f",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_171703/windows.jsonl",
+   "recorded_sha256": "560105eaa912c5f3eb30b3b528db1b18f8cddabccf7c6ec71f45da675560ba9f",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_171703/windows_b0.jsonl.gz",
+   "sha256": "7cbdf3158b9b92cad367308d8f1a6da850862e590341d213c6e3e466c450de77",
+   "content_sha256": "763948030b7b6ab5f17fbfd5c8ce495b8013fd9c4e584217008bf1a3549ceb89",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_171703/windows_b0.jsonl",
+   "recorded_sha256": "763948030b7b6ab5f17fbfd5c8ce495b8013fd9c4e584217008bf1a3549ceb89",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_171807/windows.jsonl.gz",
+   "sha256": "506728dc757b4d7d4bab6d2064c73811ad461fad7ab4577e87b07983a8398354",
+   "content_sha256": "ebd0ec95f5cb28dc1049c9f7164d7aa7f2c0a44ddfa2124f78ad004c12cdc09c",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_171807/windows.jsonl",
+   "recorded_sha256": "ebd0ec95f5cb28dc1049c9f7164d7aa7f2c0a44ddfa2124f78ad004c12cdc09c",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_171807/windows_b0.jsonl.gz",
+   "sha256": "b626bd360ab11b06bc2874c2f652fd3fcc4b76cd5a7d691b613977f104e4bc17",
+   "content_sha256": "f2ab97590eac014c09adbb36fe5536a8fb22da85c86220060dbf49069c61a5bb",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_171807/windows_b0.jsonl",
+   "recorded_sha256": "f2ab97590eac014c09adbb36fe5536a8fb22da85c86220060dbf49069c61a5bb",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_171844/windows.jsonl.gz",
+   "sha256": "af1f47bf71adf5030e20dbd7deff2323c66bac4600b3d1cdbe7b6ae7a268ab72",
+   "content_sha256": "af79fa2805901373eea1f072938e4a790b260eafa03ee0eb058c5353f329ea68",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_171844/windows.jsonl",
+   "recorded_sha256": "af79fa2805901373eea1f072938e4a790b260eafa03ee0eb058c5353f329ea68",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_171844/windows_b0.jsonl.gz",
+   "sha256": "b0804b25691c658f18899ed2e9d8fab227d6a07ecceb1dadee432b500e762e9c",
+   "content_sha256": "f38eb71074084be416e772c32ce6eb9cbc3722fb31b97e3d168106d4cd8ae5de",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_171844/windows_b0.jsonl",
+   "recorded_sha256": "f38eb71074084be416e772c32ce6eb9cbc3722fb31b97e3d168106d4cd8ae5de",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_171936/windows.jsonl.gz",
+   "sha256": "d6cbe8d148d42621e107837d1ce30a8633aa31f33beb334fd62311908aa27a84",
+   "content_sha256": "2870ebcbc50565880d11b1c854c03faa9e33a9a7bda17886bf6168070baff74a",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_171936/windows.jsonl",
+   "recorded_sha256": "2870ebcbc50565880d11b1c854c03faa9e33a9a7bda17886bf6168070baff74a",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_171936/windows_b0.jsonl.gz",
+   "sha256": "f3753752b92185573c0296781dc3205f01ffbf818515721b80dfaff06688153a",
+   "content_sha256": "6a1f59c72d3f6736769e9cc2e610c69ed213247b1da5705ec2847c387c2e6cb8",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_171936/windows_b0.jsonl",
+   "recorded_sha256": "6a1f59c72d3f6736769e9cc2e610c69ed213247b1da5705ec2847c387c2e6cb8",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_172008/windows.jsonl.gz",
+   "sha256": "71cf59f57bfba3d3b7dff9bd3de0b963ab439efa379929b735f7d162e583ed04",
+   "content_sha256": "38fc3e5fbb2d348f53c22727edaf93b420df7e313db4d5f6d8068c7d093998d5",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_172008/windows.jsonl",
+   "recorded_sha256": "38fc3e5fbb2d348f53c22727edaf93b420df7e313db4d5f6d8068c7d093998d5",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "inputs/vision_round3/20261028_172008/windows_b0.jsonl.gz",
+   "sha256": "c6ad48b389eea4eb17b3415b78b96979a76e467a1daf79cae8609de4fd7e66f0",
+   "content_sha256": "f97debf14d908a981627c7fd32a6c3c63193aad91fbab92e51ca76f1917eaf6b",
+   "source": "4_vision/companion_behind_2026-11-04/round3_replay/team_2026-10-28/20261028_172008/windows_b0.jsonl",
+   "recorded_sha256": "f97debf14d908a981627c7fd32a6c3c63193aad91fbab92e51ca76f1917eaf6b",
+   "equal_to_recorded": true
+  },
+  {
+   "file": "results/jev_cache.jsonl.gz",
+   "sha256": "9e3c3984c2e19ffa19c4a5dbd1995a8ef9399fe2d7b2cf07d656020d00ae1d27",
+   "content_sha256": "5bf0973b6bc2ceba8da5d6f03155508845ee07b580c37dad32b484343dbfdcda",
+   "source": "4_vision/eval_jev_2026-11-04/results/real_2026-11-04/jev_cache.jsonl",
+   "recorded_sha256": "5bf0973b6bc2ceba8da5d6f03155508845ee07b580c37dad32b484343dbfdcda",
+   "equal_to_recorded": true
+  }
+ ]
+}

@@ -1,0 +1,72 @@
+{
+  "bundle_id": "b1_rB",
+  "note": "b1 상황 값 13개(4_vision/params/b1_2026-10-30.json 그대로) + 역할 경계 rB. 역할 경계 격자점 rB(상대 거리 2.0, 옆 거리 0.8; [파일럿], 값을 고르지 않음). 2026-11-04 고정(재생 전).",
+  "situation": {
+    "window_s": {
+      "value": 4.0,
+      "source": "[파일럿] 정의에서: stay_min_s(3초) + segment_s(1초). 창이 stay_min_s보다 길어야 뒷사람 사건이 창 안에서 채워짐(같으면 창 양 끝에 줄이 꼭 있어야 함). 그런 길이 가운데 segment_s 단위로 가장 짧은 값이고, segment_s 이상이라 모든 줄이 한 번 이상 창에 들어감. b0보다 1구간(1초) 김"
+    },
+    "gap_s": {
+      "value": 0.15,
+      "source": "[파일럿] b0보다 프레임 1칸(0.1초) 짧음(엄격한 쪽): 프레임 1칸보다 길고 2칸보다 짧아 빠진 프레임을 하나도 잇지 않음. 코드 제약(평소 프레임 간격보다 큼)을 지키는 가장 엄격한 칸"
+    },
+    "offscreen_yaw_deg": {
+      "value": 45,
+      "source": "[관행값] Windows 존재 감지(Presence sensing)의 주의 판정: 얼굴 yaw ±45° 안이면 화면을 보는 중. 조사 06:22(2_requirements/research/1_initial_2026-09-30/06_vision_uses.md), 사실표 W3, learn.microsoft.com 'sensors-presence-sensing'. PC 앞에 앉은 사용자 기준이라 내려다보는 키오스크 카메라와 조건이 다름(조사 33:39). 세 묶음 모두 같은 값"
+    },
+    "shoulder_vis_min": {
+      "value": 0.5,
+      "source": "[파일럿] 시작값: MediaPipe 0.10.33 tasks/python/vision/drawing_utils.py의 _VISIBILITY_THRESHOLD = 0.5(가시도가 이보다 낮은 점은 그리지 않음)와 같은 값. pose_vis_shoulders(어깨 점 11과 12의 가시도 평균, features.py)가 이 값 이상이면 '어깨 점 남음'. 라이브러리 그리기 상수라 [관행값]으로 쓸지는 아직 정하지 않음. 세 묶음 모두 같은 값"
+    },
+    "look_back_min_count": {
+      "value": 3,
+      "source": "[파일럿] b0보다 1 큼(엄격한 쪽): '반복'을 3번 이상으로 읽음"
+    },
+    "sweep_min_count": {
+      "value": 3,
+      "source": "[파일럿] b0보다 1 큼(엄격한 쪽): 왕복 3번 이상"
+    },
+    "stay_min_s": {
+      "value": 3.0,
+      "source": "[파일럿] b0(Windows Onlooker 기본 2초와 같은 값)보다 1구간(1초) 김(엄격한 쪽)"
+    },
+    "dwell_min_s": {
+      "value": 3.0,
+      "source": "[파일럿] b0와 같은 읽기(머묾 = stay_min_s): 3초"
+    },
+    "mouth_motion_min": {
+      "value": 0.1,
+      "source": "[파일럿] 시작값: 결정 §3이 예로 든 jawOpen이 공개 영상 'Was ist ein Vlog'(웹캠 앞 한 사람, CC BY-SA 3.0, 얼굴 보임 4,372장)에서 흔들린 폭, 곧 표준편차 0.092(4_vision/vision_mvp/RESULTS_blendshapes_2026-10-10.md:33)를 소수 첫째 자리로 올린 값. mouth_motion = 입과 턱 다이얼 27개가 직전 2초 중앙값에서 바뀐 폭의 최댓값(columns.py). 세 묶음 모두 같은 값"
+    },
+    "body_still_max": {
+      "value": 0.1,
+      "source": "[파일럿] 시작값(측정 근거 없음): 창 안에서 어깨 가운데가 움직인 폭이 화면 폭과 높이의 1/10 이하이면 제자리. 걸어서 화면을 가로지르는 움직임(폭 전체)과 제자리 몸짓을 가르려고 Claude가 고른 수. 세 묶음 모두 같은 값"
+    },
+    "min_events": {
+      "value": 3,
+      "source": "[파일럿] b0보다 1 큼(엄격한 쪽). 이 묶음의 태그별 최소 근거 사건 수(태그 1: 4, 태그 2: 3, 태그 3: 3) 이하"
+    },
+    "face_visible_min": {
+      "value": 0.5,
+      "source": "[파일럿] 읽기(과반): 창의 프레임 절반 이상에서 얼굴이 보여야 얼굴이 필요한 단서(입 움직임, 일행 쪽 yaw, 화면 밖 고개 돌림)를 잰 것으로 봄. 세 묶음 모두 같은 값"
+    },
+    "track_conf_min": {
+      "value": 0.5,
+      "source": "[파일럿] 읽기(과반): 창의 프레임 절반 이상에서 몸 점이 잡혀야 센서가 동작한 것으로 봄. 이보다 적으면 센서 실패(unknown). 세 묶음 모두 같은 값"
+    }
+  },
+  "chain": {
+    "companion_rel_dist_max": {
+      "value": 2.0,
+      "source": "[파일럿] 격자점 rB = 상대 거리 경계 2.0 · 옆 거리 경계 0.8: main 브리프(2026-11-04 22:1x)의 예시 격자 (상대 거리 1.5 / 2.0 / 2.5 × 옆 거리 0.5 / 0.8 / 1.1)의 2번째 점. 출처 있는 값 없음(params.UNDECIDED). 격자의 범위는 촬영본의 단서 크기(4_vision/companion_behind_2026-11-04/README.md)를 본 뒤 놓였으므로 촬영본과 독립이 아님 → 값을 고르지 않고 묶음마다 결과를 보임(결정 3 · 19). 일행 = 상대 거리 중앙값이 이 값 이하"
+    },
+    "companion_lateral_min": {
+      "value": 0.8,
+      "source": "[파일럿] 격자점 rB = 상대 거리 경계 2.0 · 옆 거리 경계 0.8: main 브리프(2026-11-04 22:1x)의 예시 격자 (상대 거리 1.5 / 2.0 / 2.5 × 옆 거리 0.5 / 0.8 / 1.1)의 2번째 점. 출처 있는 값 없음(params.UNDECIDED). 격자의 범위는 촬영본의 단서 크기(4_vision/companion_behind_2026-11-04/README.md)를 본 뒤 놓였으므로 촬영본과 독립이 아님 → 값을 고르지 않고 묶음마다 결과를 보임(결정 3 · 19). 일행 = 옆 거리 중앙값의 크기가 이 값 이상"
+    },
+    "behind_rel_dist_min": {
+      "value": 2.0,
+      "source": "[파일럿] 격자점 rB = 상대 거리 경계 2.0 · 옆 거리 경계 0.8: main 브리프(2026-11-04 22:1x)의 예시 격자 (상대 거리 1.5 / 2.0 / 2.5 × 옆 거리 0.5 / 0.8 / 1.1)의 2번째 점. 출처 있는 값 없음(params.UNDECIDED). 격자의 범위는 촬영본의 단서 크기(4_vision/companion_behind_2026-11-04/README.md)를 본 뒤 놓였으므로 촬영본과 독립이 아님 → 값을 고르지 않고 묶음마다 결과를 보임(결정 3 · 19). 뒤 사람 = 상대 거리 중앙값이 이 값 이상(1보다 크고 일행 아님)"
+    }
+  }
+}

@@ -1,0 +1,6 @@
+# Data and records are stored byte for byte, so their sha256 equal the hashes in results/manifest.json on any OS.
+inputs/** -text
+results/** -text
+fixtures/** -text
+tools/e3/help_rule.py -text
+*.gz binary

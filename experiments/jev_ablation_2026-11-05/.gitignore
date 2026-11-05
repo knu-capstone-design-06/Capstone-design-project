@@ -1,0 +1,3 @@
+# run outputs (re-made from the cache or a real run; several hundred MB for the full set)
+runs/
+__pycache__/
