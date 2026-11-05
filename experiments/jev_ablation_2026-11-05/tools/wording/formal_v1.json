@@ -1,0 +1,30 @@
+{
+ "_note": "Wording variant 'formal' v1 (2026-11-05, Claude's text from main's request): the PR #77 questions restated in a more formal register with the same conditions; merged by key into the built questions (instructions replaced; criteria texts replaced only for options the question already has).",
+ "state_scores": {
+  "touch_difficulty": {"instructions": "In this window, does the user exhibit difficulty in physically pressing the intended buttons?",
+   "criteria": {"true": "Presses fall just outside the target buttons near their edges, the same location is pressed repeatedly, and the user continues to face the screen.",
+                "false": "Presses fall on the target buttons, or no presses occur because the user is reading or speaking."}},
+  "navigation_difficulty": {"instructions": "Does the user appear to have lost their way within the ordering sequence?",
+   "criteria": {"true": "The user returns to earlier screens, revisits screens, or pauses for a long time without making a selection while facing the screen.",
+                "false": "The user progresses steadily through the screens, or a pause is attributable to the system being busy."}},
+  "visual_difficulty": {"instructions": "Does the user appear unable to read or see the screen adequately?",
+   "criteria": {"true": "The user leans towards the screen, large text or high contrast is already enabled, or presses fall far from any target.",
+                "false": "The user remains at a normal distance and presses accurately."}},
+  "hesitation": {"instructions": "Is the user hesitating rather than taking action?",
+   "criteria": {"true": "No input is given for an extended period while the user faces the screen, or options are opened and closed without a selection.",
+                "false": "The user is conversing with a companion, looking behind, or the kiosk is processing."}},
+  "normal": {"instructions": "Is the user placing the order without any indication of difficulty?",
+   "criteria": {"true": "Presses are accurate, progress is steady, and there are no long pauses.",
+                "false": "Any of the difficulties described above is present."}}
+ },
+ "support_choice": {
+  "support_choice": {"instructions": "Select the single form of support that the kiosk should provide in this window to the user described by this state, or select `none`. Earlier judgments of the same window are provided under `jev`.",
+   "criteria": {"wait_hold_timer": "Suspend the session timer and display nothing while the user confers with a companion",
+                "remaining_steps_notice": "Inform the user, without a popup, of the number of steps remaining before payment",
+                "delay_responsibility_notice": "Inform the user, without a popup, that customers waiting behind are the store's responsibility",
+                "large_button": "Ask the user whether the buttons should be enlarged",
+                "highlight_next_action": "Highlight the next action on this screen with a single line of guidance, leaving the layout unchanged",
+                "defer_big_button_question": "Display nothing for now and refrain from asking about larger buttons while people are waiting behind the user",
+                "none": "Display nothing new in this window; the user is proceeding without difficulty or already has the help required"}}
+ }
+}

@@ -1,0 +1,30 @@
+{
+ "_note": "Wording variant 'short' v1 (2026-11-05, Claude's text from main's request): the PR #77 questions shortened with the same conditions; merged by key into the built questions (instructions replaced; criteria texts replaced only for options the question already has).",
+ "state_scores": {
+  "touch_difficulty": {"instructions": "Trouble hitting the buttons?",
+   "criteria": {"true": "Taps just outside targets or repeated on one spot, facing the screen.",
+                "false": "Taps on target, or no taps (reading or talking)."}},
+  "navigation_difficulty": {"instructions": "Lost in the order flow?",
+   "criteria": {"true": "Going back, revisiting screens, or long pauses without choosing while facing the screen.",
+                "false": "Steady progress, or the system is busy."}},
+  "visual_difficulty": {"instructions": "Unable to see the screen well?",
+   "criteria": {"true": "Leaning in, large text or high contrast on, taps far from targets.",
+                "false": "Normal distance, accurate taps."}},
+  "hesitation": {"instructions": "Hesitating instead of acting?",
+   "criteria": {"true": "Long time without input while facing the screen, or options opened and closed unused.",
+                "false": "Talking to a companion, looking behind, or the kiosk is processing."}},
+  "normal": {"instructions": "Ordering without trouble?",
+   "criteria": {"true": "Accurate taps, steady progress, no long pauses.",
+                "false": "Any difficulty above."}}
+ },
+ "support_choice": {
+  "support_choice": {"instructions": "Pick one support for this window, or `none`. Earlier judgments of this window: `jev`.",
+   "criteria": {"wait_hold_timer": "Pause the timer, show nothing (companion talk)",
+                "remaining_steps_notice": "Show the steps left before payment (no popup)",
+                "delay_responsibility_notice": "Say waiting customers are the store's matter (no popup)",
+                "large_button": "Ask: bigger buttons?",
+                "highlight_next_action": "Highlight the next action, one guidance line",
+                "defer_big_button_question": "Show nothing; no bigger-button question while people wait",
+                "none": "Nothing new; the user is fine or already helped"}}
+ }
+}
