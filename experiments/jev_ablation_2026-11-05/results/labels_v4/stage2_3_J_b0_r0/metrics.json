@@ -1,0 +1,1077 @@
+{
+ "run": "C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage2_3_J_b0_r0",
+ "jev": "real",
+ "model": "jev-1.13.0",
+ "order_swap": {
+  "valid": true,
+  "reversed_requests": 3344,
+  "reversed_from_cache": 3104,
+  "note": null
+ },
+ "jev_numbers": "real",
+ "labels": "C:/Users/samsung-user/claude/Capstone_Design_Project/4_vision/eval_ab_2026-11-04/admissible_v4.csv",
+ "label_mode": "admissible",
+ "label_status": "규정한 허용 행동(stipulated admissible actions) (admissible_v4.csv)",
+ "aligned": {
+  "bundle": "b0_r0",
+  "variant": "fit-medium",
+  "conditions": [
+   "C0",
+   "C1",
+   "C2",
+   "C3",
+   "C4",
+   "C5",
+   "C6"
+  ],
+  "windows_rows": "C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\4_vision\\eval_ab_2026-11-04\\results\\labels_v2\\windows_b0_r0.csv"
+ },
+ "scoring_version": "2026-11-05 Codex 209 (#1 exact no-row delivery, #2 time-mode onset, #3 paired AUROC, #4 window truth, #7 sent-question options)",
+ "rule": {
+  "windows": 3892,
+  "takes": 245,
+  "clips": 35,
+  "sessions": 257,
+  "measurable": 3344,
+  "situation_record": {
+   "unknown": 749,
+   "none": 3143
+  },
+  "transitions": {
+   "none": 2989,
+   "open": 161,
+   "keep": 625,
+   "withdraw": 117
+  },
+  "opened": {
+   "highlight_next_action": 141,
+   "large_button": 20
+  },
+  "rule_question_kinds": {
+   "fit": 134
+  },
+  "rule_question_windows": 134,
+  "expired_by_tick": 0,
+  "candidate_set_sizes": {
+   "0": 3731,
+   "1": 160,
+   "2": 1
+  },
+  "vision_record_match": {
+   "True": 3892
+  },
+  "touch_features": {
+   "absent (contract five not all known)": 3892
+  },
+  "recent_source": {
+   "segment sum (a window without touch)": 820,
+   "segment sum (n windows)": 3072
+  },
+  "expect": {
+   "checked": 0,
+   "failed": []
+  }
+ },
+ "execution": {
+  "J": {
+   "condition": "J",
+   "variant": "base",
+   "JEV_STAGES": "support_choice_all",
+   "windows": 3892,
+   "eligible": 3344,
+   "attempted": 3344,
+   "skipped": {
+    "not measurable": 548
+   },
+   "would_skip_in_flight": 56,
+   "stages": {
+    "support_choice": {
+     "eligible": 3344,
+     "skipped_build_none": 0,
+     "attempted": 3344,
+     "answered": 3344,
+     "failed": {},
+     "api_calls": 239,
+     "answers_from_cache": 3105,
+     "order_swap_calls": 240,
+     "order_swap_answered": 3344,
+     "latency_ms_api": {
+      "n": 239,
+      "mean": 201.11083682008368,
+      "min": 167.056,
+      "max": 700.92,
+      "p50": 185.675,
+      "p95": 266.325
+     },
+     "latency_ms_api_all": {
+      "n": 239,
+      "mean": 201.11083682008368,
+      "min": 167.056,
+      "max": 700.92,
+      "p50": 185.675,
+      "p95": 266.325
+     },
+     "request_bytes": {
+      "n": 3344,
+      "mean": 1424.171052631579,
+      "min": 1411,
+      "max": 1488,
+      "p50": 1423.0,
+      "p95": 1457.0
+     },
+     "input_tokens": {
+      "sum": 168064,
+      "n": 239,
+      "mean": 703.1966527196653,
+      "min": 696,
+      "max": 717,
+      "p50": 702.0,
+      "p95": 709.0
+     },
+     "output_tokens": {
+      "sum": 20252,
+      "n": 239,
+      "mean": 84.73640167364017,
+      "min": 83,
+      "max": 85,
+      "p50": 85.0,
+      "p95": 85.0
+     },
+     "response_models": {
+      "jev-1.13.0": 3344
+     }
+    }
+   },
+   "api_calls": 479,
+   "answers_from_cache": 6209,
+   "calls_per_attempted_window": 0.14324162679425836,
+   "escalation": {
+    "k": 3344,
+    "n": 3344
+   },
+   "chain_latency_ms": {
+    "n": 239,
+    "mean": 201.11083682008368,
+    "min": 167.056,
+    "max": 700.92,
+    "p50": 185.675,
+    "p95": 266.325
+   }
+  }
+ },
+ "latency_method": "wall clock (time.perf_counter) around the client call of each API request; answers from the identical-request cache are excluded; machine and network of the run",
+ "answers": {
+  "J": {
+   "support_choice": {
+    "noul": {},
+    "choice": {
+     "support_choice": {
+      "counts": {
+       "remaining_steps_notice": 2162,
+       "none": 785,
+       "highlight_next_action": 378,
+       "large_button": 18,
+       "wait_hold_timer": 1
+      },
+      "confidence": {
+       "n": 3344,
+       "mean": 0.4359778708133972,
+       "min": 0.14,
+       "max": 0.94,
+       "p50": 0.37,
+       "p95": 0.91
+      }
+     }
+    }
+   }
+  }
+ },
+ "paired": {},
+ "repeats": {
+  "calls_per_request": 1,
+  "by_arm_stage": {}
+ },
+ "label_windows": {
+  "labelled": 3892,
+  "unlabelled": 0,
+  "levels": {
+   "action": 3892
+  },
+  "match": {
+   "segment_id": 3892
+  },
+  "segment_classes": {
+   "no_user": 105,
+   "wait_only": 1087,
+   "designated": 1193,
+   "allowed_not_designated": 224,
+   "contradictory": 881,
+   "time_stop": 402
+  },
+  "sessions": 257,
+  "sessions_with_more_than_one_label_row": 56,
+  "state_proxy_defined": 1543,
+  "state_proxy_by_states": {
+   "normal": 580,
+   "touch_difficulty": 309,
+   "hesitation,navigation_difficulty": 357,
+   "hesitation,navigation_difficulty,touch_difficulty": 24,
+   "visual_difficulty": 195,
+   "touch_difficulty,visual_difficulty": 39,
+   "hesitation,navigation_difficulty,visual_difficulty": 39
+  },
+  "tag_vs_truth": {
+   "none | none": 3633,
+   "none | looking_around": 70,
+   "none | consulting_companion": 126,
+   "none | looking_back_with_people_behind": 63
+  },
+  "truth_basis": "window truth: the segment's truth tag when a GT behaviour second lies in (t - window_s, t], else none (E3 run_eval.py window_truth)",
+  "singleton_none_windows": 0
+ },
+ "coverage": {
+  "allowed_action_absent": {
+   "all": {
+    "k": 0,
+    "n": 3892
+   },
+   "with_candidates": {
+    "k": 0,
+    "n": 161
+   }
+  },
+  "designated_support_absent": {
+   "k": 1079,
+   "n": 1168
+  },
+  "designated_outside_rule_table": {
+   "k": 0,
+   "n": 3892
+  },
+  "designated_outside_examples": []
+ },
+ "scored_population": {
+  "windows": 3011,
+  "excluded_windows": 881,
+  "rule": "labelled windows outside excluded and contradictory segments; the same set for selection, state estimation, rule question, forecast and the null controls"
+ },
+ "selection": {
+  "windows_scored": 3011,
+  "singleton_none_windows": 0,
+  "A": {
+   "allowed": {
+    "all": {
+     "k": 2977,
+     "n": 3011,
+     "ci95": [
+      0.9848162635290787,
+      0.9923723076497977
+     ]
+    },
+    "with_candidates": {
+     "k": 91,
+     "n": 125,
+     "ci95": [
+      0.6258543165467626,
+      0.8151389786683902
+     ]
+    }
+   },
+   "chance_allowed": {
+    "all": 0.9942986826082144,
+    "with_candidates": 0.8626666666666666
+   },
+   "designated": {
+    "k": 82,
+    "n": 1064,
+    "ci95": [
+     0.05835096809812403,
+     0.10673256530749423
+    ]
+   },
+   "chance_designated": 0.03853383458646616,
+   "selected": {
+    "none": 2886,
+    "highlight_next_action": 108,
+    "large_button": 17
+   },
+   "segments": {
+    "help_rule": "admissible help after onset (E3 tools/help_rule.py, imported, one implementation for E3 / E5; main 2026-11-05 from labels red team round 3 #1): a display = a visible support opened inside the segment (not at the window ending at the turn start) and kept by the following windows; help = a display shown at some time at or after the onset whose form is admissible then; designated delivery = the same for the designated supports themselves; latency = max(0, open - onset)",
+    "help_rule_name": "admissible help after onset (visible at or after the onset, opened within the same turn)",
+    "false_alarm": {
+     "k": 7,
+     "n": 86,
+     "ci95": [
+      0.03998643132048015,
+      0.15860182741282047
+     ]
+    },
+    "missed_help": {
+     "k": 22,
+     "n": 66,
+     "ci95": [
+      0.2315642905191201,
+      0.45343656209205363
+     ]
+    },
+    "missed_help_v0_row": {
+     "k": 22,
+     "n": 66,
+     "ci95": [
+      0.2315642905191201,
+      0.45343656209205363
+     ]
+    },
+    "offer_precision": {
+     "k": 44,
+     "n": 51,
+     "ci95": [
+      0.7427830763077481,
+      0.9318889830203283
+     ]
+    },
+    "designated_delivery_v0_row": {
+     "k": 42,
+     "n": 66,
+     "ci95": [
+      0.5157964053493254,
+      0.7419301697869869
+     ]
+    },
+    "designated_delivery_no_row": {
+     "k": 0,
+     "n": 20,
+     "ci95": [
+      0.0,
+      0.16112516018512965
+     ]
+    },
+    "admissible_visible_no_row": {
+     "k": 4,
+     "n": 20
+    },
+    "help_opened_before_onset": {
+     "segments": 2,
+     "lead_s": [
+      1.0,
+      3.0
+     ]
+    },
+    "latency_s": {
+     "n": 44,
+     "median": 3.1174
+    },
+    "by_origin": {
+     "camera": {
+      "designated_v0_row": 12,
+      "TP": 4,
+      "FN": 8,
+      "designated_delivery": {
+       "k": 2,
+       "n": 12
+      }
+     },
+     "touch": {
+      "designated_v0_row": 54,
+      "TP": 40,
+      "FN": 14,
+      "designated_delivery": {
+       "k": 40,
+       "n": 54
+      }
+     }
+    },
+    "old_definition": {
+     "rule": "before 2026-11-05: a new visible admissible offer at or after the onset (a support held at the onset not credited)",
+     "TP": 42,
+     "FN": 24,
+     "designated_delivery_v0_row": {
+      "k": 41,
+      "n": 66
+     }
+    },
+    "TP": 44,
+    "FN": 22,
+    "FP": 7,
+    "TN": 79,
+    "other_segments": {
+     "no_user": 56,
+     "allowed_not_designated": 13,
+     "time_stop": 21
+    }
+   },
+   "attribution": {
+    "decision_errors": 34,
+    "of_windows": 3011,
+    "with_incorrect_observed_tag": 0,
+    "with_correct_observed_tag": 19,
+    "observed_tag_unknown": 15,
+    "reference_missing": 0
+   }
+  },
+  "J": {
+   "options_windows": 3011,
+   "options": "all supports + none",
+   "first_order": {
+    "status_on_options_windows": {
+     "not asked": 436,
+     "answered": 2575
+    },
+    "allowed_answered": {
+     "k": 1431,
+     "n": 2575,
+     "ci95": [
+      0.46025615031347067,
+      0.6585106481588023
+     ]
+    },
+    "chance_on_answered": 0.5933980582524272,
+    "a_on_same_windows": {
+     "k": 2541,
+     "n": 2575,
+     "ci95": [
+      0.9819482224781807,
+      0.9911052541548877
+     ]
+    },
+    "allowed_with_rule_fallback": {
+     "k": 1867,
+     "n": 3011,
+     "ci95": [
+      0.5349498795882993,
+      0.7116848725587553
+     ]
+    },
+    "designated_answered": {
+     "k": 182,
+     "n": 967,
+     "ci95": [
+      0.07983601833773428,
+      0.32429900179055815
+     ]
+    },
+    "chance_designated_on_answered": 0.10976510562860096,
+    "calibration_p_selected": {
+     "n": 2575,
+     "positives": 1431,
+     "brier": 0.2125581359223301,
+     "ece": 0.05495145631067965,
+     "bins": 10,
+     "auroc": 0.6043511432662376,
+     "table": [
+      {
+       "bin": [
+        0.0,
+        0.1
+       ],
+       "n": 0,
+       "positives": 0,
+       "mean_p": null,
+       "observed": null
+      },
+      {
+       "bin": [
+        0.1,
+        0.2
+       ],
+       "n": 0,
+       "positives": 0,
+       "mean_p": null,
+       "observed": null
+      },
+      {
+       "bin": [
+        0.2,
+        0.3
+       ],
+       "n": 12,
+       "positives": 6,
+       "mean_p": 0.2783333333333334,
+       "observed": 0.5
+      },
+      {
+       "bin": [
+        0.3,
+        0.4
+       ],
+       "n": 280,
+       "positives": 162,
+       "mean_p": 0.36264285714285716,
+       "observed": 0.5785714285714286
+      },
+      {
+       "bin": [
+        0.4,
+        0.5
+       ],
+       "n": 1504,
+       "positives": 665,
+       "mean_p": 0.4524268617021277,
+       "observed": 0.4421542553191489
+      },
+      {
+       "bin": [
+        0.5,
+        0.6
+       ],
+       "n": 326,
+       "positives": 146,
+       "mean_p": 0.5222699386503068,
+       "observed": 0.44785276073619634
+      },
+      {
+       "bin": [
+        0.6,
+        0.7
+       ],
+       "n": 4,
+       "positives": 3,
+       "mean_p": 0.6225,
+       "observed": 0.75
+      },
+      {
+       "bin": [
+        0.7,
+        0.8
+       ],
+       "n": 0,
+       "positives": 0,
+       "mean_p": null,
+       "observed": null
+      },
+      {
+       "bin": [
+        0.8,
+        0.9
+       ],
+       "n": 102,
+       "positives": 102,
+       "mean_p": 0.8875490196078432,
+       "observed": 1.0
+      },
+      {
+       "bin": [
+        0.9,
+        1.0
+       ],
+       "n": 347,
+       "positives": 347,
+       "mean_p": 0.9230835734870317,
+       "observed": 1.0
+      }
+     ]
+    }
+   },
+   "order_agreed": {
+    "status_on_options_windows": {
+     "not asked": 436,
+     "answered": 2242,
+     "order_disagree": 333
+    },
+    "allowed_answered": {
+     "k": 1149,
+     "n": 2242,
+     "ci95": [
+      0.41014295817207397,
+      0.6266014526748694
+     ]
+    },
+    "chance_on_answered": 0.5895246591053905,
+    "a_on_same_windows": {
+     "k": 2208,
+     "n": 2242,
+     "ci95": [
+      0.979323016693751,
+      0.9898053978423027
+     ]
+    },
+    "allowed_with_rule_fallback": {
+     "k": 1918,
+     "n": 3011,
+     "ci95": [
+      0.5542990301710267,
+      0.726054522431334
+     ]
+    },
+    "designated_answered": {
+     "k": 144,
+     "n": 848,
+     "ci95": [
+      0.04842160709096193,
+      0.32430366455900667
+     ]
+    },
+    "chance_designated_on_answered": 0.10933288409703504,
+    "calibration_p_selected": {
+     "n": 2242,
+     "positives": 1149,
+     "brier": 0.20018764495985727,
+     "ece": 0.10842551293487958,
+     "bins": 10,
+     "auroc": 0.6661343608388535,
+     "table": [
+      {
+       "bin": [
+        0.0,
+        0.1
+       ],
+       "n": 0,
+       "positives": 0,
+       "mean_p": null,
+       "observed": null
+      },
+      {
+       "bin": [
+        0.1,
+        0.2
+       ],
+       "n": 0,
+       "positives": 0,
+       "mean_p": null,
+       "observed": null
+      },
+      {
+       "bin": [
+        0.2,
+        0.3
+       ],
+       "n": 9,
+       "positives": 4,
+       "mean_p": 0.28,
+       "observed": 0.4444444444444444
+      },
+      {
+       "bin": [
+        0.3,
+        0.4
+       ],
+       "n": 241,
+       "positives": 131,
+       "mean_p": 0.36128630705394194,
+       "observed": 0.5435684647302904
+      },
+      {
+       "bin": [
+        0.4,
+        0.5
+       ],
+       "n": 1224,
+       "positives": 426,
+       "mean_p": 0.45465686274509803,
+       "observed": 0.3480392156862745
+      },
+      {
+       "bin": [
+        0.5,
+        0.6
+       ],
+       "n": 315,
+       "positives": 136,
+       "mean_p": 0.5222539682539683,
+       "observed": 0.43174603174603177
+      },
+      {
+       "bin": [
+        0.6,
+        0.7
+       ],
+       "n": 4,
+       "positives": 3,
+       "mean_p": 0.6225,
+       "observed": 0.75
+      },
+      {
+       "bin": [
+        0.7,
+        0.8
+       ],
+       "n": 0,
+       "positives": 0,
+       "mean_p": null,
+       "observed": null
+      },
+      {
+       "bin": [
+        0.8,
+        0.9
+       ],
+       "n": 102,
+       "positives": 102,
+       "mean_p": 0.8875490196078432,
+       "observed": 1.0
+      },
+      {
+       "bin": [
+        0.9,
+        1.0
+       ],
+       "n": 347,
+       "positives": 347,
+       "mean_p": 0.9230835734870317,
+       "observed": 1.0
+      }
+     ]
+    }
+   },
+   "order_consistency": {
+    "k": 2242,
+    "n": 2575,
+    "ci95": [
+     0.8505494505494505,
+     0.8890315964412172
+    ]
+   },
+   "chance_order_protocol": {
+    "agree": 0.14285714285714285,
+    "agreed_admissible": 0.08477115117891816
+   },
+   "reference_absent": {
+    "k": 0,
+    "n": 3011
+   },
+   "out_of_filter_choice": {
+    "k": 1877,
+    "n": 2575,
+    "ci95": [
+     0.6928373634128983,
+     0.7575056261823162
+    ]
+   },
+   "segments_with_rule_fallback": {
+    "help_rule": "admissible help after onset (E3 tools/help_rule.py, imported, one implementation for E3 / E5; main 2026-11-05 from labels red team round 3 #1): a display = a visible support opened inside the segment (not at the window ending at the turn start) and kept by the following windows; help = a display shown at some time at or after the onset whose form is admissible then; designated delivery = the same for the designated supports themselves; latency = max(0, open - onset)",
+    "help_rule_name": "admissible help after onset (visible at or after the onset, opened within the same turn)",
+    "false_alarm": {
+     "k": 63,
+     "n": 86,
+     "ci95": [
+      0.630549590817653,
+      0.8146791543305132
+     ]
+    },
+    "missed_help": {
+     "k": 22,
+     "n": 66,
+     "ci95": [
+      0.2315642905191201,
+      0.45343656209205363
+     ]
+    },
+    "missed_help_v0_row": {
+     "k": 22,
+     "n": 66,
+     "ci95": [
+      0.2315642905191201,
+      0.45343656209205363
+     ]
+    },
+    "offer_precision": {
+     "k": 44,
+     "n": 107,
+     "ci95": [
+      0.3226373072848926,
+      0.5059466883448674
+     ]
+    },
+    "designated_delivery_v0_row": {
+     "k": 38,
+     "n": 66,
+     "ci95": [
+      0.455606531313159,
+      0.6875748993181257
+     ]
+    },
+    "designated_delivery_no_row": {
+     "k": 0,
+     "n": 20,
+     "ci95": [
+      0.0,
+      0.16112516018512965
+     ]
+    },
+    "admissible_visible_no_row": {
+     "k": 16,
+     "n": 20
+    },
+    "help_opened_before_onset": {
+     "segments": 20,
+     "lead_s": [
+      0.0626,
+      0.0795,
+      0.0949,
+      0.1164,
+      0.1247,
+      0.1858,
+      0.3011,
+      0.3391,
+      0.3691,
+      0.3722,
+      0.3905,
+      0.4094,
+      0.4496,
+      0.4695,
+      0.5807,
+      0.7053,
+      0.7058,
+      0.7643,
+      0.7652,
+      0.9357
+     ]
+    },
+    "latency_s": {
+     "n": 44,
+     "median": 0.0
+    },
+    "by_origin": {
+     "camera": {
+      "designated_v0_row": 12,
+      "TP": 10,
+      "FN": 2,
+      "designated_delivery": {
+       "k": 9,
+       "n": 12
+      }
+     },
+     "touch": {
+      "designated_v0_row": 54,
+      "TP": 34,
+      "FN": 20,
+      "designated_delivery": {
+       "k": 29,
+       "n": 54
+      }
+     }
+    },
+    "old_definition": {
+     "rule": "before 2026-11-05: a new visible admissible offer at or after the onset (a support held at the onset not credited)",
+     "TP": 44,
+     "FN": 22,
+     "designated_delivery_v0_row": {
+      "k": 38,
+      "n": 66
+     }
+    },
+    "TP": 44,
+    "FN": 22,
+    "FP": 63,
+    "TN": 23,
+    "other_segments": {
+     "no_user": 56,
+     "allowed_not_designated": 13,
+     "time_stop": 21
+    }
+   },
+   "attribution_with_rule_fallback": {
+    "decision_errors": 1144,
+    "of_windows": 3011,
+    "with_incorrect_observed_tag": 6,
+    "with_correct_observed_tag": 992,
+    "observed_tag_unknown": 146,
+    "reference_missing": 0
+   },
+   "next_window": {
+    "pairs": 2398,
+    "c": 1348,
+    "a_delayed": 2370,
+    "a_same": 2375,
+    "a_delayed_all": {
+     "k": 2770,
+     "n": 2798
+    }
+   }
+  }
+ },
+ "baselines": {
+  "windows": 125,
+  "population": "windows whose sent question offers a support besides none",
+  "always_none": {
+   "k": 125,
+   "n": 125,
+   "ci95": [
+    1.0,
+    1.0
+   ]
+  },
+  "always_candidate": {
+   "k": 91,
+   "n": 125,
+   "ci95": [
+    0.6258543165467626,
+    0.8151389786683902
+   ]
+  },
+  "decline_if_withdrawn": {
+   "k": 95,
+   "n": 125,
+   "ci95": [
+    0.6854838709677419,
+    0.8275976250285452
+   ]
+  },
+  "withdrawn_known": 125,
+  "segments_decline_if_withdrawn": {
+   "help_rule": "admissible help after onset (E3 tools/help_rule.py, imported, one implementation for E3 / E5; main 2026-11-05 from labels red team round 3 #1): a display = a visible support opened inside the segment (not at the window ending at the turn start) and kept by the following windows; help = a display shown at some time at or after the onset whose form is admissible then; designated delivery = the same for the designated supports themselves; latency = max(0, open - onset)",
+   "help_rule_name": "admissible help after onset (visible at or after the onset, opened within the same turn)",
+   "false_alarm": {
+    "k": 7,
+    "n": 86,
+    "ci95": [
+     0.03998643132048015,
+     0.15860182741282047
+    ]
+   },
+   "missed_help": {
+    "k": 23,
+    "n": 66,
+    "ci95": [
+     0.2447587399036189,
+     0.46887839883381194
+    ]
+   },
+   "missed_help_v0_row": {
+    "k": 23,
+    "n": 66,
+    "ci95": [
+     0.2447587399036189,
+     0.46887839883381194
+    ]
+   },
+   "offer_precision": {
+    "k": 43,
+    "n": 50,
+    "ci95": [
+     0.7381380617631021,
+     0.9304916661082956
+    ]
+   },
+   "designated_delivery_v0_row": {
+    "k": 41,
+    "n": 66,
+    "ci95": [
+     0.5005847581944561,
+     0.7285055308155993
+    ]
+   },
+   "designated_delivery_no_row": {
+    "k": 0,
+    "n": 20,
+    "ci95": [
+     0.0,
+     0.16112516018512965
+    ]
+   },
+   "admissible_visible_no_row": {
+    "k": 4,
+    "n": 20
+   },
+   "help_opened_before_onset": {
+    "segments": 2,
+    "lead_s": [
+     1.0,
+     3.0
+    ]
+   },
+   "latency_s": {
+    "n": 43,
+    "median": 3.2348
+   },
+   "by_origin": {
+    "camera": {
+     "designated_v0_row": 12,
+     "TP": 4,
+     "FN": 8,
+     "designated_delivery": {
+      "k": 2,
+      "n": 12
+     }
+    },
+    "touch": {
+     "designated_v0_row": 54,
+     "TP": 39,
+     "FN": 15,
+     "designated_delivery": {
+      "k": 39,
+      "n": 54
+     }
+    }
+   },
+   "old_definition": {
+    "rule": "before 2026-11-05: a new visible admissible offer at or after the onset (a support held at the onset not credited)",
+    "TP": 41,
+    "FN": 25,
+    "designated_delivery_v0_row": {
+     "k": 40,
+     "n": 66
+    }
+   },
+   "TP": 43,
+   "FN": 23,
+   "FP": 7,
+   "TN": 79,
+   "other_segments": {
+    "no_user": 56,
+    "allowed_not_designated": 13,
+    "time_stop": 21
+   }
+  }
+ },
+ "state_estimation": {},
+ "rule_question": {},
+ "forecast": {},
+ "null": {
+  "permutations": 1000,
+  "seed": 0,
+  "actual": {
+   "A selection": 2977,
+   "J selection (answered)": 1431
+  },
+  "session": {
+   "labels_shuffled": {
+    "A selection": {
+     "mean": 2972.57,
+     "min": 2961,
+     "max": 2982
+    },
+    "J selection (answered)": {
+     "mean": 1425.668,
+     "min": 1412,
+     "max": 1436
+    }
+   },
+   "answers_shuffled": {
+    "J selection (answered)": {
+     "mean": 1440.346,
+     "min": 1433,
+     "max": 1448
+    }
+   }
+  },
+  "global": {
+   "labels_shuffled": {
+    "A selection": {
+     "mean": 2923.08,
+     "min": 2910,
+     "max": 2939
+    },
+    "J selection (answered)": {
+     "mean": 1307.687,
+     "min": 1265,
+     "max": 1349
+    }
+   },
+   "answers_shuffled": {
+    "J selection (answered)": {
+     "mean": 1344.597,
+     "min": 1301,
+     "max": 1376
+    }
+   }
+  }
+ },
+ "labels_segments": "C:/Users/samsung-user/claude/Capstone_Design_Project/4_vision/eval_ab_2026-11-04/judgment_labels_v4.csv",
+ "help_rule_module": {
+  "path": "C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\4_vision\\eval_ab_2026-11-04\\tools\\help_rule.py",
+  "labels_for_turn_starts": "C:/Users/samsung-user/claude/Capstone_Design_Project/4_vision/eval_ab_2026-11-04/judgment_labels_v4.csv"
+ },
+ "label_version": "v4",
+ "manifest_id": "real_2026-11-05_3c936ae-v4-219d93fe6d27"
+}

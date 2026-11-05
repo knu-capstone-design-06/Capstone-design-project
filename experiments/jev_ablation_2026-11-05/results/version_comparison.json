@@ -1,0 +1,478 @@
+{
+ "stage1_aligned_b0_r0": {
+  "windows_new": 3892,
+  "windows_compared": 3221,
+  "inputs_differ": 671,
+  "decisions_differ": 6,
+  "candidate_lists_differ": 6,
+  "arms": {
+   "B / state_scores": {
+    "both": 2760,
+    "identical_request": 2359,
+    "request_changed": 401,
+    "answer_changed": 401,
+    "identical_request_other_answer": 78
+   },
+   "B:la_null / state_scores": {
+    "both": 2760,
+    "identical_request": 2752,
+    "identical_request_other_answer": 3,
+    "request_changed": 8,
+    "answer_changed": 8
+   },
+   "B:notouch / state_scores": {
+    "both": 2760,
+    "identical_request": 2359,
+    "request_changed": 401,
+    "answer_changed": 401,
+    "identical_request_other_answer": 78
+   },
+   "B:novision / state_scores": {
+    "both": 2760,
+    "identical_request": 2752,
+    "identical_request_other_answer": 28,
+    "request_changed": 8,
+    "answer_changed": 8
+   },
+   "B:perm_touch / state_scores": {
+    "both": 2760,
+    "identical_request": 2321,
+    "request_changed": 439,
+    "answer_changed": 439,
+    "identical_request_other_answer": 0
+   },
+   "B:perm_vision / state_scores": {
+    "both": 2760,
+    "identical_request": 2349,
+    "identical_request_other_answer": 0,
+    "request_changed": 411,
+    "answer_changed": 411
+   },
+   "B:sit_dict / state_scores": {
+    "both": 2760,
+    "identical_request": 2359,
+    "request_changed": 401,
+    "answer_changed": 401,
+    "identical_request_other_answer": 0
+   },
+   "B:vision_summary / state_scores": {
+    "both": 2760,
+    "identical_request": 2359,
+    "request_changed": 401,
+    "answer_changed": 400,
+    "identical_request_other_answer": 37
+   },
+   "B:wording_nocrit / state_scores": {
+    "both": 2760,
+    "identical_request": 2359,
+    "request_changed": 401,
+    "answer_changed": 401,
+    "identical_request_other_answer": 43
+   },
+   "C / state_scores": {
+    "both": 2760,
+    "identical_request": 2359,
+    "request_changed": 401,
+    "answer_changed": 401,
+    "identical_request_other_answer": 0
+   },
+   "C / support_choice": {
+    "both": 126,
+    "identical_request": 109,
+    "identical_request_other_answer": 0,
+    "only_new": 5,
+    "request_changed": 17,
+    "answer_changed": 0,
+    "only_old": 1
+   },
+   "C0 / support_choice": {
+    "both": 126,
+    "identical_request": 109,
+    "identical_request_other_answer": 0,
+    "only_new": 5,
+    "request_changed": 17,
+    "answer_changed": 0,
+    "only_old": 1
+   },
+   "D / next_difficulty": {
+    "both": 2592,
+    "identical_request": 0,
+    "request_changed": 2592,
+    "answer_changed": 81
+   },
+   "D / state_scores": {
+    "both": 2760,
+    "identical_request": 2359,
+    "request_changed": 401,
+    "answer_changed": 401,
+    "identical_request_other_answer": 0
+   },
+   "E / next_difficulty": {
+    "both": 2592,
+    "identical_request": 0,
+    "request_changed": 2592,
+    "answer_changed": 83
+   },
+   "E / state_scores": {
+    "both": 2760,
+    "identical_request": 2359,
+    "request_changed": 401,
+    "answer_changed": 401,
+    "identical_request_other_answer": 0
+   },
+   "E / support_choice": {
+    "both": 126,
+    "identical_request": 109,
+    "identical_request_other_answer": 0,
+    "only_new": 5,
+    "request_changed": 17,
+    "answer_changed": 0,
+    "only_old": 1
+   }
+  },
+  "commits": [
+   "0114ed10d1f8babce1ce8a54b8a3f1572b1cdf94",
+   "3c936ae6d966dd91682e0a5ebfd6eba46fae03a0"
+  ]
+ },
+ "stage2_1_swap_C_C0": {
+  "windows_new": 3892,
+  "windows_compared": 3892,
+  "inputs_differ": 0,
+  "decisions_differ": 0,
+  "candidate_lists_differ": 0,
+  "arms": {
+   "C / state_scores": {
+    "both": 3344,
+    "identical_request": 2886,
+    "request_changed": 458,
+    "answer_changed": 458,
+    "identical_request_other_answer": 0
+   },
+   "C / support_choice": {
+    "both": 161,
+    "identical_request": 136,
+    "identical_request_other_answer": 0,
+    "request_changed": 25,
+    "answer_changed": 0
+   },
+   "C0 / support_choice": {
+    "both": 161,
+    "identical_request": 136,
+    "identical_request_other_answer": 0,
+    "request_changed": 25,
+    "answer_changed": 0
+   }
+  },
+  "commits": [
+   "0114ed10d1f8babce1ce8a54b8a3f1572b1cdf94",
+   "3c936ae6d966dd91682e0a5ebfd6eba46fae03a0"
+  ]
+ },
+ "stage2_2_C_nohistory": {
+  "windows_new": 3892,
+  "windows_compared": 3892,
+  "inputs_differ": 0,
+  "decisions_differ": 0,
+  "candidate_lists_differ": 0,
+  "arms": {
+   "C / state_scores": {
+    "both": 3344,
+    "identical_request": 2886,
+    "request_changed": 458,
+    "answer_changed": 458,
+    "identical_request_other_answer": 0
+   },
+   "C / support_choice": {
+    "both": 161,
+    "identical_request": 136,
+    "identical_request_other_answer": 0,
+    "request_changed": 25,
+    "answer_changed": 0
+   },
+   "C:nohistory / state_scores": {
+    "both": 3344,
+    "identical_request": 2886,
+    "request_changed": 458,
+    "answer_changed": 458,
+    "identical_request_other_answer": 0
+   },
+   "C:nohistory / support_choice": {
+    "both": 161,
+    "identical_request": 136,
+    "identical_request_other_answer": 0,
+    "request_changed": 25,
+    "answer_changed": 0
+   }
+  },
+  "commits": [
+   "0114ed10d1f8babce1ce8a54b8a3f1572b1cdf94",
+   "3c936ae6d966dd91682e0a5ebfd6eba46fae03a0"
+  ]
+ },
+ "stage2_3_J_b0_r0": {
+  "windows_new": 3892,
+  "windows_compared": 3892,
+  "inputs_differ": 0,
+  "decisions_differ": 0,
+  "candidate_lists_differ": 0,
+  "arms": {
+   "J / support_choice": {
+    "both": 3344,
+    "identical_request": 0,
+    "request_changed": 3344,
+    "answer_changed": 595
+   }
+  },
+  "commits": [
+   "0114ed10d1f8babce1ce8a54b8a3f1572b1cdf94",
+   "3c936ae6d966dd91682e0a5ebfd6eba46fae03a0"
+  ]
+ },
+ "stage2_4a_b0_rA": {
+  "windows_new": 3892,
+  "windows_compared": 3892,
+  "inputs_differ": 0,
+  "decisions_differ": 0,
+  "candidate_lists_differ": 46,
+  "arms": {
+   "B / state_scores": {
+    "both": 3344,
+    "identical_request": 3156,
+    "request_changed": 188,
+    "answer_changed": 188,
+    "identical_request_other_answer": 5
+   },
+   "C / state_scores": {
+    "both": 3344,
+    "identical_request": 3156,
+    "request_changed": 188,
+    "answer_changed": 188,
+    "identical_request_other_answer": 0
+   },
+   "C / support_choice": {
+    "both": 198,
+    "identical_request": 157,
+    "identical_request_other_answer": 0,
+    "request_changed": 41,
+    "answer_changed": 19,
+    "only_old": 46
+   },
+   "C0 / support_choice": {
+    "both": 198,
+    "identical_request": 157,
+    "identical_request_other_answer": 0,
+    "request_changed": 41,
+    "answer_changed": 21,
+    "only_old": 46
+   },
+   "J / support_choice": {
+    "both": 3344,
+    "identical_request": 0,
+    "request_changed": 3344,
+    "answer_changed": 614
+   }
+  },
+  "commits": [
+   "0114ed10d1f8babce1ce8a54b8a3f1572b1cdf94",
+   "3c936ae6d966dd91682e0a5ebfd6eba46fae03a0"
+  ]
+ },
+ "stage2_4b_b2_rA": {
+  "windows_new": 3892,
+  "windows_compared": 3892,
+  "inputs_differ": 0,
+  "decisions_differ": 0,
+  "candidate_lists_differ": 59,
+  "arms": {
+   "B / state_scores": {
+    "both": 3344,
+    "identical_request": 3114,
+    "request_changed": 230,
+    "answer_changed": 230,
+    "identical_request_other_answer": 1
+   },
+   "C / state_scores": {
+    "both": 3344,
+    "identical_request": 3114,
+    "request_changed": 230,
+    "answer_changed": 230,
+    "identical_request_other_answer": 0
+   },
+   "C / support_choice": {
+    "both": 207,
+    "identical_request": 159,
+    "identical_request_other_answer": 0,
+    "request_changed": 48,
+    "answer_changed": 31,
+    "only_old": 59
+   },
+   "C0 / support_choice": {
+    "both": 207,
+    "identical_request": 159,
+    "identical_request_other_answer": 0,
+    "request_changed": 48,
+    "answer_changed": 35,
+    "only_old": 59
+   },
+   "J / support_choice": {
+    "both": 3344,
+    "identical_request": 0,
+    "request_changed": 3344,
+    "answer_changed": 609
+   }
+  },
+  "commits": [
+   "0114ed10d1f8babce1ce8a54b8a3f1572b1cdf94",
+   "3c936ae6d966dd91682e0a5ebfd6eba46fae03a0"
+  ]
+ },
+ "stage2_5_GT_b0_r0": {
+  "windows_new": 3892,
+  "windows_compared": 3892,
+  "inputs_differ": 0,
+  "decisions_differ": 0,
+  "candidate_lists_differ": 42,
+  "arms": {
+   "C / state_scores": {
+    "both": 3344,
+    "identical_request": 3344,
+    "identical_request_other_answer": 12
+   },
+   "C / support_choice": {
+    "both": 210,
+    "identical_request": 170,
+    "identical_request_other_answer": 0,
+    "request_changed": 40,
+    "answer_changed": 29,
+    "only_old": 42
+   }
+  },
+  "commits": [
+   "0114ed10d1f8babce1ce8a54b8a3f1572b1cdf94",
+   "3c936ae6d966dd91682e0a5ebfd6eba46fae03a0"
+  ]
+ },
+ "stage2_6_vision_b0": {
+  "windows_new": 556,
+  "windows_compared": 556,
+  "inputs_differ": 0,
+  "decisions_differ": 0,
+  "candidate_lists_differ": 0,
+  "arms": {
+   "B / state_scores": {
+    "both": 447,
+    "identical_request": 328,
+    "request_changed": 119,
+    "answer_changed": 119,
+    "identical_request_other_answer": 0
+   },
+   "B:vision_summary / state_scores": {
+    "both": 447,
+    "identical_request": 328,
+    "request_changed": 119,
+    "answer_changed": 119,
+    "identical_request_other_answer": 0
+   }
+  },
+  "commits": [
+   "0114ed10d1f8babce1ce8a54b8a3f1572b1cdf94",
+   "3c936ae6d966dd91682e0a5ebfd6eba46fae03a0"
+  ]
+ },
+ "vision_only_round3": {
+  "windows_new": 556,
+  "windows_compared": 556,
+  "inputs_differ": 0,
+  "decisions_differ": 0,
+  "candidate_lists_differ": 0,
+  "arms": {
+   "B / state_scores": {
+    "both": 447,
+    "identical_request": 0,
+    "request_changed": 447,
+    "answer_changed": 447
+   },
+   "B:la_null / state_scores": {
+    "both": 447,
+    "identical_request": 447,
+    "identical_request_other_answer": 1
+   },
+   "B:notouch / state_scores": {
+    "both": 447,
+    "identical_request": 0,
+    "request_changed": 447,
+    "answer_changed": 447
+   },
+   "B:novision / state_scores": {
+    "both": 447,
+    "identical_request": 447,
+    "identical_request_other_answer": 1
+   },
+   "B:perm_touch / state_scores": {
+    "both": 447,
+    "identical_request": 0,
+    "request_changed": 447,
+    "answer_changed": 447
+   },
+   "B:perm_vision / state_scores": {
+    "both": 447,
+    "identical_request": 0,
+    "request_changed": 447,
+    "answer_changed": 447
+   },
+   "B:sit_dict / state_scores": {
+    "both": 447,
+    "identical_request": 0,
+    "request_changed": 447,
+    "answer_changed": 447
+   },
+   "B:vision_summary / state_scores": {
+    "both": 447,
+    "identical_request": 0,
+    "request_changed": 447,
+    "answer_changed": 447
+   },
+   "B:wording_nocrit / state_scores": {
+    "both": 447,
+    "identical_request": 0,
+    "request_changed": 447,
+    "answer_changed": 447
+   },
+   "C / state_scores": {
+    "both": 447,
+    "identical_request": 0,
+    "request_changed": 447,
+    "answer_changed": 447
+   },
+   "D / next_difficulty": {
+    "both": 423,
+    "identical_request": 0,
+    "request_changed": 423,
+    "answer_changed": 0
+   },
+   "D / state_scores": {
+    "both": 447,
+    "identical_request": 0,
+    "request_changed": 447,
+    "answer_changed": 447
+   },
+   "E / next_difficulty": {
+    "both": 423,
+    "identical_request": 0,
+    "request_changed": 423,
+    "answer_changed": 0
+   },
+   "E / state_scores": {
+    "both": 447,
+    "identical_request": 0,
+    "request_changed": 447,
+    "answer_changed": 447
+   }
+  },
+  "commits": [
+   "0114ed10d1f8babce1ce8a54b8a3f1572b1cdf94",
+   "3c936ae6d966dd91682e0a5ebfd6eba46fae03a0"
+  ]
+ }
+}

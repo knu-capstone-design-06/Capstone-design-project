@@ -1,0 +1,1603 @@
+{
+ "run": "C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage3_a2_repeats_B10",
+ "jev": "real",
+ "model": "jev-1.13.0",
+ "order_swap": {
+  "valid": true,
+  "reversed_requests": 0,
+  "reversed_from_cache": 0,
+  "note": null
+ },
+ "jev_numbers": "real",
+ "labels": "C:/Users/samsung-user/claude/Capstone_Design_Project/4_vision/eval_ab_2026-11-04/admissible_v4.csv",
+ "label_mode": "admissible",
+ "label_status": "규정한 허용 행동(stipulated admissible actions) (admissible_v4.csv)",
+ "aligned": {
+  "bundle": "b0_r0",
+  "variant": "fit-medium",
+  "conditions": [
+   "C0",
+   "C1",
+   "C2",
+   "C3",
+   "C4",
+   "C5",
+   "C6"
+  ],
+  "windows_rows": "C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\4_vision\\eval_ab_2026-11-04\\results\\labels_v2\\windows_b0_r0.csv"
+ },
+ "scoring_version": "2026-11-05 Codex 209 (#1 exact no-row delivery, #2 time-mode onset, #3 paired AUROC, #4 window truth, #7 sent-question options)",
+ "rule": {
+  "windows": 3892,
+  "takes": 245,
+  "clips": 35,
+  "sessions": 257,
+  "measurable": 3344,
+  "situation_record": {
+   "unknown": 749,
+   "none": 3143
+  },
+  "transitions": {
+   "none": 2989,
+   "open": 161,
+   "keep": 625,
+   "withdraw": 117
+  },
+  "opened": {
+   "highlight_next_action": 141,
+   "large_button": 20
+  },
+  "rule_question_kinds": {
+   "fit": 134
+  },
+  "rule_question_windows": 134,
+  "expired_by_tick": 0,
+  "candidate_set_sizes": {
+   "0": 3731,
+   "1": 160,
+   "2": 1
+  },
+  "vision_record_match": {
+   "True": 3892
+  },
+  "touch_features": {
+   "absent (contract five not all known)": 3892
+  },
+  "recent_source": {
+   "segment sum (a window without touch)": 820,
+   "segment sum (n windows)": 3072
+  },
+  "expect": {
+   "checked": 0,
+   "failed": []
+  }
+ },
+ "execution": {
+  "B": {
+   "condition": "B",
+   "variant": "base",
+   "JEV_STAGES": "state_scores",
+   "windows": 3892,
+   "eligible": 3344,
+   "attempted": 3344,
+   "skipped": {
+    "not measurable": 548
+   },
+   "would_skip_in_flight": 52,
+   "stages": {
+    "state_scores": {
+     "eligible": 3344,
+     "skipped_build_none": 0,
+     "attempted": 3344,
+     "answered": 3344,
+     "failed": {},
+     "api_calls": 0,
+     "answers_from_cache": 3344,
+     "order_swap_calls": 0,
+     "order_swap_answered": 0,
+     "latency_ms_api": {
+      "n": 0
+     },
+     "latency_ms_api_all": {
+      "n": 0
+     },
+     "request_bytes": {
+      "n": 3344,
+      "mean": 1773.511961722488,
+      "min": 1738,
+      "max": 2373,
+      "p50": 1750.0,
+      "p95": 1808.0
+     },
+     "input_tokens": {
+      "sum": 0,
+      "n": 0
+     },
+     "output_tokens": {
+      "sum": 0,
+      "n": 0
+     },
+     "response_models": {
+      "jev-1.13.0": 3344
+     }
+    }
+   },
+   "api_calls": 0,
+   "answers_from_cache": 3344,
+   "calls_per_attempted_window": 0.0,
+   "chain_latency_ms": {
+    "n": 0
+   }
+  }
+ },
+ "latency_method": "wall clock (time.perf_counter) around the client call of each API request; answers from the identical-request cache are excluded; machine and network of the run",
+ "answers": {
+  "B": {
+   "state_scores": {
+    "noul": {
+     "hesitation": {
+      "n": 3344,
+      "mean": 0.42793660287081337,
+      "min": 0.11,
+      "max": 0.81,
+      "p50": 0.35,
+      "p95": 0.74
+     },
+     "navigation_difficulty": {
+      "n": 3344,
+      "mean": 0.21198863636363635,
+      "min": 0.04,
+      "max": 0.64,
+      "p50": 0.19,
+      "p95": 0.39
+     },
+     "normal": {
+      "n": 3344,
+      "mean": 0.5202721291866028,
+      "min": 0.08,
+      "max": 0.89,
+      "p50": 0.53,
+      "p95": 0.85
+     },
+     "proposal_fits": {
+      "n": 134,
+      "mean": 0.45932835820895523,
+      "min": 0.13,
+      "max": 0.78,
+      "p50": 0.66,
+      "p95": 0.78
+     },
+     "touch_difficulty": {
+      "n": 3344,
+      "mean": 0.1995215311004785,
+      "min": 0.05,
+      "max": 0.77,
+      "p50": 0.12,
+      "p95": 0.66
+     },
+     "visual_difficulty": {
+      "n": 3344,
+      "mean": 0.14005382775119618,
+      "min": 0.06,
+      "max": 0.47,
+      "p50": 0.12,
+      "p95": 0.29
+     }
+    },
+    "choice": {}
+   }
+  }
+ },
+ "paired": {},
+ "repeats": {
+  "calls_per_request": 5,
+  "by_arm_stage": {
+   "B / state_scores": {
+    "requests": 209,
+    "all_answered": 209,
+    "probability_range": {
+     "touch_difficulty": {
+      "n": 209,
+      "mean": 0.015645933014354067,
+      "min": 0.0,
+      "max": 0.06,
+      "p50": 0.010000000000000009,
+      "p95": 0.03999999999999998
+     },
+     "navigation_difficulty": {
+      "n": 209,
+      "mean": 0.02229665071770335,
+      "min": 0.0,
+      "max": 0.07,
+      "p50": 0.01999999999999999,
+      "p95": 0.04999999999999999
+     },
+     "visual_difficulty": {
+      "n": 209,
+      "mean": 0.012966507177033492,
+      "min": 0.0,
+      "max": 0.07,
+      "p50": 0.010000000000000009,
+      "p95": 0.03999999999999998
+     },
+     "hesitation": {
+      "n": 209,
+      "mean": 0.03186602870813397,
+      "min": 0.0,
+      "max": 0.10000000000000003,
+      "p50": 0.030000000000000027,
+      "p95": 0.06000000000000005
+     },
+     "normal": {
+      "n": 209,
+      "mean": 0.0360287081339713,
+      "min": 0.0,
+      "max": 0.16000000000000003,
+      "p50": 0.030000000000000027,
+      "p95": 0.08000000000000004
+     },
+     "proposal_fits": {
+      "n": 11,
+      "mean": 0.028181818181818186,
+      "min": 0.010000000000000009,
+      "max": 0.06999999999999995,
+      "p50": 0.03,
+      "p95": 0.04999999999999999
+     }
+    },
+    "probability_sd": {
+     "touch_difficulty": {
+      "n": 209,
+      "mean": 0.006163624764109228,
+      "min": 0.0,
+      "max": 0.020976176963403023,
+      "p50": 0.004898979485566361,
+      "p95": 0.014696938456699058
+     },
+     "navigation_difficulty": {
+      "n": 209,
+      "mean": 0.00847682712178241,
+      "min": 0.0,
+      "max": 0.026532998322843195,
+      "p50": 0.007483314773547889,
+      "p95": 0.01720465053408525
+     },
+     "visual_difficulty": {
+      "n": 209,
+      "mean": 0.005205435612479292,
+      "min": 0.0,
+      "max": 0.02315167380558045,
+      "p50": 0.004898979485566354,
+      "p95": 0.014142135623730952
+     },
+     "hesitation": {
+      "n": 209,
+      "mean": 0.011648353740172217,
+      "min": 0.0,
+      "max": 0.03310589071449371,
+      "p50": 0.01019803902718558,
+      "p95": 0.02253594714925376
+     },
+     "normal": {
+      "n": 209,
+      "mean": 0.013293819036293028,
+      "min": 0.0,
+      "max": 0.05153639490690051,
+      "p50": 0.011661903789690611,
+      "p95": 0.029662946527177155
+     },
+     "proposal_fits": {
+      "n": 11,
+      "mean": 0.010633420274474935,
+      "min": 0.004898979485566361,
+      "max": 0.023664319132398456,
+      "p50": 0.009797958971132722,
+      "p95": 0.0186144895493245
+     }
+    },
+    "choice": {}
+   }
+  }
+ },
+ "label_windows": {
+  "labelled": 3892,
+  "unlabelled": 0,
+  "levels": {
+   "action": 3892
+  },
+  "match": {
+   "segment_id": 3892
+  },
+  "segment_classes": {
+   "no_user": 105,
+   "wait_only": 1087,
+   "designated": 1193,
+   "allowed_not_designated": 224,
+   "contradictory": 881,
+   "time_stop": 402
+  },
+  "sessions": 257,
+  "sessions_with_more_than_one_label_row": 56,
+  "state_proxy_defined": 1543,
+  "state_proxy_by_states": {
+   "normal": 580,
+   "touch_difficulty": 309,
+   "hesitation,navigation_difficulty": 357,
+   "hesitation,navigation_difficulty,touch_difficulty": 24,
+   "visual_difficulty": 195,
+   "touch_difficulty,visual_difficulty": 39,
+   "hesitation,navigation_difficulty,visual_difficulty": 39
+  },
+  "tag_vs_truth": {
+   "none | none": 3633,
+   "none | looking_around": 70,
+   "none | consulting_companion": 126,
+   "none | looking_back_with_people_behind": 63
+  },
+  "truth_basis": "window truth: the segment's truth tag when a GT behaviour second lies in (t - window_s, t], else none (E3 run_eval.py window_truth)",
+  "singleton_none_windows": 0
+ },
+ "coverage": {
+  "allowed_action_absent": {
+   "all": {
+    "k": 0,
+    "n": 3892
+   },
+   "with_candidates": {
+    "k": 0,
+    "n": 161
+   }
+  },
+  "designated_support_absent": {
+   "k": 1079,
+   "n": 1168
+  },
+  "designated_outside_rule_table": {
+   "k": 0,
+   "n": 3892
+  },
+  "designated_outside_examples": []
+ },
+ "scored_population": {
+  "windows": 3011,
+  "excluded_windows": 881,
+  "rule": "labelled windows outside excluded and contradictory segments; the same set for selection, state estimation, rule question, forecast and the null controls"
+ },
+ "selection": {
+  "windows_scored": 3011,
+  "singleton_none_windows": 0,
+  "A": {
+   "allowed": {
+    "all": {
+     "k": 2977,
+     "n": 3011,
+     "ci95": [
+      0.9848162635290787,
+      0.9923723076497977
+     ]
+    },
+    "with_candidates": {
+     "k": 91,
+     "n": 125,
+     "ci95": [
+      0.6258543165467626,
+      0.8151389786683902
+     ]
+    }
+   },
+   "chance_allowed": {
+    "all": 0.9942986826082144,
+    "with_candidates": 0.8626666666666666
+   },
+   "designated": {
+    "k": 82,
+    "n": 1064,
+    "ci95": [
+     0.05835096809812403,
+     0.10673256530749423
+    ]
+   },
+   "chance_designated": 0.03853383458646616,
+   "selected": {
+    "none": 2886,
+    "highlight_next_action": 108,
+    "large_button": 17
+   },
+   "segments": {
+    "help_rule": "admissible help after onset (E3 tools/help_rule.py, imported, one implementation for E3 / E5; main 2026-11-05 from labels red team round 3 #1): a display = a visible support opened inside the segment (not at the window ending at the turn start) and kept by the following windows; help = a display shown at some time at or after the onset whose form is admissible then; designated delivery = the same for the designated supports themselves; latency = max(0, open - onset)",
+    "help_rule_name": "admissible help after onset (visible at or after the onset, opened within the same turn)",
+    "false_alarm": {
+     "k": 7,
+     "n": 86,
+     "ci95": [
+      0.03998643132048015,
+      0.15860182741282047
+     ]
+    },
+    "missed_help": {
+     "k": 22,
+     "n": 66,
+     "ci95": [
+      0.2315642905191201,
+      0.45343656209205363
+     ]
+    },
+    "missed_help_v0_row": {
+     "k": 22,
+     "n": 66,
+     "ci95": [
+      0.2315642905191201,
+      0.45343656209205363
+     ]
+    },
+    "offer_precision": {
+     "k": 44,
+     "n": 51,
+     "ci95": [
+      0.7427830763077481,
+      0.9318889830203283
+     ]
+    },
+    "designated_delivery_v0_row": {
+     "k": 42,
+     "n": 66,
+     "ci95": [
+      0.5157964053493254,
+      0.7419301697869869
+     ]
+    },
+    "designated_delivery_no_row": {
+     "k": 0,
+     "n": 20,
+     "ci95": [
+      0.0,
+      0.16112516018512965
+     ]
+    },
+    "admissible_visible_no_row": {
+     "k": 4,
+     "n": 20
+    },
+    "help_opened_before_onset": {
+     "segments": 2,
+     "lead_s": [
+      1.0,
+      3.0
+     ]
+    },
+    "latency_s": {
+     "n": 44,
+     "median": 3.1174
+    },
+    "by_origin": {
+     "camera": {
+      "designated_v0_row": 12,
+      "TP": 4,
+      "FN": 8,
+      "designated_delivery": {
+       "k": 2,
+       "n": 12
+      }
+     },
+     "touch": {
+      "designated_v0_row": 54,
+      "TP": 40,
+      "FN": 14,
+      "designated_delivery": {
+       "k": 40,
+       "n": 54
+      }
+     }
+    },
+    "old_definition": {
+     "rule": "before 2026-11-05: a new visible admissible offer at or after the onset (a support held at the onset not credited)",
+     "TP": 42,
+     "FN": 24,
+     "designated_delivery_v0_row": {
+      "k": 41,
+      "n": 66
+     }
+    },
+    "TP": 44,
+    "FN": 22,
+    "FP": 7,
+    "TN": 79,
+    "other_segments": {
+     "no_user": 56,
+     "allowed_not_designated": 13,
+     "time_stop": 21
+    }
+   },
+   "attribution": {
+    "decision_errors": 34,
+    "of_windows": 3011,
+    "with_incorrect_observed_tag": 0,
+    "with_correct_observed_tag": 19,
+    "observed_tag_unknown": 15,
+    "reference_missing": 0
+   }
+  }
+ },
+ "baselines": {
+  "windows": 125,
+  "population": "windows whose sent question offers a support besides none",
+  "always_none": {
+   "k": 125,
+   "n": 125,
+   "ci95": [
+    1.0,
+    1.0
+   ]
+  },
+  "always_candidate": {
+   "k": 91,
+   "n": 125,
+   "ci95": [
+    0.6258543165467626,
+    0.8151389786683902
+   ]
+  },
+  "decline_if_withdrawn": {
+   "k": 95,
+   "n": 125,
+   "ci95": [
+    0.6854838709677419,
+    0.8275976250285452
+   ]
+  },
+  "withdrawn_known": 125,
+  "segments_decline_if_withdrawn": {
+   "help_rule": "admissible help after onset (E3 tools/help_rule.py, imported, one implementation for E3 / E5; main 2026-11-05 from labels red team round 3 #1): a display = a visible support opened inside the segment (not at the window ending at the turn start) and kept by the following windows; help = a display shown at some time at or after the onset whose form is admissible then; designated delivery = the same for the designated supports themselves; latency = max(0, open - onset)",
+   "help_rule_name": "admissible help after onset (visible at or after the onset, opened within the same turn)",
+   "false_alarm": {
+    "k": 7,
+    "n": 86,
+    "ci95": [
+     0.03998643132048015,
+     0.15860182741282047
+    ]
+   },
+   "missed_help": {
+    "k": 23,
+    "n": 66,
+    "ci95": [
+     0.2447587399036189,
+     0.46887839883381194
+    ]
+   },
+   "missed_help_v0_row": {
+    "k": 23,
+    "n": 66,
+    "ci95": [
+     0.2447587399036189,
+     0.46887839883381194
+    ]
+   },
+   "offer_precision": {
+    "k": 43,
+    "n": 50,
+    "ci95": [
+     0.7381380617631021,
+     0.9304916661082956
+    ]
+   },
+   "designated_delivery_v0_row": {
+    "k": 41,
+    "n": 66,
+    "ci95": [
+     0.5005847581944561,
+     0.7285055308155993
+    ]
+   },
+   "designated_delivery_no_row": {
+    "k": 0,
+    "n": 20,
+    "ci95": [
+     0.0,
+     0.16112516018512965
+    ]
+   },
+   "admissible_visible_no_row": {
+    "k": 4,
+    "n": 20
+   },
+   "help_opened_before_onset": {
+    "segments": 2,
+    "lead_s": [
+     1.0,
+     3.0
+    ]
+   },
+   "latency_s": {
+    "n": 43,
+    "median": 3.2348
+   },
+   "by_origin": {
+    "camera": {
+     "designated_v0_row": 12,
+     "TP": 4,
+     "FN": 8,
+     "designated_delivery": {
+      "k": 2,
+      "n": 12
+     }
+    },
+    "touch": {
+     "designated_v0_row": 54,
+     "TP": 39,
+     "FN": 15,
+     "designated_delivery": {
+      "k": 39,
+      "n": 54
+     }
+    }
+   },
+   "old_definition": {
+    "rule": "before 2026-11-05: a new visible admissible offer at or after the onset (a support held at the onset not credited)",
+    "TP": 41,
+    "FN": 25,
+    "designated_delivery_v0_row": {
+     "k": 40,
+     "n": 66
+    }
+   },
+   "TP": 43,
+   "FN": 23,
+   "FP": 7,
+   "TN": 79,
+   "other_segments": {
+    "no_user": 56,
+    "allowed_not_designated": 13,
+    "time_stop": 21
+   }
+  }
+ },
+ "state_estimation": {
+  "B": {
+   "normal": {
+    "n": 1287,
+    "positives": 507,
+    "brier": 0.23284281274281274,
+    "ece": 0.1737140637140637,
+    "bins": 10,
+    "auroc": 0.6937541091387245,
+    "table": [
+     {
+      "bin": [
+       0.0,
+       0.1
+      ],
+      "n": 0,
+      "positives": 0,
+      "mean_p": null,
+      "observed": null
+     },
+     {
+      "bin": [
+       0.1,
+       0.2
+      ],
+      "n": 81,
+      "positives": 0,
+      "mean_p": 0.16296296296296295,
+      "observed": 0.0
+     },
+     {
+      "bin": [
+       0.2,
+       0.3
+      ],
+      "n": 159,
+      "positives": 5,
+      "mean_p": 0.2467295597484277,
+      "observed": 0.031446540880503145
+     },
+     {
+      "bin": [
+       0.3,
+       0.4
+      ],
+      "n": 145,
+      "positives": 49,
+      "mean_p": 0.34386206896551724,
+      "observed": 0.33793103448275863
+     },
+     {
+      "bin": [
+       0.4,
+       0.5
+      ],
+      "n": 231,
+      "positives": 130,
+      "mean_p": 0.4441991341991342,
+      "observed": 0.5627705627705628
+     },
+     {
+      "bin": [
+       0.5,
+       0.6
+      ],
+      "n": 125,
+      "positives": 32,
+      "mean_p": 0.5571200000000001,
+      "observed": 0.256
+     },
+     {
+      "bin": [
+       0.6,
+       0.7
+      ],
+      "n": 185,
+      "positives": 102,
+      "mean_p": 0.6257837837837837,
+      "observed": 0.5513513513513514
+     },
+     {
+      "bin": [
+       0.7,
+       0.8
+      ],
+      "n": 171,
+      "positives": 48,
+      "mean_p": 0.743391812865497,
+      "observed": 0.2807017543859649
+     },
+     {
+      "bin": [
+       0.8,
+       0.9
+      ],
+      "n": 190,
+      "positives": 141,
+      "mean_p": 0.8334736842105263,
+      "observed": 0.7421052631578947
+     },
+     {
+      "bin": [
+       0.9,
+       1.0
+      ],
+      "n": 0,
+      "positives": 0,
+      "mean_p": null,
+      "observed": null
+     }
+    ],
+    "brier_base_rate": 0.23875114784205692,
+    "brier_skill": 0.024746834319526623,
+    "raw_feature_auroc": {
+     "misses_recent": {
+      "n": 850,
+      "auroc": 0.27586206896551724,
+      "positives": 270,
+      "jev_auroc_same_windows": 0.8212579821200511
+     },
+     "backs_recent": {
+      "n": 850,
+      "auroc": 0.3086206896551724,
+      "positives": 270,
+      "jev_auroc_same_windows": 0.8212579821200511
+     },
+     "fixes_recent": {
+      "n": 850,
+      "auroc": 0.3163793103448276,
+      "positives": 270,
+      "jev_auroc_same_windows": 0.8212579821200511
+     },
+     "condition_C2": {
+      "n": 1287,
+      "auroc": 0.2851084812623274,
+      "positives": 507,
+      "jev_auroc_same_windows": 0.6937541091387245
+     }
+    }
+   },
+   "touch_difficulty": {
+    "n": 1287,
+    "positives": 346,
+    "brier": 0.12621212121212122,
+    "ece": 0.09344211344211346,
+    "bins": 10,
+    "auroc": 0.8602442979735001,
+    "table": [
+     {
+      "bin": [
+       0.0,
+       0.1
+      ],
+      "n": 340,
+      "positives": 15,
+      "mean_p": 0.08358823529411764,
+      "observed": 0.04411764705882353
+     },
+     {
+      "bin": [
+       0.1,
+       0.2
+      ],
+      "n": 687,
+      "positives": 92,
+      "mean_p": 0.1276419213973799,
+      "observed": 0.1339155749636099
+     },
+     {
+      "bin": [
+       0.2,
+       0.3
+      ],
+      "n": 0,
+      "positives": 0,
+      "mean_p": null,
+      "observed": null
+     },
+     {
+      "bin": [
+       0.3,
+       0.4
+      ],
+      "n": 53,
+      "positives": 51,
+      "mean_p": 0.37660377358490565,
+      "observed": 0.9622641509433962
+     },
+     {
+      "bin": [
+       0.4,
+       0.5
+      ],
+      "n": 85,
+      "positives": 84,
+      "mean_p": 0.4328235294117647,
+      "observed": 0.9882352941176471
+     },
+     {
+      "bin": [
+       0.5,
+       0.6
+      ],
+      "n": 19,
+      "positives": 17,
+      "mean_p": 0.5678947368421052,
+      "observed": 0.8947368421052632
+     },
+     {
+      "bin": [
+       0.6,
+       0.7
+      ],
+      "n": 80,
+      "positives": 64,
+      "mean_p": 0.6561250000000001,
+      "observed": 0.8
+     },
+     {
+      "bin": [
+       0.7,
+       0.8
+      ],
+      "n": 23,
+      "positives": 23,
+      "mean_p": 0.714782608695652,
+      "observed": 1.0
+     },
+     {
+      "bin": [
+       0.8,
+       0.9
+      ],
+      "n": 0,
+      "positives": 0,
+      "mean_p": null,
+      "observed": null
+     },
+     {
+      "bin": [
+       0.9,
+       1.0
+      ],
+      "n": 0,
+      "positives": 0,
+      "mean_p": null,
+      "observed": null
+     }
+    ],
+    "brier_base_rate": 0.19656610332601007,
+    "brier_skill": 0.35791512841461237,
+    "raw_feature_auroc": {
+     "misses_recent": {
+      "n": 850,
+      "auroc": 0.9458496274375099,
+      "positives": 254,
+      "jev_auroc_same_windows": 0.937420731385087
+     },
+     "backs_recent": {
+      "n": 850,
+      "auroc": 0.313758389261745,
+      "positives": 254,
+      "jev_auroc_same_windows": 0.937420731385087
+     },
+     "fixes_recent": {
+      "n": 850,
+      "auroc": 0.9192913385826772,
+      "positives": 254,
+      "jev_auroc_same_windows": 0.937420731385087
+     },
+     "condition_C2": {
+      "n": 1287,
+      "auroc": 0.9962805526036131,
+      "positives": 346,
+      "jev_auroc_same_windows": 0.8602442979735001
+     }
+    }
+   },
+   "navigation_difficulty": {
+    "n": 1287,
+    "positives": 295,
+    "brier": 0.1415950271950272,
+    "ece": 0.09731157731157732,
+    "bins": 10,
+    "auroc": 0.7929350054674685,
+    "table": [
+     {
+      "bin": [
+       0.0,
+       0.1
+      ],
+      "n": 27,
+      "positives": 2,
+      "mean_p": 0.0737037037037037,
+      "observed": 0.07407407407407407
+     },
+     {
+      "bin": [
+       0.1,
+       0.2
+      ],
+      "n": 765,
+      "positives": 63,
+      "mean_p": 0.15094117647058825,
+      "observed": 0.08235294117647059
+     },
+     {
+      "bin": [
+       0.2,
+       0.3
+      ],
+      "n": 223,
+      "positives": 67,
+      "mean_p": 0.24300448430493274,
+      "observed": 0.3004484304932735
+     },
+     {
+      "bin": [
+       0.3,
+       0.4
+      ],
+      "n": 204,
+      "positives": 101,
+      "mean_p": 0.3426470588235294,
+      "observed": 0.4950980392156863
+     },
+     {
+      "bin": [
+       0.4,
+       0.5
+      ],
+      "n": 36,
+      "positives": 30,
+      "mean_p": 0.4361111111111111,
+      "observed": 0.8333333333333334
+     },
+     {
+      "bin": [
+       0.5,
+       0.6
+      ],
+      "n": 28,
+      "positives": 28,
+      "mean_p": 0.5353571428571429,
+      "observed": 1.0
+     },
+     {
+      "bin": [
+       0.6,
+       0.7
+      ],
+      "n": 4,
+      "positives": 4,
+      "mean_p": 0.615,
+      "observed": 1.0
+     },
+     {
+      "bin": [
+       0.7,
+       0.8
+      ],
+      "n": 0,
+      "positives": 0,
+      "mean_p": null,
+      "observed": null
+     },
+     {
+      "bin": [
+       0.8,
+       0.9
+      ],
+      "n": 0,
+      "positives": 0,
+      "mean_p": null,
+      "observed": null
+     },
+     {
+      "bin": [
+       0.9,
+       1.0
+      ],
+      "n": 0,
+      "positives": 0,
+      "mean_p": null,
+      "observed": null
+     }
+    ],
+    "brier_base_rate": 0.17667560791103915,
+    "brier_skill": 0.19855927556041553,
+    "raw_feature_auroc": {
+     "misses_recent": {
+      "n": 850,
+      "auroc": 0.28297161936560933,
+      "positives": 251,
+      "jev_auroc_same_windows": 0.8467199648817085
+     },
+     "backs_recent": {
+      "n": 850,
+      "auroc": 0.9422310756972112,
+      "positives": 251,
+      "jev_auroc_same_windows": 0.8467199648817085
+     },
+     "fixes_recent": {
+      "n": 850,
+      "auroc": 0.32220367278797996,
+      "positives": 251,
+      "jev_auroc_same_windows": 0.8467199648817085
+     },
+     "condition_C2": {
+      "n": 1287,
+      "auroc": 0.3220766129032258,
+      "positives": 295,
+      "jev_auroc_same_windows": 0.7929350054674685
+     }
+    }
+   },
+   "visual_difficulty": {
+    "n": 1287,
+    "positives": 213,
+    "brier": 0.13696177156177156,
+    "ece": 0.03989121989121989,
+    "bins": 10,
+    "auroc": 0.5808831886414701,
+    "table": [
+     {
+      "bin": [
+       0.0,
+       0.1
+      ],
+      "n": 268,
+      "positives": 35,
+      "mean_p": 0.0875,
+      "observed": 0.13059701492537312
+     },
+     {
+      "bin": [
+       0.1,
+       0.2
+      ],
+      "n": 865,
+      "positives": 138,
+      "mean_p": 0.1244393063583815,
+      "observed": 0.15953757225433526
+     },
+     {
+      "bin": [
+       0.2,
+       0.3
+      ],
+      "n": 113,
+      "positives": 23,
+      "mean_p": 0.24486725663716816,
+      "observed": 0.20353982300884957
+     },
+     {
+      "bin": [
+       0.3,
+       0.4
+      ],
+      "n": 39,
+      "positives": 17,
+      "mean_p": 0.33461538461538465,
+      "observed": 0.4358974358974359
+     },
+     {
+      "bin": [
+       0.4,
+       0.5
+      ],
+      "n": 2,
+      "positives": 0,
+      "mean_p": 0.405,
+      "observed": 0.0
+     },
+     {
+      "bin": [
+       0.5,
+       0.6
+      ],
+      "n": 0,
+      "positives": 0,
+      "mean_p": null,
+      "observed": null
+     },
+     {
+      "bin": [
+       0.6,
+       0.7
+      ],
+      "n": 0,
+      "positives": 0,
+      "mean_p": null,
+      "observed": null
+     },
+     {
+      "bin": [
+       0.7,
+       0.8
+      ],
+      "n": 0,
+      "positives": 0,
+      "mean_p": null,
+      "observed": null
+     },
+     {
+      "bin": [
+       0.8,
+       0.9
+      ],
+      "n": 0,
+      "positives": 0,
+      "mean_p": null,
+      "observed": null
+     },
+     {
+      "bin": [
+       0.9,
+       1.0
+      ],
+      "n": 0,
+      "positives": 0,
+      "mean_p": null,
+      "observed": null
+     }
+    ],
+    "brier_base_rate": 0.13811052971892132,
+    "brier_skill": 0.008317672515540164,
+    "raw_feature_auroc": {
+     "misses_recent": {
+      "n": 850,
+      "auroc": 0.5570348830877468,
+      "positives": 127,
+      "jev_auroc_same_windows": 0.5893967610895111
+     },
+     "backs_recent": {
+      "n": 850,
+      "auroc": 0.4638426939371168,
+      "positives": 127,
+      "jev_auroc_same_windows": 0.5893967610895111
+     },
+     "fixes_recent": {
+      "n": 850,
+      "auroc": 0.47654675945589786,
+      "positives": 127,
+      "jev_auroc_same_windows": 0.5893967610895111
+     },
+     "condition_C2": {
+      "n": 1287,
+      "auroc": 0.4453668004301414,
+      "positives": 213,
+      "jev_auroc_same_windows": 0.5808831886414701
+     }
+    }
+   },
+   "hesitation": {
+    "n": 1287,
+    "positives": 295,
+    "brier": 0.19422517482517485,
+    "ece": 0.195011655011655,
+    "bins": 10,
+    "auroc": 0.7607504100601421,
+    "table": [
+     {
+      "bin": [
+       0.0,
+       0.1
+      ],
+      "n": 0,
+      "positives": 0,
+      "mean_p": null,
+      "observed": null
+     },
+     {
+      "bin": [
+       0.1,
+       0.2
+      ],
+      "n": 8,
+      "positives": 0,
+      "mean_p": 0.14875,
+      "observed": 0.0
+     },
+     {
+      "bin": [
+       0.2,
+       0.3
+      ],
+      "n": 280,
+      "positives": 6,
+      "mean_p": 0.2581785714285714,
+      "observed": 0.02142857142857143
+     },
+     {
+      "bin": [
+       0.3,
+       0.4
+      ],
+      "n": 473,
+      "positives": 58,
+      "mean_p": 0.3419873150105708,
+      "observed": 0.1226215644820296
+     },
+     {
+      "bin": [
+       0.4,
+       0.5
+      ],
+      "n": 158,
+      "positives": 69,
+      "mean_p": 0.4506329113924051,
+      "observed": 0.43670886075949367
+     },
+     {
+      "bin": [
+       0.5,
+       0.6
+      ],
+      "n": 92,
+      "positives": 38,
+      "mean_p": 0.555,
+      "observed": 0.41304347826086957
+     },
+     {
+      "bin": [
+       0.6,
+       0.7
+      ],
+      "n": 164,
+      "positives": 104,
+      "mean_p": 0.6404878048780488,
+      "observed": 0.6341463414634146
+     },
+     {
+      "bin": [
+       0.7,
+       0.8
+      ],
+      "n": 108,
+      "positives": 19,
+      "mean_p": 0.7427777777777778,
+      "observed": 0.17592592592592593
+     },
+     {
+      "bin": [
+       0.8,
+       0.9
+      ],
+      "n": 4,
+      "positives": 1,
+      "mean_p": 0.805,
+      "observed": 0.25
+     },
+     {
+      "bin": [
+       0.9,
+       1.0
+      ],
+      "n": 0,
+      "positives": 0,
+      "mean_p": null,
+      "observed": null
+     }
+    ],
+    "brier_base_rate": 0.17667560791103915,
+    "brier_skill": -0.09933214393111012,
+    "raw_feature_auroc": {
+     "misses_recent": {
+      "n": 850,
+      "auroc": 0.28297161936560933,
+      "positives": 251,
+      "jev_auroc_same_windows": 0.7349300627207365
+     },
+     "backs_recent": {
+      "n": 850,
+      "auroc": 0.9422310756972112,
+      "positives": 251,
+      "jev_auroc_same_windows": 0.7349300627207365
+     },
+     "fixes_recent": {
+      "n": 850,
+      "auroc": 0.32220367278797996,
+      "positives": 251,
+      "jev_auroc_same_windows": 0.7349300627207365
+     },
+     "condition_C2": {
+      "n": 1287,
+      "auroc": 0.3220766129032258,
+      "positives": 295,
+      "jev_auroc_same_windows": 0.7607504100601421
+     }
+    }
+   }
+  }
+ },
+ "rule_question": {
+  "B": {
+   "n": 102,
+   "positives": 83,
+   "brier": 0.39185588235294116,
+   "ece": 0.42107843137254897,
+   "bins": 10,
+   "auroc": 0.40266328471781865,
+   "table": [
+    {
+     "bin": [
+      0.0,
+      0.1
+     ],
+     "n": 0,
+     "positives": 0,
+     "mean_p": null,
+     "observed": null
+    },
+    {
+     "bin": [
+      0.1,
+      0.2
+     ],
+     "n": 45,
+     "positives": 41,
+     "mean_p": 0.16177777777777777,
+     "observed": 0.9111111111111111
+    },
+    {
+     "bin": [
+      0.2,
+      0.3
+     ],
+     "n": 0,
+     "positives": 0,
+     "mean_p": null,
+     "observed": null
+    },
+    {
+     "bin": [
+      0.3,
+      0.4
+     ],
+     "n": 0,
+     "positives": 0,
+     "mean_p": null,
+     "observed": null
+    },
+    {
+     "bin": [
+      0.4,
+      0.5
+     ],
+     "n": 0,
+     "positives": 0,
+     "mean_p": null,
+     "observed": null
+    },
+    {
+     "bin": [
+      0.5,
+      0.6
+     ],
+     "n": 0,
+     "positives": 0,
+     "mean_p": null,
+     "observed": null
+    },
+    {
+     "bin": [
+      0.6,
+      0.7
+     ],
+     "n": 18,
+     "positives": 17,
+     "mean_p": 0.6644444444444445,
+     "observed": 0.9444444444444444
+    },
+    {
+     "bin": [
+      0.7,
+      0.8
+     ],
+     "n": 39,
+     "positives": 25,
+     "mean_p": 0.7484615384615385,
+     "observed": 0.6410256410256411
+    },
+    {
+     "bin": [
+      0.8,
+      0.9
+     ],
+     "n": 0,
+     "positives": 0,
+     "mean_p": null,
+     "observed": null
+    },
+    {
+     "bin": [
+      0.9,
+      1.0
+     ],
+     "n": 0,
+     "positives": 0,
+     "mean_p": null,
+     "observed": null
+    }
+   ]
+  }
+ },
+ "forecast": {},
+ "null": {
+  "permutations": 1000,
+  "seed": 0,
+  "actual": {
+   "A selection": 2977,
+   "B normal Brier": 0.23284281274281274,
+   "B touch_difficulty Brier": 0.12621212121212122,
+   "B navigation_difficulty Brier": 0.1415950271950272,
+   "B visual_difficulty Brier": 0.13696177156177156,
+   "B hesitation Brier": 0.19422517482517485
+  },
+  "session": {
+   "labels_shuffled": {
+    "A selection": {
+     "mean": 2972.389,
+     "min": 2962,
+     "max": 2982
+    },
+    "B normal Brier": {
+     "mean": 0.24025846153846156,
+     "min": 0.2359197358197358,
+     "max": 0.24426472416472417
+    },
+    "B touch_difficulty Brier": {
+     "mean": 0.12862001554001554,
+     "min": 0.12644522144522147,
+     "max": 0.13092074592074593
+    },
+    "B navigation_difficulty Brier": {
+     "mean": 0.14702436674436675,
+     "min": 0.14457871017871018,
+     "max": 0.14972245532245532
+    },
+    "B visual_difficulty Brier": {
+     "mean": 0.13696177156177153,
+     "min": 0.13696177156177156,
+     "max": 0.13696177156177156
+    },
+    "B hesitation Brier": {
+     "mean": 0.2012827195027195,
+     "min": 0.19832773892773894,
+     "max": 0.20435726495726494
+    }
+   },
+   "answers_shuffled": {
+    "B normal Brier": {
+     "mean": 0.24340262090132092,
+     "min": 0.23876993006993005,
+     "max": 0.24782773892773893
+    },
+    "B touch_difficulty Brier": {
+     "mean": 0.12913818127428126,
+     "min": 0.1264114219114219,
+     "max": 0.13157630147630148
+    },
+    "B navigation_difficulty Brier": {
+     "mean": 0.15234349386169388,
+     "min": 0.1489964257964258,
+     "max": 0.15639370629370627
+    },
+    "B visual_difficulty Brier": {
+     "mean": 0.13698219728049726,
+     "min": 0.13683954933954934,
+     "max": 0.1371112665112665
+    },
+    "B hesitation Brier": {
+     "mean": 0.20545988795648795,
+     "min": 0.20195011655011658,
+     "max": 0.20964048174048175
+    }
+   }
+  },
+  "global": {
+   "labels_shuffled": {
+    "A selection": {
+     "mean": 2923.115,
+     "min": 2909,
+     "max": 2940
+    },
+    "B normal Brier": {
+     "mean": 0.3003933333333333,
+     "min": 0.28137428127428127,
+     "max": 0.32198034188034186
+    },
+    "B touch_difficulty Brier": {
+     "mean": 0.2162013209013209,
+     "min": 0.19907925407925406,
+     "max": 0.2302680652680653
+    },
+    "B navigation_difficulty Brier": {
+     "mean": 0.18191022533022533,
+     "min": 0.172379797979798,
+     "max": 0.19177373737373737
+    },
+    "B visual_difficulty Brier": {
+     "mean": 0.1603509557109557,
+     "min": 0.15091670551670552,
+     "max": 0.1707768453768454
+    },
+    "B hesitation Brier": {
+     "mean": 0.23898312354312357,
+     "min": 0.22567816627816625,
+     "max": 0.24976519036519035
+    }
+   },
+   "answers_shuffled": {
+    "B normal Brier": {
+     "mean": 0.30666857140637144,
+     "min": 0.2894174825174825,
+     "max": 0.32234786324786324
+    },
+    "B touch_difficulty Brier": {
+     "mean": 0.230803118026418,
+     "min": 0.21571748251748252,
+     "max": 0.24357381507381506
+    },
+    "B navigation_difficulty Brier": {
+     "mean": 0.1866847975135975,
+     "min": 0.17836184926184928,
+     "max": 0.19455718725718726
+    },
+    "B visual_difficulty Brier": {
+     "mean": 0.1424140787878788,
+     "min": 0.1380072261072261,
+     "max": 0.14560885780885782
+    },
+    "B hesitation Brier": {
+     "mean": 0.24131681297591295,
+     "min": 0.2288148407148407,
+     "max": 0.25615835275835275
+    }
+   }
+  }
+ },
+ "labels_segments": "C:/Users/samsung-user/claude/Capstone_Design_Project/4_vision/eval_ab_2026-11-04/judgment_labels_v4.csv",
+ "help_rule_module": {
+  "path": "C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\4_vision\\eval_ab_2026-11-04\\tools\\help_rule.py",
+  "labels_for_turn_starts": "C:/Users/samsung-user/claude/Capstone_Design_Project/4_vision/eval_ab_2026-11-04/judgment_labels_v4.csv"
+ },
+ "label_version": "v4",
+ "manifest_id": "real_2026-11-05_3c936ae-v4-219d93fe6d27"
+}
