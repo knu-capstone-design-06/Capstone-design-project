@@ -37,8 +37,9 @@ export function ReadAloudControls({ root, screenKey, voiceController }: {
   const soundSupported = typeof window.AudioContext !== 'undefined';
 
   function stop() {
+    const owned = utterance.current !== null;
     utterance.current = null;
-    if (supported) window.speechSynthesis.cancel();
+    if (supported && owned) window.speechSynthesis.cancel();
     setReading(false);
   }
   function stopSounds() {
@@ -83,8 +84,7 @@ export function ReadAloudControls({ root, screenKey, voiceController }: {
     return () => {
       document.removeEventListener('visibilitychange', hide);
       window.removeEventListener('pagehide', suspend);
-      utterance.current = null;
-      if (supported) window.speechSynthesis.cancel();
+      stop();
       stopSounds();
       if (audio.current && audio.current.state !== 'closed') void audio.current.close();
       audio.current = null;

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createReplySpeaker } from './replySpeech.ts';
 import { createSpeechCapture, findRecognition, isSpeechSupported } from './speech.ts';
 import { FakeRecognition, factory, tick } from './voiceFakes.mjs';
 
@@ -13,6 +14,52 @@ function capture(options) {
   }, options);
   return { events, handle };
 }
+
+function synthesisFixture() {
+  const spoken = [];
+  const voices = [{ lang: 'en-US', localService: true }, { lang: 'ko-KR', localService: false }, { lang: 'ko-KR', localService: true }];
+  let cancellations = 0;
+  const scope = {
+    SpeechSynthesisUtterance: class { constructor(text) { this.text = text; } },
+    speechSynthesis: { getVoices: () => voices, speak: utterance => spoken.push(utterance), cancel: () => { cancellations++; } },
+  };
+  return { spoken, scope, voices, cancellations: () => cancellations };
+}
+
+test('응답 읽기는 한국어 로컬 음성을 우선 선택하고 완료를 기다린다', async () => {
+  const f = synthesisFixture();
+  const pending = createReplySpeaker(f.scope)(' 온도를 골라 주세요. ', new AbortController().signal);
+  assert.equal(f.spoken[0].text, '온도를 골라 주세요.');
+  assert.equal(f.spoken[0].lang, 'ko-KR');
+  assert.equal(f.spoken[0].voice, f.voices[2]);
+  f.spoken[0].onend();
+  assert.equal(await pending, true);
+  assert.equal(f.cancellations(), 0);
+});
+
+test('응답 읽기는 취소·재생 오류·시간 초과 뒤 늦은 완료를 무시한다', async () => {
+  for (const cause of ['abort', 'error', 'timeout']) {
+    const f = synthesisFixture(), controller = new AbortController();
+    const pending = createReplySpeaker(f.scope, cause === 'timeout' ? 5 : 1000)('아이스로 할까요?', controller.signal);
+    const lateEnd = f.spoken[0].onend;
+    if (cause === 'abort') controller.abort();
+    if (cause === 'error') f.spoken[0].onerror();
+    assert.equal(await pending, false, cause);
+    lateEnd();
+    assert.equal(f.cancellations(), 1);
+  }
+});
+
+test('음성 합성 미지원·빈 문장·취소된 요청·시작 실패는 읽기 실패로 반환한다', async () => {
+  assert.equal(await createReplySpeaker({})('질문', new AbortController().signal), false);
+  const f = synthesisFixture(), controller = new AbortController();
+  assert.equal(await createReplySpeaker(f.scope)(' ', controller.signal), false);
+  controller.abort();
+  assert.equal(await createReplySpeaker(f.scope)('질문', controller.signal), false);
+  assert.equal(f.spoken.length, 0);
+  f.scope.speechSynthesis.speak = () => { throw new Error('blocked'); };
+  assert.equal(await createReplySpeaker(f.scope)('질문', new AbortController().signal), false);
+});
 
 test('Chrome의 webkit 접두어 인식기를 찾고 없으면 지원하지 않는다', () => {
   class Webkit {}
