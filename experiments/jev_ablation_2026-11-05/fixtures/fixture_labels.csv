@@ -1,0 +1,8 @@
+take,t_start,t_end,allowed,state
+fx_queue,0,6,remaining_steps_notice;none,normal
+fx_companion,0,3,wait_hold_timer,normal
+fx_companion,3,6,highlight_next_action;none,navigation_difficulty
+fx_tremor,0,13,large_button,touch_difficulty
+fx_lost,0,5,highlight_next_action,hesitation
+fx_lost_novision,0,5,highlight_next_action,hesitation
+fx_queue_tremor,0,4,remaining_steps_notice;defer_big_button_question,touch_difficulty
