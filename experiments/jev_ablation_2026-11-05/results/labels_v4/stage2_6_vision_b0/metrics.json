@@ -1,5 +1,5 @@
 {
- "run": "C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage2_6_vision_b0",
+ "run": "<workspace>\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage2_6_vision_b0",
  "jev": "real",
  "model": "jev-1.13.0",
  "order_swap": {
@@ -9,7 +9,7 @@
   "note": null
  },
  "jev_numbers": "real",
- "labels": "C:/Users/samsung-user/claude/Capstone_Design_Project/4_vision/eval_ab_2026-11-04/judgment_labels_v4.csv",
+ "labels": "<workspace>/4_vision/eval_ab_2026-11-04/judgment_labels_v4.csv",
  "label_mode": "time",
  "label_status": "Claude(Opus 서브에이전트) 2026-11-05; v4 = 결정 227 레드팀 3회차 반영(치명 1 · 중요 2~5는 main 결정); v2 · v3 · v4 고침은 v1 결과를 본 검토 뒤에 했음",
  "aligned": null,
@@ -2249,8 +2249,8 @@
  },
  "labels_segments": null,
  "help_rule_module": {
-  "path": "C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\4_vision\\eval_ab_2026-11-04\\tools\\help_rule.py",
-  "labels_for_turn_starts": "C:/Users/samsung-user/claude/Capstone_Design_Project/4_vision/eval_ab_2026-11-04/judgment_labels_v4.csv"
+  "path": "<workspace>\\4_vision\\eval_ab_2026-11-04\\tools\\help_rule.py",
+  "labels_for_turn_starts": "<workspace>/4_vision/eval_ab_2026-11-04/judgment_labels_v4.csv"
  },
  "label_version": "v4",
  "manifest_id": "real_2026-11-05_3c936ae-v4-219d93fe6d27"

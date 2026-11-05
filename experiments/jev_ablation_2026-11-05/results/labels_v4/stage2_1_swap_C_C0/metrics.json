@@ -1,5 +1,5 @@
 {
- "run": "C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage2_1_swap_C_C0",
+ "run": "<workspace>\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage2_1_swap_C_C0",
  "jev": "real",
  "model": "jev-1.13.0",
  "order_swap": {
@@ -9,7 +9,7 @@
   "note": null
  },
  "jev_numbers": "real",
- "labels": "C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\4_vision\\eval_ab_2026-11-04\\admissible_v4.csv",
+ "labels": "<workspace>\\4_vision\\eval_ab_2026-11-04\\admissible_v4.csv",
  "label_mode": "admissible",
  "label_status": "규정한 허용 행동(stipulated admissible actions) (admissible_v4.csv)",
  "aligned": {
@@ -24,7 +24,7 @@
    "C5",
    "C6"
   ],
-  "windows_rows": "C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\4_vision\\eval_ab_2026-11-04\\results\\labels_v2\\windows_b0_r0.csv"
+  "windows_rows": "<workspace>\\4_vision\\eval_ab_2026-11-04\\results\\labels_v2\\windows_b0_r0.csv"
  },
  "scoring_version": "2026-11-05 Codex 209 (#1 exact no-row delivery, #2 time-mode onset, #3 paired AUROC, #4 window truth, #7 sent-question options)",
  "rule": {
@@ -2634,10 +2634,10 @@
    }
   }
  },
- "labels_segments": "C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\4_vision\\eval_ab_2026-11-04\\judgment_labels_v4.csv",
+ "labels_segments": "<workspace>\\4_vision\\eval_ab_2026-11-04\\judgment_labels_v4.csv",
  "help_rule_module": {
-  "path": "C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\4_vision\\eval_ab_2026-11-04\\tools\\help_rule.py",
-  "labels_for_turn_starts": "C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\4_vision\\eval_ab_2026-11-04\\judgment_labels_v4.csv"
+  "path": "<workspace>\\4_vision\\eval_ab_2026-11-04\\tools\\help_rule.py",
+  "labels_for_turn_starts": "<workspace>\\4_vision\\eval_ab_2026-11-04\\judgment_labels_v4.csv"
  },
  "label_version": "v4",
  "manifest_id": "real_2026-11-05_3c936ae-v4-219d93fe6d27"

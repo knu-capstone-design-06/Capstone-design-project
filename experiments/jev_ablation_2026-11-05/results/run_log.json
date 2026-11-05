@@ -22,10 +22,10 @@
    "failed": 0,
    "backoff_retries": 0,
    "answers_from_cache": 38266,
-   "key": "file C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\Capstone-design-project\\backend\\.env",
+   "key": "file <workspace>\\Capstone-design-project\\backend\\.env",
    "model": "jev-1.13.0",
    "max_calls_given": 900,
-   "out": "C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage1_aligned_b0_r0"
+   "out": "<workspace>\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage1_aligned_b0_r0"
   },
   {
    "step": "rerun",
@@ -44,10 +44,10 @@
    "failed": 0,
    "backoff_retries": 0,
    "answers_from_cache": 47002,
-   "key": "file C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\Capstone-design-project\\backend\\.env",
+   "key": "file <workspace>\\Capstone-design-project\\backend\\.env",
    "model": "jev-1.13.0",
    "max_calls_given": 900,
-   "out": "C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage1_aligned_b0_r0"
+   "out": "<workspace>\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage1_aligned_b0_r0"
   },
   {
    "step": "rerun",
@@ -61,10 +61,10 @@
    "failed": 0,
    "backoff_retries": 0,
    "answers_from_cache": 3988,
-   "key": "file C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\Capstone-design-project\\backend\\.env",
+   "key": "file <workspace>\\Capstone-design-project\\backend\\.env",
    "model": "jev-1.13.0",
    "max_calls_given": 496,
-   "out": "C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage2_1_swap_C_C0"
+   "out": "<workspace>\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage2_1_swap_C_C0"
   },
   {
    "step": "rerun",
@@ -78,10 +78,10 @@
    "failed": 0,
    "backoff_retries": 0,
    "answers_from_cache": 7285,
-   "key": "file C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\Capstone-design-project\\backend\\.env",
+   "key": "file <workspace>\\Capstone-design-project\\backend\\.env",
    "model": "jev-1.13.0",
    "max_calls_given": 496,
-   "out": "C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage2_2_C_nohistory"
+   "out": "<workspace>\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage2_2_C_nohistory"
   },
   {
    "step": "rerun",
@@ -95,10 +95,10 @@
    "failed": 0,
    "backoff_retries": 0,
    "answers_from_cache": 252,
-   "key": "file C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\Capstone-design-project\\backend\\.env",
+   "key": "file <workspace>\\Capstone-design-project\\backend\\.env",
    "model": "jev-1.13.0",
    "max_calls_given": 449,
-   "out": "C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage2_3_J_b0_r0"
+   "out": "<workspace>\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage2_3_J_b0_r0"
   },
   {
    "step": "rerun",
@@ -117,10 +117,10 @@
    "failed": 0,
    "backoff_retries": 0,
    "answers_from_cache": 2708,
-   "key": "file C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\Capstone-design-project\\backend\\.env",
+   "key": "file <workspace>\\Capstone-design-project\\backend\\.env",
    "model": "jev-1.13.0",
    "max_calls_given": 900,
-   "out": "C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage2_3_J_b0_r0"
+   "out": "<workspace>\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage2_3_J_b0_r0"
   },
   {
    "step": "rerun",
@@ -139,10 +139,10 @@
    "failed": 0,
    "backoff_retries": 0,
    "answers_from_cache": 6209,
-   "key": "file C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\Capstone-design-project\\backend\\.env",
+   "key": "file <workspace>\\Capstone-design-project\\backend\\.env",
    "model": "jev-1.13.0",
    "max_calls_given": 900,
-   "out": "C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage2_3_J_b0_r0"
+   "out": "<workspace>\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage2_3_J_b0_r0"
   },
   {
    "step": "rerun",
@@ -156,10 +156,10 @@
    "failed": 0,
    "backoff_retries": 0,
    "answers_from_cache": 11132,
-   "key": "file C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\Capstone-design-project\\backend\\.env",
+   "key": "file <workspace>\\Capstone-design-project\\backend\\.env",
    "model": "jev-1.13.0",
    "max_calls_given": 421,
-   "out": "C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage2_4a_b0_rA"
+   "out": "<workspace>\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage2_4a_b0_rA"
   },
   {
    "step": "rerun",
@@ -178,10 +178,10 @@
    "failed": 0,
    "backoff_retries": 0,
    "answers_from_cache": 14038,
-   "key": "file C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\Capstone-design-project\\backend\\.env",
+   "key": "file <workspace>\\Capstone-design-project\\backend\\.env",
    "model": "jev-1.13.0",
    "max_calls_given": 900,
-   "out": "C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage2_4a_b0_rA"
+   "out": "<workspace>\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage2_4a_b0_rA"
   },
   {
    "step": "rerun",
@@ -195,10 +195,10 @@
    "failed": 0,
    "backoff_retries": 0,
    "answers_from_cache": 13777,
-   "key": "file C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\Capstone-design-project\\backend\\.env",
+   "key": "file <workspace>\\Capstone-design-project\\backend\\.env",
    "model": "jev-1.13.0",
    "max_calls_given": 770,
-   "out": "C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage2_4b_b2_rA"
+   "out": "<workspace>\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage2_4b_b2_rA"
   },
   {
    "step": "rerun",
@@ -212,10 +212,10 @@
    "failed": 0,
    "backoff_retries": 0,
    "answers_from_cache": 3694,
-   "key": "file C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\Capstone-design-project\\backend\\.env",
+   "key": "file <workspace>\\Capstone-design-project\\backend\\.env",
    "model": "jev-1.13.0",
    "max_calls_given": 343,
-   "out": "C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage2_5_GT_b0_r0"
+   "out": "<workspace>\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage2_5_GT_b0_r0"
   },
   {
    "step": "rerun",
@@ -229,10 +229,10 @@
    "failed": 0,
    "backoff_retries": 0,
    "answers_from_cache": 894,
-   "key": "file C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\Capstone-design-project\\backend\\.env",
+   "key": "file <workspace>\\Capstone-design-project\\backend\\.env",
    "model": "jev-1.13.0",
    "max_calls_given": 273,
-   "out": "C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage2_6_vision_b0"
+   "out": "<workspace>\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage2_6_vision_b0"
   },
   {
    "step": "rerun",
@@ -246,10 +246,10 @@
    "failed": 0,
    "backoff_retries": 0,
    "answers_from_cache": 1433,
-   "key": "file C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\Capstone-design-project\\backend\\.env",
+   "key": "file <workspace>\\Capstone-design-project\\backend\\.env",
    "model": "jev-1.13.0",
    "max_calls_given": 273,
-   "out": "C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\vision_only_round3"
+   "out": "<workspace>\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\vision_only_round3"
   },
   {
    "step": "rerun",
@@ -263,10 +263,10 @@
    "failed": 0,
    "backoff_retries": 0,
    "answers_from_cache": 6125,
-   "key": "file C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\Capstone-design-project\\backend\\.env",
+   "key": "file <workspace>\\Capstone-design-project\\backend\\.env",
    "model": "jev-1.13.0",
    "max_calls_given": 900,
-   "out": "C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\vision_only_round3"
+   "out": "<workspace>\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\vision_only_round3"
   },
   {
    "step": "stage3",
@@ -280,10 +280,10 @@
    "failed": 0,
    "backoff_retries": 0,
    "answers_from_cache": 3988,
-   "key": "file C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\Capstone-design-project\\backend\\.env",
+   "key": "file <workspace>\\Capstone-design-project\\backend\\.env",
    "model": "jev-1.13.0",
    "max_calls_given": 900,
-   "out": "C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage3_a1_repeats_C_C0"
+   "out": "<workspace>\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage3_a1_repeats_C_C0"
   },
   {
    "step": "stage3",
@@ -297,10 +297,10 @@
    "failed": 0,
    "backoff_retries": 0,
    "answers_from_cache": 1041,
-   "key": "file C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\Capstone-design-project\\backend\\.env",
+   "key": "file <workspace>\\Capstone-design-project\\backend\\.env",
    "model": "jev-1.13.0",
    "max_calls_given": 300,
-   "out": "C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage3_a2_repeats_B10"
+   "out": "<workspace>\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage3_a2_repeats_B10"
   },
   {
    "step": "stage3",
@@ -319,10 +319,10 @@
    "failed": 0,
    "backoff_retries": 0,
    "answers_from_cache": 3344,
-   "key": "file C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\Capstone-design-project\\backend\\.env",
+   "key": "file <workspace>\\Capstone-design-project\\backend\\.env",
    "model": "jev-1.13.0",
    "max_calls_given": 900,
-   "out": "C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage3_a2_repeats_B10"
+   "out": "<workspace>\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage3_a2_repeats_B10"
   },
   {
    "step": "stage3",
@@ -336,10 +336,10 @@
    "failed": 0,
    "backoff_retries": 0,
    "answers_from_cache": 9735,
-   "key": "file C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\Capstone-design-project\\backend\\.env",
+   "key": "file <workspace>\\Capstone-design-project\\backend\\.env",
    "model": "jev-1.13.0",
    "max_calls_given": 368,
-   "out": "C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage3_b_B_vt_b0_rA"
+   "out": "<workspace>\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage3_b_B_vt_b0_rA"
   },
   {
    "step": "stage3",
@@ -353,10 +353,10 @@
    "failed": 0,
    "backoff_retries": 0,
    "answers_from_cache": 5616,
-   "key": "file C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\Capstone-design-project\\backend\\.env",
+   "key": "file <workspace>\\Capstone-design-project\\backend\\.env",
    "model": "jev-1.13.0",
    "max_calls_given": 71,
-   "out": "C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage3_b_B_vt_b2_rA"
+   "out": "<workspace>\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage3_b_B_vt_b2_rA"
   },
   {
    "step": "stage3",
@@ -370,10 +370,10 @@
    "failed": 0,
    "backoff_retries": 0,
    "answers_from_cache": 9974,
-   "key": "file C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\Capstone-design-project\\backend\\.env",
+   "key": "file <workspace>\\Capstone-design-project\\backend\\.env",
    "model": "jev-1.13.0",
    "max_calls_given": 900,
-   "out": "C:\\Users\\samsung-user\\claude\\Capstone_Design_Project\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage3_b_B_vt_b2_rA"
+   "out": "<workspace>\\4_vision\\eval_jev_2026-11-04\\results\\real_2026-11-05_3c936ae\\stage3_b_B_vt_b2_rA"
   }
  ]
 }

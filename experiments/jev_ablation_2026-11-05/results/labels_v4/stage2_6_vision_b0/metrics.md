@@ -1,7 +1,7 @@
 # E5 지표: `stage2_6_vision_b0`
 
 - 매니페스트 `real_2026-11-05_3c936ae-v4-219d93fe6d27` · 라벨 판 `v4` · 채점 판 `2026-11-05 Codex 209 (#1 exact no-row delivery, #2 time-mode onset, #3 paired AUROC, #4 window truth, #7 sent-question options)`
-- Jev: `real` · 모델 `jev-1.13.0` · 라벨 `C:/Users/samsung-user/claude/Capstone_Design_Project/4_vision/eval_ab_2026-11-04/judgment_labels_v4.csv`(time)
+- Jev: `real` · 모델 `jev-1.13.0` · 라벨 `<workspace>/4_vision/eval_ab_2026-11-04/judgment_labels_v4.csv`(time)
 - 라벨 상태: Claude(Opus 서브에이전트) 2026-11-05; v4 = 결정 227 레드팀 3회차 반영(치명 1 · 중요 2~5는 main 결정); v2 · v3 · v4 고침은 v1 결과를 본 검토 뒤에 했음
 
 ## 규칙표(조건 A)

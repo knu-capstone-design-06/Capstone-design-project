@@ -1,7 +1,7 @@
 # E5 지표: `stage3_b_B_vt_b2_rA`
 
 - 매니페스트 `real_2026-11-05_3c936ae-v4-219d93fe6d27` · 라벨 판 `v4` · 채점 판 `2026-11-05 Codex 209 (#1 exact no-row delivery, #2 time-mode onset, #3 paired AUROC, #4 window truth, #7 sent-question options)`
-- Jev: `real` · 모델 `jev-1.13.0` · 라벨 `C:/Users/samsung-user/claude/Capstone_Design_Project/4_vision/eval_ab_2026-11-04/admissible_v4.csv`(admissible)
+- Jev: `real` · 모델 `jev-1.13.0` · 라벨 `<workspace>/4_vision/eval_ab_2026-11-04/admissible_v4.csv`(admissible)
 - 합성 터치 창: 값 묶음 `b2_rA`, 배치 `fit-medium`, 조건 C0, C1, C2, C3, C4, C5, C6
 - 라벨 상태: 규정한 허용 행동(stipulated admissible actions) (admissible_v4.csv)
 
