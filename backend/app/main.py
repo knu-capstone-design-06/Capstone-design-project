@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from app.common.config.settings import Settings, get_settings
 from app.infrastructure.external.ai_client import AiEngineClient
+from app.infrastructure.external.jev_client import JevClient, create_jev_http
 from app.infrastructure.external.openai_client import OpenAiClient, create_openai_http
 from app.modules.connectivity.router import router as connectivity_router
 from app.modules.ordering.catalog import PRODUCTS
@@ -56,6 +57,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 openai = OpenAiClient(
                     openai_http, settings.openai_model, settings.openai_timeout_seconds
                 )
+            # Jev answers decisions built by ai-engine; nothing asks it until the
+            # analysis result carries a question (docs/Jev-Integration.md, step 0).
+            app.state.jev_client = None
+            if settings.jev_api_key is not None:
+                jev_http = await stack.enter_async_context(create_jev_http(
+                    settings.jev_api_key.get_secret_value(),
+                    settings.jev_api_url,
+                    settings.jev_timeout_seconds,
+                ))
+                app.state.jev_client = JevClient(
+                    jev_http, settings.jev_model, settings.jev_timeout_seconds
+                )
             executor = None
             if settings.voice_execute_tools:
                 # Voice changes the cart through the same service as touch ordering.
@@ -77,6 +90,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 del app.state.ai_engine_client
                 del app.state.session_service
                 del app.state.voice_service
+                del app.state.jev_client
 
     application = FastAPI(
         title=settings.app_name,
