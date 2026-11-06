@@ -3,7 +3,6 @@ from datetime import datetime, timezone
 from typing import Callable
 from uuid import uuid4
 
-from app.modules.ordering.catalog import PRODUCTS
 from app.modules.ordering.exceptions import OrderingError
 from app.modules.ordering.repository import OrderingRepository, SessionState
 from app.modules.ordering.schemas import (
@@ -16,10 +15,9 @@ class OrderingService:
     def __init__(self, session_exists: Callable[[str], bool], repository: OrderingRepository):
         self._session_exists = session_exists
         self._repository = repository
-        self._products = {product.product_id: product for product in PRODUCTS}
 
     def products(self) -> ProductList:
-        return ProductList(products=[product.model_copy(deep=True) for product in PRODUCTS])
+        return ProductList(products=self._repository.products())
 
     def _state(self, session_id: str) -> SessionState:
         if not self._session_exists(session_id):
@@ -64,7 +62,7 @@ class OrderingService:
         )
 
     def _product(self, product_id: str) -> Product:
-        product = self._products.get(product_id)
+        product = self._repository.product(product_id)
         if product is None:
             raise OrderingError(404, "product_not_found", "상품을 찾을 수 없습니다.")
         if not product.available:
@@ -74,7 +72,7 @@ class OrderingService:
     def add_item(self, session_id: str, key: str, request: AddItemRequest,
                  query: str = "") -> Cart:
         fingerprint = self._fingerprint("POST", "cart/items", request.model_dump(), query)
-        with self._repository.lock:
+        with self._repository.transaction(session_id):
             state, replay = self._prepare(session_id, key, fingerprint, request.expected_version)
             if replay is not None:
                 return replay
@@ -109,7 +107,7 @@ class OrderingService:
                     request: UpdateItemRequest, query: str = "") -> Cart:
         fingerprint = self._fingerprint("PATCH", f"cart/items/{item_id}",
                                         request.model_dump(), query)
-        with self._repository.lock:
+        with self._repository.transaction(session_id):
             state, replay = self._prepare(session_id, key, fingerprint, request.expected_version)
             if replay is not None:
                 return replay
@@ -130,7 +128,7 @@ class OrderingService:
                     expected_version: int, query: str = "") -> Cart:
         fingerprint = self._fingerprint("DELETE", f"cart/items/{item_id}",
                                         {"expected_version": expected_version}, query)
-        with self._repository.lock:
+        with self._repository.transaction(session_id):
             state, replay = self._prepare(session_id, key, fingerprint, expected_version)
             if replay is not None:
                 return replay
@@ -145,7 +143,7 @@ class OrderingService:
     def create_order(self, session_id: str, key: str, request: OrderRequest,
                      query: str = "") -> Order:
         fingerprint = self._fingerprint("POST", "orders", request.model_dump(), query)
-        with self._repository.lock:
+        with self._repository.transaction(session_id):
             state, replay = self._prepare(session_id, key, fingerprint, request.expected_version)
             if replay is not None:
                 return replay

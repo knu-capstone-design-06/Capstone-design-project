@@ -1,6 +1,7 @@
 import logging
 
 from pydantic import ValidationError
+from starlette.concurrency import run_in_threadpool
 
 from app.infrastructure.external.ai_client import AiEngineClient
 from app.infrastructure.external.ai_schemas import AnalyzeRequest
@@ -33,16 +34,16 @@ class SessionService:
     async def analyze(
         self, session_id: str, window: FeatureWindowRequest, ai: AiEngineClient
     ) -> FeatureWindowResponse:
-        if not self._repository.exists(session_id):
+        if not await run_in_threadpool(self._repository.exists, session_id):
             raise SessionNotFound()
-        if self._ordering.is_completed(session_id):
+        if await run_in_threadpool(self._ordering.is_completed, session_id):
             raise SessionCompleted()
         request = AnalyzeRequest(
             session_id=session_id, **window.model_dump(exclude_unset=True)
         )
         result = await ai.analyze(request)
         # An order may complete while the AI request is in flight.
-        if self._ordering.is_completed(session_id):
+        if await run_in_threadpool(self._ordering.is_completed, session_id):
             raise SessionCompleted()
         if self._decision is not None:
             try:
