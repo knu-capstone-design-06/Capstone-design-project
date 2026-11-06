@@ -426,6 +426,11 @@ class ObservationTests(unittest.TestCase):
         state, (asked,) = run(SessionState(), window(10.0, fixes_recent=2, gaze=True))
         self.assertEqual(asked.action, "propose")
         self.assertEqual(allowed_supports(window(12.0, backs_recent=1), state, P), [])
+        # A 3-2 wait displaces the open 4-1 ask, but the 4-2 highlight ranked behind it cannot (keep): each row
+        # is checked with the same transition rule, so only the wait is offered (wdragon92 review of #77).
+        companion_back = window(12.0, situation=situation(BUSY), backs_recent=1)
+        self.assertEqual((decide(companion_back, state, P).transition, decide(companion_back, state, P).support), ("replace", WAIT))
+        self.assertEqual(allowed_supports(companion_back, state, P), [WAIT])
         # A withdraw window offers nothing either.
         state, (opened,) = run(SessionState(), window(10.0, backs_recent=1))
         self.assertEqual(allowed_supports(window(12.0, progress_segment=True), state, P), [])

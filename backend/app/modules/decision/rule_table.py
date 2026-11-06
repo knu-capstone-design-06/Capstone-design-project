@@ -260,9 +260,11 @@ def decide(inp: WindowInput, state: SessionState, params: DecisionParams) -> Dec
 def allowed_supports(inp: WindowInput, state: SessionState, params: DecisionParams) -> list[str]:
     """What the rule table could open in this window, ranked, options included: the choice set for a Jev stage.
 
-    The same scopes, filter and transition as decide(): nothing when the window is not measurable, when the
-    held decision is being withdrawn, when no row opens, or when the table would keep the held decision (an
-    open ask stays). The 3-1 row's options (notice, defer) are listed as separate choices.
+    The same scopes, filter and transition as decide(): nothing when the window is not measurable or the held
+    decision is being withdrawn. Each candidate row is checked with the same transition rule decide() applies
+    (_transition(held, row)); a row the table would answer with keep is left out, so a row that cannot displace
+    the held decision (e.g. 4-2 against an open ask) is never offered. Nothing when no row is left. The 3-1 row's
+    options (notice, defer) are listed as separate choices.
     """
     if not inp.measurable:
         return []
@@ -271,7 +273,8 @@ def allowed_supports(inp: WindowInput, state: SessionState, params: DecisionPara
     if held is not None and _withdraw_met(held.withdraw_on, inp):
         return []
     rows = candidate_rows(inp, state, params, name if name in TAGS else None, tag_scope, screen_scope)
-    if not rows or _transition(held, min(rows, key=lambda r: r.rank)) == "keep":
+    rows = [row for row in rows if _transition(held, row) != "keep"]
+    if not rows:
         return []
     supports: list[str] = []
     for row in sorted(rows, key=lambda r: r.rank):

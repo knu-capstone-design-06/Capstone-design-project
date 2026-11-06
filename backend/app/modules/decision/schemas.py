@@ -59,10 +59,14 @@ PILOT_PARAMS = DecisionParams(
     defer_option_on=True,        # evaluation switch (JP 0-2)
 )
 
+# Screen order of the kiosk, taken from the frontend: frontend/src/features/order/OrderPage.tsx keeps
+# screen as 'menu' | 'review' | 'complete' (:36) and draws its step bar in that order (:172); the same
+# tuple as vision touch.py SCREEN_FLOW. Gives steps_left and screen progress.
+SCREEN_FLOW = ("menu", "review", "complete")
+
 # Shadow-stage settings with no source yet ("기준 없음"): experiment settings, not agreed thresholds.
 HISTORY_WINDOWS = 5         # windows kept for the trajectory stage (2 s windows: about ten seconds)
 FORECAST_HORIZON_S = 10     # how far ahead next_difficulty asks about
-SCREEN_FLOW = ("menu", "review", "complete")   # OrderPage.tsx screen order (vision touch.py SCREEN_FLOW)
 
 
 @dataclass(frozen=True)
