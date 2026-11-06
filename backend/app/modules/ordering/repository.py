@@ -1,4 +1,4 @@
-"""Atomic process-local ordering state; replaced by DB storage in a later PR."""
+"""Atomic process-local ordering state when DATABASE_URL is unset."""
 
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from threading import RLock
 
-from app.modules.ordering.schemas import Cart, Order
+from app.modules.ordering.catalog import PRODUCTS
+from app.modules.ordering.schemas import Cart, Order, Product
 
 
 @dataclass
@@ -55,13 +56,20 @@ class OrderingRepository:
         request with several tool inputs must change the cart entirely or not at all.
         """
         with self.lock:
-            state = self.state(session_id)
-            cart = state.cart.model_copy(deep=True)
+            state = self.states.get(session_id)
+            cart = state.cart.model_copy(deep=True) if state is not None else None
+            completed = state.completed if state is not None else False
             keys = set(self.replays)
             try:
                 yield
             except BaseException:
-                state.cart = cart
+                if state is None:
+                    # A rejected request must not allocate an orphan cart for a
+                    # session that the session repository does not recognize.
+                    self.states.pop(session_id, None)
+                else:
+                    state.cart = cart
+                    state.completed = completed
                 for key in set(self.replays) - keys:
                     del self.replays[key]
                 raise
@@ -71,3 +79,10 @@ class OrderingRepository:
 
     def save(self, session_id: str, key: str, fingerprint: str, response: Cart | Order):
         self.replays[(session_id, key)] = Replay(fingerprint, response.model_copy(deep=True))
+
+    def products(self) -> list[Product]:
+        return [product.model_copy(deep=True) for product in PRODUCTS]
+
+    def product(self, product_id: str) -> Product | None:
+        product = next((item for item in PRODUCTS if item.product_id == product_id), None)
+        return product.model_copy(deep=True) if product is not None else None

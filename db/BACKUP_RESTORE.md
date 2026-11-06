@@ -1,6 +1,13 @@
 # Supabase DB 수동 백업·복구
 
-서울 리전 `Capstone-design-project`는 Free 플랜이라 Supabase 대시보드의 자동 백업이 없습니다. 이 문서는 운영자가 별도 보관 장소에 논리 백업을 만들고, 격리된 프로젝트에서 복구를 검증하는 절차입니다. 현재까지 **백업 파일 생성과 복구 연습은 수행하지 않았습니다.** 백업 파일과 접속 정보는 Git에 넣지 않습니다.
+서울 리전 `Capstone-design-project`는 Free 플랜이라 Supabase 대시보드의 자동 백업이 없습니다. 이 문서는 운영자가 별도 보관 장소에 논리 백업을 만들고, 격리된 환경에서 복구를 검증하는 절차입니다. 백업 파일과 접속 정보는 Git에 넣지 않습니다.
+
+## 2026-11-02 백업과 2026-11-03 복구 검증 기록
+
+- 주문 마이그레이션 `20261101092640` 적용 전에 역할·스키마·데이터·마이그레이션 이력 SQL 5개와 각 SHA-256 목록을 만들었습니다. 백업 당시 적용된 버전은 `20261007072436`, `20261012110139` 두 건이고, 세션·인증·Storage 데이터 행은 모두 0개였습니다.
+- 여섯 파일을 암호화한 `20261102-230646.capbk`를 저장소 밖 OneDrive 폴더에 보관했습니다. 암호화 파일 SHA-256은 `14a697614de29e81a54451b883ea70c81f5c284443a69d9dc120b3e8b10a649e`입니다. 복구 암호는 파일과 별도로 보관합니다. OneDrive의 원격 동기화 완료 상태는 별도로 확인해야 합니다.
+- 격리된 로컬 Supabase PostgreSQL 17.11 컨테이너에서 암호화 파일을 복호화하고 다섯 SQL 해시를 확인했습니다. 역할·사용자 스키마·이력 두 건을 복원했으며 `kiosk.sessions` RLS, `anon`의 스키마 접근 거부, `kiosk_backend` 조회 권한을 확인했습니다. 운영 DB는 이 연습으로 변경하지 않았습니다.
+- 로컬 이미지의 내부 `auth`·`storage` 테이블 버전이 백업 당시와 달라 데이터 파일의 빈 `COPY` 32개는 실행하지 않았습니다. **모든 `COPY`가 0행임을 확인한 뒤** 생략했습니다. 실제 데이터가 쌓인 후의 전체 복구는 버전이 맞는 격리 Supabase 프로젝트에서 다시 연습해야 합니다. 이 백업은 주문 테이블·17개 시드 적용 전 상태이므로, 현재 상태로 복원하려면 마이그레이션과 시드 재적용이 필요합니다.
 
 ## 백업 시점과 보관
 
@@ -11,7 +18,26 @@
 
 ## 수동 백업 실행 (PowerShell)
 
-1. [Supabase CLI](https://supabase.com/docs/guides/local-development/cli/getting-started)와 Docker를 준비하고 `supabase --version`, `supabase db dump --help`를 확인합니다. 비밀 저장소에서 관리자 접속 문자열을 가져와 현재 터미널의 `SUPABASE_ADMIN_DB_URL` 환경변수에만 설정합니다. 문자열이나 실제 값을 명령 기록, CI 로그, 문서에 출력하지 않습니다. 환경변수를 사용해도 실행 중인 프로세스 인수에 연결 문자열이 나타날 수 있으므로 신뢰할 수 있는 장비에서 실행합니다.
+1. [Supabase CLI](https://supabase.com/docs/guides/local-development/cli/getting-started)와 Docker를 준비하고 `supabase --version`, `supabase db dump --help`를 확인합니다. 비밀 저장소에서 관리자 접속 문자열을 가져와 **가려진 입력창 또는 비밀 저장소의 프로세스 환경변수 주입 기능**으로 현재 프로세스의 `SUPABASE_ADMIN_DB_URL`에 넣습니다. `$env:SUPABASE_ADMIN_DB_URL = '실제 URL'`처럼 콘솔 명령에 값을 직접 쓰면 PSReadLine 기록에 남으므로 사용하지 않습니다. 문자열이나 실제 값을 CI 로그·문서에 출력하지 않습니다. 환경변수를 사용해도 실행 중인 CLI 프로세스 인수에 연결 문자열이 나타날 수 있으므로 신뢰할 수 있는 장비에서 실행합니다.
+
+   비밀 저장소에 환경변수 주입 기능이 없으면 아래 명령 **자체만** 붙여 넣습니다. 이어서 나타나는 가려진 프롬프트에 관리자 URL을 입력합니다. 복구 때는 함수의 인수를 `SUPABASE_RESTORE_DB_URL`로 바꿔 사용합니다. 암호가 포함된 URL은 일반 PowerShell 프롬프트에 쓰지 않습니다.
+
+```powershell
+function Set-DatabaseUrlFromHiddenInput([string]$variableName) {
+    $private:secureUrl = Read-Host "$variableName (입력 내용 숨김)" -AsSecureString
+    $private:buffer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureUrl)
+    try {
+        [Environment]::SetEnvironmentVariable(
+            $variableName,
+            [Runtime.InteropServices.Marshal]::PtrToStringBSTR($buffer),
+            'Process'
+        )
+    } finally {
+        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($buffer)
+    }
+}
+Set-DatabaseUrlFromHiddenInput 'SUPABASE_ADMIN_DB_URL'
+```
 2. 저장소 **밖**에 백업 폴더를 만들고 아래 명령을 순서대로 실행합니다. 각 명령의 종료 코드가 0인지 확인합니다.
 
 ```powershell
@@ -50,7 +76,7 @@ Get-FileHash -LiteralPath $sqlFiles -Algorithm SHA256 -ErrorAction Stop |
 ## 격리된 프로젝트에서 복구 연습
 
 1. 새 Supabase 프로젝트 생성에 따른 비용·권한을 확인하고, 운영 프로젝트와 분리된 연습 프로젝트를 만듭니다. 대상 프로젝트의 Postgres 버전, 확장 기능, Webhook 설정을 확인합니다. 운영 DB에 덮어쓰지 않습니다.
-2. 새 프로젝트의 관리자 접속 문자열을 비밀 저장소에서 가져와 `SUPABASE_RESTORE_DB_URL`에 설정합니다. [Supabase 공식 CLI 복구 절차](https://supabase.com/docs/guides/platform/migrating-within-supabase/backup-restore)에 따라 `roles.sql` → `schema.sql` → `data.sql` 순서로 복구합니다. 환경에 따라 확장 기능이나 관리 스키마와 충돌하면 원인을 확인하고 새 연습 프로젝트에서 다시 검증합니다.
+2. PostgreSQL 클라이언트를 설치해 `Get-Command psql`과 `psql --version`이 성공하는지 확인합니다. 대상 PostgreSQL과 호환되는 버전의 `psql`을 사용합니다. 새 프로젝트의 관리자 접속 문자열을 비밀 저장소에서 가져와, 백업 때와 같이 가려진 입력 또는 비밀 저장소 주입으로 `SUPABASE_RESTORE_DB_URL` 프로세스 환경변수에 넣습니다. 실제 URL을 콘솔 명령에 쓰지 않습니다. [Supabase 공식 CLI 복구 절차](https://supabase.com/docs/guides/platform/migrating-within-supabase/backup-restore)에 따라 `roles.sql` → `schema.sql` → `data.sql` 순서로 복구합니다. 환경에 따라 확장 기능이나 관리 스키마와 충돌하면 원인을 확인하고 새 연습 프로젝트에서 다시 검증합니다.
 
 ```powershell
 $backupDir = '<내려받아 복호화한 백업 폴더 경로>'
@@ -83,7 +109,7 @@ psql --single-transaction --variable ON_ERROR_STOP=1 --file $historySchema --fil
 if ($LASTEXITCODE -ne 0) { throw 'migration history restore failed' }
 ```
 
-4. `kiosk.sessions` 행 수와 샘플 세션 조회, 두 마이그레이션 버전, RLS 활성화, `anon`·`authenticated` 접근 거부, `kiosk_backend`의 SELECT·INSERT만 허용되는지 확인합니다. 실제 데이터가 있다면 개인 식별값 대신 집계로 검증합니다. 커스텀 로그인 역할의 **비밀번호는 덤프에 포함되지 않으므로**, 필요한 경우 새 비밀값을 별도로 설정합니다.
+4. `kiosk.sessions` 행 수와 샘플 세션 조회, 백업 시점의 마이그레이션 버전, RLS 활성화, `anon`·`authenticated` 접근 거부, `kiosk_backend`의 필요한 작업만 허용되는지 확인합니다. 실제 데이터가 있다면 개인 식별값 대신 집계로 검증합니다. 커스텀 로그인 역할의 **비밀번호는 덤프에 포함되지 않으므로**, 필요한 경우 새 비밀값을 별도로 설정합니다.
 5. 복구 연습 날짜, 소요 시간, 복원된 행 수·해시, 실패와 수정 사항을 운영 기록에 남깁니다. 복구가 검증되기 전에는 이 백업을 운영 복구 수단으로 간주하지 않습니다.
 
 ## 실제 장애 시
