@@ -1194,6 +1194,17 @@ class ToolExecutionApiTests(VoiceApiCase):
                 self.interpreter.result = interpretation(call("remove_cart_item", "americano", "iced"))
                 self.assertEqual(self.status(self.say(text)).json()["actions"], ["cart_updated"])
                 self.assertEqual(self.cart()["items"], [])
+        # The reviewer's reproduction: "빼고" followed by "싶지 않아요" is a no, "빼고 샌드위치 주세요" is a request.
+        self.add_by_touch("americano", "iced", 2)
+        self.interpreter.result = interpretation(call("remove_cart_item", "americano", "iced"))
+        body = self.status(self.say("아이스 아메리카노 빼고 싶지 않아요")).json()
+        self.assertEqual((body["status"], body["actions"]), ("needs_clarification", []))
+        self.assertEqual(self.cart()["total_quantity"], 2)
+        self.interpreter.result = interpretation(
+            call("remove_cart_item", "americano", "iced"), call("add_cart_item", "sandwich", None, 1))
+        body = self.status(self.say("아메리카노 빼고 샌드위치 주세요")).json()
+        self.assertEqual((body["status"], body["actions"]), ("completed", ["cart_updated"]))
+        self.assertEqual([(i["product_id"], i["quantity"]) for i in self.cart()["items"]], [("sandwich", 1)])
 
     def test_worded_acceptance_with_the_same_tool_inputs_runs_once(self):
         self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
@@ -1334,6 +1345,8 @@ class RemovalIntentTests(unittest.TestCase):
             ("아이스 아메리카노 빼지 말아 주세요", "no"), ("빼지 마세요", "no"), ("취소하면 안 돼요", "no"),
             ("지우지 않을래요", "no"), ("한 잔 줄이지 마세요", "no"), ("빼지는 마세요", "no"), ("빼시면 안 돼요", "no"),
             ("취소는 하지 마세요", "no"), ("삭제 안 해도 돼요", "no"), ("빼면 좋겠는데 아니다", "no"),
+            ("빼고 싶지 않아요", "no"), ("빼 주지 마세요", "no"), ("빼 주시면 안 돼요", "no"), ("빼고 싶어요", "yes"),
+            ("빼고 샌드위치 주세요", "yes"),
             ("아메리카노요", "unclear"), ("네", "unclear"), ("아이스 아메리카노 주세요", "unclear"),
         ]:
             with self.subTest(text=text):

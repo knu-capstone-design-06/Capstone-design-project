@@ -213,6 +213,9 @@ REMOVAL_MARKS = ("빼", "취소", "삭제", "없애", "지워", "지우", "제�
 REQUEST_AFTER = tuple(sorted(
     ("주세요", "주시", "줘", "줄래", "달라", "해주세요", "해줘", "해주", "해요", "할게", "할래", "해", "고", "요", ""),
     key=len, reverse=True))
+# What right after a requesting ending turns it back into "do not": "빼고 싶지 않아요",
+# "빼 주지 마세요", "빼 주시면 안 돼요".
+NEGATED_TAIL = ("지마", "지말", "지않", "진마", "진않", "지는마", "지는않", "싶지", "싶진", "싶은건아", "싶은게아", "면안", "는안")
 _REMOVAL = re.compile("|".join(map(re.escape, sorted(REMOVAL_MARKS, key=len, reverse=True))))
 
 
@@ -233,8 +236,9 @@ def removal_intents(text: str, menu: list[MenuItem]) -> dict[str | None, str]:
         if found.group() == "말고" and compact[:found.start()].endswith("지"):
             position = found.end()  # the 말고 of "빼지 말고": part of a negation, not a request
             continue
-        requested = found.group() == "말고" or (
-            after == "" or any(after.startswith(ending) for ending in REQUEST_AFTER if ending))
+        ending = next((e for e in REQUEST_AFTER if e and after.startswith(e)), "")
+        requested = found.group() == "말고" or after == "" or (
+            ending != "" and not after[len(ending):].startswith(NEGATED_TAIL))
         before = [product_id for p, product_id in names if start <= p < found.start()]
         key = before[-1] if before else None
         intents[key] = "yes" if requested and intents.get(key) != "no" else "no"
