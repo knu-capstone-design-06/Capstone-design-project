@@ -13,6 +13,10 @@ from app.infrastructure.external.ai_client import AiEngineClient
 from app.infrastructure.external.jev_client import JevClient, create_jev_http
 from app.infrastructure.external.openai_client import OpenAiClient, create_openai_http
 from app.modules.connectivity.router import router as connectivity_router
+from app.modules.decision.jev_questions import build_stages
+from app.modules.decision.repository import DecisionRepository
+from app.modules.decision.schemas import PILOT_PARAMS
+from app.modules.decision.service import DecisionService
 from app.modules.ordering.catalog import PRODUCTS
 from app.modules.ordering.repository import OrderingRepository
 from app.modules.ordering.postgres_repository import PostgresOrderingRepository
@@ -67,20 +71,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             else:
                 app.state.ordering_repository = OrderingRepository()
                 session_repository = SessionRepository()
-            app.state.session_service = SessionService(
-                session_repository, app.state.ordering_repository
-            )
-            openai = None
-            if settings.openai_api_key is not None:
-                openai_http = await stack.enter_async_context(create_openai_http(
-                    settings.openai_api_key.get_secret_value(),
-                    settings.openai_timeout_seconds,
-                ))
-                openai = OpenAiClient(
-                    openai_http, settings.openai_model, settings.openai_timeout_seconds
-                )
-            # Jev answers decisions built by ai-engine; nothing asks it until the
-            # analysis result carries a question (docs/Jev-Integration.md, step 0).
+            # Jev answers decisions in shadow mode; nothing reaches the screen until thresholds
+            # are agreed (docs/Jev-Integration.md). No key: the rule table still runs, Jev is not asked.
             app.state.jev_client = None
             if settings.jev_api_key is not None:
                 jev_http = await stack.enter_async_context(create_jev_http(
@@ -90,6 +82,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 ))
                 app.state.jev_client = JevClient(
                     jev_http, settings.jev_model, settings.jev_timeout_seconds
+                )
+            app.state.decision_repository = DecisionRepository()
+            # JEV_STAGES picks the experiment arm: off = rule table alone, or 1..n Jev stages.
+            app.state.decision_service = DecisionService(
+                app.state.decision_repository, PILOT_PARAMS, app.state.jev_client,
+                stages=build_stages(settings.jev_stages),
+            )
+            app.state.session_service = SessionService(
+                session_repository, app.state.ordering_repository, decision=app.state.decision_service
+            )
+            openai = None
+            if settings.openai_api_key is not None:
+                openai_http = await stack.enter_async_context(create_openai_http(
+                    settings.openai_api_key.get_secret_value(),
+                    settings.openai_timeout_seconds,
+                ))
+                openai = OpenAiClient(
+                    openai_http, settings.openai_model, settings.openai_timeout_seconds
                 )
             executor = None
             if settings.voice_execute_tools:
@@ -115,6 +125,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 del app.state.ai_engine_client
                 del app.state.session_service
                 del app.state.voice_service
+                await app.state.decision_service.drain()
+                del app.state.decision_service
+                del app.state.decision_repository
                 del app.state.jev_client
 
     application = FastAPI(

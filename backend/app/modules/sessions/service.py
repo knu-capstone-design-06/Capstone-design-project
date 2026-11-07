@@ -1,8 +1,11 @@
+import logging
+
 from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 
 from app.infrastructure.external.ai_client import AiEngineClient
 from app.infrastructure.external.ai_schemas import AnalyzeRequest
+from app.modules.decision.service import DecisionService
 from app.modules.ordering.repository import OrderingRepository
 from app.modules.sessions.exceptions import SessionCompleted, SessionNotFound
 from app.modules.sessions.repository import SessionRepository
@@ -11,10 +14,16 @@ from app.modules.sessions.schemas import (
 )
 
 
+logger = logging.getLogger(__name__)
+
+
 class SessionService:
-    def __init__(self, repository: SessionRepository, ordering: OrderingRepository):
+    def __init__(self, repository: SessionRepository, ordering: OrderingRepository,
+                 decision: DecisionService | None = None):
         self._repository = repository
         self._ordering = ordering
+        # Shadow judgment layer: runs beside the response and never changes it (docs/Jev-Integration.md).
+        self._decision = decision
 
     def exists(self, session_id: str) -> bool:
         return self._repository.exists(session_id)
@@ -36,6 +45,12 @@ class SessionService:
         # An order may complete while the AI request is in flight.
         if await run_in_threadpool(self._ordering.is_completed, session_id):
             raise SessionCompleted()
+        if self._decision is not None:
+            try:
+                self._decision.observe(session_id, window, measurable=result is not None and result.measurable)
+            except Exception:
+                # The judgment layer is in shadow mode: a failure there must not touch the response.
+                logger.exception("decision layer failed; response unchanged")
         fallback = FeatureWindowResponse(session_id=session_id, ai_available=False)
         if result is None:
             return fallback
