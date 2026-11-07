@@ -57,11 +57,13 @@ class FakeInterpreter:
         self.calls = 0
         self.menus = []
         self.histories = []
+        self.carts = []
 
-    async def interpret(self, request, menu, history):
+    async def interpret(self, request, menu, history, cart=()):
         self.calls += 1
         self.menus.append(menu)
         self.histories.append(history)
+        self.carts.append(list(cart))
         if isinstance(self.result, Exception):
             raise self.result
         return self.result
@@ -112,6 +114,15 @@ class VoiceApiCase(unittest.TestCase):
 
     def cart(self):
         return self.client.get(f"/api/v1/sessions/{self.session_id}/cart").json()
+
+    def add_by_touch(self, product_id, temperature, quantity=1):
+        """Put something in the cart the way the touch screen does (real catalog)."""
+        cart = self.cart()
+        added = self.client.post(f"/api/v1/sessions/{self.session_id}/cart/items", json={
+            "product_id": product_id, "temperature": temperature, "quantity": quantity,
+            "expected_version": cart["version"],
+        }, headers={"Idempotency-Key": str(uuid4())})
+        self.assertEqual(added.status_code, 200, added.text)
 
 
 class VoiceApiTests(VoiceApiCase):
@@ -192,6 +203,8 @@ class VoiceApiTests(VoiceApiCase):
         self.assertEqual([t.request.text for t in self.interpreter.histories[-1]], ["아메리카노"])
 
     def test_tool_calls_on_menu_are_kept_in_order(self):
+        self.add_by_touch("sandwich", None, 1)
+        self.add_by_touch("latte", "hot", 1)
         valid = [
             call("update_cart_item", "sandwich", None, 3),
             call("remove_cart_item", "latte", "hot"),  # unavailable items can still leave the cart
@@ -224,6 +237,7 @@ class VoiceApiTests(VoiceApiCase):
             self.assertIsNone(body["error"])
 
     def test_single_allowed_temperature_is_filled_in(self):
+        self.add_by_touch("latte", "hot", 1)
         self.interpreter.result = interpretation(call("remove_cart_item", "latte", None))
         body = self.status(self.say("라떼 빼 주세요")).json()
         self.assertEqual(body["status"], "completed")
@@ -314,12 +328,198 @@ class VoiceApiTests(VoiceApiCase):
         self.assertEqual(body["tool_calls"], [])
 
     def test_product_named_earlier_in_the_session_is_kept(self):
+        self.add_by_touch("americano", "iced", 2)
         self.interpreter.result = interpretation(ADD_AMERICANO)
         self.say("아이스 아메리카노 두 잔")
         self.interpreter.result = interpretation(call("update_cart_item", "americano", "iced", 3))
         body = self.status(self.say("하나 더요")).json()
         self.assertEqual(body["status"], "completed")
         self.assertEqual(body["tool_calls"], [call("update_cart_item", "americano", "iced", 3)])
+
+    def test_current_cart_is_passed_to_the_interpreter(self):
+        from app.modules.voice.schemas import CartLine
+
+        self.add_by_touch("sandwich", None, 1)
+        self.add_by_touch("americano", "hot", 2)
+        self.say("하나 더요")
+        self.assertEqual(self.interpreter.carts[-1], [
+            CartLine(product_id="sandwich", temperature=None, quantity=1),
+            CartLine(product_id="americano", temperature="hot", quantity=2),
+        ])
+
+    def test_one_more_of_a_product_added_by_touch_passes_the_name_check(self):
+        # No voice turn named it; the customer put it in the cart by touch.
+        self.add_by_touch("americano", "iced", 2)
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 1))
+        body = self.status(self.say("하나 더요")).json()
+        self.assertEqual(body["status"], "completed")
+        self.assertEqual(body["tool_calls"], [call("add_cart_item", "americano", "iced", 1)])
+        # A product neither named nor in the cart still has to be asked about.
+        self.interpreter.result = interpretation(call("add_cart_item", "sandwich", None, 1))
+        self.assertEqual(self.status(self.say("그것도요")).json()["reply_text"], "어떤 메뉴를 주문할까요?")
+
+    def test_model_quantity_that_ignores_the_spoken_one_more_is_confirmed_not_run(self):
+        # Two iced americanos by touch; the model answers "하나 더요" with the cart total.
+        self.add_by_touch("americano", "iced", 2)
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 3))
+        body = self.status(self.say("하나 더요")).json()
+        self.assertEqual((body["status"], body["reply_text"]), ("needs_confirmation", "아이스 아메리카노 1잔 담을까요?"))
+        self.assertEqual(body["tool_calls"], [call("add_cart_item", "americano", "iced", 1)])
+        # "네" runs the read-back quantity, not the model's.
+        body = self.status(self.say("네")).json()
+        self.assertEqual((body["status"], body["tool_calls"]), ("completed", [call("add_cart_item", "americano", "iced", 1)]))
+
+    def test_update_that_disagrees_with_the_spoken_increment_is_confirmed_with_current_plus_it(self):
+        self.add_by_touch("americano", "iced", 2)
+        self.interpreter.result = interpretation(call("update_cart_item", "americano", "iced", 5))
+        body = self.status(self.say("두 잔 더요")).json()
+        self.assertEqual((body["status"], body["reply_text"]), ("needs_confirmation", "아이스 아메리카노 4잔으로 바꿀까요?"))
+        self.assertEqual(body["tool_calls"], [call("update_cart_item", "americano", "iced", 4)])
+
+    def test_each_spoken_count_checks_the_product_named_before_it(self):
+        self.add_by_touch("americano", "iced", 2)
+        # The model gives the sandwich 1 where the customer said two.
+        self.interpreter.result = interpretation(
+            call("add_cart_item", "americano", "iced", 1), call("add_cart_item", "sandwich", None, 1))
+        body = self.status(self.say("아메리카노 하나 더, 샌드위치 두 개 더")).json()
+        self.assertEqual((body["status"], body["reply_text"]),
+                         ("needs_confirmation", "아이스 아메리카노 1잔 담기, 에그 샌드위치 2개 담기, 이대로 할까요?"))
+        self.assertEqual(body["tool_calls"],
+                         [call("add_cart_item", "americano", "iced", 1), call("add_cart_item", "sandwich", None, 2)])
+
+    def test_spoken_count_past_the_cart_limit_is_refused_with_the_limit(self):
+        self.add_by_touch("americano", "iced", 19)
+        for text, tool_call in [
+            ("100잔 더요", call("add_cart_item", "americano", "iced", 1)),
+            ("두 잔 더요", call("update_cart_item", "americano", "iced", 20)),  # 19 + 2
+        ]:
+            with self.subTest(text=text):
+                self.interpreter.result = interpretation(tool_call)
+                body = self.status(self.say(text)).json()
+                self.assertEqual((body["status"], body["reply_text"]), ("needs_clarification", "한 상품은 20개까지 담을 수 있어요."))
+                self.assertEqual(body["tool_calls"], [])
+        # Nothing was proposed, so "네" does not run anything.
+        self.assertEqual(self.status(self.say("네")).json()["status"], "needs_clarification")
+
+    def test_taking_one_off_three_cups_updates_to_two_even_if_the_model_removes_the_line(self):
+        # Over one piece the words remove the line, as the model said.
+        self.add_by_touch("sandwich", None, 1)
+        self.interpreter.result = interpretation(call("remove_cart_item", "sandwich", None))
+        self.assertEqual(self.status(self.say("샌드위치 하나 빼 주세요")).json()["status"], "completed")
+        # Over three cups they leave two; the model's removal is read back as that change.
+        self.add_by_touch("americano", "iced", 3)
+        self.interpreter.result = interpretation(call("remove_cart_item", "americano", "iced"))
+        body = self.status(self.say("아메리카노 하나 빼 주세요")).json()
+        self.assertEqual((body["status"], body["reply_text"]), ("needs_confirmation", "아이스 아메리카노 2잔으로 바꿀까요?"))
+        self.assertEqual(body["tool_calls"], [call("update_cart_item", "americano", "iced", 2)])
+
+    def test_count_said_in_the_utterance_the_kiosk_asked_about_still_holds(self):
+        self.interpreter.result = interpretation(reply_text="아메리카노, 따뜻한 것과 아이스 중 무엇으로 할까요?")
+        self.say("아메리카노 두 잔이요")
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 2))
+        body = self.status(self.say("아이스로요")).json()
+        self.assertEqual((body["status"], body["tool_calls"]), ("completed", [call("add_cart_item", "americano", "iced", 2)]))
+        # A different number than the two cups asked about is read back first.
+        self.interpreter.result = interpretation(reply_text="아메리카노, 따뜻한 것과 아이스 중 무엇으로 할까요?")
+        self.say("아메리카노 두 잔이요")
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 5))
+        body = self.status(self.say("아이스로요")).json()
+        self.assertEqual((body["status"], body["reply_text"]), ("needs_confirmation", "아이스 아메리카노 2잔 담을까요?"))
+
+    def test_answer_with_a_temperature_other_than_the_model_picked_is_confirmed(self):
+        self.interpreter.result = interpretation(reply_text="아메리카노, 따뜻한 것과 아이스 중 무엇으로 할까요?")
+        self.say("아메리카노 하나요")
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "hot", 1))
+        body = self.status(self.say("아이스로요")).json()
+        self.assertEqual((body["status"], body["reply_text"]), ("needs_confirmation", "아이스 아메리카노 1잔 담을까요?"))
+        self.assertEqual(body["tool_calls"], [call("add_cart_item", "americano", "iced", 1)])
+
+    def test_tool_inputs_matching_the_spoken_increment_run_as_they_are(self):
+        self.add_by_touch("americano", "iced", 2)
+        for text, tool_call in [
+            ("두 잔 더요", call("add_cart_item", "americano", "iced", 2)),
+            ("한 잔 더 주세요", call("update_cart_item", "americano", "iced", 5)),  # 2 + 2 + 1
+        ]:
+            with self.subTest(text=text):
+                self.interpreter.result = interpretation(tool_call)
+                body = self.status(self.say(text)).json()
+                self.assertEqual((body["status"], body["tool_calls"]), ("completed", [tool_call]))
+                self.add_by_touch("americano", "iced", 2)  # as if the add had run (tools are off here)
+
+    def test_unnamed_instruction_with_several_cart_lines_asks_which(self):
+        self.add_by_touch("americano", "iced", 2)
+        self.add_by_touch("sandwich", None, 1)
+        self.interpreter.result = interpretation(call("add_cart_item", "sandwich", None, 1))
+        body = self.status(self.say("하나 더요")).json()
+        self.assertEqual((body["status"], body["reply_text"]),
+                         ("needs_clarification", "아이스 아메리카노, 에그 샌드위치 중 어느 것을 말씀하시나요?"))
+        self.assertEqual(body["tool_calls"], [])
+        # Naming it still works with several lines in the cart.
+        self.interpreter.result = interpretation(call("add_cart_item", "sandwich", None, 1))
+        self.assertEqual(self.status(self.say("샌드위치 하나 더요")).json()["status"], "completed")
+
+    def test_products_said_earlier_do_not_license_an_ambiguous_instruction_now(self):
+        # Both products were ordered by voice (and sit in the cart); "하나 더요" names neither.
+        self.add_by_touch("americano", "iced", 2)
+        self.add_by_touch("sandwich", None, 1)
+        self.interpreter.result = interpretation(ADD_AMERICANO)
+        self.say("아이스 아메리카노 두 잔")
+        self.interpreter.result = interpretation(call("add_cart_item", "sandwich", None, 1))
+        self.say("에그 샌드위치 하나")
+        self.interpreter.result = interpretation(call("add_cart_item", "sandwich", None, 1))
+        body = self.status(self.say("하나 더요")).json()
+        self.assertEqual((body["status"], body["reply_text"]),
+                         ("needs_clarification", "아이스 아메리카노, 에그 샌드위치 중 어느 것을 말씀하시나요?"))
+
+    def test_product_named_now_wins_over_one_said_earlier(self):
+        self.add_by_touch("americano", "iced", 2)
+        self.add_by_touch("sandwich", None, 1)
+        self.interpreter.result = interpretation(ADD_AMERICANO)
+        self.say("아이스 아메리카노 두 잔")
+        # The customer names the sandwich now; the model returns the americano from before.
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 1))
+        body = self.status(self.say("샌드위치 하나 더요")).json()
+        self.assertEqual((body["status"], body["reply_text"]), ("needs_clarification", "어떤 메뉴를 주문할까요?"))
+        self.assertEqual(body["tool_calls"], [])
+
+    def test_unnamed_instruction_with_two_temperatures_in_the_cart_asks_which(self):
+        self.add_by_touch("americano", "iced", 1)
+        self.add_by_touch("americano", "hot", 1)
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 1))
+        body = self.status(self.say("하나 더요")).json()
+        self.assertEqual((body["status"], body["reply_text"]),
+                         ("needs_clarification", "아이스 아메리카노, 따뜻한 아메리카노 중 어느 것을 말씀하시나요?"))
+        # One line in the cart but the model picks the other temperature: not what "그거" means.
+        self.session_id = self.client.post("/api/v1/sessions").json()["session_id"]
+        self.add_by_touch("americano", "iced", 1)
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "hot", 1))
+        body = self.status(self.say("하나 더요")).json()
+        self.assertEqual((body["status"], body["reply_text"]),
+                         ("needs_clarification", "아이스 아메리카노 중 어느 것을 말씀하시나요?"))
+
+    def test_identical_repeated_tool_inputs_are_kept_once(self):
+        one = call("add_cart_item", "americano", "iced", 1)
+        self.interpreter.result = interpretation(one, one, call("add_cart_item", "sandwich", None, 1))
+        body = self.status(self.say("아이스 아메리카노 하나랑 샌드위치 하나")).json()
+        self.assertEqual(body["status"], "completed")
+        self.assertEqual(body["tool_calls"], [one, call("add_cart_item", "sandwich", None, 1)])
+
+    def test_change_or_removal_of_something_not_in_the_cart_asks(self):
+        self.interpreter.result = interpretation(call("update_cart_item", "americano", "iced", 3))
+        body = self.status(self.say("아메리카노 세 잔으로 바꿔 주세요")).json()
+        self.assertEqual((body["status"], body["reply_text"]), ("needs_clarification", "아메리카노, 지금 장바구니에 없어요."))
+        self.assertEqual(body["tool_calls"], [])
+
+    def test_temperature_of_a_change_comes_from_the_cart(self):
+        self.add_by_touch("americano", "hot", 2)
+        self.interpreter.result = interpretation(call("remove_cart_item", "americano", None))
+        body = self.status(self.say("아메리카노 빼 주세요")).json()
+        self.assertEqual(body["status"], "completed")
+        self.assertEqual(body["tool_calls"], [call("remove_cart_item", "americano", "hot")])
+        # Both temperatures in the cart: the kiosk has to ask which one.
+        self.add_by_touch("americano", "iced", 1)
+        body = self.status(self.say("아메리카노 빼 주세요")).json()
+        self.assertEqual((body["status"], body["reply_text"]), ("needs_clarification", "아메리카노, 따뜻한 것과 아이스 중 무엇으로 할까요?"))
 
     def test_bare_yes_after_a_completed_order_asks_without_calling_openai(self):
         self.interpreter.result = interpretation(ADD_AMERICANO)
@@ -543,12 +743,12 @@ class ToolExecutionApiTests(VoiceApiCase):
                     self.say("잠깐만 전화 좀 받을게")
                     self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", quantity))
                     body = self.status(self.say("네 그걸로 주세요")).json()
-                    self.assertEqual(body["status"], "needs_confirmation")
-                    self.assertEqual(body["reply_text"], f"아이스 아메리카노 {quantity}잔 담을까요?")
-                    self.assertEqual(self.cart()["total_quantity"], 1, "재확인 전에는 그대로")
-                    # The customer confirms what was read back; only now does it run.
-                    self.assertEqual(self.status(self.say("네")).json()["actions"], ["cart_updated"])
-                    self.assertEqual(self.cart()["total_quantity"], 1 + quantity)
+                    # No offer is open and the words name nothing: the kiosk asks, never runs.
+                    self.assertEqual((body["status"], body["reply_text"], body["actions"]),
+                                     ("needs_clarification", "어떤 메뉴를 주문할까요?", []))
+                    self.assertEqual(self.cart()["total_quantity"], 1, "그대로")
+                    self.assertEqual(self.status(self.say("네")).json()["actions"], [])
+                    self.assertEqual(self.cart()["total_quantity"], 1)
 
     def test_declined_proposal_is_not_run_from_a_later_worded_acceptance(self):
         self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
@@ -584,7 +784,7 @@ class ToolExecutionApiTests(VoiceApiCase):
     def test_long_proposal_asks_to_split_instead_of_hiding_items(self):
         self.interpreter.result = interpretation(
             call("add_cart_item", "americano", "iced", 2), call("add_cart_item", "americano", "hot", 1),
-            call("add_cart_item", "sandwich", None, 20), call("remove_cart_item", "sandwich", None),
+            call("add_cart_item", "sandwich", None, 20), call("add_cart_item", "sandwich", None, 1),
             reply_text="네 가지 담을까요?",
         )
         body = self.status(self.say("아이스 아메리카노 두 잔, 따뜻한 거 하나, 샌드위치 하나")).json()
@@ -598,7 +798,7 @@ class ToolExecutionApiTests(VoiceApiCase):
 
     def test_split_request_is_not_bypassed_by_a_worded_acceptance(self):
         four = (call("add_cart_item", "americano", "iced", 2), call("add_cart_item", "americano", "hot", 1),
-                call("add_cart_item", "sandwich", None, 20), call("remove_cart_item", "sandwich", None))
+                call("add_cart_item", "sandwich", None, 20), call("add_cart_item", "sandwich", None, 1))
         for text in ("네 그걸로 주세요", "네 맞아요", "네 그렇게 해주세요"):
             with self.subTest(text=text):
                 self.session_id = self.client.post("/api/v1/sessions").json()["session_id"]
@@ -607,10 +807,404 @@ class ToolExecutionApiTests(VoiceApiCase):
                 # The model now reads the acceptance against the long utterance still in context.
                 self.interpreter.result = interpretation(*four)
                 body = self.status(self.say(text)).json()
-                self.assertEqual((body["status"], body["reply_text"]),
-                                 ("needs_clarification", "주문이 길어요. 두 가지씩 나눠서 말씀해 주세요."))
+                # Nothing named now and the cart is empty: the kiosk asks again, never runs.
+                self.assertEqual(body["status"], "needs_clarification")
+                self.assertEqual(body["tool_calls"], [])
                 self.assertEqual(body["actions"], [])
                 self.assertEqual(self.cart()["items"], [], "읽어 주지 않은 항목은 담기지 않음")
+
+    def test_one_more_after_a_touch_order_adds_one_to_the_cart(self):
+        self.add_by_touch("americano", "iced", 2)
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 1))
+        body = self.status(self.say("하나 더요")).json()
+        self.assertEqual((body["status"], body["actions"]), ("completed", ["cart_updated"]))
+        self.assertEqual([(i["product_id"], i["temperature"], i["quantity"]) for i in self.cart()["items"]],
+                         [("americano", "iced", 3)])
+
+    def test_one_more_with_a_wrong_model_quantity_does_not_change_the_cart_until_confirmed(self):
+        # The reviewer's reproduction: 2 in the cart, model says add 3, "하나 더요" became 5.
+        self.add_by_touch("americano", "iced", 2)
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 3))
+        body = self.status(self.say("하나 더요")).json()
+        self.assertEqual((body["status"], body["actions"]), ("needs_confirmation", []))
+        self.assertEqual(self.cart()["total_quantity"], 2)
+        body = self.status(self.say("네")).json()
+        self.assertEqual((body["status"], body["actions"]), ("completed", ["cart_updated"]))
+        self.assertEqual([(i["product_id"], i["temperature"], i["quantity"]) for i in self.cart()["items"]],
+                         [("americano", "iced", 3)])
+
+    def test_explicit_order_with_a_wrong_model_quantity_is_confirmed_not_run(self):
+        # The reviewer's reproduction: "한 잔" said, three cups returned.
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 3))
+        body = self.status(self.say("아이스 아메리카노 한 잔 주세요")).json()
+        self.assertEqual((body["status"], body["reply_text"], body["actions"]),
+                         ("needs_confirmation", "아이스 아메리카노 1잔 담을까요?", []))
+        self.assertEqual(self.cart()["items"], [])
+        body = self.status(self.say("네")).json()
+        self.assertEqual((body["status"], body["actions"]), ("completed", ["cart_updated"]))
+        self.assertEqual([(i["product_id"], i["temperature"], i["quantity"]) for i in self.cart()["items"]],
+                         [("americano", "iced", 1)])
+
+    def test_explicit_order_with_a_wrong_model_temperature_is_confirmed_not_run(self):
+        # The reviewer's reproduction: "아이스" said, a hot one returned.
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "hot", 1))
+        body = self.status(self.say("아이스 아메리카노 한 잔 주세요")).json()
+        self.assertEqual((body["status"], body["reply_text"], body["actions"]),
+                         ("needs_confirmation", "아이스 아메리카노 1잔 담을까요?", []))
+        self.assertEqual(body["tool_calls"], [call("add_cart_item", "americano", "iced", 1)])
+        self.assertEqual(self.cart()["items"], [])
+        body = self.status(self.say("네")).json()
+        self.assertEqual([(i["product_id"], i["temperature"], i["quantity"]) for i in self.cart()["items"]],
+                         [("americano", "iced", 1)])
+
+    def test_temperature_said_after_its_product_is_not_given_to_the_next_product(self):
+        # The reviewer's reproduction: "아이스" belongs to the americano before it, not the sandwich after.
+        self.interpreter.result = interpretation(
+            call("add_cart_item", "americano", "hot", 1), call("add_cart_item", "sandwich", None, 1))
+        body = self.status(self.say("아메리카노 아이스로 하고 샌드위치 하나 주세요")).json()
+        self.assertEqual((body["status"], body["reply_text"], body["actions"]),
+                         ("needs_confirmation", "아이스 아메리카노 1잔 담기, 에그 샌드위치 1개 담기, 이대로 할까요?", []))
+        self.assertEqual(self.cart()["items"], [])
+        body = self.status(self.say("네")).json()
+        self.assertEqual([(i["product_id"], i["temperature"], i["quantity"]) for i in self.cart()["items"]],
+                         [("americano", "iced", 1), ("sandwich", None, 1)])
+
+    def test_temperature_said_before_the_next_drink_is_not_given_to_the_drink_before(self):
+        # The reviewer's reproduction: "아이스로" describes the americano after it, not the latte before.
+        menu = [*MENU[:2], MenuItem(product_id="latte", name="카페 라떼", available=True, temperatures=["iced", "hot"])]
+        with patch("app.main.menu_from_products", return_value=menu):
+            self.interpreter.result = interpretation(
+                call("add_cart_item", "latte", "hot", 1), call("add_cart_item", "americano", "hot", 1))
+            body = self.status(self.say("카페 라떼 따뜻하게 하나랑 아이스로 아메리카노 하나 주세요")).json()
+            self.assertEqual((body["status"], body["reply_text"], body["actions"]),
+                             ("needs_confirmation", "따뜻한 카페 라떼 1잔 담기, 아이스 아메리카노 1잔 담기, 이대로 할까요?", []))
+            self.assertEqual(self.cart()["items"], [])
+            self.status(self.say("네"))
+        self.assertEqual([(i["product_id"], i["temperature"], i["quantity"]) for i in self.cart()["items"]],
+                         [("latte", "hot", 1), ("americano", "iced", 1)])
+
+    def test_touch_change_between_the_checks_and_execution_is_not_overwritten(self):
+        # The reviewer's reproduction: "하나 더요" over 2 cups read as "3잔으로"; a touch makes
+        # it 5 before the executor runs. Running 3 now would throw the touch away.
+        from app.modules.ordering.schemas import AddItemRequest
+        from app.modules.voice.executor import OrderingCartExecutor
+
+        self.add_by_touch("americano", "iced", 2)
+        self.interpreter.result = interpretation(call("update_cart_item", "americano", "iced", 3))
+        original = OrderingCartExecutor.execute
+
+        def touch_then_execute(executor, session_id, request_id, calls, expected=None):
+            cart = executor.service.cart(session_id)
+            executor.service.add_item(session_id, str(uuid4()), AddItemRequest(
+                expected_version=cart.version, product_id="americano", temperature="iced", quantity=3))
+            return original(executor, session_id, request_id, calls, expected)
+
+        with patch.object(OrderingCartExecutor, "execute", autospec=True, side_effect=touch_then_execute):
+            body = self.status(self.say("하나 더요")).json()
+        self.assertEqual((body["status"], body["reply_text"], body["actions"]),
+                         ("needs_confirmation", "아이스 아메리카노 3잔으로 바꿀까요?", []))
+        self.assertEqual(self.cart()["total_quantity"], 5, "터치로 더한 3잔이 남아 있음")
+        # "네" runs the read-back inputs on the cart as the customer now sees it.
+        body = self.status(self.say("네")).json()
+        self.assertEqual((body["status"], body["actions"]), ("completed", ["cart_updated"]))
+        self.assertEqual(self.cart()["total_quantity"], 3)
+
+    def test_touch_change_after_a_proposal_makes_yes_confirm_again(self):
+        self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
+        self.say("아이스 아메리카노 두 개")
+        self.add_by_touch("sandwich", None, 1)
+        body = self.status(self.say("네")).json()
+        self.assertEqual((body["status"], body["reply_text"], body["actions"]), ("needs_confirmation", CONFIRM, []))
+        self.assertEqual(self.cart()["total_quantity"], 1)
+        body = self.status(self.say("네")).json()
+        self.assertEqual((body["status"], body["actions"]), ("completed", ["cart_updated"]))
+        self.assertEqual(self.cart()["total_quantity"], 3)
+
+    def test_addition_with_no_spoken_count_runs_only_as_one(self):
+        # One cup, as the prompt says for an order with no count, runs.
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 1))
+        body = self.status(self.say("아이스 아메리카노 주세요")).json()
+        self.assertEqual((body["status"], body["actions"]), ("completed", ["cart_updated"]))
+        self.assertEqual(self.cart()["total_quantity"], 1)
+        # The reviewer's reproduction: no count said, twenty returned.
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 20))
+        body = self.status(self.say("아이스 아메리카노 주세요")).json()
+        self.assertEqual((body["status"], body["reply_text"], body["actions"]),
+                         ("needs_confirmation", "아이스 아메리카노 20잔 담을까요?", []))
+        self.assertEqual(self.cart()["total_quantity"], 1)
+        # The customer corrects the count; the model repeats the offered twenty. The
+        # correction is checked, not the offer.
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 20))
+        body = self.status(self.say("아이스 아메리카노 한 잔만 주세요")).json()
+        self.assertEqual((body["status"], body["reply_text"], body["actions"]),
+                         ("needs_confirmation", "아이스 아메리카노 1잔 담을까요?", []))
+        self.assertEqual(body["tool_calls"], [call("add_cart_item", "americano", "iced", 1)])
+        self.assertEqual(self.cart()["total_quantity"], 1)
+        body = self.status(self.say("네")).json()
+        self.assertEqual((body["status"], body["actions"]), ("completed", ["cart_updated"]))
+        self.assertEqual(self.cart()["total_quantity"], 2)
+
+    def test_wrong_increment_beside_a_removal_is_confirmed_not_run(self):
+        # The reviewer's reproduction: "빼" in the sentence must not switch the count check off.
+        self.add_by_touch("americano", "iced", 2)
+        self.add_by_touch("sandwich", None, 1)
+        self.interpreter.result = interpretation(
+            call("add_cart_item", "americano", "iced", 3), call("remove_cart_item", "sandwich", None))
+        body = self.status(self.say("아이스 아메리카노 하나 더, 샌드위치 빼 주세요")).json()
+        self.assertEqual((body["status"], body["actions"]), ("needs_confirmation", []))
+        self.assertEqual(body["tool_calls"],
+                         [call("add_cart_item", "americano", "iced", 1), call("remove_cart_item", "sandwich", None)])
+        self.assertEqual(self.cart()["total_quantity"], 3)
+        body = self.status(self.say("네")).json()
+        self.assertEqual((body["status"], body["actions"]), ("completed", ["cart_updated"]))
+        self.assertEqual([(i["product_id"], i["temperature"], i["quantity"]) for i in self.cart()["items"]],
+                         [("americano", "iced", 3)])
+
+    def test_turned_down_offer_repeated_by_the_model_is_not_run(self):
+        # The reviewer's reproduction: twenty offered, the customer says no, the model repeats the twenty.
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 20))
+        body = self.status(self.say("아이스 아메리카노 주세요")).json()
+        self.assertEqual(body["status"], "needs_confirmation")
+        body = self.status(self.say("아니요 그거 말고요")).json()
+        self.assertEqual((body["status"], body["reply_text"], body["actions"]),
+                         ("needs_clarification", "어떤 메뉴를 주문할까요?", []))
+        self.assertEqual(body["tool_calls"], [])
+        self.assertEqual(self.cart()["items"], [])
+        # The offer is gone: a later "네" has nothing to run.
+        body = self.status(self.say("네")).json()
+        self.assertEqual((body["status"], body["actions"]), ("needs_clarification", []))
+        self.assertEqual(self.cart()["items"], [])
+
+    def test_negated_taking_word_does_not_accept_the_offer(self):
+        # The reviewer's reproductions: "그대로" beside "안 돼요" or "하지 마세요" is a no, not a yes.
+        for text in ["그대로 하면 안 돼요", "그대로 하지 마세요"]:
+            with self.subTest(text=text):
+                self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 20))
+                self.say("아이스 아메리카노 주세요")
+                body = self.status(self.say(text)).json()
+                self.assertEqual((body["status"], body["reply_text"], body["actions"]),
+                                 ("needs_clarification", "어떤 메뉴를 주문할까요?", []))
+                self.assertEqual(self.cart()["items"], [])
+
+    def test_anything_off_the_acceptance_list_reads_the_offer_back_instead_of_running(self):
+        # Not a listed acceptance, no rejection word either: the offer is never run on it.
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 20))
+        self.say("아이스 아메리카노 주세요")
+        body = self.status(self.say("그대로 하면 좀 그런데요")).json()
+        self.assertEqual((body["status"], body["reply_text"], body["actions"]),
+                         ("needs_confirmation", "아이스 아메리카노 20잔 담을까요?", []))
+        self.assertEqual(self.cart()["items"], [])
+
+    def test_unclear_answer_to_an_offer_reads_it_back_again(self):
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 20))
+        self.say("아이스 아메리카노 주세요")
+        body = self.status(self.say("음 잠깐만요")).json()
+        self.assertEqual((body["status"], body["reply_text"], body["actions"]),
+                         ("needs_confirmation", "아이스 아메리카노 20잔 담을까요?", []))
+        self.assertEqual(self.cart()["items"], [])
+        body = self.status(self.say("네")).json()
+        self.assertEqual((body["status"], body["actions"]), ("completed", ["cart_updated"]))
+        self.assertEqual(self.cart()["total_quantity"], 20)
+
+    def test_worded_acceptance_after_a_touch_change_confirms_again(self):
+        # The reviewers' reproduction: "네 그걸로 주세요" must run on the cart the offer was
+        # checked against, exactly like a bare "네".
+        self.add_by_touch("americano", "iced", 2)
+        self.interpreter.result = interpretation(call("update_cart_item", "americano", "iced", 3))
+        self.interpreter.result = interpretation(call("update_cart_item", "americano", "iced", 3), reply_text="?")
+        self.say("하나 더요")
+        self.add_by_touch("americano", "iced", 3)
+        total = 5
+        for text in ["네 그걸로 주세요", "네네", "응 그렇게 해주세요", "네, 담아 주세요"]:
+            self.interpreter.result = interpretation(call("update_cart_item", "americano", "iced", 3))
+            body = self.status(self.say(text)).json()
+            self.assertEqual((body["status"], body["reply_text"], body["actions"]),
+                             ("needs_confirmation", "아이스 아메리카노 3잔으로 바꿀까요?", []), text)
+            self.assertEqual(self.cart()["total_quantity"], total, text)
+            self.add_by_touch("americano", "iced", 1)  # changed again before the next answer
+            total += 1
+        # With the cart as read back, the worded acceptance runs.
+        self.interpreter.result = interpretation(call("update_cart_item", "americano", "iced", 3))
+        body = self.status(self.say("네 그걸로 주세요")).json()
+        self.assertEqual((body["status"], body["reply_text"]), ("needs_confirmation", "아이스 아메리카노 3잔으로 바꿀까요?"))
+        self.interpreter.result = interpretation(call("update_cart_item", "americano", "iced", 3))
+        body = self.status(self.say("네 그걸로 주세요")).json()
+        self.assertEqual((body["status"], body["actions"]), ("completed", ["cart_updated"]))
+        self.assertEqual(self.cart()["total_quantity"], 3)
+
+    def test_target_count_with_an_add_from_the_model_is_confirmed_as_a_change(self):
+        # The reviewer's reproduction: "세 잔으로" over two cups is three in all, not three more.
+        self.add_by_touch("americano", "iced", 2)
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 3))
+        body = self.status(self.say("세 잔으로 바꿔 주세요")).json()
+        self.assertEqual((body["status"], body["reply_text"], body["actions"]),
+                         ("needs_confirmation", "아이스 아메리카노 3잔으로 바꿀까요?", []))
+        self.assertEqual(body["tool_calls"], [call("update_cart_item", "americano", "iced", 3)])
+        self.assertEqual(self.cart()["total_quantity"], 2)
+        body = self.status(self.say("네")).json()
+        self.assertEqual((body["status"], body["actions"]), ("completed", ["cart_updated"]))
+        self.assertEqual(self.cart()["total_quantity"], 3)
+
+    def test_sole_cart_line_does_not_stand_in_for_an_unrelated_request(self):
+        # The reviewer's reproduction: one line in the cart must not license a request for
+        # another product or for nothing in the cart.
+        self.add_by_touch("americano", "iced", 2)
+        for text in ["라떼 하나 주세요", "화면 좀 내려줘"]:
+            with self.subTest(text=text):
+                self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 1))
+                body = self.status(self.say(text)).json()
+                self.assertEqual((body["status"], body["actions"], body["tool_calls"]), ("needs_clarification", [], []))
+                self.assertEqual(self.cart()["total_quantity"], 2)
+
+    def test_removal_runs_only_on_words_that_ask_for_one(self):
+        # The reviewer's reproduction: "빼지 말아 주세요" with the model removing anyway.
+        self.add_by_touch("americano", "iced", 2)
+        self.interpreter.result = interpretation(call("remove_cart_item", "americano", "iced"))
+        body = self.status(self.say("아이스 아메리카노 빼지 말아 주세요")).json()
+        self.assertEqual((body["status"], body["reply_text"], body["actions"], body["tool_calls"]),
+                         ("needs_clarification", "어떤 메뉴를 주문할까요?", [], []))
+        self.assertEqual(self.cart()["total_quantity"], 2)
+        # Nothing about removing at all: the removal is read back, not run.
+        self.interpreter.result = interpretation(call("remove_cart_item", "americano", "iced"))
+        body = self.status(self.say("아메리카노요")).json()
+        self.assertEqual((body["status"], body["reply_text"], body["actions"]),
+                         ("needs_confirmation", "아이스 아메리카노 뺄까요?", []))
+        self.assertEqual(self.cart()["total_quantity"], 2)
+        body = self.status(self.say("네")).json()
+        self.assertEqual((body["status"], body["actions"]), ("completed", ["cart_updated"]))
+        self.assertEqual(self.cart()["items"], [])
+        # Words that ask for a removal still run it.
+        self.add_by_touch("americano", "iced", 1)
+        self.interpreter.result = interpretation(call("remove_cart_item", "americano", "iced"))
+        body = self.status(self.say("아이스 아메리카노 취소해 주세요")).json()
+        self.assertEqual((body["status"], body["actions"]), ("completed", ["cart_updated"]))
+        self.assertEqual(self.cart()["items"], [])
+
+    def test_negated_removal_with_a_count_is_not_run_as_a_reduction(self):
+        # The reviewer's reproduction: "한 잔 빼지 마세요" with the model lowering the line to one.
+        self.add_by_touch("americano", "iced", 2)
+        self.interpreter.result = interpretation(call("update_cart_item", "americano", "iced", 1))
+        body = self.status(self.say("아이스 아메리카노 한 잔 빼지 마세요")).json()
+        self.assertEqual((body["status"], body["reply_text"], body["actions"], body["tool_calls"]),
+                         ("needs_clarification", "어떤 메뉴를 주문할까요?", [], []))
+        self.assertEqual(self.cart()["total_quantity"], 2)
+
+    def test_removal_words_bind_to_their_own_product(self):
+        # The reviewer's reproduction: keep the americano, remove the sandwich; the model removes both.
+        self.add_by_touch("americano", "iced", 2)
+        self.add_by_touch("sandwich", None, 1)
+        self.interpreter.result = interpretation(
+            call("remove_cart_item", "americano", "iced"), call("remove_cart_item", "sandwich", None))
+        body = self.status(self.say("아메리카노 빼지 말고 샌드위치 빼 주세요")).json()
+        self.assertEqual((body["status"], body["actions"], body["tool_calls"]), ("needs_clarification", [], []))
+        self.assertEqual(self.cart()["total_quantity"], 3)
+        # Said the right way round, only the sandwich goes.
+        self.interpreter.result = interpretation(call("remove_cart_item", "sandwich", None))
+        body = self.status(self.say("아메리카노 빼지 말고 샌드위치 빼 주세요")).json()
+        self.assertEqual((body["status"], body["actions"]), ("completed", ["cart_updated"]))
+        self.assertEqual([(i["product_id"], i["quantity"]) for i in self.cart()["items"]], [("americano", 2)])
+
+    def test_question_product_does_not_license_an_unrelated_utterance(self):
+        # The reviewer's reproduction: a temperature question, then a screen request.
+        self.interpreter.result = interpretation(reply_text="아메리카노, 따뜻한 것과 아이스 중 무엇으로 할까요?")
+        self.say("아메리카노 한 잔 주세요")
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 1))
+        body = self.status(self.say("화면 아래로 내려주세요")).json()
+        self.assertEqual((body["status"], body["reply_text"], body["actions"], body["tool_calls"]),
+                         ("needs_clarification", "어떤 메뉴를 주문할까요?", [], []))
+        self.assertEqual(self.cart()["items"], [])
+        # The answer to the question still goes through, with the count asked about.
+        self.interpreter.result = interpretation(reply_text="아메리카노, 따뜻한 것과 아이스 중 무엇으로 할까요?")
+        self.say("아메리카노 한 잔 주세요")
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 1))
+        body = self.status(self.say("아이스로요")).json()
+        self.assertEqual((body["status"], body["actions"]), ("completed", ["cart_updated"]))
+        self.assertEqual(self.cart()["total_quantity"], 1)
+
+    def test_low_confidence_alternative_does_not_pick_the_product(self):
+        # The reviewer's reproduction: the chosen text says sandwich, a 1% alternative says americano.
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 1))
+        request_id = self.post(body={**BODY, "text": "샌드위치 주세요", "alternatives": [
+            {"text": "아이스 아메리카노 주세요", "confidence": 0.01}]}).json()["request_id"]
+        body = self.status(request_id).json()
+        self.assertEqual((body["status"], body["reply_text"], body["actions"], body["tool_calls"]),
+                         ("needs_clarification", "어떤 메뉴를 주문할까요?", [], []))
+        self.assertEqual(self.cart()["items"], [])
+
+    def test_sole_cart_line_is_only_for_counted_or_removing_instructions(self):
+        # The reviewer's reproductions: two touch cups, the model adds one on words that name
+        # nothing in the cart (screen requests, questions, a stray yes with no offer open).
+        self.add_by_touch("americano", "iced", 2)
+        for text in ["글씨 더 크게 해 주세요", "화면 좀 더 내려 주세요", "이거 얼마예요?", "추가 할인 있어요?",
+                     "네네", "네 주세요", "좋아요 좋아요", "그걸로요"]:
+            with self.subTest(text=text):
+                self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 1))
+                body = self.status(self.say(text)).json()
+                self.assertEqual((body["status"], body["actions"], body["tool_calls"]), ("needs_clarification", [], []))
+                self.assertEqual(self.cart()["total_quantity"], 2)
+        # A count or a removal word attaches to the line and runs.
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 1))
+        self.assertEqual(self.status(self.say("하나 더요")).json()["actions"], ["cart_updated"])
+        self.interpreter.result = interpretation(call("remove_cart_item", "americano", "iced"))
+        self.assertEqual(self.status(self.say("그거 빼 줘")).json()["actions"], ["cart_updated"])
+        self.assertEqual(self.cart()["items"], [])
+
+    def test_addition_on_words_that_ask_for_a_removal_is_read_back(self):
+        # The backend reviewer's case: "빼 주세요" answered by the model with an addition.
+        self.add_by_touch("americano", "iced", 2)
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 1))
+        body = self.status(self.say("아이스 아메리카노 빼 주세요")).json()
+        self.assertEqual((body["status"], body["reply_text"], body["actions"]),
+                         ("needs_confirmation", "아이스 아메리카노 1잔 담을까요?", []))
+        self.assertEqual(self.cart()["total_quantity"], 2)
+
+    def test_temperature_question_is_answered_only_by_a_temperature(self):
+        self.interpreter.result = interpretation(reply_text="아메리카노, 따뜻한 것과 아이스 중 무엇으로 할까요?")
+        self.say("아메리카노 한 잔 주세요")
+        for text in ["화면이 하나도 안 보여요", "하나도 모르겠어요", "네네"]:
+            with self.subTest(text=text):
+                self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 1))
+                body = self.status(self.say(text)).json()
+                self.assertEqual((body["status"], body["actions"], body["tool_calls"]), ("needs_clarification", [], []))
+                self.assertEqual(self.cart()["items"], [])
+                self.interpreter.result = interpretation(reply_text="아메리카노, 따뜻한 것과 아이스 중 무엇으로 할까요?")
+                self.say("아메리카노 한 잔 주세요")
+
+    def test_removal_runs_only_with_a_requesting_ending(self):
+        # The vision reviewer's negations outside any word list, and the requests that still run.
+        for text in ["아메리카노 빼지는 마세요", "빼시면 안 돼요", "취소는 하지 마세요", "삭제 안 해도 돼요"]:
+            with self.subTest(text=text):
+                self.add_by_touch("americano", "iced", 1) if not self.cart()["items"] else None
+                self.interpreter.result = interpretation(call("remove_cart_item", "americano", "iced"))
+                body = self.status(self.say(text)).json()
+                self.assertEqual((body["status"], body["actions"]), ("needs_clarification", []))
+                self.assertEqual(self.cart()["total_quantity"], 1)
+        for text in ["한 잔 빼시면 안 돼요", "한 잔 빼지는 마세요"]:
+            with self.subTest(text=text):
+                self.add_by_touch("americano", "iced", 1)
+                self.interpreter.result = interpretation(call("update_cart_item", "americano", "iced", 1))
+                body = self.status(self.say(text)).json()
+                self.assertEqual((body["status"], body["actions"]), ("needs_clarification", []))
+                self.assertEqual(self.cart()["total_quantity"], 2)
+                self.interpreter.result = interpretation(call("update_cart_item", "americano", "iced", 1))
+                self.assertEqual(self.status(self.say("아메리카노 한 잔으로 해 주세요")).json()["actions"], ["cart_updated"])
+        for text in ["아메리카노 빼 주세요", "아메리카노 빼 줘", "아메리카노 취소해 주세요"]:
+            with self.subTest(text=text):
+                self.add_by_touch("americano", "iced", 1) if not self.cart()["items"] else None
+                self.interpreter.result = interpretation(call("remove_cart_item", "americano", "iced"))
+                self.assertEqual(self.status(self.say(text)).json()["actions"], ["cart_updated"])
+                self.assertEqual(self.cart()["items"], [])
+        # The reviewer's reproduction: "빼고" followed by "싶지 않아요" is a no, "빼고 샌드위치 주세요" is a request.
+        self.add_by_touch("americano", "iced", 2)
+        self.interpreter.result = interpretation(call("remove_cart_item", "americano", "iced"))
+        body = self.status(self.say("아이스 아메리카노 빼고 싶지 않아요")).json()
+        self.assertEqual((body["status"], body["actions"]), ("needs_clarification", []))
+        self.assertEqual(self.cart()["total_quantity"], 2)
+        self.interpreter.result = interpretation(
+            call("remove_cart_item", "americano", "iced"), call("add_cart_item", "sandwich", None, 1))
+        body = self.status(self.say("아메리카노 빼고 샌드위치 주세요")).json()
+        self.assertEqual((body["status"], body["actions"]), ("completed", ["cart_updated"]))
+        self.assertEqual([(i["product_id"], i["quantity"]) for i in self.cart()["items"]], [("sandwich", 1)])
 
     def test_worded_acceptance_with_the_same_tool_inputs_runs_once(self):
         self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
@@ -623,10 +1217,10 @@ class ToolExecutionApiTests(VoiceApiCase):
 
     def test_refused_tool_input_fails_with_the_ordering_code_and_keeps_the_cart(self):
         self.post()
-        self.interpreter.result = interpretation(call("update_cart_item", "sandwich", None, 3))
-        body = self.status(self.say("샌드위치 세 개로 바꿔 주세요")).json()
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 19))
+        body = self.status(self.say("아이스 아메리카노 열아홉 잔 더요")).json()
         self.assertEqual(body["status"], "failed")
-        self.assertEqual(body["error"]["code"], "cart_item_not_found")
+        self.assertEqual(body["error"]["code"], "quantity_limit_exceeded")
         self.assertEqual(body["tool_calls"], [])
         self.assertEqual(body["actions"], [])
         self.assertTrue(body["reply_text"])
@@ -719,6 +1313,153 @@ class ConfirmationTextTests(unittest.TestCase):
         self.assertIsNone(self.text(*many))
 
 
+class AcceptanceWordsTests(unittest.TestCase):
+    def test_yes_and_taking_words_accept_unless_something_turns_the_offer_down(self):
+        from app.modules.voice.service import is_acceptance, is_rejection
+
+        for text in ["네", "네 그걸로 주세요", "그걸로요", "그렇게 해 주세요", "응 맞아요", "네, 담아 주세요"]:
+            with self.subTest(text=text):
+                self.assertTrue(is_acceptance(text))
+                self.assertFalse(is_rejection(text))
+        for text in ["아니요 그거 말고요", "아뇨", "그거 말고 다른 거요", "취소해 주세요", "네 아니요",
+                     "그대로 하면 안 돼요", "그대로 하지 마세요", "그렇게 하지 않을래요", "그걸로는 못 해요",
+                     "괜찮아요 됐어요", "좋아요 근데 그만할래요"]:
+            with self.subTest(text=text):
+                self.assertFalse(is_acceptance(text))
+                self.assertTrue(is_rejection(text))
+        # Neither: not on the acceptance list, so an offer is read back, never run.
+        for text in ["음 잠깐만요", "아이스 아메리카노 주세요", "얼마예요", "그대로 하면 좀 그런데요", "네 잔 더요",
+                     "좋아요 근데 하나만요"]:
+            with self.subTest(text=text):
+                self.assertFalse(is_acceptance(text))
+                self.assertFalse(is_rejection(text))
+
+
+class RemovalIntentTests(unittest.TestCase):
+    def test_removal_words_and_their_negations(self):
+        from app.modules.voice.service import removal_intent
+
+        for text, expected in [
+            ("아이스 아메리카노 빼 주세요", "yes"), ("그거 취소해 주세요", "yes"), ("아메리카노 말고 라떼로요", "yes"),
+            ("하나 더 빼 주세요", "yes"), ("빼지 말고 하나 더요", "no"), ("한 잔 줄여 주세요", "yes"),
+            ("아이스 아메리카노 빼지 말아 주세요", "no"), ("빼지 마세요", "no"), ("취소하면 안 돼요", "no"),
+            ("지우지 않을래요", "no"), ("한 잔 줄이지 마세요", "no"), ("빼지는 마세요", "no"), ("빼시면 안 돼요", "no"),
+            ("취소는 하지 마세요", "no"), ("삭제 안 해도 돼요", "no"), ("빼면 좋겠는데 아니다", "no"),
+            ("빼고 싶지 않아요", "no"), ("빼 주지 마세요", "no"), ("빼 주시면 안 돼요", "no"), ("빼고 싶어요", "yes"),
+            ("빼고 샌드위치 주세요", "yes"),
+            ("아메리카노요", "unclear"), ("네", "unclear"), ("아이스 아메리카노 주세요", "unclear"),
+        ]:
+            with self.subTest(text=text):
+                self.assertEqual(removal_intent(text), expected)
+
+    def test_removal_words_go_with_the_product_named_before_them(self):
+        from app.modules.voice.service import removal_intents
+
+        menu = [MenuItem(product_id="americano", name="아메리카노", available=True, temperatures=["iced", "hot"]),
+                MenuItem(product_id="sandwich", name="에그 샌드위치", available=True, temperatures=[])]
+        for text, expected in [
+            ("아메리카노 빼지 말고 샌드위치 빼 주세요", {"americano": "no", "sandwich": "yes"}),
+            ("샌드위치 빼고 아메리카노는 두세요", {"sandwich": "yes"}),
+            ("아메리카노 말고 샌드위치로요", {"americano": "yes"}),
+            ("그거 빼 줘", {None: "yes"}),
+            ("아메리카노 한 잔 빼지 마세요", {"americano": "no"}),
+        ]:
+            with self.subTest(text=text):
+                self.assertEqual(removal_intents(text, menu), expected)
+
+
+class SpokenIncrementTests(unittest.TestCase):
+    def test_counts_before_더_are_read(self):
+        from app.modules.voice.service import spoken_increment
+
+        for text, expected in [
+            ("하나 더요", 1), ("아메리카노 한 잔 더", 1), ("한 잔만 더요", 1), ("두 잔 더 주세요", 2),
+            ("3개 더", 3), ("열 잔 더", 10), ("열아홉 잔 더요", 19), ("스무 잔 더", 20),
+        ]:
+            with self.subTest(text=text):
+                self.assertEqual(spoken_increment(text), expected)
+
+    def test_other_utterances_are_not_increments(self):
+        from app.modules.voice.service import spoken_increment
+
+        for text in ["네", "네 더 주세요", "더 주세요", "아이스 아메리카노 두 잔", "세 잔으로 바꿔 주세요",
+                     "하나 더 빼 주세요", "따뜻한 거 더 주세요", "하나 더 줄여 주세요"]:
+            with self.subTest(text=text):
+                self.assertIsNone(spoken_increment(text))
+
+    def test_removal_in_the_same_breath_is_left_alone(self):
+        from app.modules.voice.service import match_spoken_details
+
+        request = VoiceRequestCreate(text="샌드위치 하나 더요, 아메리카노는 빼 주세요", alternatives=[], screen_id="menu_list")
+        result = interpretation(call("add_cart_item", "sandwich", None, 1), call("remove_cart_item", "americano", "iced"))
+        self.assertIs(match_spoken_details(result, request, []), result)
+
+    def test_counts_bind_to_the_product_named_before_them(self):
+        from app.modules.voice.service import spoken_increments
+
+        menu = [MenuItem(product_id="americano", name="아메리카노", available=True, temperatures=["iced", "hot"]),
+                MenuItem(product_id="sandwich", name="에그 샌드위치", available=True, temperatures=[])]
+        for text, expected in [
+            ("아메리카노 하나 더, 샌드위치 두 개 더", [("americano", 1), ("sandwich", 2)]),
+            ("아이스 아메리카노 하나 더, 샌드위치 빼 주세요", [("americano", 1)]),
+            ("샌드위치 빼고 아메리카노 하나 더", [("americano", 1)]),
+            ("아메리카노 두 잔이랑 샌드위치 하나 더", [("sandwich", 1)]),
+            ("하나 더요", [(None, 1)]),
+            ("하나 더 빼 주세요", []),
+        ]:
+            with self.subTest(text=text):
+                self.assertEqual(spoken_increments(text, menu), expected)
+
+    def test_counts_and_temperatures_are_read_with_their_kind_and_product(self):
+        from app.modules.voice.service import spoken_mentions
+
+        menu = [MenuItem(product_id="americano", name="아메리카노", available=True, temperatures=["iced", "hot"]),
+                MenuItem(product_id="latte", name="카페 라떼", available=True, temperatures=["iced", "hot"])]
+        for text, counts, temperatures in [
+            ("아이스 아메리카노 한 잔 주세요", [("americano", "abs", 1)], [("americano", "iced")]),
+            ("아메리카노 세 잔으로", [("americano", "to", 3)], []),
+            ("아메리카노 세 잔", [("americano", "abs", 3)], []),
+            ("아메리카노 하나 빼 주세요", [("americano", "less", 1)], []),
+            ("하나 더 빼 주세요", [(None, "less", 1)], []),
+            ("아메리카노 아이스로 바꿔 주세요", [], [("americano", "iced")]),
+            ("따뜻한 걸로요", [], [(None, "hot")]),
+            ("아이스 아메리카노 하나랑 따뜻한 카페라떼 하나",
+             [("americano", "abs", 1), ("latte", "abs", 1)], [("americano", "iced"), ("latte", "hot")]),
+            ("아메리카노 아이스로 하고 카페라떼 하나 주세요", [("latte", "abs", 1)], [("americano", "iced")]),
+            ("카페 라떼 따뜻하게 하나랑 아이스로 아메리카노 하나 주세요",
+             [("latte", "abs", 1), ("americano", "abs", 1)], [("latte", "hot"), ("americano", "iced")]),
+            ("아이스로 해서 아메리카노랑 카페라떼 주세요", [], [(None, "iced")]),
+            ("네", [], []),
+        ]:
+            with self.subTest(text=text):
+                self.assertEqual(spoken_mentions(text, menu), (counts, temperatures))
+
+    def test_counts_that_cannot_be_matched_to_the_tool_inputs_confirm_them_as_they_are(self):
+        from app.modules.voice.service import match_spoken_details
+
+        menu = [MenuItem(product_id="americano", name="아메리카노", available=True, temperatures=["iced", "hot"]),
+                MenuItem(product_id="sandwich", name="에그 샌드위치", available=True, temperatures=[])]
+        for text, tool_calls in [
+            # The customer counted the sandwich too; the model left it out.
+            ("아메리카노 하나 더, 샌드위치 두 개 더", [call("add_cart_item", "americano", "iced", 1)]),
+            # One unnamed count, two additions: which one is "하나"?
+            ("하나 더요", [call("add_cart_item", "americano", "iced", 1), call("add_cart_item", "sandwich", None, 1)]),
+            # A temperature tied to nothing, two additions: which one is iced?
+            ("아이스로 해서 아메리카노랑 샌드위치 주세요",
+             [call("add_cart_item", "americano", "hot", 1), call("add_cart_item", "sandwich", None, 1)]),
+            # Two temperatures for one product: which cup is which?
+            ("아이스 아메리카노 하나랑 따뜻한 아메리카노 하나",
+             [call("add_cart_item", "americano", "iced", 1), call("add_cart_item", "americano", "hot", 1)]),
+            # A temperature tied to a product sold at no temperature.
+            ("아이스 샌드위치 하나", [call("add_cart_item", "sandwich", None, 1)]),
+        ]:
+            with self.subTest(text=text):
+                request = VoiceRequestCreate(text=text, alternatives=[], screen_id="menu_list")
+                result = match_spoken_details(interpretation(*tool_calls), request, [], menu)
+                self.assertEqual(result.status, "needs_confirmation")
+                self.assertEqual(result.tool_calls, interpretation(*tool_calls).tool_calls)
+
+
 class MissingTemperatureTests(unittest.TestCase):
     def test_sold_out_drink_without_temperature_is_still_rejected(self):
         from app.modules.voice.service import ask_for_missing_temperature, matches_menu
@@ -785,6 +1526,21 @@ class ToolExecutionTests(unittest.TestCase):
     def lines(cart):
         return [(item.product_id, item.temperature, item.quantity) for item in cart.items]
 
+    def test_cart_other_than_the_one_checked_runs_nothing(self):
+        from app.modules.voice.executor import CartChanged
+        from app.modules.voice.schemas import CartLine
+
+        self.execute(call("add_cart_item", "americano", "iced", 5))
+        checked = [CartLine(product_id="americano", temperature="iced", quantity=2)]
+        with self.assertRaises(CartChanged) as raised:
+            self.executor.execute("s1", "vr_2", interpretation(call("update_cart_item", "americano", "iced", 3)).tool_calls, checked)
+        self.assertEqual(raised.exception.cart, [CartLine(product_id="americano", temperature="iced", quantity=5)])
+        self.assertEqual(self.lines(self.service.cart("s1")), [("americano", "iced", 5)])
+        # The same cart as checked runs as before.
+        cart = self.executor.execute("s1", "vr_3", interpretation(call("update_cart_item", "americano", "iced", 3)).tool_calls,
+                                     raised.exception.cart)
+        self.assertEqual(self.lines(cart), [("americano", "iced", 3)])
+
     def test_applies_tool_inputs_in_spoken_order(self):
         cart = self.execute(
             call("add_cart_item", "americano", "iced", 2),
@@ -827,10 +1583,19 @@ class PromptVersionTests(unittest.TestCase):
     def test_current_prompt_explains_every_status(self):
         from app.modules.voice import interpreter
 
-        self.assertEqual(interpreter.PROMPT_VERSION, "interpret_v3")
+        self.assertEqual(interpreter.PROMPT_VERSION, "interpret_v4")
         prompt = interpreter._PROMPT_PATH.read_text(encoding="utf-8")
         for status in ("completed", "needs_confirmation", "needs_clarification", "ignored"):
             self.assertIn(f"- {status}:", prompt)
+
+    def test_current_prompt_reads_more_against_the_cart(self):
+        from app.modules.voice import interpreter
+
+        prompt = interpreter._PROMPT_PATH.read_text(encoding="utf-8")
+        self.assertIn("- cart:", prompt)
+        self.assertIn("더 담을 개수만 넣는다", prompt)
+        self.assertIn("quantity 3이 아니다", prompt)
+        self.assertIn("cart에 없는 상품을 바꾸거나 빼 달라고 하면", prompt)
 
 
     def test_current_prompt_asks_temperature_and_does_not_invent_answers(self):
@@ -920,7 +1685,8 @@ class OpenAiInterpreterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["response_format"]["type"], "json_schema")
         self.assertTrue(payload["response_format"]["json_schema"]["strict"])
         user = json.loads(payload["messages"][-1]["content"])
-        self.assertEqual(set(user), {"text", "alternatives", "screen_id", "menu"})
+        self.assertEqual(set(user), {"text", "alternatives", "screen_id", "menu", "cart"})
+        self.assertEqual(user["cart"], [])
         self.assertEqual([item["product_id"] for item in user["menu"]],
                          ["americano", "sandwich", "latte"])
 
