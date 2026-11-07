@@ -7,8 +7,11 @@ import type { Settings } from './model.ts';
 import { measureTouchPilot } from './touchLogFeatures.ts';
 import type { TouchPilotPolicy } from './touchLogFeatures.ts';
 import type { TouchLogObservation } from './touchLogObservation.ts';
+import { backendApi } from '../../shared/api/index.ts';
+import { createTouchFeatureTransport } from './touchFeatureTransport.ts';
+import type { TransmissionState } from './touchFeatureTransport.ts';
 
-type DraftInspector = { read: () => SavedLog; summarize: () => RawTouchSummary; features: (policy?: TouchPilotPolicy) => ReturnType<typeof measureTouchPilot>; exportJson: () => void; status: () => string | null };
+type DraftInspector = { read: () => SavedLog; summarize: () => RawTouchSummary; features: (policy?: TouchPilotPolicy) => ReturnType<typeof measureTouchPilot>; exportJson: () => void; status: () => string | null; transmission: () => TransmissionState | null };
 declare global { interface Window { kioskTouchLogDraft?: DraftInspector } }
 type Gesture = {
   id: string; context: LogContext; start: Point; last: Point; maxDistance: number;
@@ -53,13 +56,15 @@ function targetInfo(element: HTMLElement) {
   };
 }
 
-export function useTouchLog(screen: string, category: string, productId: string | null, settings: Settings, serverSessionId: string | null, observation: TouchLogObservation) {
+export function useTouchLog(screen: string, category: string, productId: string | null, settings: Settings, serverSessionId: string | null, observation: TouchLogObservation, uploadEnabled = false) {
   const root = useRef<HTMLDivElement>(null);
   const tracker = useRef<ReturnType<typeof createTouchLog> | null>(null);
   const context = useRef<LogContext>({ screen, visitId: '', settings, voiceMode: observation.voice.enabled });
   const previous = useRef<{ screen: string; category: string; productId: string | null; settings: Settings } | null>(null);
   const previousObservation = useRef<TouchLogObservation | null>(null);
   const interruptGestures = useRef<() => void>(() => {});
+  const transport = useRef<ReturnType<typeof createTouchFeatureTransport> | null>(null);
+  const uploadContext = useRef({ session: serverSessionId, enabled: false });
 
   // effect에서 초기화하고 StrictMode 재설정에서도 세션·방문을 유지합니다.
   useEffect(() => {
@@ -152,7 +157,7 @@ export function useTouchLog(screen: string, category: string, productId: string 
       if (before && before.x === position.x && before.y === position.y) return;
       positions.set(element, position);
       record('scroll', {
-        container: element === document.scrollingElement ? 'document' : (element as HTMLElement).dataset.logTarget ?? null,
+        container: element === document.scrollingElement ? 'document' : (element as HTMLElement).dataset.logScroll ?? (element as HTMLElement).dataset.logTarget ?? null,
         before: before ?? null, after: position,
         // 시간상 겹치는 후보일 뿐, 프로그램 스크롤이나 입력 의도를 확정하지 않습니다.
         inputCandidates: [...gestures.values(), ...cancelled.values()].map(gesture => gesture.id),
@@ -178,6 +183,7 @@ export function useTouchLog(screen: string, category: string, productId: string 
     }
     const inspector: DraftInspector = {
       read: () => recorder.read(), status: () => recorder.getWarning(),
+      transmission: () => transport.current?.status() ?? null,
       summarize: () => summarizeTouchLog(recorder.read()),
       features: policy => measureTouchPilot(recorder.read(), Date.now(), 2000, policy),
       exportJson() {
@@ -249,6 +255,35 @@ export function useTouchLog(screen: string, category: string, productId: string 
     previousObservation.current = structuredClone(observation);
     previous.current = { screen, category, productId, settings: { ...settings } };
   }, [screen, category, productId, settings, serverSessionId, observation]);
+
+  useEffect(() => {
+    if (!uploadEnabled || !tracker.current) return;
+    const sender = createTouchFeatureTransport(
+      (session, window, signal) => backendApi.sendFeatureWindow(session, window, signal),
+      () => tracker.current!.read(),
+    );
+    transport.current = sender;
+    let suspended = false;
+    const sync = () => sender.setContext(uploadContext.current.session,
+      uploadContext.current.enabled && !suspended && document.visibilityState === 'visible');
+    document.addEventListener('visibilitychange', sync);
+    const suspend = () => { suspended = true; sender.setContext(uploadContext.current.session, false); };
+    const resume = () => { suspended = false; sync(); };
+    window.addEventListener('pagehide', suspend);
+    window.addEventListener('pageshow', resume);
+    const timer = setInterval(() => { sync(); void sender.tick(); }, 2000);
+    return () => {
+      clearInterval(timer); sender.dispose(); transport.current = null;
+      document.removeEventListener('visibilitychange', sync);
+      window.removeEventListener('pagehide', suspend); window.removeEventListener('pageshow', resume);
+    };
+  }, [uploadEnabled]);
+
+  useEffect(() => {
+    const enabled = uploadEnabled && !observation.order.completed && ['ready', 'saving'].includes(observation.order.status);
+    uploadContext.current = { session: serverSessionId, enabled };
+    transport.current?.setContext(serverSessionId, enabled && document.visibilityState === 'visible');
+  }, [uploadEnabled, serverSessionId, observation.order.completed, observation.order.status]);
 
   return { root };
 }
