@@ -7,6 +7,7 @@ a test target.
 
 from concurrent.futures import ThreadPoolExecutor
 import os
+from threading import Barrier
 import unittest
 from urllib.parse import urlsplit
 from uuid import uuid4
@@ -128,6 +129,77 @@ class PostgresOrderingTests(unittest.TestCase):
                 (self.session_id, "voice:vr_rollback:%"),
             ).fetchone()["count"]
         self.assertEqual(replay_count, 0)
+
+    def test_concurrent_cart_changes_with_same_version_only_one_succeeds(self):
+        start = Barrier(2)
+
+        def add_item(_):
+            service = OrderingService(
+                self.sessions.exists, PostgresOrderingRepository(self.database),
+            )
+            start.wait(timeout=10)
+            try:
+                return self._add(service)
+            except OrderingError as error:
+                return error
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes = list(pool.map(add_item, range(2)))
+
+        successes = [outcome for outcome in outcomes if not isinstance(outcome, OrderingError)]
+        failures = [outcome for outcome in outcomes if isinstance(outcome, OrderingError)]
+        self.assertEqual(len(successes), 1)
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(failures[0].status_code, 409)
+        self.assertEqual(failures[0].code, "cart_version_conflict")
+        self.assertEqual(failures[0].cart, successes[0])
+        persisted = self.service.cart(self.session_id)
+        self.assertEqual(persisted, successes[0])
+        self.assertEqual(persisted.version, 1)
+        self.assertEqual(persisted.total_quantity, 1)
+
+    def test_reused_key_with_changed_payload_is_rejected_after_restart(self):
+        key = str(uuid4())
+        original = self._add(key=key)
+        restarted = OrderingService(
+            self.sessions.exists, PostgresOrderingRepository(self.database),
+        )
+        with self.assertRaises(OrderingError) as raised:
+            restarted.add_item(
+                self.session_id, key,
+                AddItemRequest(product_id="americano", temperature="iced",
+                               quantity=2, expected_version=0),
+            )
+        self.assertEqual(raised.exception.status_code, 409)
+        self.assertEqual(raised.exception.code, "idempotency_key_reused")
+        self.assertEqual(restarted.cart(self.session_id), original)
+        self.assertEqual(self._add(restarted, key=key), original)
+
+    def test_completed_order_rejects_new_cart_changes_but_replays_order(self):
+        self._add()
+        order_key = str(uuid4())
+        request = OrderRequest(expected_version=1)
+        order = self.service.create_order(self.session_id, order_key, request)
+        restarted = OrderingService(
+            self.sessions.exists, PostgresOrderingRepository(self.database),
+        )
+        with self.assertRaises(OrderingError) as raised:
+            restarted.add_item(
+                self.session_id, str(uuid4()),
+                AddItemRequest(product_id="americano", temperature="iced",
+                               quantity=1, expected_version=2),
+            )
+        self.assertEqual(raised.exception.status_code, 410)
+        self.assertEqual(raised.exception.code, "session_expired")
+        self.assertEqual(restarted.create_order(self.session_id, order_key, request), order)
+        with self.database.connect() as connection:
+            row = connection.execute(
+                "select (select count(*) from kiosk.orders where session_id = %s) as orders, "
+                "(select count(*) from kiosk.cart_items where session_id = %s) as items",
+                (self.session_id, self.session_id),
+            ).fetchone()
+        self.assertEqual(row["orders"], 1)
+        self.assertEqual(row["items"], 0)
 
 
 if __name__ == "__main__":
