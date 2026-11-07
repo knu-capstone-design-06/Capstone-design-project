@@ -15,16 +15,33 @@ async function screenshot(page, name, clipHeight = null) {
     ...(clipHeight ? { clip: { x: 0, y: 0, width: 1080, height: clipHeight } } : {}) });
 }
 
-async function open(steps, pageUrl = url) {
+async function open(steps, pageUrl = url, manualSpeech = false) {
   const browser = await chromium.launch({ headless: true, ...(channel === 'default' ? {} : { channel }) });
   const page = await browser.newPage({ viewport: { width: 1080, height: 1920 } });
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
-  await page.addInitScript(() => {
+  await page.addInitScript(manual => {
     let active = null;
+    const speech = window.ttsFakes = { utterances: [], playing: null, cancelled: 0, overlaps: [],
+      finish() { const current = this.playing; this.playing = null; current?.onend?.(); },
+    };
+    window.SpeechSynthesisUtterance = class { constructor(text) { this.text = text; } };
+    Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: {
+      getVoices: () => [{ lang: 'ko-KR', localService: true }],
+      cancel() { speech.cancelled++; speech.playing = null; },
+      speak(utterance) {
+        if (active) speech.overlaps.push('마이크 종료 전 안내 시작');
+        speech.utterances.push(utterance); speech.playing = utterance;
+        if (!manual) setTimeout(() => { if (speech.playing === utterance) speech.finish(); }, 20);
+      },
+    } });
     class FakeRecognition {
       constructor() { this.aborted = false; window.voiceFakes.push(this); }
-      start() { if (active) throw new Error('이전 마이크 종료 전 재시작'); active = this; }
+      start() {
+        if (active) throw new Error('이전 마이크 종료 전 재시작');
+        if (speech.playing) speech.overlaps.push('안내 재생 중 마이크 시작');
+        active = this;
+      }
       stop() { setTimeout(() => { if (active === this) active = null; this.onend?.(); }, 30); }
       abort() { this.aborted = true; this.stop(); }
       partial(text) { this.onresult?.({ resultIndex: 0, results: [Object.assign([{ transcript: text, confidence: .9 }], { isFinal: false })] }); }
@@ -34,7 +51,7 @@ async function open(steps, pageUrl = url) {
     window.voiceFakes = [];
     window.SpeechRecognition = FakeRecognition;
     window.webkitSpeechRecognition = FakeRecognition;
-  });
+  }, manualSpeech);
   const fixture = await installOrderResponses(page, steps);
   await page.goto(pageUrl);
   await page.locator('[data-log-target="voice-mode-toggle"]:not([disabled])').waitFor();
@@ -86,6 +103,74 @@ const voiceStatus = (status, extra = {}) => ({ request_id: 'voice-1', status, re
 const voicePost = session => ({ method: 'POST', path: `/api/v1/sessions/${session}/voice/requests`, status: 202,
   body: { request_id: 'voice-1', status: 'accepted', accepted_at: '2026-10-19T00:00:00Z' } });
 const voiceGet = (session, status) => ({ method: 'GET', path: `/api/v1/sessions/${session}/voice/requests/voice-1`, body: status });
+
+for (const enlarged of [false, true]) {
+  test(`질문 자동 읽기와 재청취가 수동 화면 읽기와 겹치지 않는다 (${enlarged ? '큰 글씨·큰 버튼·낮은 화면' : '기본'})`, async () => {
+    const session = `tts-${enlarged}`;
+    const steps = bootstrap(session); steps[2].body = cartResponse(session, 1, [iced()]);
+    const { browser, page, fixture, errors } = await open([
+      ...steps, voicePost(session), voiceGet(session, voiceStatus('needs_confirmation', { reply_text: '아이스 아메리카노 2잔 담을까요?' })),
+    ], url, true);
+    try {
+      await page.locator('[data-log-target="support-toggle"]').click();
+      if (enlarged) for (const setting of ['largeText', 'largeButton', 'lowScreen']) {
+        await page.locator(`[data-log-target="support:${setting}"]`).click();
+      }
+      await page.locator('[data-log-target="read-aloud-toggle"]').click();
+      await page.waitForFunction(() => window.ttsFakes.playing);
+      await page.locator('[data-log-target="support-toggle"]').click();
+      await page.locator('[data-log-target="voice-mode-toggle"]').click();
+      assert.equal(await page.evaluate(() => window.ttsFakes.playing), null, '수동 화면 읽기를 먼저 중단');
+      await page.evaluate(() => window.voiceFakes.at(-1).final('아이스 아메리카노 두 잔'));
+      await page.waitForFunction(() => window.ttsFakes.playing?.text === '아이스 아메리카노 2잔 담을까요?');
+      const stop = page.locator('[data-log-target="voice-reply-stop"]');
+      await stop.scrollIntoViewIfNeeded();
+      assert(await stop.isVisible());
+      assert.equal(await page.locator('[data-log-target="voice-listen"]').count(), 0);
+      assert.equal(await page.evaluate(() => window.voiceFakes.length), 1);
+      assert.match(await page.locator('.voice-mode-feedback').innerText(), /안내를 읽고 있어요/);
+      assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+      await screenshot(page, enlarged ? 'tts-question-low-large' : 'tts-question-normal');
+      await page.evaluate(() => window.ttsFakes.finish());
+      await page.waitForFunction(() => window.voiceFakes.length === 2);
+      assert.deepEqual(await page.evaluate(() => window.ttsFakes.overlaps), []);
+      await page.locator('[data-log-target="review-open"]').click();
+      await page.locator('[data-log-target="review-back"]').click();
+      assert.equal(await page.locator('[data-log-target="voice-mode-toggle"]').getAttribute('aria-checked'), 'false');
+      fixture.verify(); assert.deepEqual(errors, []);
+    } finally { await browser.close(); }
+  });
+}
+
+test('안내 중단과 페이지 이탈은 재생을 취소하고, 실패는 화면 안내와 수동 듣기를 제공한다', async () => {
+  const session = 'tts-cancel';
+  const question = voiceStatus('needs_clarification', { reply_text: '아이스와 따뜻한 것 중 무엇으로 할까요?' });
+  const { browser, page, fixture, errors } = await open([
+    ...bootstrap(session), voicePost(session), voiceGet(session, question),
+    voicePost(session), voiceGet(session, question), voicePost(session), voiceGet(session, question),
+  ], url, true);
+  try {
+    await page.locator('[data-log-target="voice-mode-toggle"]').click();
+    await page.evaluate(() => window.voiceFakes.at(-1).final('아메리카노 주세요'));
+    await page.waitForFunction(() => window.ttsFakes.playing);
+    await page.locator('[data-log-target="voice-reply-stop"]').click();
+    assert.equal(await page.evaluate(() => window.ttsFakes.playing), null);
+    assert.equal(await page.evaluate(() => window.voiceFakes.length), 1);
+    await page.locator('[data-log-target="voice-listen"]').click();
+    await page.evaluate(() => window.voiceFakes.at(-1).final('아메리카노 주세요'));
+    await page.waitForFunction(() => window.ttsFakes.playing);
+    await page.evaluate(() => window.ttsFakes.playing.onerror({ error: 'not-allowed' }));
+    await page.getByText(/음성 안내를 재생하지 못했어요/).waitFor();
+    assert.equal(await page.evaluate(() => window.voiceFakes.length), 2, '재생 실패 뒤 자동 청취 없음');
+    await page.locator('[data-log-target="voice-listen"]').click();
+    await page.evaluate(() => window.voiceFakes.at(-1).final('아메리카노 주세요'));
+    await page.waitForFunction(() => window.ttsFakes.playing);
+    await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide')));
+    assert.equal(await page.evaluate(() => window.ttsFakes.playing), null);
+    assert.equal(await page.locator('[data-log-target="voice-mode-toggle"]').getAttribute('aria-checked'), 'false');
+    fixture.verify(); assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
 
 test('메뉴에서 마이크·질문·해석 결과를 표시하고 주문 확인으로 이동하면 듣기를 중단한다', async () => {
   const session = 'voice-screen', cart = cartResponse(session, 1, [iced()]);
@@ -163,7 +248,7 @@ test('주변 대화는 표시하지 않고 이전 확인 질문에 짧게 답할
     await page.evaluate(() => window.voiceFakes.at(-1).partial('네'));
     assert.match(await page.locator('.voice-mode-feedback').innerText(), /듣는 중: 네/);
     await page.evaluate(() => window.voiceFakes.at(-1).final('네'));
-    await page.locator('.voice-mode-feedback').getByText(/주문을 변경하는 기능은 아직 준비 중/).waitFor();
+    await page.locator('.voice-mode-feedback').getByText('말씀을 확인했어요.').waitFor();
     assert.equal(fixture.requests.filter(request => request.method === 'POST' && request.path.endsWith('/voice/requests')).at(-1).body.text, '네');
     fixture.verify();
     assert.deepEqual(errors, []);
@@ -189,7 +274,7 @@ test('확인 질문 뒤 서버 실패를 알리고 다시 말하기에서 질문
     await page.waitForFunction(() => window.voiceFakes.length === 3);
     assert.match(await page.locator('.voice-mode-feedback').innerText(), /아이스 아메리카노 담을까요/);
     await page.evaluate(() => window.voiceFakes.at(-1).final('네'));
-    await page.locator('.voice-mode-feedback').getByText(/주문을 변경하는 기능은 아직 준비 중/).waitFor();
+    await page.locator('.voice-mode-feedback').getByText('말씀을 확인했어요.').waitFor();
     assert.deepEqual(fixture.requests.filter(request => request.method === 'POST' && request.path.endsWith('/voice/requests')).map(request => request.body.text), ['아메리카노 주세요', '네', '네']);
     fixture.verify();
     assert.deepEqual(errors, []);

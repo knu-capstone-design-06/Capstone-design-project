@@ -4,3 +4,5 @@ export { createVoiceApi } from './voiceApi.ts';
 export type { VoiceApi, VoiceRequestStatus, VoiceStatus, VoiceToolCall } from './voiceApi.ts';
 export { isSpeechSupported } from './speech.ts';
 export { useVoiceInput } from './useVoiceInput.ts';
+export { createReplySpeaker } from './replySpeech.ts';
+export type { ReplySpeaker } from './replySpeech.ts';
