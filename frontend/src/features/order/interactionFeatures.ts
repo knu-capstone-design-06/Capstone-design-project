@@ -1,6 +1,7 @@
 import type { FeatureWindowRequest, TouchFeatures } from '../../shared/api/types.ts';
 import type { LogEvent, SavedLog } from './touchLog.ts';
 import { measureTouchPilot } from './touchLogFeatures.ts';
+import { observedWaitMs, voiceBusy, voicePhase } from './interactionWait.ts';
 
 const object = (value: unknown): Record<string, unknown> => value && typeof value === 'object' ? value as Record<string, unknown> : {};
 const at = (event: LogEvent) => Date.parse(event.occurredAt);
@@ -30,6 +31,9 @@ export function buildTouchFeatureWindow(saved: SavedLog, now: number, sequence: 
   const order = lastState('order_state_change');
   if (!order || order.completed !== false || !['ready', 'saving'].includes(String(order.status))) return null;
   const voice = lastState('voice_state_change');
+  const phase = voicePhase(voice?.phase);
+  const lastInput = pilot.sinceLastInputMs;
+  const systemWait = lastInput === null ? null : observedWaitMs(events, now - lastInput, now, true);
   const selectionEvent = last(events, e => e.kind === 'selection_state_change');
   const settings = object(current.settings);
 
@@ -89,6 +93,9 @@ export function buildTouchFeatureWindow(saved: SavedLog, now: number, sequence: 
         order_busy: busy(order), voice_enabled: typeof voice?.enabled === 'boolean' ? voice.enabled : null,
         microphone_active: typeof voice?.microphoneActive === 'boolean' ? voice.microphoneActive : null,
         voice_processing: typeof voice?.phase === 'string' ? voice.phase === 'processing' : null,
+        voice_phase: phase, voice_speaking: phase === null ? null : phase === 'speaking',
+        voice_busy: voiceBusy(phase), voice_busy_ms: observedWaitMs(events, pilot.from, now, false),
+        since_last_input_excluding_system_busy_ms: lastInput === null || systemWait === null ? null : lastInput - systemWait,
         voice_auto_off: voice?.autoOff === 'silence' || voice?.autoOff === 'idle' ? voice.autoOff : null,
         ui_settings: {
           large_text: settings.largeText === true, large_button: settings.largeButton === true,

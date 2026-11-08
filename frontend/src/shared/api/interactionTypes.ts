@@ -25,6 +25,12 @@ export interface InteractionFeatures {
   voice_enabled: boolean | null;
   microphone_active: boolean | null;
   voice_processing: boolean | null;
+  /** Optional additive pilot context. Absent on older producers; never assume false/zero. */
+  voice_phase?: 'idle' | 'listening' | 'processing' | 'speaking' | null;
+  voice_speaking?: boolean | null;
+  voice_busy?: boolean | null;
+  voice_busy_ms?: number | null;
+  since_last_input_excluding_system_busy_ms?: number | null;
   voice_auto_off: 'silence' | 'idle' | null;
   ui_settings: {
     large_text: boolean; large_button: boolean; simple_screen: boolean;

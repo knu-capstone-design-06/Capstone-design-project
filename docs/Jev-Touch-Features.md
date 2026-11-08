@@ -85,6 +85,42 @@ Jev에는 후속 연동에서 시간 구간·관측 여부·현재 화면·비�
 
 ## 5. 전송 조건과 실패 처리
 
+### 2026-11-08: #72·#79 음성 대기 호환 처리 (팀 계약 미확정)
+
+`voice_processing`은 계속 backend 요청 처리(`processing`)만 뜻한다. #79의 `speaking`은 실제 마이크 종료 대기부터 응답 읽기 완료까지의 제어 단계이므로 순수 스피커 재생 시간과 같지 않다. `since_last_input_ms`(숨김·시스템 대기를 포함한 마지막 누름 이후 벽시계 시간), 방문 전경 누적 `dwell_ms`, 기존 다섯 지표·정책·버전은 바꾸지 않는다.
+
+다음은 기존 생산자와 호환되는 선택적 파일럿 확장이다. 이전 기록·생산자에 없는 필드를 false나 0으로 채우지 않는다. 서버 계약과 전송 기본 비활성화는 유지한다.
+
+| 추가 필드 | 단위·의미·결측 |
+| --- | --- |
+| `voice_phase` | 구간 종료의 `idle/listening/processing/speaking`. 상태 없음·미지원 단계는 `null` |
+| `voice_speaking` | 구간 종료가 `speaking`인지. 단계 미관측은 `null` |
+| `voice_busy` | 구간 종료가 `processing` 또는 `speaking`인지. 단계 미관측은 `null` |
+| `voice_busy_ms` | 최근 2초 내 두 대기 단계의 관측 시간 합(ms). 구간 시작 상태나 도중 단계가 불명확하면 `null`. 겹치지 않는 연속 구간으로 계산 |
+| `since_last_input_excluding_system_busy_ms` | 현재 방문 마지막 누름부터 주문 `loading/saving` 또는 음성 `processing/speaking`이었던 시간의 합집합을 뺀 ms. 대기 이전 경과는 보존하고 대기 종료 후 다시 증가. 누름 없음·필요한 상태 이력 누락·해당 기간의 화면 숨김/페이지 중단은 `null` |
+
+판단 층은 `voice_busy` 또는 `order_busy`가 true이면 시스템 대기로 취급해야 한다. 현재 false여도 과거 대기가 원래 `since_last_input_ms`에 남으므로 이 값을 그대로 `pause_s`로 사용하지 않는다. 위 보정값은 시스템 대기 제외 관측값이며, 음성 입력·읽기·탐색 등 사용자 맥락까지 반영한 망설임 판정은 아니다. `null`이면 추정 판단을 보류한다. 이 PR에는 실제 Jev 판단 연결이 없으며 backend·AI 담당자의 합의와 수신·전달 구현이 필요하다.
+
+#72(`feat/frontend`)의 집계 코드에 선택적 필드를 먼저 추가한다. 이 집계는 #79 없이도 동작하고, `speaking`이 없는 기존 음성 제어 코드에서는 처리 대기만 집계한다. #72에 새 커밋이 추가되므로 기존 `ab1869f`의 승인을 최종 승인으로 취급하지 않고 다시 리뷰받아야 한다. #72를 먼저 병합한 뒤 #79(`TTS`, 확인한 커밋 `76a2a34`)가 그 결과와 최신 main을 받아 통합 검증하는 순서를 제안한다. 두 PR은 확인 시점 모두 열려 있고, 겹치는 경로는 `OrderPage.tsx`, `frontend/README.md`, 주문 기능 README이다. `TTS`는 #79 본문에 기록된 프론트 담당자의 별도 브랜치 요청에 따른 기존 브랜치다.
+
+검증: `node --test frontend/src/features/order/interactionFeatures.test.mjs`. 실제 #79 상태 전환과의 연결은 `TTS_VOICE_CONTROLLER_MODULE`에 #79의 `voiceController.ts` 파일 URL을 지정한 뒤 `voiceWait.integration.test.mjs`를 실행한다. 상태 전환 검증은 모의 인식·재생을 사용하며 G10 실제 음향 검증을 대신하지 않는다.
+
+검증 결과: #72 기반 `pnpm test` 119개 통과(시간 집계 신규 6개 포함), #79 `76a2a34`의 실제 `VoiceController`를 주입한 연결 검사 6개 통과(완료·중단·실패·모드 해제·세션 변경·숨김), `pnpm build` 통과. 연결 검사는 별도 명령이며 기존 `pnpm test` 스크립트에는 추가하지 않았다. #79 통합 전 기본 음성 제어 코드로 이 연결 검사만 실행하면 6개를 건너뛰며, 앞선 6개 시간 집계 검사는 기본 `pnpm test`에 포함된다. 두 PR을 실제 병합한 화면 전체의 브라우저 검증은 후속 작업이다.
+
+예를 들어 현재 방문에서 1000ms에 누르고, 1200ms에 `processing`, 2000ms에 `speaking`으로 바뀐 뒤 3000ms에 집계하면 `touch.interaction`에 다음 값이 추가된다(나머지 기존 필드는 생략). 응답 형식은 바꾸지 않으며 현재 backend는 이 확장 자체를 보존하지 않는다.
+
+```json
+{
+  "since_last_input_ms": 2000,
+  "voice_processing": false,
+  "voice_phase": "speaking",
+  "voice_speaking": true,
+  "voice_busy": true,
+  "voice_busy_ms": 1800,
+  "since_last_input_excluding_system_busy_ms": 200
+}
+```
+
 - 기본 실행에서는 전송하지 않는다. 팀 합의 후 공동 파일럿에서 빌드 또는 개발 서버 실행 시 `VITE_TOUCH_INTERACTION_DRAFT=true`로 명시하면 실제 API 모드에서 2초마다 최근 2초 집계를 시도한다. 개발 샘플 모드에서는 설정과 관계없이 요청하지 않는다.
 - 서버 세션이 있고 현재 주문 상태가 `ready/saving`이며, 화면이 전경이고 주문이 완료되지 않았을 때 전송한다.
 - 기존 5개 정수 필드가 전부 산출된 구간만 보낸다. 시작 직후, 백그라운드 복귀 직후, 기록 잘림, 종료되지 않은 입력 등으로 기존 집계가 `null`이면 그 구간은 건너뛴다. `null`을 0으로 바꾸지 않는다.

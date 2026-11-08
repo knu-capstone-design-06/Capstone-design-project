@@ -4,6 +4,7 @@ import { createTouchLog } from './touchLog.ts';
 import { buildTouchFeatureWindow } from './interactionFeatures.ts';
 import { createTouchFeatureTransport } from './touchFeatureTransport.ts';
 import { ApiError } from '../../shared/api/client.ts';
+import { measureTouchPilot } from './touchLogFeatures.ts';
 
 function fixture(session = 'server-1') {
   let clock = 0, id = 0;
@@ -22,6 +23,92 @@ function fixture(session = 'server-1') {
   };
   return { recorder, record, context, ready, press };
 }
+
+function voiceAt(f, time, phase) {
+  f.record(time, 'voice_state_change', { before: {}, after: { enabled: true, microphoneActive: phase === 'listening', phase } });
+}
+
+test('processing → speaking → listening preserves legacy metrics and excludes both waits', () => {
+  const f = fixture(); f.press(1000);
+  voiceAt(f, 1200, 'processing'); voiceAt(f, 2000, 'speaking');
+  let extra = buildTouchFeatureWindow(f.recorder.read(), 3000, 1).touch.interaction;
+  assert.equal(extra.voice_processing, false);
+  assert.equal(extra.voice_speaking, true); assert.equal(extra.voice_busy, true);
+  assert.equal(extra.voice_phase, 'speaking'); assert.equal(extra.voice_busy_ms, 1800);
+  assert.equal(extra.since_last_input_ms, 2000);
+  assert.equal(extra.since_last_input_excluding_system_busy_ms, 200);
+  voiceAt(f, 4000, 'listening');
+  const result = buildTouchFeatureWindow(f.recorder.read(), 5000, 2);
+  extra = result.touch.interaction;
+  assert.equal(extra.voice_busy, false); assert.equal(extra.voice_busy_ms, 1000);
+  assert.equal(extra.since_last_input_excluding_system_busy_ms, 1200);
+  const { interaction, ...legacy } = result.touch;
+  assert.deepEqual(legacy, measureTouchPilot(f.recorder.read(), 5000).features);
+  assert.equal(legacy.dwell_ms, 5000);
+});
+
+test('overlapping order and voice waits are subtracted once, including history before window', () => {
+  const f = fixture(); f.press(500);
+  voiceAt(f, 1000, 'processing');
+  f.record(1500, 'order_state_change', { before: f.ready, after: { ...f.ready, status: 'saving' } });
+  voiceAt(f, 2000, 'speaking'); voiceAt(f, 3000, 'idle');
+  f.record(3500, 'order_state_change', { before: {}, after: f.ready });
+  const extra = buildTouchFeatureWindow(f.recorder.read(), 5000, 1).touch.interaction;
+  assert.equal(extra.voice_busy_ms, 0);
+  assert.equal(extra.order_busy_ms, 500);
+  assert.equal(extra.since_last_input_ms, 4500);
+  assert.equal(extra.since_last_input_excluding_system_busy_ms, 2000);
+});
+
+test('new touch during speaking resets only the input baseline', () => {
+  const f = fixture(); voiceAt(f, 500, 'speaking'); f.press(2000);
+  voiceAt(f, 2500, 'idle');
+  const extra = buildTouchFeatureWindow(f.recorder.read(), 4000, 1).touch.interaction;
+  assert.equal(extra.voice_busy_ms, 500);
+  assert.equal(extra.since_last_input_ms, 2000);
+  assert.equal(extra.since_last_input_excluding_system_busy_ms, 1500);
+});
+
+test('missing or unknown voice history is null rather than an invented zero', () => {
+  const f = fixture(); f.press(500); voiceAt(f, 2500, 'idle');
+  const saved = f.recorder.read();
+  saved.events = saved.events.filter(e => e.kind !== 'voice_state_change' || Date.parse(e.occurredAt) > 1000);
+  let extra = buildTouchFeatureWindow(saved, 3000, 1).touch.interaction;
+  assert.equal(extra.voice_busy_ms, null);
+  assert.equal(extra.since_last_input_excluding_system_busy_ms, null);
+  voiceAt(f, 2600, 'future-phase');
+  extra = buildTouchFeatureWindow(f.recorder.read(), 3000, 1).touch.interaction;
+  assert.equal(extra.voice_phase, null); assert.equal(extra.voice_busy, null);
+  assert.equal(extra.voice_busy_ms, null);
+});
+
+test('foreground gaps, visit and session boundaries do not create a waiting estimate', () => {
+  const f = fixture(); f.press(500); voiceAt(f, 700, 'speaking');
+  f.record(1000, 'visibility_change', { visibility: 'hidden' });
+  f.record(2000, 'visibility_change', { visibility: 'visible' });
+  voiceAt(f, 2200, 'idle');
+  let extra = buildTouchFeatureWindow(f.recorder.read(), 5000, 1).touch.interaction;
+  assert.equal(extra.since_last_input_ms, 4500);
+  assert.equal(extra.since_last_input_excluding_system_busy_ms, null);
+  f.context.visitId = 'visit-2';
+  f.record(5100, 'screen_enter', { from: 'menu', visibility: 'visible' });
+  extra = buildTouchFeatureWindow(f.recorder.read(), 7200, 2).touch.interaction;
+  assert.equal(extra.since_last_input_excluding_system_busy_ms, null);
+  const next = fixture('server-2');
+  assert.equal(buildTouchFeatureWindow(next.recorder.read(), 3000, 1).touch.interaction.voice_busy_ms, 0);
+});
+
+test('window boundaries clip waits and speaking cancellation/failure stop the timer', () => {
+  for (const end of ['idle', 'listening']) {
+    const f = fixture(); f.press(500);
+    voiceAt(f, 1000, 'speaking'); voiceAt(f, 3000, end);
+    let extra = buildTouchFeatureWindow(f.recorder.read(), 3000, 1).touch.interaction;
+    assert.equal(extra.voice_busy_ms, 2000); assert.equal(extra.voice_busy, false);
+    extra = buildTouchFeatureWindow(f.recorder.read(), 5000, 2).touch.interaction;
+    assert.equal(extra.voice_busy_ms, 0);
+    assert.equal(extra.since_last_input_excluding_system_busy_ms, 2500);
+  }
+});
 
 test('same feature window carries five pilot metrics and contextual interaction observations', () => {
   const f = fixture();
