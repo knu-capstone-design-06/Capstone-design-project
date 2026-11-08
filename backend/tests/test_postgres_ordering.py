@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 import os
 from threading import Barrier
 import unittest
-from unittest.mock import patch
+from unittest.mock import call, patch
 from urllib.parse import urlsplit
 from uuid import uuid4
 
@@ -209,6 +209,8 @@ class PostgresOrderingTests(unittest.TestCase):
 class PostgresOrderingHttpTests(unittest.TestCase):
     """Exercise HTTP serialization and application startup against the disposable DB."""
 
+    SETTINGS_DATABASE_URL = "postgresql://kiosk_backend:test@localhost/postgres"
+
     @classmethod
     def setUpClass(cls):
         url = os.environ.get("TEST_DATABASE_URL")
@@ -224,7 +226,7 @@ class PostgresOrderingHttpTests(unittest.TestCase):
         # no production URL, secret, or external AI service is used.
         settings = Settings(
             _env_file=None,
-            database_url="postgresql://kiosk_backend:test@localhost/postgres",
+            database_url=self.SETTINGS_DATABASE_URL,
             openai_api_key=None,
             jev_api_key=None,
         )
@@ -232,7 +234,7 @@ class PostgresOrderingHttpTests(unittest.TestCase):
 
     def test_order_replay_survives_application_restart(self):
         add_key, order_key = str(uuid4()), str(uuid4())
-        with patch("app.main.PostgresDatabase", return_value=self.database):
+        with patch("app.main.PostgresDatabase", return_value=self.database) as database_factory:
             with TestClient(self.app()) as client:
                 created = client.post("/api/v1/sessions")
                 self.assertEqual(created.status_code, 201)
@@ -262,6 +264,9 @@ class PostgresOrderingHttpTests(unittest.TestCase):
                 cart = restarted.get(f"{base}/cart")
                 self.assertEqual((cart.status_code, cart.json()["code"]),
                                  (410, "session_expired"))
+            self.assertEqual(database_factory.call_args_list, [
+                call(self.SETTINGS_DATABASE_URL), call(self.SETTINGS_DATABASE_URL),
+            ])
 
 
 if __name__ == "__main__":
