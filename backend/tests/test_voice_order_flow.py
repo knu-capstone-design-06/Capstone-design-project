@@ -25,7 +25,7 @@ class VoiceOrderFlowTests(unittest.TestCase):
         }
 
         def respond(request):
-            openai_requests.append(request.url.path)
+            openai_requests.append((request.url.path, json.loads(request.content)["model"]))
             return httpx.Response(200, json={"choices": [{"message": {
                 "content": json.dumps(model_response),
             }}]})
@@ -38,10 +38,12 @@ class VoiceOrderFlowTests(unittest.TestCase):
 
         settings = Settings(
             _env_file=None, openai_api_key="test-key", jev_api_key=None,
+            openai_model="voice-test-model", openai_timeout_seconds=7.5,
             database_url=None, voice_execute_tools=True,
         )
-        with patch("app.main.create_openai_http", side_effect=mock_openai_http):
+        with patch("app.main.create_openai_http", side_effect=mock_openai_http) as factory:
             with TestClient(create_app(settings)) as client:
+                factory.assert_called_once_with("test-key", 7.5)
                 session = client.post("/api/v1/sessions")
                 self.assertEqual(session.status_code, 201)
                 base = f"/api/v1/sessions/{session.json()['session_id']}"
@@ -71,7 +73,7 @@ class VoiceOrderFlowTests(unittest.TestCase):
                 self.assertEqual(replay.status_code, 202)
                 self.assertEqual(replay.json()["request_id"], request_id)
                 self.assertEqual(client.get(base + "/cart").json()["total_quantity"], 1)
-                self.assertEqual(openai_requests, ["/v1/chat/completions"])
+                self.assertEqual(openai_requests, [("/v1/chat/completions", "voice-test-model")])
 
                 order_headers = {"Idempotency-Key": str(uuid4())}
                 order_body = {"expected_version": cart_data["version"]}
@@ -89,4 +91,4 @@ class VoiceOrderFlowTests(unittest.TestCase):
                     headers={"Idempotency-Key": str(uuid4())},
                 )
                 self.assertEqual(new_voice.status_code, 410)
-                self.assertEqual(openai_requests, ["/v1/chat/completions"])
+                self.assertEqual(openai_requests, [("/v1/chat/completions", "voice-test-model")])
