@@ -13,7 +13,7 @@ from app.modules.decision.jev_questions import STATE_QUESTIONS, shadow_questions
 from app.modules.decision.repository import DecisionRepository
 from app.modules.decision.rule_table import apply, decide, jev_request, react, tick
 from app.modules.decision.schemas import (
-    AROUND, BIG, BUSY, HIGHLIGHT, NOTICE, PILOT_PARAMS, QUEUE, WAIT, SessionState, WindowInput,
+    AROUND, BIG, BUSY, HIGHLIGHT, NOTICE, PILOT_PARAMS, QUEUE, STALE, WAIT, SessionState, WindowInput,
 )
 from app.modules.decision.service import DecisionService, window_input
 from app.modules.sessions.schemas import FeatureWindowRequest, StateScores
@@ -152,6 +152,12 @@ def feature_window(back_count=1):
                                 touch={"tap_count": 1, "miss_tap_count": 0, "repeat_tap_count": 0, "back_count": back_count, "dwell_ms": 3000})
 
 
+def ending_at(seconds, screen="menu", back_count=0, tap_count=1):
+    """A two-second /features window ending `seconds` after T0."""
+    return FeatureWindowRequest(screen_id=screen, window_start=T0 + timedelta(seconds=seconds - 2), window_end=T0 + timedelta(seconds=seconds),
+                                touch={"tap_count": tap_count, "miss_tap_count": 0, "repeat_tap_count": 0, "back_count": back_count, "dwell_ms": 1000})
+
+
 class DecisionServiceTests(unittest.IsolatedAsyncioTestCase):
     def service(self, handler):
         self.http = httpx.AsyncClient(base_url="https://api.typesafe.ai", transport=httpx.MockTransport(handler))
@@ -221,7 +227,10 @@ class DecisionServiceTests(unittest.IsolatedAsyncioTestCase):
         await service.drain()
         first, second = self.repository.records("s1")
         self.assertEqual((first.stage, second.stage), ("state_scores", "support_choice"))
-        self.assertEqual(second.answers["queue_support"], {"choice": HIGHLIGHT, "confidence": 0.9})
+        # The record keeps the validated answer whole (docs 5 #6), probabilities included.
+        self.assertEqual(second.answers["queue_support"], {"type": "choice", "choice": HIGHLIGHT, "confidence": 0.9,
+                                                           "probabilities": {HIGHLIGHT: 0.9, "none": 0.1}})
+        self.assertEqual(self.repository.windows("s1")[0].answers["support_choice"], second.answers)
         self.assertEqual(bodies[1]["state"]["scores"]["hesitation"], 0.5, "stage 2 read stage 1's answers")
         self.assertNotIn("jev", bodies[0]["state"], "stage 1 has nothing before it")
 
@@ -257,6 +266,82 @@ class DecisionServiceTests(unittest.IsolatedAsyncioTestCase):
         service.observe("s2", feature_window(), measurable=False)
         await service.drain()
         self.assertEqual(calls, [])
+
+    async def test_a_late_window_is_recorded_without_rolling_the_session_back(self):
+        """Overlapping /features requests: the 4 s window's ai-engine answer arrives after the 6 s window's
+        (backend and vision reviews of #77). In time order it is open, keep, withdraw; the late window must not
+        reopen the withdrawn highlight under a new id."""
+        calls = []
+        service = self.service(lambda request: calls.append(1) or httpx.Response(200, json=RESPONSE))
+        opened = service.observe("s1", ending_at(2, back_count=1), measurable=True)
+        await service.drain()
+        withdrawn = service.observe("s1", ending_at(6, screen="review"), measurable=True)
+        await service.drain()
+        late = service.observe("s1", ending_at(4, back_count=1), measurable=True)
+        await service.drain()
+        self.assertEqual((opened.transition, withdrawn.transition, late.transition), ("open", "withdraw", "none"))
+        state = self.repository.state("s1")
+        self.assertIsNone(state.held, "the withdrawn highlight stays withdrawn")
+        self.assertEqual(state.next_id, 2, "no new decision id was handed out")
+        self.assertEqual(state.last_t, (T0 + timedelta(seconds=6)).timestamp())
+        rows = self.repository.windows("s1")
+        self.assertEqual([r.jev for r in rows], ["asked", "asked", STALE])
+        self.assertEqual(rows[-1].inputs["backs_recent"], 1, "the late window is still a comparison row")
+        self.assertEqual(len(calls), 2, "Jev is not asked about a late window")
+        self.assertEqual(len(self.repository.history("s1")), 2, "the trajectory reads judged windows only")
+        # The next window reads its previous screen from the last judged window (review), not the late one.
+        service.observe("s1", ending_at(8, screen="complete"), measurable=True)
+        self.assertIs(self.repository.windows("s1")[-1].inputs["progress_segment"], True)
+
+    async def test_an_answer_goes_to_its_own_window_only(self):
+        """Two windows ending at the same time: the one skipped while the first call is in flight gets no answer."""
+        gate = asyncio.Event()
+        calls = []
+
+        async def slow(request):
+            calls.append(1)
+            await gate.wait()
+            return httpx.Response(200, json=RESPONSE)
+
+        service = self.service(slow)
+        service.observe("s1", feature_window(), measurable=True)
+        await asyncio.sleep(0)
+        service.observe("s1", feature_window(), measurable=True)   # same end time, recorded as skipped
+        gate.set()
+        await service.drain()
+        asked, skipped = self.repository.windows("s1")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual((asked.jev, asked.outcomes), ("asked", {"state_scores": "answered"}))
+        self.assertEqual((skipped.jev, skipped.outcomes, skipped.answers), ("skipped_in_flight", {}, {}))
+
+    async def test_a_stage_that_fails_before_the_call_has_no_answer_and_the_next_stage_runs(self):
+        from app.modules.decision.jev_questions import ScoreStage
+
+        class BrokenStage:
+            name = "broken"
+
+            def build(self, ctx):
+                raise RuntimeError("question could not be built")
+
+        self.service(lambda request: httpx.Response(200, json=RESPONSE))
+        service = DecisionService(self.repository, P, JevClient(self.http, "jev-1.13.0", 3.0), stages=(BrokenStage(), ScoreStage()))
+        with self.assertLogs("app.modules.decision.service", "ERROR"):
+            service.observe("s1", feature_window(), measurable=True)
+            await service.drain()
+        broken, scores = self.repository.records("s1")
+        self.assertEqual((broken.stage, broken.outcome, broken.questions), ("broken", "no_answer", ()))
+        self.assertEqual((scores.stage, scores.outcome, scores.previous_missing), ("state_scores", "answered", ("broken",)))
+        self.assertEqual(self.repository.windows("s1")[0].outcomes, {"broken": "no_answer", "state_scores": "answered"})
+
+    async def test_stages_without_a_client_warn_and_are_marked_apart_from_off(self):
+        from app.modules.decision.jev_questions import ScoreStage
+
+        repository = DecisionRepository()
+        with self.assertLogs("app.modules.decision.service", "WARNING") as logs:
+            service = DecisionService(repository, P, None, stages=(ScoreStage(),))
+        self.assertIn("JEV_STAGES=state_scores", logs.output[0])
+        service.observe("s1", feature_window(), measurable=True)
+        self.assertEqual(repository.windows("s1")[0].jev, "no_client")
 
 
 class StageArmTests(unittest.IsolatedAsyncioTestCase):
@@ -348,7 +433,6 @@ class TrajectoryStageTests(unittest.IsolatedAsyncioTestCase):
                                      touch={"tap_count": 0, "miss_tap_count": 0, "repeat_tap_count": 0, "back_count": 1, "dwell_ms": 5000})
         service.observe("s1", later, measurable=True)
         await service.drain()
-        await http.aclose()
         self.assertEqual([r.stage for r in repository.records("s1")][-2:], ["state_scores", "next_difficulty"])
         forecast = bodies[-1]
         (first,) = forecast["state"]["history"]
@@ -357,12 +441,19 @@ class TrajectoryStageTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("t", first)
         self.assertEqual(forecast["state"]["jev"]["state_scores"]["normal"], 0.5, "and this window's own scores are beside it")
         self.assertEqual(repository.records("s1")[-1].answers["next_difficulty"]["choice"], "navigation_difficulty")
+        # Third window: the second one carries its stage-1 scores but not its own forecast (docs 9.6).
+        service.observe("s1", ending_at(6), measurable=True)
+        await service.drain()
+        older, newer = bodies[-1]["state"]["history"]
+        self.assertEqual(newer["state_scores"]["hesitation"], 0.5)
+        self.assertNotIn("next_difficulty", newer, "a forecast never reads the forecasts before it")
         # The trajectory sees at most HISTORY_WINDOWS windows; every window stays in the session's records.
         from app.modules.decision.schemas import HISTORY_WINDOWS
         for i in range(HISTORY_WINDOWS + 3):
-            service.observe("s1", feature_window(), measurable=False)   # remembered, not asked
+            service.observe("s1", ending_at(8 + 2 * i), measurable=False)   # remembered, not asked
+        await http.aclose()
         self.assertEqual(len(repository.history("s1")), HISTORY_WINDOWS)
-        self.assertEqual(len(repository.windows("s1")), HISTORY_WINDOWS + 5)
+        self.assertEqual(len(repository.windows("s1")), HISTORY_WINDOWS + 6)
 
 
 class ObservationTests(unittest.TestCase):
@@ -404,12 +495,15 @@ class ObservationTests(unittest.TestCase):
         service = DecisionService(repository, P, None)
         quiet = service.judge("s1", feature_window(back_count=0), measurable=True, situation=situation(AROUND))
         self.assertEqual(quiet.transition, "none", "no fixes_recent from the contract: no ask yet")
-        # Put an ask in place the way 4-1 would, then move past no_response_s.
-        state, (ask,) = run(repository.state("s1"), window(2.0, fixes_recent=2, gaze=True))
+        # Put an ask in place the way 4-1 would, on the same clock as the /features windows (T0 + 2 s).
+        shown = T0.timestamp() + 2
+        state, (ask,) = run(repository.state("s1"), window(shown, fixes_recent=2, gaze=True))
         repository.save_state("s1", state)
-        later = FeatureWindowRequest(screen_id="menu", window_start=T0 + timedelta(seconds=P.no_response_s), window_end=T0 + timedelta(seconds=P.no_response_s + 2),
-                                     touch={"tap_count": 0, "miss_tap_count": 0, "repeat_tap_count": 0, "back_count": 0, "dwell_ms": 1000})
-        service.observe("s1", later, measurable=True)
+        # One second short of no_response_s the ask stays; at no_response_s it lapses before the window is judged.
+        service.observe("s1", ending_at(2 + P.no_response_s - 1, tap_count=0), measurable=True)
+        self.assertIsNone(repository.windows("s1")[-1].timed_out)
+        self.assertEqual(repository.state("s1").held.decision_id, ask.decision_id)
+        service.observe("s1", ending_at(2 + P.no_response_s, tap_count=0), measurable=True)
         record = repository.windows("s1")[-1]
         self.assertEqual(record.timed_out, ask.decision_id)
         self.assertEqual(repository.state("s1").withdrawn[-1]["reason"], "no_response")
@@ -431,6 +525,10 @@ class ObservationTests(unittest.TestCase):
         companion_back = window(12.0, situation=situation(BUSY), backs_recent=1)
         self.assertEqual((decide(companion_back, state, P).transition, decide(companion_back, state, P).support), ("replace", WAIT))
         self.assertEqual(allowed_supports(companion_back, state, P), [WAIT])
+        # A held 3-1 notice with 4-1 and 4-2 together: the ask may replace the notice, the highlight may not.
+        state, (notice,) = run(SessionState(), window(10.0, situation=situation(QUEUE)))
+        self.assertEqual(notice.support, NOTICE)
+        self.assertEqual(allowed_supports(window(12.0, situation=situation(QUEUE), fixes_recent=2, gaze=True, backs_recent=1), state, P), [BIG])
         # A withdraw window offers nothing either.
         state, (opened,) = run(SessionState(), window(10.0, backs_recent=1))
         self.assertEqual(allowed_supports(window(12.0, progress_segment=True), state, P), [])

@@ -68,6 +68,11 @@ SCREEN_FLOW = ("menu", "review", "complete")
 HISTORY_WINDOWS = 5         # windows kept for the trajectory stage (2 s windows: about ten seconds)
 FORECAST_HORIZON_S = 10     # how far ahead next_difficulty asks about
 
+# The only stage answers the trajectory reads (docs 9.6): stage-1 state scores. A forecast never reads the
+# forecasts or support choices of the windows before it.
+HISTORY_STAGES = ("state_scores",)
+STALE = "stale"   # WindowRecord.jev of a window that ended before the session's last judged window
+
 
 @dataclass(frozen=True)
 class WindowInput:
@@ -167,6 +172,7 @@ class SessionState:
     screen_last: str | None = None
     screen_since: float | None = None
     next_id: int = 1
+    last_t: float | None = None   # end of the last judged window; a window ending before it is recorded only
 
     def snapshot(self) -> dict:
         held = None if self.held is None else {
@@ -188,7 +194,7 @@ class JevRecord:
     outcome: str                           # answered | no_answer
     latency_ms: int
     response_model: str | None = None
-    answers: dict = field(default_factory=dict)   # name -> noul probability, or {"choice", "confidence"}
+    answers: dict = field(default_factory=dict)   # name -> noul probability, or the whole choice / score answer
     usage: dict | None = None
     decision_id: str | None = None
     stage: str = "state_scores"            # which Jev stage asked (stages can be stacked)
@@ -200,8 +206,10 @@ class WindowRecord:
     """One judged window, kept for the whole session: the comparison row of the experiment (docs 7.1).
 
     inputs is the rule table's input line, decision the rule table's result, jev why Jev was or was not asked
-    ("off", "not_measurable", "skipped_in_flight", "asked"), answers the stage answers as they arrive. Windows
-    the rule table alone judged are rows too, so the rule-only arm has the same denominator.
+    ("off", "no_client", "not_measurable", "skipped_in_flight", "asked", or STALE for a window that arrived after
+    a later one and was recorded without being judged), answers the stage answers as they arrive (the validated
+    answer as Jev gave it). Windows the rule table alone judged are rows too, so the rule-only arm has the same
+    denominator.
     """
 
     session_id: str

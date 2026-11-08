@@ -8,7 +8,7 @@ from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from threading import Lock
 
-from app.modules.decision.schemas import HISTORY_WINDOWS, JevRecord, SessionState, WindowRecord
+from app.modules.decision.schemas import HISTORY_STAGES, HISTORY_WINDOWS, STALE, JevRecord, SessionState, WindowRecord
 
 RETENTION = timedelta(hours=1)   # as the voice context (voice/repository.py): records live as long as the session's talk
 
@@ -59,28 +59,36 @@ class DecisionRepository:
             self._touch(record.session_id)
             self._windows.setdefault(record.session_id, []).append(record)
 
-    def attach(self, session_id: str, t: float, stage: str, outcome: str, answers: dict | None = None) -> None:
-        """Add a stage's result to the window that ended at t, as it arrives."""
+    def attach(self, window: WindowRecord, stage: str, outcome: str, answers: dict | None = None) -> None:
+        """Add a stage's result to this one window record, as it arrives (never to another window that ended at
+        the same time, such as one recorded as skipped while this call was in flight)."""
         with self._lock:
-            for window in self._windows.get(session_id, ()):
-                if window.t == t:
-                    window.outcomes[stage] = outcome
-                    if answers is not None:
-                        window.answers[stage] = answers
+            window.outcomes[stage] = outcome
+            if answers is not None:
+                window.answers[stage] = answers
+
+    def window_at(self, session_id: str, t: float) -> WindowRecord | None:
+        """The last window of the session recorded as ending at t (for callers that did not keep the record)."""
+        with self._lock:
+            return next((w for w in reversed(self._windows.get(session_id, [])) if w.t == t), None)
 
     def windows(self, session_id: str) -> list[WindowRecord]:
-        """Every judged window of the session, oldest first."""
+        """Every window of the session in the order it was recorded. Judged windows are in time order; a window
+        recorded as STALE arrived after a later one and may end before the record ahead of it."""
         with self._lock:
             return list(self._windows.get(session_id, []))
 
     def history(self, session_id: str) -> list[dict]:
-        """The last HISTORY_WINDOWS windows as plain summaries for the trajectory stage, oldest first."""
+        """The last HISTORY_WINDOWS judged windows as plain summaries for the trajectory stage, oldest first.
+
+        Only HISTORY_STAGES answers ride along (stage-1 scores); STALE windows are left out.
+        """
         with self._lock:
-            recent = self._windows.get(session_id, [])[-HISTORY_WINDOWS:]
+            judged = [w for w in self._windows.get(session_id, []) if w.jev != STALE]
             return [{
                 "t": w.t, "tag": w.decision.get("tag"), "screen": w.inputs.get("screen"), "measurable": w.inputs.get("measurable"),
                 "decision": w.decision.get("transition"), "support": w.decision.get("support"),
                 "touch": {"taps": w.inputs.get("taps_segment"), "misses": w.inputs.get("misses_recent"),
                           "backs": w.inputs.get("backs_recent")},
-                **{stage: answers for stage, answers in w.answers.items()},
-            } for w in recent]
+                **{stage: w.answers[stage] for stage in HISTORY_STAGES if stage in w.answers},
+            } for w in judged[-HISTORY_WINDOWS:]]
