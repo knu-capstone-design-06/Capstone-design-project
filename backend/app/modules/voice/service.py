@@ -262,24 +262,30 @@ def _removal_verdict(word: str, after: str, product_offsets: list[int]) -> str:
     certain: "빼지 마세요", "빼 달라고 안 했어요", "빼고 싶은 것은 아니에요", "취소해 주시면 안
     돼요". "unclear" for everything else ("빼면 어때요"), which the caller reads back.
     """
-    if word == "말고":
-        return "yes"
-    if after == "":
-        return "yes"
+    # Only the words up to the next product belong to this removal: in "아메리카노 빼 주세요
+    # 샌드위치는 빼지 마세요" the sandwich's negation is not the americano's.
+    cut = min((offset for offset in product_offsets if offset > 0), default=None)
+    if cut is not None:
+        after = after[:cut]
+    if word == "말고" or after == "":
+        return "yes"  # "빼고 샌드위치 주세요" ends the americano's part at "빼고"
     if after.startswith(NEGATED_TAIL):
         return "no"
     ending = next((e for e in REQUEST_AFTER if after.startswith(e)), None)
     if ending is None:
         return "no" if any(n in after for n in NEGATION_WORDS) else "unclear"
     rest = after[len(ending):]
-    if rest == "" or any(rest.startswith(tail) for tail in POLITE_TAILS):
-        return "no" if any(n in rest for n in NEGATION_WORDS) and not any(p in rest for p in POLITE_REQUESTS) else "yes"
-    if any(p in rest for p in POLITE_REQUESTS):
-        return "yes"
+    polite = next((p for p in POLITE_REQUESTS if p in rest), None)
+    if polite is not None:
+        # "빼 주시면 안 될까요?" asks; "빼 주시면 안 될까요? 아니요 그대로 해 주세요" takes it back.
+        later = rest[rest.find(polite) + len(polite):]
+        return "no" if any(n in later for n in NEGATION_WORDS) else "yes"
     if any(n in rest for n in NEGATION_WORDS):
         return "no"
-    if ending == "고" and (len(ending) in product_offsets or _COUNT.match(rest)):
-        return "yes"  # "빼고 샌드위치 주세요": what follows is another request
+    if rest == "" or any(rest.startswith(tail) for tail in POLITE_TAILS):
+        return "yes"
+    if ending == "고" and _COUNT.match(rest):
+        return "yes"  # "빼고 하나 더요": what follows is another request
     return "unclear"
 
 
@@ -404,8 +410,12 @@ def match_spoken_details(
         return result
     last = history[-1] if history else None
     if (not counts and last is not None and last.result.status == "needs_clarification"
-            and (last.result.reply_text or "").endswith("?") and answers_question(request.text)):
-        # An answer to the kiosk's question keeps the counts of the utterance asked about.
+            and (last.result.reply_text or "").endswith("?")
+            and answers_question(request.text, last.result.reply_text)
+            and _name_positions(_compact(last.result.reply_text), menu)):
+        # An answer to the kiosk's question about a product ("아메리카노, 따뜻한 것과 아이스 중?")
+        # keeps the counts of the utterance asked about. A general "어떤 메뉴를 주문할까요?"
+        # carries nothing over.
         counts = spoken_mentions(last.request.text, menu)[0]
     products = {item.product_id: item for item in menu}
     in_cart = {(line.product_id, line.temperature): line.quantity for line in cart}

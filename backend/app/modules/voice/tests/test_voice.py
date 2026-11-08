@@ -1270,11 +1270,30 @@ class ToolExecutionApiTests(VoiceApiCase):
         body = self.status(self.say("한 잔 빼 달라고 안 했어요")).json()
         self.assertEqual((body["status"], body["actions"]), ("needs_clarification", []))
         self.assertEqual(self.cart()["total_quantity"], 2)
+        # A polite request taken back right after it is a no (reviewer's regression).
+        for text in ["아이스 아메리카노 빼 주시면 안 될까요? 아니요 그대로 해 주세요", "아이스 아메리카노 빼 주시면 안 될까요라고 한 적 없어요"]:
+            with self.subTest(text=text):
+                self.interpreter.result = interpretation(call("remove_cart_item", "americano", "iced"))
+                body = self.status(self.say(text)).json()
+                self.assertEqual((body["status"], body["actions"]), ("needs_clarification", []), text)
+                self.assertEqual(self.cart()["total_quantity"], 2)
         # Unclear: read back, not run.
         self.interpreter.result = interpretation(call("remove_cart_item", "americano", "iced"))
         body = self.status(self.say("아메리카노 빼면 어때요")).json()
         self.assertEqual((body["status"], body["reply_text"], body["actions"]), ("needs_confirmation", "아이스 아메리카노 뺄까요?", []))
         self.assertEqual(self.cart()["total_quantity"], 2)
+
+    def test_negation_for_one_product_does_not_block_another_products_removal(self):
+        # The reviewer's regression: keep the sandwich, remove the americano.
+        for text in ["아이스 아메리카노 빼 주세요 샌드위치는 빼지 마세요", "아메리카노 빼고 샌드위치는 빼지 마세요"]:
+            with self.subTest(text=text):
+                self.session_id = self.client.post("/api/v1/sessions").json()["session_id"]
+                self.add_by_touch("americano", "iced", 2)
+                self.add_by_touch("sandwich", None, 1)
+                self.interpreter.result = interpretation(call("remove_cart_item", "americano", "iced"))
+                body = self.status(self.say(text)).json()
+                self.assertEqual((body["status"], body["actions"]), ("completed", ["cart_updated"]), text)
+                self.assertEqual([(i["product_id"], i["quantity"]) for i in self.cart()["items"]], [("sandwich", 1)])
 
     def test_two_tool_inputs_on_the_same_line_are_confirmed_not_both_run(self):
         self.add_by_touch("americano", "iced", 2)
@@ -1477,6 +1496,9 @@ class RemovalIntentTests(unittest.TestCase):
                 MenuItem(product_id="sandwich", name="에그 샌드위치", available=True, temperatures=[])]
         for text, expected in [
             ("아메리카노 빼지 말고 샌드위치 빼 주세요", {"americano": "no", "sandwich": "yes"}),
+            ("아이스 아메리카노 빼 주세요 샌드위치는 빼지 마세요", {"americano": "yes", "sandwich": "no"}),
+            ("아메리카노 빼고 샌드위치는 빼지 마세요", {"americano": "yes", "sandwich": "no"}),
+            ("아메리카노 빼 주시면 안 될까요? 아니요 그대로 해 주세요", {"americano": "no"}),
             ("샌드위치 빼고 아메리카노는 두세요", {"sandwich": "yes"}),
             ("아메리카노 말고 샌드위치로요", {"americano": "yes"}),
             ("그거 빼 줘", {None: "yes"}),
