@@ -222,8 +222,12 @@ NEGATED_TAIL = ("지마", "지말", "지않", "진마", "진않", "지는마", "
 NEGATION_WORDS = ("안", "않", "마세", "말아", "말라", "아니", "없", "싶지", "싶진")
 # Polite requests that contain a negation word but ask for the removal: "빼 주시면 안 될까요?"
 POLITE_REQUESTS = ("안될까", "안되나", "안될지", "안되겠냐", "안되겠니")
-# What may close a request: nothing more, or a polite tail.
-POLITE_TAILS = ("요", "세요", "셔요", "습니다", "ㅂ니다", "래요", "라요", "게요", "겠어요", "겠습니다", "싶어", "싶습", "싶네")
+# What may close a request: nothing more, or exactly one of these tails. "빼 줄래요? 아
+# 됐어요" goes on past the tail, so the clause is not closed and the request is not certain.
+POLITE_TAILS = (
+    "요", "세요", "셔요", "습니다", "ㅂ니다", "습니까", "시오", "래요", "라요", "게요", "겠어요", "겠습니다", "겠습니까",
+    "싶어", "싶어요", "싶습니다", "싶네요",
+)
 _REMOVAL = re.compile("|".join(map(re.escape, sorted(REMOVAL_MARKS, key=len, reverse=True))))
 
 
@@ -232,11 +236,14 @@ def removal_intents(text: str, menu: list[MenuItem]) -> dict[str | None, str]:
 
     Each removal word goes with the product named last before it since the previous one,
     so "아메리카노 빼지 말고 샌드위치 빼 주세요" is {americano: no, sandwich: yes}; a word with
-    no product before it ("그거 빼 줘") is keyed None. "말고" ("아메리카노 말고 라떼") is a
-    request by itself. Any "no" for a product wins.
+    no product before it ("그거 빼 줘") is keyed None. "안" right before the word ("안 빼요",
+    "한 잔 안 빼도 돼요") is a no. "말고" ("아메리카노 말고 라떼") is a request by itself, unless
+    what follows takes another product out ("아메리카노 말고 샌드위치 빼 주세요": the americano
+    stays). Any "no" for a product wins.
     """
     compact = _compact(text)
     names = _name_positions(compact, menu)
+    boundaries = _clause_boundaries(compact, names)
     intents: dict[str | None, str] = {}
     position = start = 0
     while (found := _REMOVAL.search(compact, position)) is not None:
@@ -244,7 +251,12 @@ def removal_intents(text: str, menu: list[MenuItem]) -> dict[str | None, str]:
         if found.group() == "말고" and compact[:found.start()].endswith("지"):
             position = found.end()  # the 말고 of "빼지 말고": part of a negation, not a request
             continue
-        verdict = _removal_verdict(found.group(), after, [p - found.end() for p, _ in names if p >= found.end()])
+        if compact[:found.start()].endswith("안"):
+            verdict = "no"  # "안 빼요", "안 취소해요": the removal word itself is negated
+        elif found.group() == "말고" and _removes_another(compact, found.end(), names):
+            verdict = "no"  # "아메리카노 말고 샌드위치 빼 주세요": the sandwich goes, not the americano
+        else:
+            verdict = _removal_verdict(found.group(), after, [b - found.end() for b in boundaries if b >= found.end()])
         before = [product_id for p, product_id in names if start <= p < found.start()]
         key = before[-1] if before else None
         previous = intents.get(key)
@@ -253,18 +265,41 @@ def removal_intents(text: str, menu: list[MenuItem]) -> dict[str | None, str]:
     return intents
 
 
-def _removal_verdict(word: str, after: str, product_offsets: list[int]) -> str:
+def _clause_boundaries(compact: str, names: list[tuple[int, str]]) -> list[int]:
+    """Where another product's words begin: its name, or a temperature word tied to it.
+
+    In "샌드위치 빼고 아이스 아메리카노 주세요" the americano's clause starts at "아이스".
+    """
+    boundaries = [position for position, _ in names]
+    for found in _TEMPERATURE.finditer(compact):
+        following = [position for position in boundaries if position >= found.end()]
+        if following and compact[found.end():following[0]] in TEMPERATURE_LINKS:
+            boundaries.append(found.start())
+    return sorted(set(boundaries))
+
+
+def _removes_another(compact: str, start: int, names: list[tuple[int, str]]) -> bool:
+    """Whether a product named after start is followed by a removal word of its own."""
+    following = [position for position, _ in names if position >= start]
+    if not following:
+        return False
+    later = _REMOVAL.search(compact, following[0])
+    return later is not None and later.group() != "말고"
+
+
+def _removal_verdict(word: str, after: str, boundary_offsets: list[int]) -> str:
     """Three ways to read what follows a removal word.
 
-    "yes" when the request is certain: nothing follows, a requesting ending closes the
-    utterance ("빼 주세요", "빼 줘"), or the ending leads into another request ("빼고
-    샌드위치 주세요", "빼고 싶어요", "빼 주시면 안 될까요?"). "no" when a negation is
-    certain: "빼지 마세요", "빼 달라고 안 했어요", "빼고 싶은 것은 아니에요", "취소해 주시면 안
-    돼요". "unclear" for everything else ("빼면 어때요"), which the caller reads back.
+    "yes" when the request is certain: nothing follows, a requesting ending with at most a
+    polite tail closes the clause ("빼 주세요", "빼 줘", "빼 줄래요?"), or the ending leads into
+    another request ("빼고 샌드위치 주세요", "빼고 싶어요", "빼 주시면 안 될까요?"). "no" when a
+    negation is certain: "빼지 마세요", "빼 달라고 안 했어요", "빼고 싶은 것은 아니에요", "취소해
+    주시면 안 돼요". "unclear" for everything else ("빼면 어때요", "빼 줄래요? 아 됐어요"), which
+    the caller reads back.
     """
     # Only the words up to the next product belong to this removal: in "아메리카노 빼 주세요
     # 샌드위치는 빼지 마세요" the sandwich's negation is not the americano's.
-    cut = min((offset for offset in product_offsets if offset > 0), default=None)
+    cut = min((offset for offset in boundary_offsets if offset > 0), default=None)
     if cut is not None:
         after = after[:cut]
     if word == "말고" or after == "":
@@ -282,8 +317,8 @@ def _removal_verdict(word: str, after: str, product_offsets: list[int]) -> str:
         return "no" if any(n in later for n in NEGATION_WORDS) else "yes"
     if any(n in rest for n in NEGATION_WORDS):
         return "no"
-    if rest == "" or any(rest.startswith(tail) for tail in POLITE_TAILS):
-        return "yes"
+    if rest == "" or rest in POLITE_TAILS:
+        return "yes"  # the clause ends with the request; "빼 줄래요? 아 됐어요" goes on, so it is unclear
     if ending == "고" and _COUNT.match(rest):
         return "yes"  # "빼고 하나 더요": what follows is another request
     return "unclear"
@@ -334,6 +369,8 @@ def spoken_mentions(
             kind = "less" if after[1:].startswith(DECREASE_AFTER) else "more"
         elif after.startswith(DECREASE_AFTER):
             kind = "less"
+        elif after.startswith("안") and after[1:].startswith(DECREASE_AFTER):
+            kind = "less"  # "한 잔 안 빼도 돼요": a removal, negated; removal_intents says so
         elif after.startswith(("으로", "로")):
             kind = "to"  # "세 잔으로": the line becomes three, whatever it holds now
         else:
@@ -414,9 +451,9 @@ def match_spoken_details(
             and answers_question(request.text, last.result.reply_text)
             and _name_positions(_compact(last.result.reply_text), menu)):
         # An answer to the kiosk's question about a product ("아메리카노, 따뜻한 것과 아이스 중?")
-        # keeps the counts of the utterance asked about. A general "어떤 메뉴를 주문할까요?"
-        # carries nothing over.
-        counts = spoken_mentions(last.request.text, menu)[0]
+        # keeps the counts of the utterance asked about, also when the question had to be
+        # repeated in between. A general "어떤 메뉴를 주문할까요?" carries nothing over.
+        counts = spoken_mentions(_asked_utterance(history, menu), menu)[0]
     products = {item.product_id: item for item in menu}
     in_cart = {(line.product_id, line.temperature): line.quantity for line in cart}
     removals = removal_intents(request.text, menu)
@@ -439,6 +476,9 @@ def match_spoken_details(
     uncounted = [call for call in quantified if call.arguments.product_id not in bound_counts]
     if len(unbound_counts) > 1 or (unbound_counts and len(uncounted) != 1):
         ambiguous = True
+    for product_id in bound_counts:
+        if sum(call.arguments.product_id == product_id for call in result.tool_calls) > 1:
+            ambiguous = True  # one spoken count, two tool inputs: "아메리카노 하나 더요" on both temperatures
 
     bound_temperatures: dict[str, str] = {}
     unbound_temperatures: set[str] = set()
@@ -537,18 +577,35 @@ def match_spoken_details(
     return VoiceInterpretation(status="needs_confirmation", tool_calls=calls, reply_text="?")
 
 
+def _asked_utterance(history: Sequence[VoiceTurn], menu: list[MenuItem]) -> str:
+    """The utterance the kiosk's last question was first asked about.
+
+    When the same question was repeated over words that neither answered it nor named a
+    product ("네", "잠깐만요", "화면이 하나도 안 보여요"), the order that drew it is the earlier
+    one: "아메리카노 두 잔 주세요" → question → "네" → same question → "아이스로요" is two cups.
+    """
+    question = history[-1].result.reply_text
+    index = len(history) - 1
+    while (index > 0 and history[index - 1].result.status == "needs_clarification"
+           and history[index - 1].result.reply_text == question
+           and not answers_question(history[index].request.text, question)
+           and not _name_positions(_compact(history[index].request.text), menu)):
+        index -= 1
+    return history[index].request.text
+
+
 ASK_MENU_REPLY = "어떤 메뉴를 주문할까요?"
 PENDING = {"needs_confirmation", "needs_clarification"}
-# Words of an instruction about what is already in the cart.
 # Everything a bare instruction about the one thing in the cart may be made of: a count,
 # the words for more/less/change, a pointer such as "그거", particles and a polite ending.
-# "하나 더요", "한 잔 더 주세요", "두 잔으로 해 주세요", "그거 빼 줘" reduce to nothing; "샷 하나
-# 추가해 주세요", "얼음 빼고 주세요", "화면이 하나도 안 보여요" leave words behind.
-_ACTION_TOKENS = ("더", "빼", "취소", "삭제", "없애", "지워", "제거", "바꿔", "바꾸", "변경", "줄여", "늘려")
+# "하나 더요", "한 잔 더 주세요", "두 잔으로 해 주세요", "그거 빼 줘", "같은 걸로 하나 더요" reduce to
+# nothing; "샷 하나 추가해 주세요", "얼음 빼고 주세요", "화면이 하나도 안 보여요" leave words behind.
+_ACTION_TOKENS = ("더", "빼", "취소", "삭제", "없애", "지워", "제거", "바꿔", "바꾸", "변경", "줄여", "늘려", "추가", "넣어")
 _INSTRUCTION_TOKENS = tuple(sorted((
     "더", "빼", "취소", "삭제", "없애", "지워", "제거", "그거", "그것", "그걸", "이거", "이것", "이걸", "저거", "저것",
-    "바꿔", "바꾸", "변경", "줄여", "늘려", "으로", "로", "만", "씩", "은", "는", "이", "가", "을", "를", "도", "요", "주세요",
-    "주시겠어요", "주실래요", "주십시오", "줘", "줄래", "해주세요", "해줘", "해주", "해", "고", "좀", "다", "하", "것",
+    "바꿔", "바꾸", "변경", "줄여", "늘려", "추가", "넣어", "부탁", "같은", "걸로", "아까", "으로", "로", "만", "씩", "은",
+    "는", "이", "가", "을", "를", "도", "요", "주세요", "주시겠어요", "주실래요", "주십시오", "줘", "줄래", "해주세요",
+    "해줘", "해주", "해", "고", "좀", "다", "하", "것",
 ), key=len, reverse=True))
 
 
@@ -557,8 +614,9 @@ def is_cart_instruction(text: str) -> bool:
     compact = _compact(text)
     if not compact:
         return False
-    # A pointer alone ("그걸로요") instructs nothing: a count or an action word is needed.
-    acts = bool(_COUNT.search(compact))
+    # A pointer alone ("그걸로요") or a bare count ("하나만요", "두 잔이요": more, or that many?)
+    # instructs nothing: an action word ("더", "빼", "(으)로", "추가") is needed.
+    acts = any(kind != "abs" for _, kind, _ in spoken_mentions(text, [])[0])
     rest = _COUNT.sub("", compact)
     while rest:
         for token in _INSTRUCTION_TOKENS:
@@ -658,11 +716,14 @@ def require_named_products(
              and (answers_question(request.text, history[-1].result.reply_text)
                   or history[-1].result.status == "needs_confirmation") else [])
     asked_products = named_in(asked)
-    if (history and history[-1].result.status == "needs_clarification" and len(asked_products) > 1):
-        # "A, B 중 어느 것을 말씀하시나요?" answered by "그거요": neither is chosen, so neither counts.
-        asked_products = set()
-    allowed = named_in(now) or named_in(alternatives) or asked_products
     lines = list(cart)
+    if (history and history[-1].result.status == "needs_clarification" and len(asked_products) > 1):
+        # "아이스 아메리카노, 따뜻한 카페 라떼 중 어느 것?" answered by "아이스요" picks the one line
+        # with that temperature; answered by "그거요", neither is chosen, so neither counts.
+        spoken = {SPOKEN_TEMPERATURES[found.group()] for found in _TEMPERATURE.finditer(now[0])}
+        fitting = {line.product_id for line in lines if line.product_id in asked_products and line.temperature in spoken}
+        asked_products = fitting if len(spoken) == 1 and len(fitting) == 1 else set()
+    allowed = named_in(now) or named_in(alternatives) or asked_products
     sole = lines[0] if len(lines) == 1 else None
     in_cart = {line.product_id for line in lines}
     # The one cart line stands in for a product only when the whole utterance is an
