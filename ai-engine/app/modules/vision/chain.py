@@ -4,7 +4,7 @@ Per frame (FrameChain.process): features.Observer row (MediaPipe face / face det
 on) -> H1 head boxes (app/inference/head.py) -> head tracks, the main user as a track, companion and people behind
 from the tracks' cues, and the main user's P1 direction (columns.py HeadPeople; its state lives as long as the
 FrameChain and starts again when the touch log's sessionId changes) -> the face values blanked where the tracked face
-is not inside the main user's box (columns.FACE_VALUE_COLUMNS, face_in_primary False) -> shoulders, mouth_motion ->
+is someone else's (columns.FACE_VALUE_COLUMNS, face_in_primary False) -> shoulders, mouth_motion ->
 touch counts since the previous row (touch.py). Each part that is not
 available (no ONNX model, blendshapes off, no touch log) leaves its columns blank or absent, so the events layer treats
 the cue as missing ('모름'), never as 'absent'.

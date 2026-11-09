@@ -26,9 +26,12 @@ Columns (names = the ones events.py reads, then observation-only columns no rule
                         but has no box in this frame.
   primary_track         track id of the main user (also while its track has no box in this frame); observation only
   face_in_primary       whether the centre of the face the Face Landmarker tracks lies inside the main user's box: True,
-                        False, or None when the face or the main user's box is not there. False = the face is someone
-                        else's: the chain (chain.FrameChain) then blanks the face values of the row (FACE_VALUE_COLUMNS)
-                        and mouth_motion, so the events layer reads them as missing, not as the main user's
+                        False, or None when the face or the main user is not there. While the main user's track is
+                        alive but has no box in this frame: False when the face centre lies in another track's box,
+                        None when it lies in no head box (the head detector may have missed the main user). False =
+                        the face is someone else's: the chain (chain.FrameChain) then blanks the face values of the
+                        row (FACE_VALUE_COLUMNS) and mouth_motion, so the events layer reads them as missing, not as
+                        the main user's
   face_track            track id of the largest head box around the face centre (the box choose_primary takes by the
                         face), or None; observation only (whose face the landmarker follows)
   head_boxes            every head box of the frame in H1 order, one dict each: track (id), cx, cy, w, h (fractions of
@@ -51,10 +54,11 @@ stays the main user, and only after it ended is a new one chosen among the boxes
 face_cy), so the yaw, the mouth and the head box belong to the same person at the moment of choice; without such a box
 (face not seen, or no box around it) the largest box, ties broken by the distance of the box centre to the frame's
 vertical centre line. 'largest' = always the largest box. The Face Landmarker follows one face on its own, so after the
-choice a face centre outside the main user's box (primary_box) means the face and the head box are two people; that
-frame's face values are not the main user's (face_in_primary). A new touch-log session (chain.FrameChain) starts the
-tracks, the main user and the cue history again (HeadPeople.reset; tree section 4 ①: a new session is judged from the
-start); track ids keep counting, so an id names one track in a run.
+choice a face centre outside the main user's box (primary_box), or inside another track's box while the main user's
+track has no box in the frame, means the face and the main user are two people; that frame's face values are not the
+main user's (face_in_primary). A new touch-log session (chain.FrameChain) starts the tracks, the main user and the cue
+history again (HeadPeople.reset; tree section 4 ①: a new session is judged from the start); track ids keep counting, so
+an id names one track in a run.
 
 Cues of every other track against the main user (relative_cues), in frames where both have a box: rel_dist = h_primary /
 h_box (box heights; a pinhole camera images a head at a size inversely proportional to its distance, so with heads of
