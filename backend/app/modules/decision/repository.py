@@ -29,15 +29,20 @@ class DecisionRepository:
         self._clock = clock
         self._lock = Lock()
 
-    def _touch(self, session_id: str) -> None:
-        """Drop the sessions idle past the retention, this one included, and only then mark this one as used:
-        a session coming back after the retention starts fresh, as it would after another session's access."""
+    def _expire(self) -> datetime:
+        """Drop the sessions idle past the retention. Every read and write calls it first, so nothing of an
+        expired session is read or written back, whichever access comes first after the retention."""
         now = self._clock()
         cutoff = now - self._retention
         for stale in [s for s, at in self._touched.items() if at < cutoff]:
             for store in (self._touched, self._states, self._records, self._windows):
                 store.pop(stale, None)
-        self._touched[session_id] = now
+        return now
+
+    def _touch(self, session_id: str) -> None:
+        """Expire idle sessions, this one included, and only then mark this one as used: a session coming back
+        after the retention starts fresh, as it would after another session's access."""
+        self._touched[session_id] = self._expire()
 
     def _holds(self, window: WindowRecord) -> bool:
         return any(w is window for w in self._windows.get(window.session_id, ()))
@@ -56,6 +61,7 @@ class DecisionRepository:
         """Keep a shadow call's record. With the window it answered, only while that window is still kept: an
         answer arriving after its session expired does not bring the session back."""
         with self._lock:
+            self._expire()   # before the window check: an expired session's window is no longer held
             if window is not None and not self._holds(window):
                 return False
             self._touch(record.session_id)
@@ -64,6 +70,7 @@ class DecisionRepository:
 
     def records(self, session_id: str) -> list[JevRecord]:
         with self._lock:
+            self._expire()
             return list(self._records.get(session_id, []))
 
     def add_window(self, record: WindowRecord) -> None:
@@ -75,6 +82,7 @@ class DecisionRepository:
         """Add a stage's result to this one window record, as it arrives (never to another window that ended at
         the same time, such as one recorded as skipped while this call was in flight)."""
         with self._lock:
+            self._expire()
             if not self._holds(window):
                 return   # the session expired while the call was in flight
             window.outcomes[stage] = outcome
@@ -84,12 +92,14 @@ class DecisionRepository:
     def window_at(self, session_id: str, t: float) -> WindowRecord | None:
         """The last window of the session recorded as ending at t (for callers that did not keep the record)."""
         with self._lock:
+            self._expire()
             return next((w for w in reversed(self._windows.get(session_id, [])) if w.t == t), None)
 
     def windows(self, session_id: str) -> list[WindowRecord]:
         """Every window of the session in the order it was recorded. Judged windows are in time order; a window
         recorded as STALE arrived after a later one and may end before the record ahead of it."""
         with self._lock:
+            self._expire()
             return list(self._windows.get(session_id, []))
 
     def history(self, session_id: str) -> list[dict]:
@@ -99,6 +109,7 @@ class DecisionRepository:
         rule table's own question asked in the same call); STALE windows are left out.
         """
         with self._lock:
+            self._expire()
             judged = [w for w in self._windows.get(session_id, []) if w.jev != STALE]
             return [{
                 "t": w.t, "tag": w.decision.get("tag"), "screen": w.inputs.get("screen"), "measurable": w.inputs.get("measurable"),

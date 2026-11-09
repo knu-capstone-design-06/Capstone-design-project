@@ -710,6 +710,43 @@ class RetentionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((repository.records("s1"), repository.windows("s1")), ([], []))
         self.assertEqual(repository.state("s1").next_id, 1)
 
+    def test_the_first_window_after_the_retention_reads_no_previous_screen_or_history(self):
+        """Expiry comes before the reads of observe(): no previous screen (no progress) and no history."""
+        repository = self.repository()
+        service = DecisionService(repository, P, None, stages=())
+        service.observe("s1", ending_at(2), measurable=True)                    # menu
+        self.now[0] = T0 + timedelta(hours=2)                                   # nothing else touches the repository
+        self.assertEqual(repository.history("s1"), [], "the trajectory stage reads history before the judgment")
+        service.observe("s1", ending_at(4, screen="review"), measurable=True)   # would be menu -> review progress
+        (first,) = repository.windows("s1")
+        self.assertIsNone(first.inputs["progress_segment"], "an expired session has no previous screen")
+
+    def test_judge_after_the_retention_reads_no_previous_screen(self):
+        repository = self.repository()
+        service = DecisionService(repository, P, None, stages=())
+        service.observe("s1", ending_at(2), measurable=True)                    # menu
+        self.now[0] = T0 + timedelta(hours=2)
+        inp = service._input("s1", ending_at(4, screen="review"), True, None, None)
+        self.assertIsNone(inp.progress_segment)
+
+    async def test_an_answer_after_expiry_with_no_access_in_between_is_not_recorded(self):
+        gate = asyncio.Event()
+
+        async def slow(request):
+            await gate.wait()
+            return httpx.Response(200, json=RESPONSE)
+
+        http = httpx.AsyncClient(base_url="https://api.typesafe.ai", transport=httpx.MockTransport(slow))
+        repository = self.repository()
+        service = DecisionService(repository, P, JevClient(http, "jev-1.13.0", 3.0))
+        service.observe("s1", feature_window(), measurable=True)
+        await asyncio.sleep(0)
+        self.now[0] = T0 + timedelta(hours=2)                # s1 expires; no other access before the answer
+        gate.set()
+        await service.drain()
+        await http.aclose()
+        self.assertEqual((repository.records("s1"), repository.windows("s1")), ([], []))
+
 
 class HistoryContentTests(unittest.IsolatedAsyncioTestCase):
     def test_the_trajectory_carries_the_five_state_scores_only(self):
