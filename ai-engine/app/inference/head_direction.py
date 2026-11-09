@@ -1,5 +1,7 @@
-"""P1 head-direction classifier (torchvision ResNet-18, 5 classes, trained from random initial weights on AI Hub 70 head
-crops) with ONNX Runtime, CPU only: the probability of each direction class for a head box.
+"""P1 camera-viewpoint classifier (torchvision ResNet-18, 5 classes, trained from random initial weights on AI Hub 70
+head crops and their '촬영방향' labels) with ONNX Runtime, CPU only: the probability of each viewpoint class for a
+head box. The file, HeadDirection, DIR_CLASSES and the head_dir_* columns keep their original names; displays call P1
+the camera-viewpoint classifier (vision README 'P1 표시 이름과 한계').
 
 Crop and input exactly as P1 was trained and evaluated (4_vision/gpu_runs/p1_head_direction_70/code: p1_common.py
 square_crop and CROP_*, 01_prepare_crops.py, p1_data.transforms(False), 03_eval.py softmax; the same steps as
@@ -14,7 +16,9 @@ kiosk_inputs_2026-10-22/code/extract_kiosk_features.py head_crop / directions):
   output  softmax over the classes in the model's order: 중간 · 위 · 좌 · 우 · 뒤. The labels are AI Hub 70's '촬영방향'
           (the direction the camera looks at the person from), not the person's gaze.
 The crop constants are read from the ONNX metadata that tools/export_onnx.py writes from the checkpoint and checked
-against the values above. Known limit (P1 README): on its test split the class 뒤 had a recall of 30.2 %.
+against the values above. Known limits: on its test split the class 뒤 had a recall of 30.2 % (P1 README); under the
+kiosk's top camera 중간 and 위 split more by the user's height than by head pose (2026-10-30 cross-tab of 41
+replayed videos, vision README). No rule reads P1 (observation only).
 """
 from __future__ import annotations
 
@@ -71,7 +75,7 @@ def softmax(logits: np.ndarray) -> np.ndarray:
 
 
 class HeadDirection:
-    """Direction probabilities of head boxes: model.probs(frame, boxes_px) -> (n, 5) in DIR_CLASSES order."""
+    """Viewpoint-class probabilities of head boxes: model.probs(frame, boxes_px) -> (n, 5) in DIR_CLASSES order."""
 
     def __init__(self, model_path: str, threads: int = 1):
         import onnxruntime as ort

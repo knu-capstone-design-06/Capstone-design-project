@@ -1,6 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -23,6 +23,36 @@ class Settings(BaseSettings):
     openai_api_key: SecretStr | None = None
     openai_model: str = "gpt-4o-mini"
     openai_timeout_seconds: float = Field(default=10.0, gt=0, allow_inf_nan=False)
+    # Off: voice results return tool_calls only. On: completed tool_calls change the cart.
+    voice_execute_tools: bool = False
+    # Optional first-demo persistence. The URL is server-only and must use the
+    # dedicated kiosk_backend login, never the Supabase postgres/admin account.
+    database_url: SecretStr | None = None
+
+    # Jev (TypeSafe AI) decision model, called by the backend only. Unset key: never called.
+    jev_api_key: SecretStr | None = None
+    jev_api_url: str = "https://api.typesafe.ai"
+    # A version ID, not a moving alias, so experiments record what answered.
+    jev_model: str = "jev-1.13.0"
+    jev_timeout_seconds: float = Field(default=3.0, gt=0, allow_inf_nan=False)
+
+    @field_validator("database_url")
+    @classmethod
+    def validate_database_url(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is None:
+            return None
+        parsed = urlsplit(value.get_secret_value())
+        user = unquote(parsed.username or "")
+        if (
+            parsed.scheme not in {"postgresql", "postgres"}
+            or not parsed.hostname or parsed.path != "/postgres"
+            or not (user == "kiosk_backend" or user.startswith("kiosk_backend."))
+            or not parsed.password
+            or parsed.fragment
+        ):
+            raise ValueError("DATABASE_URL must be a kiosk_backend PostgreSQL URL")
+        _ = parsed.port
+        return value
 
     @field_validator("ai_engine_url")
     @classmethod
@@ -40,6 +70,19 @@ class Settings(BaseSettings):
             raise ValueError("AI_ENGINE_URL must be an HTTP(S) origin")
         _ = parsed.port
         return value.rstrip("/")
+
+    @field_validator("jev_api_url")
+    @classmethod
+    def validate_jev_api_url(cls, value: str) -> str:
+        try:
+            origin = cls.validate_ai_engine_url(value)
+        except ValueError:
+            raise ValueError("JEV_API_URL must be an HTTP(S) origin") from None
+        parsed = urlsplit(origin)
+        # The key goes in a header: plain HTTP only to a mock server on this machine.
+        if parsed.scheme != "https" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
+            raise ValueError("JEV_API_URL must use HTTPS unless it is a loopback address")
+        return origin
 
     @field_validator("cors_origins")
     @classmethod

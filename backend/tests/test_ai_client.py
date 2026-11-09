@@ -184,6 +184,21 @@ class IntegrationTests(unittest.TestCase):
         for timeout in (0, -1, float("inf"), float("nan")):
             with self.assertRaises(ValidationError):
                 Settings(_env_file=None, ai_engine_timeout_seconds=timeout)
+        for url in (
+            "postgresql://postgres:secret@db.example:5432/postgres",
+            "postgresql://kiosk_backend:secret@db.example:5432/other",
+            "http://kiosk_backend:secret@db.example/postgres",
+        ):
+            with self.assertRaises(ValidationError):
+                Settings(_env_file=None, database_url=url)
+
+    def test_accepts_dedicated_role_session_pooler_url(self):
+        url = (
+            "postgresql://kiosk_backend.example:placeholder@"
+            "aws-0-ap-northeast-2.pooler.supabase.com:5432/postgres"
+        )
+        settings = Settings(_env_file=None, database_url=url)
+        self.assertEqual(settings.database_url.get_secret_value(), url)
 
     def test_window_requires_timezone_and_positive_duration(self):
         for override in (

@@ -1,6 +1,6 @@
 # 백엔드 실행 및 API 현황
 
-Python 3.12 기반 FastAPI 백엔드입니다. 상태·AI 연결 확인, 임시 세션·특징 전송, 상품·장바구니·모의 주문 API를 제공합니다. 음성 요청 접수·해석 API도 등록돼 있습니다. 세션·주문·음성 기록은 현재 프로세스 메모리에 저장하며, Supabase DB·사용자 인증은 연결하지 않았습니다. `/health` 성공은 프로세스 생존만 뜻하고 DB나 AI 연결 성공을 보장하지 않습니다.
+Python 3.12 기반 FastAPI 백엔드입니다. 상태·AI 연결 확인, 세션·특징 전송, 상품·장바구니·모의 주문 API를 제공합니다. 음성 요청 접수·해석 API도 등록돼 있습니다. `DATABASE_URL`을 설정하면 세션·상품·장바구니·주문·주문 API의 성공 응답 재생 기록을 Supabase에 저장하고, 비워 두면 기존 프로세스 메모리 방식으로 동작합니다. 음성 요청·대화 기록과 사용자 인증은 DB에 연결하지 않았습니다. `/health` 성공은 프로세스 생존만 뜻하고 DB나 AI 연결 성공을 보장하지 않습니다.
 
 ## 프론트 주문 연동 상태
 
@@ -32,9 +32,9 @@ API 문서: http://127.0.0.1:8000/docs
 
 [프론트엔드 ↔ 백엔드 OpenAPI](../contract/frontend-backend.openapi.yaml) 0.4.1의 상품 조회, 세션 장바구니 조회·추가·수량 변경·삭제, 모의 주문 확정 6개 API를 구현했습니다. 첫 시연의 고정 17개 상품·현재 가격·옵션·항목별 최대 20개, 실제 결제·재고 차감 없는 모의 주문, 한 세션 한 주문·새 주문 새 세션은 채택됐습니다. 계약 문서의 `draft` 표시는 미정 정책의 팀 리뷰가 끝날 때까지 유지합니다. FastAPI `/docs`에는 현재 등록된 여섯 경로가 표시됩니다.
 
-설계 이유·미정 정책은 [주문 API 검토 문서](../docs/Product-Cart-Order-API-Draft.md)를 확인합니다. 상품 목록은 프론트 개발 샘플의 17개 메뉴와 가격을 서버의 고정 시연 데이터로 옮겼습니다. 가격·옵션·수량을 서버가 검증하고, 세션별 Cart 버전과 `Idempotency-Key`의 성공 결과를 같은 프로세스의 잠금 아래 저장합니다. 모의 주문은 항목·금액 스냅샷을 반환하고 Cart를 비우며 같은 키 재시도에는 원래 주문 응답을 반환합니다. 신규 API의 검증 오류는 `OrderApiError` 형식이고 기존 API 오류 형식은 유지합니다.
+설계 이유·미정 정책은 [주문 API 검토 문서](../docs/Product-Cart-Order-API-Draft.md)를 확인합니다. 상품 목록은 프론트 개발 샘플의 17개 메뉴와 가격을 서버의 고정 시연 데이터로 옮겼습니다. 가격·옵션·수량을 서버가 검증하고, 세션별 Cart 버전과 `Idempotency-Key`의 성공 결과를 메모리 모드에서는 프로세스 잠금으로, DB 모드에서는 트랜잭션 잠금으로 저장합니다. 모의 주문은 항목·금액 스냅샷을 반환하고 Cart를 비우며 같은 키 재시도에는 원래 주문 응답을 반환합니다. 신규 API의 검증 오류는 `OrderApiError` 형식이고 기존 API 오류 형식은 유지합니다.
 
-현재 세션·Cart·주문·중복 방지 기록은 프로세스 재시작이나 여러 백엔드 인스턴스 사이에 유지되지 않습니다. 서버가 반환한 `session_id`를 보유한 클라이언트가 해당 Cart에 접근하므로 공개 배포 전 세션 접근·만료 정책을 정해야 합니다. 주문번호는 서버가 생성한 `SIM-` 접두의 고유 UUID 문자열이며 형식과 보관 정책은 팀 리뷰 대상입니다. 처리 중 중복 응답·장기 보관·동적 가격 변경은 미구현입니다. 실제 결제와 재고 차감은 포함하지 않습니다.
+`DATABASE_URL` 설정 시 세션·Cart·주문·중복 방지 기록은 프로세스 재시작 후에도 유지됩니다. 동일 세션의 변경은 DB 트랜잭션 잠금으로 순서를 정하며, 여러 백엔드 인스턴스가 동시에 주문해도 세션당 주문은 한 건만 생성합니다. 음성 도구 묶음에서 뒤 명령이 실패하면 앞 장바구니 변경도 롤백합니다. 서버가 반환한 `session_id`를 보유한 클라이언트가 해당 Cart에 접근하므로 공개 배포 전 세션 접근·만료 정책을 정해야 합니다. 주문번호는 서버가 생성한 `SIM-` 접두의 고유 UUID 문자열이며 형식과 보관 정책은 팀 리뷰 대상입니다. 처리 중 중복 응답·장기 보관·동적 가격 변경은 미구현입니다. 실제 결제와 재고 차감은 포함하지 않습니다.
 
 모의 주문을 확정한 세션의 장바구니 조회·변경은 `410 session_expired`로 거절합니다. 같은 `Idempotency-Key`와 동일한 주문 요청을 재시도하면 저장된 첫 주문 성공 응답을 다시 반환합니다. 완료 세션의 복원·보관·만료 정책은 팀 합의 전입니다.
 
@@ -42,15 +42,15 @@ API 문서: http://127.0.0.1:8000/docs
 
 ## Supabase DB 연결 상태
 
-서울 리전 Supabase 프로젝트에는 `kiosk.sessions` 테이블과 백엔드 전용 `kiosk_backend` 역할을 만드는 마이그레이션 2개가 적용돼 있습니다. 역할에는 현재 세션 테이블의 SELECT·INSERT 권한만 있으며, 비밀번호는 마이그레이션에 넣지 않았습니다. **백엔드 코드는 아직 이 테이블을 사용하지 않습니다.** `app/infrastructure/database/`에는 연결 구현이 없고 DB 접속 환경변수도 아직 정의하지 않았습니다. 주문 관련 테이블은 계약·보관 정책을 합의한 뒤 새 마이그레이션으로 설계해야 합니다. 이미 적용한 마이그레이션은 수정하지 않습니다. 현재 구조와 백업 상태는 [DB 안내](../db/README.md)와 [백업·복구 절차](../db/BACKUP_RESTORE.md)를 참고합니다.
+서울 리전 Supabase 프로젝트에는 세션과 첫 시연 주문 저장용 마이그레이션 3개, 고정 상품 17개 시드가 적용돼 있습니다. 서버 전용 `DATABASE_URL`은 `kiosk_backend` 역할의 PostgreSQL URL만 허용합니다. `app/infrastructure/database/`의 연결은 TLS를 사용하며, 앱 시작 시 실제 DB 역할을 확인합니다. URL이 없으면 DB 연결을 시도하지 않고 메모리 저장소를 사용합니다. 비밀번호와 URL은 Git에 넣지 않습니다. 원격 DB에 합성 세션으로 주문·재시작·동시 요청·음성 도구 롤백을 검증한 뒤 합성 데이터를 삭제했습니다. 현재 구조와 백업 상태는 [DB 안내](../db/README.md)와 [백업·복구 절차](../db/BACKUP_RESTORE.md)를 참고합니다.
 
 ## 음성 API 상태
 
-[PR #36](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/36)에서 음성 요청 접수 `POST /api/v1/sessions/{session_id}/voice/requests`와 상태 조회 `GET /api/v1/sessions/{session_id}/voice/requests/{request_id}`를 병합했습니다. [PR #42](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/42)에서 주문 카탈로그를 음성 메뉴에 연결하고 `ignored` 상태를 추가했습니다. 세션별 대화 맥락을 사용해 OpenAI 해석 결과를 `tool_calls`로 만들지만, 도구를 실행하거나 장바구니를 변경하지 않으므로 `actions`는 비어 있습니다. `OPENAI_API_KEY`가 없으면 개발용 응답을 사용하며, 터치 주문과 백엔드 기동은 가능합니다.
+[PR #36](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/36)에서 음성 요청 접수 `POST /api/v1/sessions/{session_id}/voice/requests`와 상태 조회 `GET /api/v1/sessions/{session_id}/voice/requests/{request_id}`를 병합했습니다. [PR #42](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/42)에서 주문 카탈로그를 음성 메뉴에 연결하고 `ignored` 상태를 추가했습니다. 세션별 대화 맥락을 사용해 OpenAI 해석 결과를 `tool_calls`로 만듭니다. 기본 설정에서는 도구를 실행하지 않아 `actions`가 비어 있고, `VOICE_EXECUTE_TOOLS=true`면 `completed`의 `tool_calls`를 주문 서비스로 반영한 뒤 `actions: ["cart_updated"]`를 돌려줍니다(`app/modules/voice/executor.py`). `OPENAI_API_KEY`가 없으면 개발용 응답을 사용하며, 터치 주문과 백엔드 기동은 가능합니다.
 
-도구 실행·장바구니 변경과 실제 OpenAI 키를 사용한 검증은 별도 작업입니다. 음성 요청 형식은 [음성 OpenAPI](../contract/voice.openapi.yaml)를 확인합니다.
+실제 OpenAI 키를 사용한 검증은 해석(PR #61)과 도구 실행(PR #66)에서 했으며, 결과 표는 각 PR 본문에 있습니다. 음성 요청 형식은 [음성 OpenAPI](../contract/voice.openapi.yaml)를 확인합니다.
 
-주문 완료 세션의 **새 음성 요청**은 410 `{ "code": "session_expired", "detail": "새 이용 세션을 시작해 주세요." }`로 거절합니다. 완료 전에 접수한 요청의 같은 키·같은 본문은 기록이 남아 있으면 기존 202를 재생하고, 같은 키·다른 본문은 409입니다. 기존 요청의 GET은 주문 완료만으로 막지 않으며, 음성 기록의 기존 1시간 정리 규칙을 따릅니다. 음성 해석은 여전히 Cart를 변경하지 않습니다.
+주문 완료 세션의 **새 음성 요청**은 410 `{ "code": "session_expired", "detail": "새 이용 세션을 시작해 주세요." }`로 거절합니다. 완료 전에 접수한 요청의 같은 키·같은 본문은 기록이 남아 있으면 기존 202를 재생하고, 같은 키·다른 본문은 409입니다. 기존 요청의 GET은 주문 완료만으로 막지 않으며, 음성 기록의 기존 1시간 정리 규칙을 따릅니다. 기본 설정(`VOICE_EXECUTE_TOOLS` 꺼짐)에서 음성 해석은 Cart를 변경하지 않습니다.
 
 ## 환경변수
 
@@ -66,10 +66,16 @@ API 문서: http://127.0.0.1:8000/docs
 | OPENAI_API_KEY | 미설정 | 서버 전용 비밀값 |
 | OPENAI_MODEL | gpt-4o-mini | 모델 이름 |
 | OPENAI_TIMEOUT_SECONDS | 10 | 양의 유한한 초 단위 숫자 |
+| VOICE_EXECUTE_TOOLS | false | true면 completed 음성 결과의 tool_calls를 장바구니에 반영 |
+| DATABASE_URL | 미설정 | 서버 전용 `kiosk_backend` PostgreSQL URL. 미설정 시 메모리 저장 |
+| JEV_API_KEY | 미설정 | 서버 전용 비밀값. 없으면 Jev를 호출하지 않음 |
+| JEV_API_URL | https://api.typesafe.ai | HTTPS 오리진만. 평문 HTTP는 localhost·127.0.0.1 모의 서버에만 허용 |
+| JEV_MODEL | jev-1.13.0 | 버전 ID. 별칭(jev-latest)은 실험 기록을 위해 쓰지 않음 |
+| JEV_TIMEOUT_SECONDS | 3 | Jev 호출 한 번의 전체 제한, 재시도 없음 |
 
 예: `CORS_ORIGINS=["http://localhost:5173","http://127.0.0.1:5173"]`. 실제 프론트 출처에 맞춰 설정하며 경로나 와일드카드는 허용하지 않습니다. CORS는 GET·POST·PATCH·DELETE를 허용합니다. 기본 허용 출처는 localhost이므로 127.0.0.1에서 직접 교차 출처 요청을 보낼 때는 위 설정이 필요합니다. CORS는 사용자 인증 기능이 아닙니다.
 
-`.env`에는 실제 비밀값을 넣을 수 있지만 Git에 커밋하지 않습니다. `.env.example`은 항목 설명만 공유합니다. 음성 메뉴는 주문 카탈로그와 연결돼 있으며, 실제 OpenAI 키를 사용한 음성 해석은 아직 검증하지 않았습니다. DB 접속 설정은 실제 연동 시 추가합니다.
+`.env`에는 실제 비밀값을 넣을 수 있지만 Git에 커밋하지 않습니다. `.env.example`은 항목 설명만 공유합니다. 음성 메뉴는 주문 카탈로그와 연결돼 있으며, 실제 OpenAI 키를 사용한 검증 결과는 PR #61과 #66 본문에 있습니다. 로컬에서 DB 모드를 실행하려면 `backend/.env`의 `DATABASE_URL`에 전용 역할 URL을 설정합니다. 관리자 `postgres` 계정 URL을 넣으면 시작 단계에서 거절합니다.
 
 ## Docker Compose
 
@@ -79,7 +85,7 @@ API 문서: http://127.0.0.1:8000/docs
 docker compose up --build
 ```
 
-프론트 화면은 `http://127.0.0.1:8080`에서 제공하고 `/backend/` 요청을 백엔드로 전달합니다. 백엔드의 직접 주소는 `http://127.0.0.1:8000`이며 ai-engine은 Docker 내부의 `http://ai-engine:8001`을 사용합니다. Compose에는 `env_file`이 없고 이미지에도 `.env`가 없으므로, 로컬 직접 실행과 달리 `backend/.env`는 읽지 않습니다. 필요한 값은 실행 환경에서 컨테이너에 주입합니다.
+프론트 화면은 `http://127.0.0.1:8080`에서 제공하고 `/backend/` 요청을 백엔드로 전달합니다. 백엔드의 직접 주소는 `http://127.0.0.1:8000`이며 ai-engine은 Docker 내부의 `http://ai-engine:8001`을 사용합니다. Compose에는 `env_file`이 없고 이미지에도 `.env`가 없으므로, 로컬 직접 실행과 달리 `backend/.env`는 읽지 않습니다. DB 모드가 필요하면 실행 터미널의 `DATABASE_URL` 환경변수로 전용 역할 URL을 주입합니다. 값을 넣지 않으면 메모리 모드입니다.
 
 연결 API의 기존 실행·통신 검증은 [PR #26](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/26)를 참고합니다. 2026-10-14에는 PR #43이 병합된 `main`(`3cb8529`)으로 세 이미지를 빌드해 모두 healthy 상태를 확인했습니다. 실제 브라우저의 기본 API 모드에서 상품 조회 → 세션·장바구니 생성 → 상품 추가 → 모의 주문 확정 → 새 주문 시작이 통과했습니다. 주문은 서버에서 처리하되 첫 응답만 유실시킨 검사에서는 화면의 `주문 반영 확인`이 같은 키·본문으로 재요청해 원래 주문번호를 표시했습니다. `/backend/` 프록시를 거친 HTTP 검사에서는 17개 상품, 옵션 오류, 버전 충돌과 최신 Cart, 중복 키·주문 재시도, 완료 세션 410을 확인했습니다. 이 검증은 DB 영속성, 실제 결제, 음성 도구 실행, AI 판단을 확인한 것은 아닙니다.
 
@@ -130,13 +136,15 @@ ai-engine의 호스트 포트를 공개하지 않습니다. 두 서버를
 
 ## 테스트
 
-의존성 설치 후 `backend/`에서 실행합니다. 표준 라이브러리 unittest와 HTTPX
-MockTransport를 사용하므로 실제 ai-engine·DB·Docker가 필요하지 않습니다.
+의존성 설치 후 `backend/`에서 실행합니다. 일반 테스트는 표준 라이브러리 unittest와 HTTPX
+MockTransport를 사용하므로 실제 ai-engine·DB·Docker가 필요하지 않습니다. `TEST_DATABASE_URL`이 없으면 PostgreSQL 통합 테스트 3개는 건너뜁니다.
 
 ```powershell
 python -m unittest discover -s tests -v
 python -m unittest discover -s app/modules -p 'test_*.py' -v
 ```
+
+별도 CI 작업 `Backend DB integration`은 일회용 PostgreSQL 17에 저장소의 마이그레이션 3개와 상품 17개 시드를 적용한 뒤 `python -m unittest tests.test_postgres_ordering -v`를 실행합니다. 실제 Supabase 접속 정보는 사용하지 않고, Cart·주문 성공 응답의 재시작 뒤 재생, 두 저장소 인스턴스의 동시 주문, 실패한 음성 도구 묶음의 롤백을 검사합니다.
 
 기존 AI 클라이언트 테스트는 정상 요청·응답, vision 생략/null, 판단 불가, HTTP 오류,
 연결 실패, 전체 타임아웃, 잘못된 응답·세션 불일치, 호출 취소, health 응답과 연결 종료를 확인합니다.
@@ -151,8 +159,8 @@ python -m unittest discover -s app/modules -p 'test_*.py' -v
 | POST /api/v1/sessions | 201, session_id와 UTC started_at |
 | POST /api/v1/sessions/{session_id}/features | 200, AI 점수 또는 판단 없는 응답 |
 
-세션은 단일 프로세스 메모리에만 보관하며 재시작하면 초기화됩니다.
-세션 만료·정리·영속 저장은 아직 없으므로 장기 운영 또는 여러 worker/인스턴스에 사용하지 않습니다.
+`DATABASE_URL`이 없으면 세션은 단일 프로세스 메모리에만 보관하며 재시작하면 초기화됩니다. 전용 역할의 `DATABASE_URL`을 설정하면 세션·Cart·주문·성공 요청 재생 기록을 DB에 저장하고 재시작 뒤에도 조회할 수 있습니다. 음성 요청·대화 이력은 두 모드 모두 메모리에만 남습니다.
+세션 만료·정리와 공개 접속자의 세션 접근 통제는 아직 없으므로, DB 모드에서도 공개 장기 운영 준비가 끝난 것은 아닙니다.
 터치 원시 로그의 통계 계산과 비전 추출은 구현하지 않고 계약에 정의된 특징만 전달합니다.
 주문 완료 세션의 새 특징 요청은 AI 호출 전에 410 `{ "detail": "session_expired" }`로 거절합니다. AI 호출 중 주문이 완료된 경우에도 결과를 반환하지 않고 410으로 처리합니다. 프론트가 이미 수신한 늦은 결과의 화면 적용 차단은 특징 전송 연결 시 함께 확인해야 합니다.
 AI 측정 불가는 ai_available=true, states=null입니다. 통신 오류·타임아웃·잘못된 AI 응답은
@@ -195,7 +203,7 @@ Invoke-RestMethod -Method Post "$base/api/v1/sessions/$($session.session_id)/fea
 
 팀과 결정하고 이후 구현할 사항:
 - 프론트 요청 타임아웃은 15초입니다. 최종 시간과 시간 초과 후 처리 중 응답·재시도 정책은 백엔드 담당자와 합의할 항목입니다.
-- 처리 중 중복 요청의 오류·간격, 실패 결과와 성공 키의 보관 기간, DB 전환 시 원자적 저장
+- 처리 중 중복 요청의 오류·간격, 실패 결과와 성공 키의 보관 기간. DB 모드의 Cart·주문·성공 응답은 트랜잭션으로 원자적 저장을 구현했습니다.
 - 서버 주문번호의 장기 보관 범위, 세션 시간 만료·복원, 프론트의 늦은 특징·음성 결과 화면 적용 차단
 - 공개 주소의 세션 접근·인증·쿠키 및 배포 정책
 

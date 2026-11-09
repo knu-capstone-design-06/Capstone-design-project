@@ -144,6 +144,15 @@ class OrderingApiTests(unittest.TestCase):
         response = self.client.get("/api/v1/sessions/missing/cart")
         self.assertEqual((response.status_code, response.json()["code"]),
                          (404, "session_not_found"))
+        mutation = self.client.post(
+            "/api/v1/sessions/missing/cart/items", headers=self.headers(), json={
+                "product_id": "americano", "temperature": "iced",
+                "quantity": 1, "expected_version": 0,
+            },
+        )
+        self.assertEqual((mutation.status_code, mutation.json()["code"]),
+                         (404, "session_not_found"))
+        self.assertNotIn("missing", self.client.app.state.ordering_repository.states)
 
 
 class OrderingConcurrencyTests(unittest.TestCase):

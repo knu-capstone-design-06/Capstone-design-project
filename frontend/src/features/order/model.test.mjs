@@ -49,6 +49,12 @@ function fixture(overrides = {}, onInvalidOrder) {
   return new OrderController(api, onInvalidOrder);
 }
 
+function deferred() {
+  let resolve, reject;
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
+
 test('초기화 중 중복 호출은 상품·세션 요청을 한 번만 실행한다', async () => {
   let calls = 0;
   const controller = fixture({ createSession: async () => { calls++; return { session_id: 'session-1', started_at: '' }; } });
@@ -142,6 +148,154 @@ test('낮은 버전 응답으로 현재 Cart를 덮어쓰지 않는다', async (
   await controller.initialize();
   await controller.updateQuantity('item-1', 3);
   assert.equal(controller.getSnapshot().cart.version, 5);
+});
+
+test('음성 장바구니 변경 뒤에는 최신 Cart를 다시 읽고, 실패해도 이전 Cart를 보존한다', async () => {
+  let reads = 0;
+  const latest = { ...populatedCart(3), items: [{ ...populatedCart().items[0], quantity: 3, line_amount: 10500 }], total_quantity: 3, total_amount: 10500 };
+  const controller = fixture({ getCart: async () => {
+    reads += 1;
+    if (reads === 1) return populatedCart(1);
+    if (reads === 2) return latest;
+    throw new ApiError(503, { detail: 'temporary failure' });
+  } });
+  await controller.initialize();
+  assert.equal(await controller.refreshCartAfterVoice(), true);
+  assert.equal(controller.getSnapshot().cart.total_quantity, 3);
+  assert.match(controller.getSnapshot().notice, /음성 주문/);
+  assert.equal(await controller.refreshCartAfterVoice(), false);
+  assert.equal(controller.getSnapshot().status, 'ready');
+  assert.equal(controller.getSnapshot().cart.total_quantity, 3);
+  assert.match(controller.getSnapshot().message, /음성 주문 결과/);
+});
+
+test('터치 응답보다 먼저 온 음성 변경은 저장 뒤 한 번 조회하고 다음 변경에 최신 버전을 쓴다', async () => {
+  const touch = deferred(), refresh = deferred();
+  let reads = 0, nextVersion;
+  const controller = fixture({
+    getCart: () => ++reads === 1 ? Promise.resolve(emptyCart()) : refresh.promise,
+    addCartItem: () => touch.promise,
+    updateCartItem: async (_session, _item, input) => { nextVersion = input.expected_version; return populatedCart(3); },
+  });
+  await controller.initialize();
+  const writing = controller.addItem({ product_id: 'americano', temperature: 'iced', quantity: 2 });
+  await controller.refreshCartAfterVoice();
+  await controller.refreshCartAfterVoice();
+  assert.equal(reads, 1, '터치 저장 중에는 재조회를 보류');
+  touch.resolve(populatedCart(1));
+  assert.equal(await writing, true);
+  assert.equal(reads, 2, '저장 중의 알림들을 한 번의 조회로 처리');
+  assert.equal(controller.getSnapshot().status, 'saving');
+  assert.equal(await controller.updateQuantity('item-1', 3), false, '재조회가 끝나기 전에는 추가 변경 차단');
+  refresh.resolve(populatedCart(2));
+  await refresh.promise;
+  assert.equal(controller.getSnapshot().status, 'ready');
+  assert.equal(controller.getSnapshot().cart.version, 2);
+  assert.equal(await controller.updateQuantity('item-1', 3), true);
+  assert.equal(nextVersion, 2);
+});
+
+test('음성 재조회 도중 새 변경이 오면 현재 조회 뒤 한 번 더 조회하고 중간에 조작을 열지 않는다', async () => {
+  const first = deferred(), second = deferred();
+  let reads = 0;
+  const controller = fixture({ getCart: () => {
+    reads++;
+    return reads === 1 ? Promise.resolve(populatedCart(1)) : reads === 2 ? first.promise : second.promise;
+  } });
+  await controller.initialize();
+  const snapshots = [];
+  controller.subscribe(() => snapshots.push(controller.getSnapshot()));
+  const refreshing = controller.refreshCartAfterVoice();
+  await controller.refreshCartAfterVoice();
+  await controller.refreshCartAfterVoice();
+  assert.equal(reads, 2);
+  first.resolve(populatedCart(2));
+  await refreshing;
+  assert.equal(reads, 3);
+  assert.equal(controller.getSnapshot().status, 'saving');
+  assert(!snapshots.some(snapshot => snapshot.status === 'ready'), '중간 응답으로 조작을 재개하지 않음');
+  second.resolve(populatedCart(3));
+  await second.promise;
+  assert.equal(controller.getSnapshot().status, 'ready');
+  assert.equal(controller.getSnapshot().cart.version, 3);
+});
+
+test('응답 유실 중 음성 변경은 동일 요청 재확인이 끝난 뒤 조회한다', async () => {
+  const requests = [], refresh = deferred();
+  let reads = 0;
+  const controller = fixture({
+    getCart: () => ++reads === 1 ? Promise.resolve(emptyCart()) : refresh.promise,
+    addCartItem: async (...args) => {
+      requests.push(structuredClone(args));
+      if (requests.length === 1) throw new TypeError('response lost');
+      return populatedCart(1);
+    },
+  });
+  await controller.initialize();
+  await controller.addItem({ product_id: 'americano', temperature: 'iced', quantity: 2 });
+  await controller.refreshCartAfterVoice();
+  assert.equal(controller.getSnapshot().status, 'uncertain');
+  assert.equal(reads, 1, '음성 조회로 미확정 요청을 버리지 않음');
+  assert.equal(await controller.retry(), true);
+  assert.deepEqual(requests[0], requests[1]);
+  assert.equal(reads, 2);
+  refresh.resolve(populatedCart(2));
+  await refresh.promise;
+  assert.equal(controller.getSnapshot().cart.version, 2);
+});
+
+test('터치 요청이 확정 오류로 끝나도 보류한 음성 변경은 조회한다', async () => {
+  const touch = deferred(), refresh = deferred();
+  let reads = 0;
+  const controller = fixture({
+    getCart: () => ++reads === 1 ? Promise.resolve(populatedCart(1)) : refresh.promise,
+    updateCartItem: () => touch.promise,
+  });
+  await controller.initialize();
+  const writing = controller.updateQuantity('item-1', 3);
+  await controller.refreshCartAfterVoice();
+  touch.reject(new ApiError(409, { code: 'cart_version_conflict', detail: '최신 내용을 확인해주세요.', cart: populatedCart(2) }));
+  assert.equal(await writing, false);
+  assert.equal(reads, 2);
+  refresh.resolve(populatedCart(3));
+  await refresh.promise;
+  assert.equal(controller.getSnapshot().cart.version, 3);
+});
+
+test('세션이 끝나면 보류한 음성 조회를 버리고 새 주문에 가져가지 않는다', async () => {
+  const touch = deferred(), sessions = [];
+  const controller = fixture({
+    getCart: async session => { sessions.push(session); return session === 'session-1' ? populatedCart(1) : emptyCart(session); },
+    updateCartItem: () => touch.promise,
+  });
+  await controller.initialize();
+  const writing = controller.updateQuantity('item-1', 3);
+  await controller.refreshCartAfterVoice();
+  touch.reject(new ApiError(410, { code: 'session_expired', detail: '새로 시작해주세요.', cart: null }));
+  await writing;
+  assert.equal(controller.getSnapshot().status, 'ended');
+  assert.deepEqual(sessions, ['session-1']);
+  assert.equal(await controller.startNewOrder(), true);
+  assert.deepEqual(sessions, ['session-1', 'session-2']);
+  assert.equal(controller.getSnapshot().cart.session_id, 'session-2');
+});
+
+test('주문 완료로 확정되면 보류한 음성 조회가 완료 Cart를 다시 읽지 않는다', async () => {
+  const checkout = deferred(), sessions = [];
+  const controller = fixture({
+    getCart: async session => { sessions.push(session); return session === 'session-1' ? populatedCart(1) : emptyCart(session); },
+    createOrder: () => checkout.promise,
+  });
+  await controller.initialize();
+  const writing = controller.checkout();
+  await controller.refreshCartAfterVoice();
+  checkout.resolve(structuredClone(order));
+  assert.equal(await writing, true);
+  assert.equal(controller.getSnapshot().order.order_id, order.order_id);
+  assert.equal(controller.getSnapshot().cart, null);
+  assert.deepEqual(sessions, ['session-1']);
+  assert.equal(await controller.startNewOrder(), true);
+  assert.deepEqual(sessions, ['session-1', 'session-2']);
 });
 
 test('처리 중 응답의 재시도 간격을 존중하고 그동안 새 키를 만들지 않는다', async () => {
