@@ -1365,6 +1365,15 @@ class ToolExecutionApiTests(VoiceApiCase):
                 self.assertEqual(self.status(self.say(text)).json()["actions"], ["cart_updated"], text)
                 total += 1
                 self.assertEqual(self.cart()["total_quantity"], total)
+        # The vision reviewer's regression: "하나 추가" is one more, so update(1) is read back as the sum.
+        for text in ["하나 추가해 주세요", "한 잔 넣어 주세요"]:
+            with self.subTest(text=text):
+                self.interpreter.result = interpretation(call("update_cart_item", "americano", "iced", 1))
+                body = self.status(self.say(text)).json()
+                self.assertEqual((body["status"], body["reply_text"], body["actions"]),
+                                 ("needs_confirmation", f"아이스 아메리카노 {total + 1}잔으로 바꿀까요?", []), text)
+                self.assertEqual(self.cart()["total_quantity"], total)
+                self.status(self.say("아니요"))
 
     def test_removal_taken_back_negated_or_aimed_at_another_product_is_not_run(self):
         self.add_by_touch("americano", "iced", 2)
@@ -1470,6 +1479,18 @@ class ToolExecutionApiTests(VoiceApiCase):
         self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 1))
         self.assertEqual(self.status(self.say("아이스로요")).json()["actions"], ["cart_updated"])
         self.assertEqual(self.cart()["total_quantity"], 1)
+        # The vision reviewer's regression: a bare count in between ("한 잔만요") is a correction,
+        # so the answer after it means one cup, not the two first asked about.
+        self.session_id = self.client.post("/api/v1/sessions").json()["session_id"]
+        self.interpreter.result = interpretation(reply_text=question)
+        self.say("아메리카노 두 잔 주세요")
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 1))
+        self.assertEqual(self.status(self.say("한 잔만요")).json()["reply_text"], question)
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 2))
+        body = self.status(self.say("아이스로요")).json()
+        self.assertEqual((body["status"], body["reply_text"], body["actions"]),
+                         ("needs_confirmation", "아이스 아메리카노 1잔 담을까요?", []))
+        self.assertEqual(self.cart()["items"], [])
 
     def test_two_line_question_answered_by_a_temperature_picks_that_line(self):
         self.add_by_touch("americano", "iced", 1)
@@ -1685,9 +1706,18 @@ class SpokenIncrementTests(unittest.TestCase):
         for text, expected in [
             ("하나 더요", 1), ("아메리카노 한 잔 더", 1), ("한 잔만 더요", 1), ("두 잔 더 주세요", 2),
             ("3개 더", 3), ("열 잔 더", 10), ("열아홉 잔 더요", 19), ("스무 잔 더", 20),
+            ("하나 추가해 주세요", 1), ("두 개 넣어 주세요", 2), ("한 잔을 추가해 줘", 1),
         ]:
             with self.subTest(text=text):
                 self.assertEqual(spoken_increment(text), expected)
+
+    def test_하나도_before_a_negation_is_not_a_count(self):
+        from app.modules.voice.service import spoken_mentions
+
+        for text in ["화면이 하나도 안 보여요", "하나도 모르겠어요", "한 개도 없어요", "하나도 못 알아듣겠어요"]:
+            with self.subTest(text=text):
+                self.assertEqual(spoken_mentions(text, [])[0], [])
+        self.assertEqual(spoken_mentions("하나도 더 주세요", [])[0], [(None, "more", 1)])
 
     def test_other_utterances_are_not_increments(self):
         from app.modules.voice.service import spoken_increment

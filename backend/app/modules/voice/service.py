@@ -195,6 +195,10 @@ _COUNT = re.compile(
 )
 # Right after a count (or its 더): "하나 빼 주세요", "하나 더 빼 주세요", "하나 줄여요" take away.
 DECREASE_AFTER = ("빼", "취소", "줄", "덜", "없")
+# Right after a count: "하나 추가해 주세요", "두 개 넣어 주세요" add that many, like "하나 더".
+INCREASE_AFTER = ("추가", "넣어")
+# "하나도 안 보여요", "하나도 모르겠어요", "한 개도 없어요": 하나도 before a negation means "at all", not one.
+_NOT_AT_ALL = ("안", "않", "없", "못", "모르")
 SPOKEN_TEMPERATURES = {
     "아이스": "iced", "차가운": "iced", "차갑게": "iced", "시원한": "iced", "시원하게": "iced",
     "따뜻한": "hot", "따뜻하게": "hot", "따듯한": "hot", "따듯하게": "hot", "뜨거운": "hot", "뜨겁게": "hot", "핫": "hot",
@@ -364,11 +368,16 @@ def spoken_mentions(
     names = _name_positions(compact, menu)
     counts, start = [], 0
     for found in _COUNT.finditer(compact):
-        after = _PARTICLES.sub("", compact[found.end():])  # "한 잔을 빼" reads like "한 잔 빼"
+        tail = compact[found.end():]
+        if tail.startswith("도") and tail[1:].startswith(_NOT_AT_ALL):
+            continue  # "화면이 하나도 안 보여요": no count was said
+        after = _PARTICLES.sub("", tail)  # "한 잔을 빼" reads like "한 잔 빼"
         if after.startswith("더"):
             kind = "less" if after[1:].startswith(DECREASE_AFTER) else "more"
         elif after.startswith(DECREASE_AFTER):
             kind = "less"
+        elif after.startswith(INCREASE_AFTER):
+            kind = "more"  # "하나 추가해 주세요": one more, not one in all
         elif after.startswith("안") and after[1:].startswith(DECREASE_AFTER):
             kind = "less"  # "한 잔 안 빼도 돼요": a removal, negated; removal_intents says so
         elif after.startswith(("으로", "로")):
@@ -580,16 +589,18 @@ def match_spoken_details(
 def _asked_utterance(history: Sequence[VoiceTurn], menu: list[MenuItem]) -> str:
     """The utterance the kiosk's last question was first asked about.
 
-    When the same question was repeated over words that neither answered it nor named a
-    product ("네", "잠깐만요", "화면이 하나도 안 보여요"), the order that drew it is the earlier
-    one: "아메리카노 두 잔 주세요" → question → "네" → same question → "아이스로요" is two cups.
+    When the same question was repeated over words that neither answered it, named a
+    product nor said a count ("네", "잠깐만요", "화면이 하나도 안 보여요"), the order that drew it
+    is the earlier one: "아메리카노 두 잔 주세요" → question → "네" → same question → "아이스로요"
+    is two cups. A count in between ("한 잔만요") is a correction, so the walk stops there.
     """
     question = history[-1].result.reply_text
     index = len(history) - 1
     while (index > 0 and history[index - 1].result.status == "needs_clarification"
            and history[index - 1].result.reply_text == question
            and not answers_question(history[index].request.text, question)
-           and not _name_positions(_compact(history[index].request.text), menu)):
+           and not _name_positions(_compact(history[index].request.text), menu)
+           and not spoken_mentions(history[index].request.text, menu)[0]):
         index -= 1
     return history[index].request.text
 
