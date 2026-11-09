@@ -97,8 +97,13 @@ class FrameChain:
             row.update(C.head_columns(heads, roles, probs))
             k = C.face_box(heads.boxes, face)
             row["face_track"] = None if k is None else roles.tracks[k]
-            row["face_in_primary"] = None if face is None or roles.primary is None else \
-                C.inside(face, heads.boxes[roles.primary])
+            if face is None or roles.primary_track is None:
+                row["face_in_primary"] = None     # no face, or no main user: cannot be told
+            elif roles.primary is not None:
+                row["face_in_primary"] = C.inside(face, heads.boxes[roles.primary])
+            else:   # the main user's track is alive without a box here: a face in another track's box is someone
+                    # else's; a face in no box cannot be told (it may be the main user's, missed by the head detector)
+                row["face_in_primary"] = False if k is not None else None
             if row["face_in_primary"] is False:  # someone else's face: its values are not the main user's
                 for col in C.FACE_VALUE_COLUMNS:
                     if col in row:

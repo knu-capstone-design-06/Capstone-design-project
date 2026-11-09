@@ -1178,6 +1178,46 @@ class FrameChainTests(unittest.TestCase):
         self.assertEqual((r["face_in_primary"], r["face_track"]), (True, 1))
         self.assertAlmostEqual(abs(r["yaw_deg"]), 10.0, places=3)
 
+    def test_another_face_while_the_main_user_box_is_missing_is_not_the_main_users(self):
+        """The main user's box (around the face) is missing for 3 frames, well within track_max_gap_s, while a smaller
+        box of another person, overlapping it below track_iou_min, holds the face centre; then the main user's box
+        returns. While it is missing the face is the other person's: face_in_primary False, face values and
+        mouth_motion blank. After the return it is the main user's again (box lost, other face, return)."""
+        from app.modules.vision.chain import FrameChain
+        from app.modules.vision.columns import FACE_VALUE_COLUMNS
+        from app.modules.vision.params import PilotParams
+        user, other = [0.38, 0.22, 0.62, 0.58], [0.45, 0.30, 0.55, 0.50]   # IoU 0.02 / 0.0864 = 0.23; face (0.5, 0.4)
+        blend = {name: 0.1 for name in PilotParams().mouth_dials}
+        heads = ScheduledHeads([[user]] * 3 + [[other]] * 3 + [[user, other]])
+        chain = FrameChain(FakeModels([fake_inference(yaw=10.0, blend=blend) for _ in range(9)]),
+                           PilotParams(mouth_baseline_s=0.15), heads, blendshapes=True)
+        rows = [chain.process(f) for f in frames(9)]
+        self.assertEqual(rows[2]["mouth_motion"], 0.0)                   # the main user's mouth before the gap
+        for r in rows[3:6]:
+            self.assertEqual((r["primary_track"], r["primary_box"], r["face_track"], r["face_in_primary"]),
+                             (1, None, 2, False))
+            self.assertEqual(r["face_state"], SEEN)
+            self.assertTrue(all(r[c] is None for c in FACE_VALUE_COLUMNS),
+                            [c for c in FACE_VALUE_COLUMNS if r[c] is not None])
+            self.assertIsNone(r["mouth_motion"])                         # the other person's blendshapes not used
+        for r in rows[6:]:
+            self.assertEqual((r["primary_track"], r["face_track"], r["face_in_primary"]), (1, 1, True))
+            self.assertAlmostEqual(abs(r["yaw_deg"]), 10.0, places=3)
+        self.assertEqual(rows[8]["mouth_motion"], 0.0)                   # a new face run (from 0.6 s), baseline filled
+
+    def test_a_face_in_no_box_while_the_main_user_box_is_missing_cannot_be_told(self):
+        """The main user's box is missing and the only box is far from the face: the face may be the main user's (a
+        head detector miss), so face_in_primary stays None and the face values are kept."""
+        from app.modules.vision.chain import FrameChain
+        from app.modules.vision.params import PilotParams
+        user, away = [0.38, 0.22, 0.62, 0.58], [0.02, 0.10, 0.30, 0.45]
+        chain = FrameChain(FakeModels([fake_inference(yaw=10.0) for _ in range(5)]), PilotParams(),
+                           ScheduledHeads([[user]] * 3 + [[away]]))
+        r = [chain.process(f) for f in frames(5)][-1]
+        self.assertEqual((r["primary_track"], r["primary_box"], r["face_track"], r["face_in_primary"]),
+                         (1, None, None, None))
+        self.assertAlmostEqual(abs(r["yaw_deg"]), 10.0, places=3)
+
     def test_face_value_columns_are_feature_columns(self):
         from app.modules.vision.columns import FACE_VALUE_COLUMNS
         from app.modules.vision.features import COLUMNS
@@ -1200,6 +1240,20 @@ class FrameChainTests(unittest.TestCase):
         seen = [(r["primary_from"], [b["track"] for b in r["head_boxes"]]) for r in rows[4:8]]
         self.assertEqual(seen, [("track", [1, 2]), ("track", [1, 2]),     # 0.4 s, 0.5 s: session s1
                                 ("face", [3, 4]), ("track", [3, 4])])      # 0.6 s: s2 chooses anew
+        # s1's main user leaves at 0.3 s and another person's face is seen in their own box until the session ends:
+        # blank in s1 (the main user's track is still alive); from 0.6 s that person is s2's main user, chosen anew
+        from app.modules.vision.columns import FACE_VALUE_COLUMNS
+        user, other = [0.38, 0.22, 0.62, 0.58], [0.45, 0.30, 0.55, 0.50]
+        chain = FrameChain(FakeModels([fake_inference(yaw=10.0) for _ in range(9)]), PilotParams(),
+                           ScheduledHeads([[user]] * 3 + [[other]]), timeline=tl)
+        rows = [chain.process(f) for f in frames(9)]
+        for r in rows[3:6]:                                               # 0.3 to 0.5 s: session s1
+            self.assertEqual((r["primary_track"], r["face_track"], r["face_in_primary"]), (1, 2, False))
+            self.assertTrue(all(r[c] is None for c in FACE_VALUE_COLUMNS))
+        self.assertEqual((rows[6]["primary_from"], rows[6]["primary_track"]), ("face", 3))
+        for r in rows[6:]:                                                # 0.6 s on: session s2, new main user
+            self.assertEqual((r["primary_track"], r["face_track"], r["face_in_primary"]), (3, 3, True))
+            self.assertAlmostEqual(abs(r["yaw_deg"]), 10.0, places=3)
 
     def test_without_boundary_values_the_head_behind_is_unknown(self):
         from app.modules.vision.chain import FrameChain
