@@ -159,13 +159,13 @@ export function OrderPage() {
     </div><button data-log-target={`cart:${item.product_id}:${temperatureLabel(item.temperature)}:remove`} className="text-button" aria-label={`${item.name} ${temperatureLabel(item.temperature)} 삭제`} disabled={writeDisabled} onClick={() => void controller.removeItem(item.item_id)}>삭제</button></div>
   </li>);
 
-  const screenHeightButton = <button data-log-target="screen-height-toggle" className="screen-height-toggle" data-active={settings.lowScreen} onClick={toggleScreenHeight}>{settings.lowScreen ? '기본 높이' : '낮은 화면'}</button>;
+  const screenHeightButton = <button data-log-target="screen-height-toggle" className="screen-height-toggle" onClick={toggleScreenHeight}>{settings.lowScreen ? '화면 위로 올리기' : '화면 아래로 내리기'}</button>;
 
-  return <><button type="button" className={`screen-position-pad ${settings.lowScreen ? 'is-lowered' : ''} ${settings.highContrast ? 'is-contrast' : ''}`}
+  return <><button ref={touchLog.heightControl} type="button" className={`screen-position-pad ${settings.lowScreen ? 'is-lowered' : ''} ${settings.highContrast ? 'is-contrast' : ''}`}
     data-log-target="screen-position-pad" aria-label={settings.lowScreen ? '화면 위로 올리기' : '화면 아래로 내리기'} onClick={toggleScreenHeight}>
     <span>{settings.lowScreen ? '화면 위로 올리기' : '화면 아래로 내리기'}<span className="screen-position-arrow" aria-hidden="true">{settings.lowScreen ? '⌃' : '⌄'}</span></span>
   </button><div ref={touchLog.root} className={`kiosk ${settings.largeText ? 'large-text' : ''} ${settings.largeButton ? 'large-button' : ''} ${settings.simpleScreen ? 'simple-screen' : ''} ${settings.lowScreen ? 'low-screen' : ''} ${settings.highContrast ? 'high-contrast' : ''}`}>
-    <header className="header">
+    <header className="header" data-log-target="kiosk-header">
       <div className="kiosk-identity"><div><a data-log-target="menu-home" className="brand" href="#" onClick={event => { event.preventDefault(); if (screen !== 'complete') setScreen('menu'); }}>온기 카페</a><span className="sample-badge">{sampleMode ? '개발용 샘플' : '샘플 주문'} · 실제 결제 없음</span></div><KioskClock /></div>
       <div className="kiosk-toolbar"><KioskModeBar settings={settings} voiceEnabled={voice.enabled}
         voiceReady={screen === 'menu' && (state.status === 'ready' || state.status === 'saving') && !!state.session && !state.order && voice.supported}
@@ -174,7 +174,7 @@ export function OrderPage() {
         <button data-log-target="support-toggle" className="support-trigger" aria-expanded={supportOpen} aria-controls="support-panel" onClick={() => setSupportOpen(!supportOpen)}>화면 도움 {supportOpen ? '닫기' : '열기'}</button>
       </div>
     </header>
-    <section id="support-panel" className="support-panel" hidden={!supportOpen} aria-label="화면 도움 설정">
+    <section id="support-panel" data-log-target="support-panel" className="support-panel" hidden={!supportOpen} aria-label="화면 도움 설정">
       <div><h2>편한 화면으로 주문해 주세요</h2><p>설정을 바꿔도 담은 메뉴는 그대로예요.</p></div>
       <div className="support-options">
         {(Object.keys(supportLabels) as (keyof Settings)[]).map(key => <button data-log-target={`support:${key}`} key={key} aria-pressed={settings[key]} onClick={() => setSettings(current => ({ ...current, [key]: !current[key] }))}>{settings[key] ? '✓ ' : ''}{supportLabels[key]}</button>)}
@@ -183,7 +183,7 @@ export function OrderPage() {
       </div>
       <ReadAloudControls root={touchLog.root} voiceController={voiceController} screenKey={`${state.session?.session_id}:${screen}:${selected?.product_id ?? ''}:${restartOpen}`} />
     </section>
-    <main>
+    <main data-log-target="order-content">
       {!selected && feedback}
       <div className="cart-notice" role="status" aria-live="polite" hidden={!state.notice || screen !== 'menu'}>{state.notice}<button data-log-target="notice-close" aria-label="안내 닫기" onClick={() => controller.clearNotice()}>✕</button></div>
       <nav className="steps" aria-label="주문 단계">{['메뉴 선택', '주문 확인', '주문 완료'].map((label, index) => <span key={label} aria-current={index === ['menu', 'review', 'complete'].indexOf(screen) ? 'step' : undefined}><b>{index + 1}</b> {label}</span>)}</nav>
@@ -198,7 +198,7 @@ export function OrderPage() {
               <span className="product-info"><strong>{product.name}</strong><span className="product-identity"><span className="product-mark" aria-hidden="true"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{product.category === 'food' ? <><path d="m3 12 3-6h12l3 6-3 6H6Z" /><path d="m8 7 2 4m4-4 2 4" /></> : <><path d="M5 8h12v6a5 5 0 0 1-5 5h-2a5 5 0 0 1-5-5ZM17 9h2a3 3 0 0 1 0 6h-2M4 22h16M8 2v2m4-2v2" /></>}</svg></span><span className="product-category">{categoryLabels[product.category]}</span></span><span className="description">{product.description}</span><span className="product-price">{money(product.unit_price)}</span>{!product.available && <span>품절</span>}</span>
             </button>)}
           </div></> : <section className="review-card"><h2>주문 내역</h2>{count ? <ul>{cartRows}</ul> : <p>아직 담은 메뉴가 없어요. 메뉴를 먼저 골라 주세요.</p>}<button data-log-target="review-back" className="secondary" onClick={() => setScreen('menu')}>← 메뉴 더 고르기</button></section>}
-        </section><aside className="cart"><div className="cart-heading"><h2>{screen === 'menu' ? '담은 메뉴' : '주문 요약'}</h2><span>{count}개</span></div>{screen === 'menu' ? (count ? <ul>{cartRows}</ul> : <div className="empty-cart"><span aria-hidden="true">＋</span><p>메뉴를 담아 주세요</p><span>선택한 메뉴가 여기에 보여요.</span></div>) : <p className="cart-summary">담은 메뉴 {count}개를 확인해 주세요.<br />실제 결제는 진행되지 않아요.</p>}</aside></div>
+        </section><aside className="cart" data-log-target="cart-content"><div className="cart-heading"><h2>{screen === 'menu' ? '담은 메뉴' : '주문 요약'}</h2><span>{count}개</span></div>{screen === 'menu' ? (count ? <ul>{cartRows}</ul> : <div className="empty-cart"><span aria-hidden="true">＋</span><p>메뉴를 담아 주세요</p><span>선택한 메뉴가 여기에 보여요.</span></div>) : <p className="cart-summary">담은 메뉴 {count}개를 확인해 주세요.<br />실제 결제는 진행되지 않아요.</p>}</aside></div>
       </>}
     </main><footer className="footer"><span>온기 카페</span><span>천천히 골라도 괜찮아요.</span></footer>
     <section ref={actionsRef} className="order-actions" aria-label="주문 진행"><div className="order-actions-inner">
