@@ -55,6 +55,7 @@ function targetInfo(element: HTMLElement) {
 
 export function useTouchLog(screen: string, category: string, productId: string | null, settings: Settings, serverSessionId: string | null, observation: TouchLogObservation) {
   const root = useRef<HTMLDivElement>(null);
+  const heightControl = useRef<HTMLButtonElement>(null);
   const tracker = useRef<ReturnType<typeof createTouchLog> | null>(null);
   const context = useRef<LogContext>({ screen, visitId: '', settings, voiceMode: observation.voice.enabled });
   const previous = useRef<{ screen: string; category: string; productId: string | null; settings: Settings } | null>(null);
@@ -92,11 +93,12 @@ export function useTouchLog(screen: string, category: string, productId: string 
     const record = (kind: string, data: unknown) => recorder.record(context.current, kind, data);
     const point = (event: PointerEvent) => ({ x: event.clientX, y: event.clientY });
     function down(event: PointerEvent) {
-      if (!root.current?.contains(event.target as Node)) return;
+      const onHeightControl = heightControl.current?.contains(event.target as Node);
+      if (!root.current || (!root.current.contains(event.target as Node) && !onHeightControl)) return;
       const startedAt = performance.now();
       // 이전 취소 입력을 다음 제스처와 연결하지 않습니다.
       if (!gestures.size) cancelled.clear();
-      const scope = root.current.querySelector<HTMLDialogElement>('dialog[open]') ?? root.current;
+      const scope = root.current.querySelector<HTMLDialogElement>('dialog[open]') ?? (onHeightControl ? heightControl.current! : root.current);
       const element = (event.target as Element).closest<HTMLElement>(selector);
       const target = element && scope.contains(element) ? targetInfo(element) : null;
       const start = point(event);
@@ -250,5 +252,5 @@ export function useTouchLog(screen: string, category: string, productId: string 
     previous.current = { screen, category, productId, settings: { ...settings } };
   }, [screen, category, productId, settings, serverSessionId, observation]);
 
-  return { root };
+  return { root, heightControl };
 }

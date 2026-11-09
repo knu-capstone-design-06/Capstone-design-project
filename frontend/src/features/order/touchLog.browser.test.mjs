@@ -277,19 +277,23 @@ test('로컬 로그: 중복 방지, 화면·옵션·설정, 서버 세션 연결
       assert.equal(new Set(log.events.filter(event => event.sessionId === local).map(event => event.serverSessionId)).size, 1);
     }
     // 터치 제스처를 브라우저에 전달하여 기본 스크롤과 pointercancel을 확인합니다.
-    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.locator('.kiosk main').evaluate(element => { element.scrollTop = 0; });
     const cdp = await context.newCDPSession(page);
+    const contentBounds = await page.locator('.kiosk main').boundingBox();
+    const startY = contentBounds.y + contentBounds.height - 20;
+    const endY = contentBounds.y + 20;
     const touch = async (type, y) => cdp.send('Input.dispatchTouchEvent', {
-      type, touchPoints: type === 'touchEnd' ? [] : [{ x: 350, y, id: 1 }],
+      type, touchPoints: type === 'touchEnd' ? [] : [{ x: contentBounds.x + contentBounds.width / 2, y, id: 1 }],
     });
     const previousCount = (await read()).events.length;
-    await touch('touchStart', 550);
-    for (const y of [520, 470, 420, 350, 280]) {
+    await touch('touchStart', startY);
+    for (const fraction of [.1, .3, .5, .7, 1]) {
+      const y = startY + (endY - startY) * fraction;
       await touch('touchMove', y);
       await new Promise(resolve => setTimeout(resolve, 30));
     }
-    await touch('touchEnd', 280);
-    await page.waitForFunction(() => window.scrollY > 0);
+    await touch('touchEnd', endY);
+    await page.waitForFunction(() => document.querySelector('.kiosk main').scrollTop > 0);
     log = await read();
     const gestureEvents = log.events.slice(previousCount);
     assert.equal(gestureEvents.filter(event => event.kind === 'pointer_start').length, 1);
@@ -312,10 +316,10 @@ test('주변 후보는 화면·컨테이너에서 보이는 부분만 사용하�
       const product = document.querySelector('[data-log-target="product:americano"]');
       return product && !product.disabled;
     });
-    const scrollPastHeader = await page.evaluate(() => document.querySelector('.header').getBoundingClientRect().height + 20);
-    await page.evaluate(y => window.scrollTo(0, y), scrollPastHeader);
-    await page.waitForFunction(y => Math.abs(window.scrollY - y) < 1, scrollPastHeader);
-    await page.mouse.click(890, 2);
+    await page.locator('.kiosk main').evaluate(element => { element.scrollTop = 200; });
+    await page.waitForFunction(() => document.querySelector('.kiosk main').scrollTop > 0);
+    const point = await page.locator('.kiosk main').boundingBox();
+    await page.mouse.click(point.x + 2, point.y + 2);
     const outside = await page.evaluate(() => window.kioskTouchLogDraft.read().events.filter(event => event.kind === 'pointer_start').at(-1));
     assert.equal(outside.data.target, null);
     assert(outside.data.nearestCandidates.every(candidate => candidate.rect.y + candidate.rect.height > 0));
@@ -350,8 +354,9 @@ test('주변 후보는 화면·컨테이너에서 보이는 부분만 사용하�
     await page.waitForFunction(() => document.querySelector('.touch-log-summary')?.innerText.includes('보관 중인 현재 세션 누름'));
     await page.evaluate(() => {
       for (let i = 0; i < 1010; i++) {
-        document.scrollingElement.scrollTop = i % 2;
-        document.dispatchEvent(new Event('scroll'));
+        const content = document.querySelector('.kiosk main');
+        content.scrollTop = i % 2;
+        content.dispatchEvent(new Event('scroll', { bubbles: true }));
       }
     });
     await page.waitForFunction(() => document.querySelector('.touch-log-summary strong')?.textContent === '1000');
@@ -427,6 +432,7 @@ test('하단 주문 바의 완전·부분 가림을 제외하고 주문 버튼�
           }
           const point = await page.evaluate(() => {
             const bar = document.querySelector('.order-actions').getBoundingClientRect();
+            const left = document.querySelector('.kiosk').getBoundingClientRect().left;
             document.querySelectorAll('.kiosk button, .kiosk a').forEach(element => {
               if (element.closest('.order-actions')) return;
               element.dataset.occlusionDisabled = element.getAttribute('aria-disabled') ?? '';
@@ -436,10 +442,10 @@ test('하단 주문 바의 완전·부분 가림을 제외하고 주문 버튼�
               const button = document.createElement('button');
               button.dataset.logTarget = id;
               button.textContent = id;
-              button.style.cssText = `position:fixed;left:4px;top:${top}px;width:60px;height:80px;min-height:0;padding:0;z-index:0`;
+              button.style.cssText = `position:fixed;left:${left + 4}px;top:${top}px;width:60px;height:80px;min-height:0;padding:0;z-index:0`;
               document.querySelector('.kiosk').append(button);
             }
-            const x = 12, y = bar.top + 12;
+            const x = left + 12, y = bar.top + 12;
             const hit = document.elementFromPoint(x, y);
             if (!hit.closest('.order-actions') || hit.closest('button,a[href]')) throw new Error('주문 바의 버튼 밖 위치');
             return { x, y };
