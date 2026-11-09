@@ -1456,7 +1456,7 @@ class ToolExecutionApiTests(VoiceApiCase):
         # The vision reviewer's reproduction: the question was repeated over "네", and the
         # answer after that must still mean the two cups first asked about.
         question = "아메리카노, 따뜻한 것과 아이스 중 무엇으로 할까요?"
-        for between in ["네", "잠깐만요", "화면이 하나도 안 보여요"]:
+        for between in ["네", "잠깐만요", "화면이 하나도 안 보여요", "하나만 물어볼게요", "두 개만 여쭤볼게요"]:
             with self.subTest(between=between):
                 self.session_id = self.client.post("/api/v1/sessions").json()["session_id"]
                 self.interpreter.result = interpretation(reply_text=question)
@@ -1481,16 +1481,18 @@ class ToolExecutionApiTests(VoiceApiCase):
         self.assertEqual(self.cart()["total_quantity"], 1)
         # The vision reviewer's regression: a bare count in between ("한 잔만요") is a correction,
         # so the answer after it means one cup, not the two first asked about.
-        self.session_id = self.client.post("/api/v1/sessions").json()["session_id"]
-        self.interpreter.result = interpretation(reply_text=question)
-        self.say("아메리카노 두 잔 주세요")
-        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 1))
-        self.assertEqual(self.status(self.say("한 잔만요")).json()["reply_text"], question)
-        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 2))
-        body = self.status(self.say("아이스로요")).json()
-        self.assertEqual((body["status"], body["reply_text"], body["actions"]),
-                         ("needs_confirmation", "아이스 아메리카노 1잔 담을까요?", []))
-        self.assertEqual(self.cart()["items"], [])
+        for between in ["한 잔만요", "하나만요", "한 잔이요"]:
+            with self.subTest(between=between):
+                self.session_id = self.client.post("/api/v1/sessions").json()["session_id"]
+                self.interpreter.result = interpretation(reply_text=question)
+                self.say("아메리카노 두 잔 주세요")
+                self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 1))
+                self.assertEqual(self.status(self.say(between)).json()["reply_text"], question)
+                self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 2))
+                body = self.status(self.say("아이스로요")).json()
+                self.assertEqual((body["status"], body["reply_text"], body["actions"]),
+                                 ("needs_confirmation", "아이스 아메리카노 1잔 담을까요?", []), between)
+                self.assertEqual(self.cart()["items"], [])
 
     def test_two_line_question_answered_by_a_temperature_picks_that_line(self):
         self.add_by_touch("americano", "iced", 1)

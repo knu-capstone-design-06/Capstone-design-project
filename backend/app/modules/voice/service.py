@@ -592,7 +592,8 @@ def _asked_utterance(history: Sequence[VoiceTurn], menu: list[MenuItem]) -> str:
     When the same question was repeated over words that neither answered it, named a
     product nor said a count ("네", "잠깐만요", "화면이 하나도 안 보여요"), the order that drew it
     is the earlier one: "아메리카노 두 잔 주세요" → question → "네" → same question → "아이스로요"
-    is two cups. A count in between ("한 잔만요") is a correction, so the walk stops there.
+    is two cups. A count said on its own in between ("한 잔만요") is a correction, so the walk
+    stops there; a count inside other words ("하나만 물어볼게요") is not one.
     """
     question = history[-1].result.reply_text
     index = len(history) - 1
@@ -600,7 +601,8 @@ def _asked_utterance(history: Sequence[VoiceTurn], menu: list[MenuItem]) -> str:
            and history[index - 1].result.reply_text == question
            and not answers_question(history[index].request.text, question)
            and not _name_positions(_compact(history[index].request.text), menu)
-           and not spoken_mentions(history[index].request.text, menu)[0]):
+           and not (spoken_mentions(history[index].request.text, menu)[0]
+                    and _cart_words_only(history[index].request.text))):
         index -= 1
     return history[index].request.text
 
@@ -620,24 +622,37 @@ _INSTRUCTION_TOKENS = tuple(sorted((
 ), key=len, reverse=True))
 
 
-def is_cart_instruction(text: str) -> bool:
-    """Whether the whole utterance is an instruction about what is already in the cart."""
-    compact = _compact(text)
-    if not compact:
-        return False
-    # A pointer alone ("그걸로요") or a bare count ("하나만요", "두 잔이요": more, or that many?)
-    # instructs nothing: an action word ("더", "빼", "(으)로", "추가") is needed.
-    acts = any(kind != "abs" for _, kind, _ in spoken_mentions(text, [])[0])
-    rest = _COUNT.sub("", compact)
+def _cart_tokens(text: str) -> list[str] | None:
+    """The instruction tokens the utterance is made of besides counts, or None when other words remain."""
+    rest = _COUNT.sub("", _compact(text))
+    tokens = []
     while rest:
         for token in _INSTRUCTION_TOKENS:
             if rest.startswith(token):
-                acts = acts or token in _ACTION_TOKENS
+                tokens.append(token)
                 rest = rest[len(token):]
                 break
         else:
-            return False
-    return acts
+            return None
+    return tokens
+
+
+def _cart_words_only(text: str) -> bool:
+    """Whether the utterance is nothing but counts, pointers, particles and endings ("한 잔만요")."""
+    return bool(_compact(text)) and _cart_tokens(text) is not None
+
+
+def is_cart_instruction(text: str) -> bool:
+    """Whether the whole utterance is an instruction about what is already in the cart."""
+    if not _compact(text):
+        return False
+    tokens = _cart_tokens(text)
+    if tokens is None:
+        return False
+    # A pointer alone ("그걸로요") or a bare count ("하나만요", "두 잔이요": more, or that many?)
+    # instructs nothing: an action word ("더", "빼", "(으)로", "추가") is needed.
+    return (any(kind != "abs" for _, kind, _ in spoken_mentions(text, [])[0])
+            or any(token in _ACTION_TOKENS for token in tokens))
 
 
 def answers_question(text: str, question: str = "") -> bool:
