@@ -58,7 +58,8 @@
   --kiosk-control-large: 80px;
   --kiosk-mic: 112px;
   --kiosk-mic-large: 136px;
-  --kiosk-interaction-height: min(100dvh, max(60dvh, 720px));
+  --low-screen-height: min(100dvh, max(60dvh, 720px));
+  --kiosk-interaction-height: var(--low-screen-height);
   --kiosk-radius: 12px;
   --kiosk-panel-radius: 20px;
   --kiosk-circle: 50%;

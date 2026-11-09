@@ -93,7 +93,7 @@ test('세로·가로 화면과 독립 접근성 설정에서 전체 주문·설�
           await noOverflow(page); await bottomAction(page, 'review-open');
           if (settings.includes('largeText')) assert(await page.locator('.product-info strong').first().evaluate(element => parseFloat(getComputedStyle(element).fontSize) >= 56), '큰 글씨에서 기본 28px의 두 배 이상');
           if (settings.includes('largeButton')) assert((await page.locator('[data-log-target="review-open"]').boundingBox()).height >= 88);
-          await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+          await page.locator('.product').last().evaluate(element => element.scrollIntoView({ block: 'end' }));
           await bottomAction(page, 'review-open');
           const lastProduct = await page.locator('.product').last().boundingBox();
           const actions = await page.locator('.order-actions').boundingBox();
@@ -164,7 +164,7 @@ test('낮은 화면에서 옵션·전체 주문·접근성 조합·새로고침�
           await reachable('[data-log-target="cart-add"]');
           await click(page, 'cart-add'); await page.locator('dialog[open]').waitFor({ state: 'hidden' });
           await noOverflow(page); await bottomAction(page, 'review-open');
-          await page.locator('.low-screen > main').evaluate(element => { element.scrollTop = element.scrollHeight; });
+          await page.locator('.product').last().evaluate(element => element.scrollIntoView({ block: 'end' }));
           const lastProduct = await page.locator('.product').last().boundingBox();
           const actions = await page.locator('.order-actions').boundingBox();
           assert(lastProduct.y + lastProduct.height <= actions.y, '낮은 화면에서도 목록 끝을 하단 바 위까지 볼 수 있음');
@@ -577,8 +577,8 @@ test('긴 주문 내역 아래에서 실패해도 안내와 재확인 버튼을 
             await click(page, 'support-toggle');
           }
           await click(page, 'review-open');
-          await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
-          assert(await page.evaluate(() => window.scrollY > 0));
+          await page.locator('.review-card li').last().scrollIntoViewIfNeeded();
+          assert(await page.evaluate(() => [...document.querySelectorAll('.kiosk, .kiosk main')].some(element => element.scrollTop > 0)));
           await click(page, 'simulate-payment');
           await page.locator('.order-feedback').waitFor();
           const feedback = await page.locator('.order-feedback').boundingBox();
