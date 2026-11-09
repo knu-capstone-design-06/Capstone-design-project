@@ -59,6 +59,7 @@ test('개발 샘플에서 짧은 말도 인식하고 다시 듣기·오류·화�
     await page.locator('[data-log-target="voice-listen"]').click();
     await page.evaluate(() => window.voiceFakes.at(-1).fail('not-allowed'));
     assert.match(await page.locator('.voice-mode-feedback').innerText(), /마이크 사용을 허용/);
+    assert.equal(await page.locator('.voice-mode-badge').innerText(), '마이크 권한 확인');
     await page.locator('[data-log-target="voice-listen"]').click();
     await page.evaluate(() => window.voiceFakes.at(-1).final('아메리카노 두 잔'));
     await page.locator('[data-log-target="voice-listen"]').waitFor();
@@ -163,7 +164,7 @@ test('주변 대화는 표시하지 않고 이전 확인 질문에 짧게 답할
     await page.evaluate(() => window.voiceFakes.at(-1).partial('네'));
     assert.match(await page.locator('.voice-mode-feedback').innerText(), /듣는 중: 네/);
     await page.evaluate(() => window.voiceFakes.at(-1).final('네'));
-    await page.locator('.voice-mode-feedback').getByText(/주문을 변경하는 기능은 아직 준비 중/).waitFor();
+    await page.locator('.voice-mode-feedback').getByText(/말씀을 확인했어요/).waitFor();
     assert.equal(fixture.requests.filter(request => request.method === 'POST' && request.path.endsWith('/voice/requests')).at(-1).body.text, '네');
     fixture.verify();
     assert.deepEqual(errors, []);
@@ -189,7 +190,7 @@ test('확인 질문 뒤 서버 실패를 알리고 다시 말하기에서 질문
     await page.waitForFunction(() => window.voiceFakes.length === 3);
     assert.match(await page.locator('.voice-mode-feedback').innerText(), /아이스 아메리카노 담을까요/);
     await page.evaluate(() => window.voiceFakes.at(-1).final('네'));
-    await page.locator('.voice-mode-feedback').getByText(/주문을 변경하는 기능은 아직 준비 중/).waitFor();
+    await page.locator('.voice-mode-feedback').getByText(/말씀을 확인했어요/).waitFor();
     assert.deepEqual(fixture.requests.filter(request => request.method === 'POST' && request.path.endsWith('/voice/requests')).map(request => request.body.text), ['아메리카노 주세요', '네', '네']);
     fixture.verify();
     assert.deepEqual(errors, []);
@@ -292,6 +293,7 @@ test('마이크 권한 오류를 알리고 큰 글씨·큰 버튼·낮은 화면
     await page.locator('[data-log-target="voice-mode-toggle"]').click();
     await page.evaluate(() => window.voiceFakes.at(-1).fail('not-allowed'));
     assert.match(await page.locator('.voice-mode-feedback').innerText(), /마이크 사용을 허용/);
+    assert.equal(await page.locator('.voice-mode-badge').innerText(), '마이크 권한 확인');
     assert.equal(await page.locator('[data-log-target="voice-listen"]').isVisible(), true);
     await screenshot(page, 'voice-permission-low-large');
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
@@ -301,5 +303,21 @@ test('마이크 권한 오류를 알리고 큰 글씨·큰 버튼·낮은 화면
     assert.equal(await page.locator('.voice-mode-feedback').count(), 0);
     fixture.verify();
     assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
+
+test('완료 세션의 음성 오류는 새 주문 안내 배지를 표시하고 다시 듣기를 제공하지 않는다', async () => {
+  const session = 'voice-session-ended';
+  const { browser, page, fixture } = await open([
+    ...bootstrap(session),
+    mutation(session, '/voice/requests', { code: 'session_expired', detail: '새 이용 세션을 시작해 주세요.' }, { status: 410 }),
+  ]);
+  try {
+    await page.locator('[data-log-target="voice-mode-toggle"]').click();
+    await page.evaluate(() => window.voiceFakes.at(-1).final('아메리카노 주세요'));
+    await page.locator('.voice-mode-badge').getByText('주문 완료 · 새 주문 필요', { exact: true }).waitFor();
+    assert.equal(await page.locator('[data-log-target="voice-listen"]').count(), 0);
+    fixture.verify();
   } finally { await browser.close(); }
 });

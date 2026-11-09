@@ -9,7 +9,7 @@ export function KioskModeBar({ settings, voiceEnabled, voiceReady, onStandard, o
   onVoice: () => void;
 }) {
   const modes = [
-    { id: 'standard', label: '일반', selected: !settings.highContrast && !settings.largeText && !voiceEnabled, action: onStandard },
+    { id: 'standard', label: '일반', selected: !settings.highContrast && !settings.largeText && !settings.largeButton && !settings.simpleScreen && !settings.stepGuide && !voiceEnabled, action: onStandard },
     { id: 'contrast', label: '고대비', selected: settings.highContrast, action: () => onSetting('highContrast') },
     { id: 'text', label: '큰 글자', selected: settings.largeText, action: () => onSetting('largeText') },
     { id: 'voice', label: '음성', selected: voiceEnabled, action: onVoice },

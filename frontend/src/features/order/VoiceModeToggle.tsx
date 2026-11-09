@@ -14,6 +14,12 @@ const errorCopy: Record<VoiceInputError, string> = {
   timeout: '음성 응답이 늦어지고 있어요. 화면을 눌러 주문해 주세요.',
 };
 
+const errorLabel: Record<VoiceInputError, string> = {
+  not_supported: '음성 입력 미지원', not_allowed: '마이크 권한 확인', network: '음성 인식 연결 확인',
+  failed: '다시 말씀해 주세요', no_session: '주문 준비 중', request_failed: '음성 요청 실패',
+  session_expired: '주문 완료 · 새 주문 필요', timeout: '음성 응답 지연',
+};
+
 function resultCopy(result: VoiceRequestStatus): string {
   switch (result.status) {
     case 'completed': return result.actions.includes('cart_updated')
@@ -45,7 +51,7 @@ export function VoiceModeToggle({ controller, ready, sampleMode }: {
     : result ? resultCopy(result) : '';
   const status = !voice.enabled ? 'off' : voice.error ? 'error' : voice.phase;
   const statusLabel = !voice.enabled ? '화면 터치로 선택'
-    : voice.error ? '마이크·연결 확인'
+    : voice.error ? errorLabel[voice.error]
     : voice.phase === 'listening' ? '듣는 중' : voice.phase === 'processing' ? '확인 중' : '음성 입력 켜짐';
 
   return <section className="voice-mode-control" data-enabled={voice.enabled} data-state={status} aria-label="음성 모드 설정">
