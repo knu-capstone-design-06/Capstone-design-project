@@ -1,5 +1,5 @@
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from threading import Lock
@@ -9,10 +9,18 @@ from app.modules.voice.exceptions import (
     IdempotencyKeyReused, RequestInProgress, VoiceSessionCompleted,
 )
 from app.modules.voice.schemas import (
-    ToolCall, VoiceAction, VoiceErrorResponse, VoiceRequestStatus, VoiceStatus, VoiceTurn,
+    CartLine, ToolCall, VoiceAction, VoiceErrorResponse, VoiceRequestStatus, VoiceStatus, VoiceTurn,
 )
 
 ACTIVE_STATUSES = {"accepted", "processing"}
+
+
+@dataclass
+class Proposal:
+    """An offer read back to the customer, with the cart its tool inputs were checked against."""
+
+    tool_calls: list[ToolCall]
+    cart: list[CartLine] = field(default_factory=list)
 # Proposed value: recent exchanges per session passed to the interpreter as context.
 HISTORY_TURNS = 10
 # Proposed value: requests, idempotency keys and idle session context are dropped after this.
@@ -57,7 +65,7 @@ class VoiceRepository:
         self._keys: dict[tuple[str, UUID], str] = {}
         self._history: dict[str, deque[VoiceTurn]] = {}
         # A needs_confirmation proposal waiting for the very next utterance of its session.
-        self._proposals: dict[str, list[ToolCall]] = {}
+        self._proposals: dict[str, Proposal] = {}
         # Sessions whose next completed reading must be confirmed again: a proposal is
         # open or has just lapsed, so an answer read against the context is not an order.
         self._reconfirm: set[str] = set()
@@ -138,14 +146,15 @@ class VoiceRepository:
             self._history.setdefault(session_id, deque(maxlen=HISTORY_TURNS)).append(turn)
             self._last_turn_at[session_id] = self._clock()
 
-    def take_proposal(self, session_id: str) -> list[ToolCall] | None:
+    def take_proposal(self, session_id: str) -> Proposal | None:
         """Return and clear the pending proposal: it answers one utterance only."""
         with self._lock:
             return self._proposals.pop(session_id, None)
 
-    def set_proposal(self, session_id: str, tool_calls: list[ToolCall]) -> None:
+    def set_proposal(self, session_id: str, tool_calls: list[ToolCall], cart: Iterable[CartLine] = ()) -> None:
+        """Keep the offer with the cart it was checked against, so "네" runs it on that cart only."""
         with self._lock:
-            self._proposals[session_id] = list(tool_calls)
+            self._proposals[session_id] = Proposal(list(tool_calls), list(cart))
             self._reconfirm.add(session_id)
 
     def mark_reconfirm(self, session_id: str) -> None:
