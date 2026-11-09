@@ -13,7 +13,8 @@ from app.modules.decision.jev_questions import STATE_QUESTIONS, shadow_questions
 from app.modules.decision.repository import DecisionRepository
 from app.modules.decision.rule_table import apply, decide, jev_request, react, tick
 from app.modules.decision.schemas import (
-    AROUND, BIG, BUSY, HIGHLIGHT, NOTICE, PILOT_PARAMS, QUEUE, STALE, WAIT, SessionState, WindowInput,
+    AROUND, BIG, BUSY, HIGHLIGHT, HISTORY_SCORES, NOTICE, PILOT_PARAMS, QUEUE, STALE, WAIT, SessionState, WindowInput,
+    WindowRecord,
 )
 from app.modules.decision.service import DecisionService, window_input
 from app.modules.sessions.schemas import FeatureWindowRequest, StateScores
@@ -650,3 +651,87 @@ class FeaturesEndpointTests(unittest.TestCase):
                     self.assertEqual(state.screen_last, "menu", "the table saw the window (not measurable: no row)")
                     self.assertIsNone(state.held)
                     self.assertIs(client.app.state.decision_service.shadow, key is not None)
+
+
+class RetentionTests(unittest.IsolatedAsyncioTestCase):
+    """Sessions idle past the retention start fresh, whoever touches the repository first (backend review of #77)."""
+
+    def repository(self):
+        self.now = [T0]
+        return DecisionRepository(clock=lambda: self.now[0])
+
+    def used_session(self, repository, session_id="s1"):
+        state = repository.state(session_id)
+        state.next_id = 7
+        repository.save_state(session_id, state)
+        repository.add_window(WindowRecord(session_id, T0, T0.timestamp(), {"screen": "menu"}, {}, (), "off"))
+
+    def test_the_same_session_coming_back_after_the_retention_starts_fresh(self):
+        repository = self.repository()
+        self.used_session(repository)
+        self.now[0] = T0 + timedelta(hours=2)
+        self.assertEqual(repository.state("s1").next_id, 1, "no other session touched the repository in between")
+        self.assertEqual(repository.windows("s1"), [])
+
+    def test_another_sessions_access_expires_an_idle_session(self):
+        repository = self.repository()
+        self.used_session(repository)
+        self.now[0] = T0 + timedelta(hours=2)
+        repository.state("s2")
+        self.assertEqual(repository.windows("s1"), [])
+
+    def test_the_retention_boundary(self):
+        from app.modules.decision.repository import RETENTION
+
+        repository = self.repository()
+        self.used_session(repository)
+        self.now[0] = T0 + RETENTION                        # exactly the retention: still kept
+        self.assertEqual(repository.state("s1").next_id, 7)
+        self.now[0] = T0 + 2 * RETENTION + timedelta(seconds=1)   # idle one second past it since that access
+        self.assertEqual(repository.state("s1").next_id, 1)
+
+    async def test_an_answer_arriving_after_the_session_expired_does_not_bring_it_back(self):
+        gate = asyncio.Event()
+
+        async def slow(request):
+            await gate.wait()
+            return httpx.Response(200, json=RESPONSE)
+
+        http = httpx.AsyncClient(base_url="https://api.typesafe.ai", transport=httpx.MockTransport(slow))
+        repository = self.repository()
+        service = DecisionService(repository, P, JevClient(http, "jev-1.13.0", 3.0))
+        service.observe("s1", feature_window(), measurable=True)
+        await asyncio.sleep(0)
+        self.now[0] = T0 + timedelta(hours=2)
+        repository.state("s2")                               # expires s1 while its call is in flight
+        gate.set()
+        await service.drain()
+        await http.aclose()
+        self.assertEqual((repository.records("s1"), repository.windows("s1")), ([], []))
+        self.assertEqual(repository.state("s1").next_id, 1)
+
+
+class HistoryContentTests(unittest.IsolatedAsyncioTestCase):
+    def test_the_trajectory_carries_the_five_state_scores_only(self):
+        from app.modules.decision.jev_questions import STATE_QUESTIONS
+
+        self.assertEqual(set(HISTORY_SCORES), set(STATE_QUESTIONS))
+        repository = DecisionRepository()
+        record = WindowRecord("s1", T0, T0.timestamp(), {"screen": "menu"}, {"transition": "open"}, ("state_scores",), "asked")
+        repository.add_window(record)
+        scores = {name: 0.5 for name in STATE_QUESTIONS}
+        repository.attach(record, "state_scores", "answered", {**scores, "proposal_fits": 0.8,
+                                                                 "queue_support": {"type": "choice", "choice": NOTICE}})
+        (row,) = repository.history("s1")
+        self.assertEqual(row["state_scores"], scores, "the rule table's own question stays out")
+
+    async def test_a_late_window_reads_its_previous_screen_from_the_window_before_it_in_time(self):
+        """menu 2 s, review 6 s, then review 4 s arriving late: in time order menu -> review is progress."""
+        repository = DecisionRepository()
+        service = DecisionService(repository, P, None, stages=())
+        service.observe("s1", ending_at(2, back_count=1), measurable=True)
+        service.observe("s1", ending_at(6, screen="review"), measurable=True)
+        service.observe("s1", ending_at(4, screen="review"), measurable=True)
+        late = repository.windows("s1")[-1]
+        self.assertEqual(late.jev, STALE)
+        self.assertIs(late.inputs["progress_segment"], True)

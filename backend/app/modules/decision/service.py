@@ -100,7 +100,10 @@ class DecisionService:
         return session_id in self._in_flight
 
     def _input(self, session_id: str, window: FeatureWindowRequest, measurable: bool, situation, gaze) -> WindowInput:
-        judged = [w for w in self._repository.windows(session_id) if w.jev != STALE]
+        # The previous screen is the last judged window that ended no later than this one: for a late window,
+        # the one before it in time, so its comparison row keeps the time order of the screens.
+        t = window.window_end.timestamp()
+        judged = [w for w in self._repository.windows(session_id) if w.jev != STALE and w.t <= t]
         return window_input(window, measurable, situation, gaze, judged[-1].inputs.get("screen") if judged else None)
 
     def judge(self, session_id: str, window: FeatureWindowRequest, measurable: bool,
@@ -219,7 +222,7 @@ class DecisionService:
                                    decision.decision_id, stage.name, tuple(missing))
                 previous[stage.name] = {name: passed_answer(answer) for name, answer in response.answers.items()}
                 mark(stage.name, "answered", answers)
-            self._repository.add_record(record)
+            self._repository.add_record(record, window_record)
             records.append(record)
             logger.info("jev shadow %s %s: %s in %d ms (%d questions)", stage.name, record.outcome,
                         response.model if response else "-", latency_ms, len(questions))

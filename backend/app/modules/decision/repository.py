@@ -8,7 +8,9 @@ from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from threading import Lock
 
-from app.modules.decision.schemas import HISTORY_STAGES, HISTORY_WINDOWS, STALE, JevRecord, SessionState, WindowRecord
+from app.modules.decision.schemas import (
+    HISTORY_SCORES, HISTORY_STAGES, HISTORY_WINDOWS, STALE, JevRecord, SessionState, WindowRecord,
+)
 
 RETENTION = timedelta(hours=1)   # as the voice context (voice/repository.py): records live as long as the session's talk
 
@@ -28,12 +30,17 @@ class DecisionRepository:
         self._lock = Lock()
 
     def _touch(self, session_id: str) -> None:
+        """Drop the sessions idle past the retention, this one included, and only then mark this one as used:
+        a session coming back after the retention starts fresh, as it would after another session's access."""
         now = self._clock()
-        self._touched[session_id] = now
         cutoff = now - self._retention
         for stale in [s for s, at in self._touched.items() if at < cutoff]:
             for store in (self._touched, self._states, self._records, self._windows):
                 store.pop(stale, None)
+        self._touched[session_id] = now
+
+    def _holds(self, window: WindowRecord) -> bool:
+        return any(w is window for w in self._windows.get(window.session_id, ()))
 
     def state(self, session_id: str) -> SessionState:
         with self._lock:
@@ -45,10 +52,15 @@ class DecisionRepository:
             self._touch(session_id)
             self._states[session_id] = state
 
-    def add_record(self, record: JevRecord) -> None:
+    def add_record(self, record: JevRecord, window: WindowRecord | None = None) -> bool:
+        """Keep a shadow call's record. With the window it answered, only while that window is still kept: an
+        answer arriving after its session expired does not bring the session back."""
         with self._lock:
+            if window is not None and not self._holds(window):
+                return False
             self._touch(record.session_id)
             self._records.setdefault(record.session_id, []).append(record)
+            return True
 
     def records(self, session_id: str) -> list[JevRecord]:
         with self._lock:
@@ -63,6 +75,8 @@ class DecisionRepository:
         """Add a stage's result to this one window record, as it arrives (never to another window that ended at
         the same time, such as one recorded as skipped while this call was in flight)."""
         with self._lock:
+            if not self._holds(window):
+                return   # the session expired while the call was in flight
             window.outcomes[stage] = outcome
             if answers is not None:
                 window.answers[stage] = answers
@@ -81,7 +95,8 @@ class DecisionRepository:
     def history(self, session_id: str) -> list[dict]:
         """The last HISTORY_WINDOWS judged windows as plain summaries for the trajectory stage, oldest first.
 
-        Only HISTORY_STAGES answers ride along (stage-1 scores); STALE windows are left out.
+        Only HISTORY_STAGES answers ride along, and of them only the HISTORY_SCORES (the five state scores, not the
+        rule table's own question asked in the same call); STALE windows are left out.
         """
         with self._lock:
             judged = [w for w in self._windows.get(session_id, []) if w.jev != STALE]
@@ -90,5 +105,6 @@ class DecisionRepository:
                 "decision": w.decision.get("transition"), "support": w.decision.get("support"),
                 "touch": {"taps": w.inputs.get("taps_segment"), "misses": w.inputs.get("misses_recent"),
                           "backs": w.inputs.get("backs_recent")},
-                **{stage: w.answers[stage] for stage in HISTORY_STAGES if stage in w.answers},
+                **{stage: {name: value for name, value in w.answers[stage].items() if name in HISTORY_SCORES}
+                   for stage in HISTORY_STAGES if stage in w.answers},
             } for w in judged[-HISTORY_WINDOWS:]]

@@ -71,6 +71,9 @@ FORECAST_HORIZON_S = 10     # how far ahead next_difficulty asks about
 # The only stage answers the trajectory reads (docs 9.6): stage-1 state scores. A forecast never reads the
 # forecasts or support choices of the windows before it.
 HISTORY_STAGES = ("state_scores",)
+# Of those answers, the five contract state scores only (jev_questions.STATE_QUESTIONS): the rule table's own
+# question asked in the same call (proposal_fits, queue_support) stays out of the trajectory.
+HISTORY_SCORES = ("touch_difficulty", "navigation_difficulty", "visual_difficulty", "hesitation", "normal")
 STALE = "stale"   # WindowRecord.jev of a window that ended before the session's last judged window
 
 
