@@ -1,0 +1,233 @@
+# Jev 판단을 위한 터치·상호작용 특징과 전송
+
+- 작성일: 2026-11-02
+- 범위: 프론트의 로컬 기록·파일럿 집계·선택적 전송 준비. 백엔드·AI·계약 수정은 담당자에게 요청한다.
+- 상태: 팀 검토용 제안. `touch.interaction`은 확정 계약이 아니며 추가 필드·계산 기준·운영 정책을 관련 담당자가 합의해야 한다.
+- 제안 형식: `touch-interaction-pilot-v1`. 기존 5개 필드와 `touch.interaction` 확장을 같은 요청에 넣는다. 전송은 기본적으로 꺼져 있다.
+- 기존 논의: [터치 로그 검토](Touch-Log-Review.md), [세션·이벤트 정책 제안](Session-Event-Voice-Policy-Proposal.md).
+
+## 1. 프로젝트 구조에서의 역할
+
+```text
+주문 화면의 터치·화면 이동·주문 상태·설정·음성 상태 기록
+ → 프론트: 최근 2초 특징 + 현재 화면 맥락 계산
+ → backend: POST /api/v1/sessions/{session_id}/features
+ → [담당자 검토 요청] 추가 필드 검증·보존 → ai-engine /v1/analyze
+ → 기존 분석 응답(현재 placeholder)
+```
+
+프론트는 backend와만 통신하고, 외부 Jev 호출은 backend가 맡는다. [README의 목표 구조](../README.md#시스템-아키텍처) 제안에서는 판단 층을 backend에 두고 터치 통계와 비전 창 출력을 Jev의 판단 입력으로 구성한다. 이는 PR #78에 반영된 팀 합의·계약 변경 전의 제안이다. 현행 계약은 backend가 ai-engine `/v1/analyze`의 불편 상태 점수(`states`)를 받아 지원 방식을 정하는 경로를 유지한다. 현재 backend의 `TouchFeatures`에는 `interaction`이 없으며 추가 필드를 무시하므로, 프론트가 200 응답을 받더라도 확장 필드가 보존되거나 판단 층에 전달되었다는 뜻이 아니다. 팀 합의와 각 담당자의 후속 구현 전까지 파일럿 전송은 기본적으로 꺼진다. Jev 호출·실제 자동 지원·DB 저장도 이번 PR에 없다.
+
+Jev에는 후속 연동에서 시간 구간·관측 여부·현재 화면·비전 상황·허용 가능한 지원과 함께 아래 근거를 전달해야 한다. 개별 통계를 곧바로 장애·감정·불편의 확정값으로 해석하지 않는다.
+
+## 2. 기존 5개와 판단 용도
+
+| 필드 | 이번 전송의 파일럿 계산 | 유용한 판단·주의점 |
+| --- | --- | --- |
+| `tap_count` | 최근 2초 `pointer_start` 수 | 터치가 이어지는지, 입력이 멈췄는지 확인. 취소·스크롤 시작도 포함하며 조작 성공 수가 아님 |
+| `miss_tap_count` | 같은 구간에서 버튼·링크 대상이 없는 누름 수 | 큰 버튼 지원을 검토할 단서. 배경 누름·큰 빈 공간 선택을 실패로 단정하지 않음 |
+| `repeat_tap_count` | 기존 로컬 기준 800ms·24 CSS px의 추가 반복 후보 수 | 입력 반응을 찾는 행동을 검토. 정상 수량 증가, 스크롤·취소·동시 접촉, 주문 대기와 함께 봄 |
+| `back_count` | 최근 2초 주문 확인 → 메뉴 이동 수 | 탐색 도움·다음 단계 안내 검토. 메뉴 추가를 위한 정상 복귀도 포함 |
+| `dwell_ms` | 현재 화면 방문의 전경 체류 누적 ms | 현재 단계에 머무는 정도. 최근 2초의 길이나 마지막 성공 후 시간과 다름 |
+
+이는 기존 로컬 파일럿 기준을 버전으로 식별해 전달하는 구현이다. `Touch-Log-Review.md`의 T01~T14를 팀 합의 완료로 바꾸지 않는다. 반복 후보의 상세 제외 조건은 기존 `touchLogFeatures.ts`를 그대로 따른다.
+
+## 3. 추가 집계와 판단 용도
+
+아래 필드는 `touch.interaction`에 들어간다. 횟수는 기본적으로 요청의 `(window_start, window_end]` 구간이며, 시각 차이는 ms, 거리는 CSS px다.
+
+| 필드 | 계산·결측 표현 | Jev 및 판단 층에서 유용한 점 |
+| --- | --- | --- |
+| `outside_tap_ratio` | `miss_tap_count / tap_count`. 누름 0회면 `null` | 사용량이 다른 구간의 대상 밖 입력 정도를 비교. 실패율로 명명하지 않음 |
+| `outside_nearest_distance_mean_px` | 대상 밖 누름에서 기록된 가장 가까운 활성 대상까지의 거리 평균. 관측 없음은 `null` | 버튼 경계 근처 입력과 멀리 떨어진 배경 입력을 구분할 근거. 임의의 주변 거리 임계값은 두지 않음 |
+| `outside_nearest_distance_sample_count` | 위 평균에 사용한 누름 수. 동률 후보가 여럿이어도 누름당 한 표본 | 거리 평균의 근거량과 누락을 확인. 전체 대상 밖 누름 수와 함께 봄 |
+| `pointer_cancel_count` | 취소로 끝난 입력 수 | 스크롤 등으로 취소된 입력을 일반 누름과 구분하는 보조 근거. 취소=실패가 아님 |
+| `pointer_interrupted_count` | 끝까지 관측하지 못해 중단 기록이 생긴 입력 수 | 측정 품질과 관측 중단 확인. 부재·포기로 단정하지 않음 |
+| `scroll_event_count` | 기록된 스크롤 이벤트 수 | 목록·설정·옵션 등 여러 영역을 포함하므로 단독으로 목록 탐색으로 판단하지 않음. 스크롤 제스처 횟수나 이동 거리는 아님 |
+| `category_change_count` | 메뉴 분류 변경 수 | 여러 분류를 탐색하는 상황과 정지 상태를 구분. 잦은 변경만으로 헤맴을 판단하지 않음 |
+| `options_open_count`, `options_close_count` | 옵션 창 열기·닫기 수 | 옵션 비교·선택 과정을 확인. 정상 취소와 담기를 구분하려면 Cart 변화와 함께 봄 |
+| `screen_transition_count` | 출발 화면이 있는 화면 진입 수 | 주문 단계의 진행·왕복을 파악 |
+| `screen_revisit_count` | 같은 로컬 세션에서 이미 방문한 화면에 다시 진입한 수. 세션 시작 기록이 잘렸으면 `null` | 반복 탐색·단계 안내 필요성 검토. 정상 메뉴 추가와 구분 필요 |
+| `cart_change_count` | 이전·이후 서버 Cart 버전 증가를 관측한 횟수. 최초 기준선 제외 | 주문이 실제로 진행되는지 확인하여 불필요한 도움을 거둘 근거. 터치·음성 원인과 개별 성공 횟수는 구분할 수 없음 |
+| `selection_change_count` | 상품·옵션·수량 선택 상태의 변화 수. 최초 기준선 제외. 세션 시작 또는 최초 기준선 기록이 없으면 `null` | 옵션을 조정 중인지, 아무 행동 없이 멈춘 상태인지 구분 |
+| `ui_settings_change_count` | 접근성 설정 변경 수 | 사용자가 도움을 직접 조정하는 흐름 확인. 지원 제안 수락·거절을 대신하지 않음 |
+| `voice_state_change_count` | 음성 모드·마이크·처리 단계의 변화 수. 최초 기준선 제외 | 터치 대신 음성을 사용하는 상황을 함께 고려. 발화 한 번에도 `listening → processing → idle`로 2~3회 늘 수 있어 모드 켬·끔 횟수나 발화 횟수가 아님 |
+| `since_last_input_ms` | 현재 방문의 마지막 누름 이후 ms. 누름 이력 없음은 `null` | 선택 후 멈춤을 확인. 숨겨진 시간도 포함하며 성공 조작 후 정지나 사용자 부재를 의미하지 않음 |
+| `order_busy_ms` | 구간 내 프론트 주문 상태 `loading/saving` 시간의 합. 구간 시작 상태가 없으면 `null` | 시스템 응답을 기다리는 정지를 사용자 망설임으로 오해하지 않도록 보조. 실제 서버 처리 지연·요청별 소요 시간과 다름 |
+
+구간 종료 시 맥락도 함께 보낸다.
+
+| 필드 | 판단에 필요한 맥락 |
+| --- | --- |
+| `options_open` | 현재 옵션 선택 중인지. 상태 기록 없음은 `null` |
+| `order_busy` | 현재 주문 처리·조회 대기 중인지 |
+| `voice_enabled`, `microphone_active` | 음성 입력 중이라 터치가 없는 경우를 구분. 상태 기록 없음은 `null` |
+| `voice_processing` | backend 음성 요청을 기다리는 단계인지. 상태 기록 없음은 `null` |
+| `voice_auto_off` | 음성 모드가 무음(`silence`) 또는 유휴 시간(`idle`)으로 저절로 꺼진 이유. 값이 있으면 사용자가 직접 끈 것과 구분하며, `null`은 자동 종료 이유를 관측하지 못했거나 자동 종료가 아니었음을 뜻함 |
+| `ui_settings` | 큰 글씨·큰 버튼·간편 화면·단계 안내·낮은 화면·고대비 적용 여부. 이미 켠 도움을 다시 제안하지 않을 근거 |
+| `visit_id` | 구간 종료 시 화면 방문. 같은 화면 재방문과 이전 방문을 구분 |
+| `window_sequence` | 현재 서버 세션에서 전송을 시도한 구간의 순서. 서버 중복 제거·최신 결과 적용을 보장하는 필드는 아님 |
+| `schema_version` | 파일럿 계산 정책 식별자. 정책이 달라지면 버전도 바꿔야 함 |
+
+### 2026-11-08: #72·#79 음성 대기 호환 처리 (팀 계약 미확정)
+
+`voice_processing`은 계속 backend 요청 처리(`processing`)만 뜻한다. #79의 `speaking`은 실제 마이크 종료 대기부터 응답 읽기 완료까지의 제어 단계이므로 순수 스피커 재생 시간과 같지 않다. `since_last_input_ms`(숨김·시스템 대기를 포함한 마지막 누름 이후 벽시계 시간), 방문 전경 누적 `dwell_ms`, 기존 다섯 지표·정책·버전은 바꾸지 않는다.
+
+다음은 기존 생산자와 호환되는 선택적 파일럿 확장이다. 이전 기록·생산자에 없는 필드를 false나 0으로 채우지 않는다. 서버 계약과 전송 기본 비활성화는 유지한다.
+
+| 추가 필드 | 단위·의미·결측 |
+| --- | --- |
+| `voice_phase` | 구간 종료의 `idle/listening/processing/speaking`. 상태 없음·미지원 단계는 `null` |
+| `voice_speaking` | 구간 종료가 `speaking`인지. 단계 미관측은 `null` |
+| `voice_busy` | 구간 종료가 `processing` 또는 `speaking`인지. 단계 미관측은 `null` |
+| `voice_busy_ms` | 최근 2초 내 두 대기 단계의 관측 시간 합(ms). 구간 시작 상태나 도중 단계가 불명확하면 `null`. 겹치지 않는 연속 구간으로 계산 |
+| `since_last_input_excluding_system_busy_ms` | 현재 방문 마지막 누름부터 주문 `loading/saving` 또는 음성 `processing/speaking`이었던 시간의 합집합을 뺀 ms. 대기 이전 경과는 보존하고 대기 종료 후 다시 증가. 누름 없음·필요한 상태 이력 누락·해당 기간의 화면 숨김/페이지 중단은 `null` |
+
+판단 층은 `voice_busy` 또는 `order_busy`가 true이면 시스템 대기로 취급해야 한다. 현재 false여도 과거 대기가 원래 `since_last_input_ms`에 남으므로 이 값을 그대로 `pause_s`로 사용하지 않는다. 위 보정값은 시스템 대기 제외 관측값이며, 음성 입력·읽기·탐색 등 사용자 맥락까지 반영한 망설임 판정은 아니다. `null`이면 추정 판단을 보류한다. 이 PR에는 실제 Jev 판단 연결이 없으며 backend·AI 담당자의 합의와 수신·전달 구현이 필요하다.
+
+#72(`feat/frontend`)의 집계 코드에 선택적 필드를 먼저 추가한다. 이 집계는 #79 없이도 동작하고, `speaking`이 없는 기존 음성 제어 코드에서는 처리 대기만 집계한다. #72에 새 커밋이 추가되므로 기존 `ab1869f`의 승인을 최종 승인으로 취급하지 않고 다시 리뷰받아야 한다. #72를 먼저 병합한 뒤 #79(`TTS`, 확인한 커밋 `76a2a34`)가 그 결과와 최신 main을 받아 통합 검증하는 순서를 제안한다. 두 PR은 확인 시점 모두 열려 있고, 겹치는 경로는 `OrderPage.tsx`, `frontend/README.md`, 주문 기능 README이다. `TTS`는 #79 본문에 기록된 프론트 담당자의 별도 브랜치 요청에 따른 기존 브랜치다.
+
+검증: `node --test frontend/src/features/order/interactionFeatures.test.mjs`. 실제 #79 상태 전환과의 연결은 `TTS_VOICE_CONTROLLER_MODULE`에 #79의 `voiceController.ts` 파일 URL을 지정한 뒤 `voiceWait.integration.test.mjs`를 실행한다. 상태 전환 검증은 모의 인식·재생을 사용하며 G10 실제 음향 검증을 대신하지 않는다.
+
+검증 결과: #72 기반 `pnpm test` 119개 통과(시간 집계 신규 6개 포함), #79 `76a2a34`의 실제 `VoiceController`를 주입한 연결 검사 6개 통과(완료·중단·실패·모드 해제·세션 변경·숨김), `pnpm build` 통과. 연결 검사는 별도 명령이며 기존 `pnpm test` 스크립트에는 추가하지 않았다. #79 통합 전 기본 음성 제어 코드로 이 연결 검사만 실행하면 6개를 건너뛰며, 앞선 6개 시간 집계 검사는 기본 `pnpm test`에 포함된다. 두 PR을 실제 병합한 화면 전체의 브라우저 검증은 후속 작업이다.
+
+예를 들어 현재 방문에서 1000ms에 누르고, 1200ms에 `processing`, 2000ms에 `speaking`으로 바뀐 뒤 3000ms에 집계하면 `touch.interaction`에 다음 값이 추가된다(나머지 기존 필드는 생략). 응답 형식은 바꾸지 않으며 현재 backend는 이 확장 자체를 보존하지 않는다.
+
+```json
+{
+  "since_last_input_ms": 2000,
+  "voice_processing": false,
+  "voice_phase": "speaking",
+  "voice_speaking": true,
+  "voice_busy": true,
+  "voice_busy_ms": 1800,
+  "since_last_input_excluding_system_busy_ms": 200
+}
+```
+
+## 4. 아직 계산하지 않는 항목
+
+다음은 원시 기록만으로 확정할 수 없거나 T03·T06·T07·T08 합의가 필요한 항목이다. 전송 형식에 가짜 0을 만들지 않는다.
+
+- 버튼 주변 입력 수: 거리 임계값 미정. 이번에는 거리 평균과 표본 수만 전송한다.
+- 주변 입력 후 같은 대상 조작 성공 수: 가까운 대상을 사용자의 의도로 단정할 수 없고 입력과 성공 결과의 연결 기준도 미정이다.
+- 조작 성공·차단·오류 수 및 마지막 성공 이후 시간: 서버 Cart 변화는 관측하지만 개별 입력과 요청 결과의 인과 관계는 아직 없다. `cart_change_count`로 대체 해석하지 않는다.
+- 실제 시스템 요청 대기 시간: 이번 `order_busy_ms`는 화면 상태의 지속 시간이며 요청별 네트워크·서버 시간 측정과 다르다.
+- 자동 지원 제안·수락·거절·적용·되돌리기: 지원 UI와 결과 이벤트 계약을 연결한 뒤 추가한다. 현재 설정 변경만으로 거절 여부를 만들지 않는다.
+
+원시 영상·음성·인식 문장·상품별 선택 내역·포인터 좌표·전체 원시 이벤트는 이 요청에 포함하지 않는다.
+
+`since_last_input_ms`는 마지막 터치 누름만 기준으로 하므로 음성 요청 처리·안내 읽기 중에도 늘어날 수 있다. 따라서 판단 층은 `voice_busy: true` 또는 `order_busy: true`인 구간을 사용자 망설임으로 단정하지 않는다. `voice_busy`는 `processing`과 `speaking`을 포함하며, `voice_processing`은 기존대로 요청 처리만 뜻한다. `voice_auto_off`는 자동 종료 사유만 보내며, 사용자가 끈 동작·인식 문장·음성 오류 상세는 보내지 않는다.
+
+## 5. 전송 조건과 실패 처리
+
+- 기본 실행에서는 전송하지 않는다. 팀 합의 후 공동 파일럿에서 빌드 또는 개발 서버 실행 시 `VITE_TOUCH_INTERACTION_DRAFT=true`로 명시하면 실제 API 모드에서 2초마다 최근 2초 집계를 시도한다. 개발 샘플 모드에서는 설정과 관계없이 요청하지 않는다.
+- 서버 세션이 있고 현재 주문 상태가 `ready/saving`이며, 화면이 전경이고 주문이 완료되지 않았을 때 전송한다.
+- 기존 5개 정수 필드가 전부 산출된 구간만 보낸다. 시작 직후, 백그라운드 복귀 직후, 기록 잘림, 종료되지 않은 입력 등으로 기존 집계가 `null`이면 그 구간은 건너뛴다. `null`을 0으로 바꾸지 않는다.
+- 한 번에 요청 하나만 실행하며 5초에 중단한다. 지연 중 지나간 구간은 쌓아두지 않는다. 이후 최신 구간을 보낸다. 따라서 전 구간 보존·정확한 누적 이벤트 수를 보장하는 실험 저장소가 아니다.
+- 일시적 연결 실패 후에는 새 표본을 보낸다. 이전 구간을 자동 재전송하지 않는다. 400·401·403·404·410·422는 해당 세션의 전송을 중단하고 새 세션/새로고침 때 다시 시작한다.
+- 세션 변경·주문 완료·전경 이탈·언마운트 때 요청을 취소하고 이전 응답은 무시한다. 서버가 이미 받은 요청은 취소만으로 되돌릴 수 없으며, backend는 기존대로 완료 전·후를 확인한다.
+- 전송 성공·오류는 주문 상태나 화면 도움 설정을 바꾸지 않는다. 성공은 HTTP 응답 수신일 뿐 추가 필드 보존·AI 사용을 보장하지 않는다. 서버 장애 중에도 기존 터치 주문 흐름을 유지한다.
+- `window_sequence`는 추적용이다. 서버에서 영구 저장·구간 중복 제거·새 판단의 적용 순서를 관리하는 기능은 추가하지 않았다.
+- 시간은 기존 로그의 벽시계를 따른다. 기록의 역행·미래 시각을 감지하면 집계를 보내지 않으며, 여러 기기의 시계 일치나 탭 정지·브라우저 지연 동안의 완전 관측은 보장하지 않는다.
+- 한 구간이 화면 이동을 포함할 수 있다. `screen_id/visit_id`는 구간 종료 시 화면이며 횟수는 같은 세션의 구간 전체다. 방문 누적 `dwell_ms`와 `since_last_input_ms`는 현재 방문만 사용한다.
+
+낮은 화면 상단 안내는 기존 수집 루트 밖이다. 해당 영역의 터치는 포함하지 않으며 전체 화면 입력으로 해석하지 않는다. `order_state_change`의 React 관측은 빠르게 합쳐진 중간 상태를 모두 보장하지 않으므로 주문 거래 감사 로그로 쓰지 않는다.
+
+## 6. 담당자별 수정 요청 — 팀 합의 후 후속 PR
+
+### 공통 계약·백엔드 담당
+
+- 기존 5개 필드와 하위 호환되는 선택형 `touch.interaction`의 필드 이름·타입·단위·필수 여부·`null` 의미와 오류 형식을 검토하고, 합의된 내용만 `contract/frontend-backend.openapi.yaml`과 `contract/backend-ai.openapi.yaml`에 반영해 주세요.
+- `POST /api/v1/sessions/{session_id}/features`에서 합의된 추가 값을 검증하고 버리지 않고 ai-engine으로 전달해 주세요. 기존 5개만 있는 요청도 유지하는 방향을 제안합니다.
+- 없는 값은 0으로 바꾸지 말고 타입·범위 오류, 알 수 없는 필드, 세션 종료, 시간 구간, 중복·지연 처리와 이전 클라이언트 호환을 검증해 주세요.
+- `window_sequence`를 추적에만 쓸지 중복 제거·오래된 응답 차단에 사용할지는 별도 합의해 주세요. 이 PR의 번호는 중복 제거를 보장하지 않습니다.
+- Jev 어댑터·저장·보관 정책과 지원 결과 이벤트는 별도 결정해 주세요.
+
+### AI·비전 담당
+
+- 백엔드와 합의한 추가 통계 입력을 ai-engine에서 받아 보존하는 형식과, 비전 관측·상황 태그의 시간 구간을 어떻게 맞출지 검토해 주세요.
+- 위 표의 각 필드가 규칙표·Jev 질문에서 유용한지와 관측 부족·모름 처리, 지원 판단의 근거·품질 표현을 검토해 주세요.
+- 현재의 placeholder 응답을 실제 판단 결과로 취급하지 않고, Jev 호출 위치·지연·실패 시 대체 동작을 백엔드와 합의해 주세요.
+
+### 프론트·공통 검증
+
+- 전송은 프론트 파일럿으로만 준비했습니다. 서버의 필드 수신·AI 전달과 팀 계약이 확정되면 기본 활성화 여부를 별도 결정하고 각 서비스의 실제 입력을 함께 검증합니다.
+- `window.kioskTouchLogDraft.transmission()`은 HTTP 요청 상태·성공 수·마지막 구간 종료 시각만 보여 줍니다. 추가 필드가 백엔드에서 보존되거나 AI에 전달됐는지 증명하지 않습니다.
+- [기존 프론트↔백엔드 계약](../contract/frontend-backend.openapi.yaml), [기존 백엔드↔AI 계약](../contract/backend-ai.openapi.yaml), [터치 로그 검토](Touch-Log-Review.md)를 함께 검토합니다.
+- 열린 PR #70도 `OrderPage.tsx`를 수정하므로 작성자들이 병합 순서를 정하고 뒤에 병합하는 쪽에서 충돌과 동작을 확인해야 합니다.
+
+### 비전·판단 층 리뷰 후 남은 과업 (미합의)
+
+- **T06·T07 / `fixes_recent`:** 대상 밖 누름 이후 가까운 후보를 다시 누른 사실 수를 프론트에서 집계할지, 좌표 없이 후보 ID를 전달해 후속 계산할지 프론트·AI·비전이 정한다. 성공이나 사용자 의도는 추정하지 않는다.
+- **관측 구간 유실:** 전송 지연으로 빠지는 2초 구간과 구간 경계의 입력을 고려해 세션 누적값 제공 여부, 재전송·중복 처리와 초기화 기준을 합의한다.
+- **스크롤 전송:** 로컬 기록은 메뉴 영역(`order-main`), 화면 도움(`support-panel`), 옵션 창(`options-dialog`)을 구분한다. 현재 전송의 `scroll_event_count`는 전체 합계이며 영역별 값을 전송하지 않는다. 영역별 전송 필요성과 형식은 합의한다.
+- **음성 결과:** 인식 문장·오류 상세 없이 완료·무시·실패를 구분하는 로컬 기록과 전송 필요성, 오류·취소·새 세션 경계를 프론트·AI가 정하고 검증한다. 현재 `voice_processing`만으로는 결과를 구분할 수 없다.
+- **수동 화면 읽기:** `ReadAloudControls.tsx`의 켜짐 여부와 재생 시작·종료는 현재 터치 관측값과 `ui_settings`에 기록하지 않는다. 화면·옵션 창 변경 시 화면을 읽는 시간도 `since_last_input_excluding_system_busy_ms`에서 제외되지 않는다. 이 시간을 사용자 망설임과 구분할 수 있도록 관측·전달 범위와 시간 집계 기준을 프론트·AI가 합의하고 후속 구현·검증한다.
+- **설정 이력:** 현재 세션에서 접근성 설정이 변경됐는지와 이전 세션의 유지 설정을 어떻게 구분·전달할지 합의한다. 현재 `ui_settings_change_count`는 최근 구간의 변화만 나타낸다.
+- **낮은 화면 상단 안내:** 기록 루트 밖의 상단 안내 영역을 수집할 필요성과 범위를 팀에서 정한다. 현재 그 영역은 기록하지 않는다.
+
+### 합성 요청 예시 — 확정 계약이 아닌 제안
+
+```json
+{
+  "screen_id": "menu",
+  "window_start": "2026-11-02T01:00:00Z",
+  "window_end": "2026-11-02T01:00:02Z",
+  "touch": {
+    "tap_count": 4,
+    "miss_tap_count": 1,
+    "repeat_tap_count": 0,
+    "back_count": 0,
+    "dwell_ms": 12000,
+    "interaction": {
+      "schema_version": "touch-interaction-pilot-v1",
+      "visit_id": "example-visit",
+      "window_sequence": 1,
+      "outside_tap_ratio": 0.25,
+      "pointer_cancel_count": 0,
+      "pointer_interrupted_count": 0,
+      "scroll_event_count": 3,
+      "category_change_count": 1,
+      "options_open_count": 1,
+      "options_close_count": 0,
+      "screen_transition_count": 0,
+      "screen_revisit_count": 0,
+      "cart_change_count": 1,
+      "selection_change_count": 2,
+      "ui_settings_change_count": 0,
+      "voice_state_change_count": 0,
+      "since_last_input_ms": 500,
+      "order_busy_ms": 300,
+      "options_open": true,
+      "order_busy": false,
+      "voice_enabled": false,
+      "microphone_active": false,
+      "voice_processing": false,
+      "voice_auto_off": null,
+      "ui_settings": {
+        "large_text": false,
+        "large_button": false,
+        "simple_screen": false,
+        "step_guide": false,
+        "low_screen": false,
+        "high_contrast": false
+      },
+      "outside_nearest_distance_mean_px": 8.5,
+      "outside_nearest_distance_sample_count": 1
+    }
+  },
+  "vision": null
+}
+```
+
+위 예시의 모든 횟수는 0 이상의 정수, 시간은 밀리초, 거리는 CSS px이며 비율은 0~1이다. `outside_tap_ratio`, `outside_nearest_distance_mean_px`, `screen_revisit_count`, `selection_change_count`, `since_last_input_ms`, `order_busy_ms`, `options_open`, `voice_enabled`, `microphone_active`, `voice_processing`은 관측 불충분 시 `null`을 제안한다. `voice_auto_off`의 `null`은 자동 종료 이유가 없거나 관측되지 않았음을 뜻한다. `vision`은 측정값이 없으면 `null`이다. 이 예시는 서버 수신·저장·Jev 판단 완료를 의미하지 않는다.
+
+## 7. 검증 범위
+
+- 2026-11-03 프론트 단위 테스트 112개와 TypeScript/Vite 빌드가 통과했다. 당시 Chromium 검사는 고정 서버 응답으로 7개 통과(하위 검사 포함), 실제 서비스 선택 검사는 1개 건너뛰었다. 기본 비활성화, 명시적 파일럿 전송, 세션 교체·실패, 샘플 모드를 확인했다.
+- 현재 backend 모델에 추가 필드를 넣는 로컬 확인에서 `interaction`이 유지되지 않음을 확인했다. 서버 응답 성공만으로 추가 필드 보존이 증명되지 않는다.
+- 서버 모델·계약을 이 PR에서 수정하지 않는다. 따라서 추가 필드가 백엔드에서 유지되거나 ai-engine까지 전달되는 통합 검증은 담당자 후속 구현 후 수행해야 한다.
+- 실제 G10·카메라·참가자 데이터·Jev 판단 효과는 이 검증에 포함하지 않는다.
+
+- 2026-11-04 리뷰 반영 후 단위 테스트 113개와 TypeScript/Vite 빌드가 통과했다. 1080×1920 Chromium에서 기본·큰 글씨/큰 버튼·낮은 화면 파일럿 전송과 낮은 화면 세 스크롤 영역의 로컬 기록을 확인했다. 영역 기록 검사는 스크롤 가능하도록 테스트에서 높이를 제한했다. 실제 장비 검증은 별도다.

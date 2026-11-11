@@ -10,12 +10,12 @@ test('주문·옵션·음성 관측은 필요한 필드만 복사하고 인식�
     version: 2, total_quantity: 3, items: [{ item_id: 'item', product_id: 'coffee', temperature: 'hot', quantity: 3, name: '상품명', unit_price: 3500 }],
   } };
   const selection = { productId: 'coffee', temperature: 'iced', quantity: 2 };
-  const voice = { enabled: true, microphoneActive: true, phase: 'listening', partialText: '개인적인 발화', lastTranscript: '마지막 인식문', lastResult: { reply_text: '서버 응답' } };
+  const voice = { enabled: true, microphoneActive: true, phase: 'listening', autoOff: null, partialText: '개인적인 발화', lastTranscript: '마지막 인식문', lastResult: { reply_text: '서버 응답' } };
   const observed = captureTouchLogObservation(order, selection, voice);
   assert.deepEqual(observed, {
     order: { status: 'ready', completed: false, feedbackVisible: true,
       cart: { version: 2, totalQuantity: 3, items: [{ itemId: 'item', productId: 'coffee', temperature: 'hot', quantity: 3 }] } },
-    selection, voice: { enabled: true, microphoneActive: true, phase: 'listening' },
+    selection, voice: { enabled: true, microphoneActive: true, phase: 'listening', autoOff: null },
   });
   observed.order.cart.items[0].quantity = 9;
   observed.selection.quantity = 9;
@@ -24,6 +24,8 @@ test('주문·옵션·음성 관측은 필요한 필드만 복사하고 인식�
   assert.equal(selection.quantity, 2);
   assert.equal(voice.enabled, true);
   assert.equal(captureTouchLogObservation({ ...order, order: {}, cart: null, message: '' }, null, voice).order.completed, true);
+  assert.deepEqual(captureTouchLogObservation(order, null, { ...voice, enabled: false, autoOff: 'silence' }).voice,
+    { enabled: false, microphoneActive: true, phase: 'listening', autoOff: 'silence' });
 });
 
 function pilotLog() {
