@@ -289,6 +289,109 @@ function deferredSpeaker() {
   };
 }
 
+test('실패 안내는 확인·추가 질문과 따로 보관하고 다음 듣기·세션·모드 종료에 정리한다', async () => {
+  for (const kind of ['needs_confirmation', 'needs_clarification']) {
+    const question = status(kind, { reply_text: '이 메뉴로 할까요?' });
+    const failure = '장바구니가 바뀌었어요. 내용을 확인해 주세요.';
+    const { controller, calls } = setup([question, status('failed', { reply_text: failure }), status('completed')], { replySpeaker: async () => true });
+    try {
+      controller.setEnabled(true); FakeRecognition.last().final(['아메리카노 주세요', .9]); await tick();
+      FakeRecognition.last().final(['네', .9]); await tick();
+      assert.equal(controller.getSnapshot().lastResult, question);
+      assert.equal(controller.getSnapshot().failureReplyText, failure);
+      assert.equal(controller.getSnapshot().lastReplyText, failure);
+      assert.equal(controller.getSnapshot().phase, 'idle');
+      controller.listen();
+      assert.equal(controller.getSnapshot().failureReplyText, null);
+      FakeRecognition.last().final(['네', .9]); await tick();
+      assert.deepEqual(calls.map(call => call.body.text), ['아메리카노 주세요', '네', '네']);
+      assert.equal(controller.getSnapshot().lastReplyText, null, '문장 없는 최신 응답은 이전 안내를 재사용하지 않음');
+    } finally { controller.dispose(); }
+  }
+});
+
+test('중단한 안내를 다시 읽고 끝내도 요청·자동 듣기 없이 질문의 짧은 대답을 유지한다', async () => {
+  const speech = deferredSpeaker();
+  const { controller, calls, delivered } = setup([status('needs_confirmation', { reply_text: '아이스로 할까요?' }), status('completed')], { replySpeaker: speech.speak });
+  try {
+    assert.equal(controller.replayReply(), false);
+    controller.setEnabled(true); FakeRecognition.last().final(['아메리카노 주세요', .9]); await tick();
+    controller.stopReply();
+    assert.equal(controller.replayReply(), true); await tick();
+    assert.equal(speech.replies[1].text, speech.replies[0].text);
+    speech.replies[0].finish(true); await tick();
+    assert.equal(controller.getSnapshot().phase, 'speaking', '이전 재생의 늦은 완료 무시');
+    speech.replies[1].finish(true); await tick();
+    assert.equal(controller.getSnapshot().phase, 'idle');
+    assert.equal(FakeRecognition.instances.length, 1);
+    assert.equal(calls.length, 1); assert.equal(delivered.length, 1);
+    controller.listen(); FakeRecognition.last().final(['네', .9]); await tick();
+    assert.equal(calls[1].body.text, '네');
+  } finally { controller.dispose(); }
+});
+
+test('완료한 질문을 다시 들을 때 열린 마이크의 실제 종료를 기다리고 늦은 발화를 버린다', async () => {
+  const speech = deferredSpeaker();
+  const { controller, calls } = setup([status('needs_clarification', { reply_text: '온도를 골라 주세요.' })], { recognition: deferredRecognition(), replySpeaker: speech.speak });
+  try {
+    controller.setEnabled(true); FakeRecognition.last().final(['커피 주세요', .9]); FakeRecognition.last().finish(); await tick();
+    speech.replies[0].finish(true); await tick();
+    const answering = FakeRecognition.last();
+    assert.equal(controller.replayReply(), true);
+    answering.final(['취소한 대답', .9]); await tick();
+    assert.equal(calls.length, 1);
+    assert.equal(speech.replies.length, 1, 'abort 뒤 onend 전에는 읽지 않음');
+    answering.finish(); await tick();
+    assert.equal(speech.replies.length, 2);
+    speech.replies[1].finish(true); await tick();
+    assert.equal(controller.getSnapshot().phase, 'idle');
+    assert.equal(controller.getSnapshot().microphoneActive, false);
+    assert.equal(FakeRecognition.instances.length, 2);
+  } finally { controller.dispose(); FakeRecognition.last().finish(); }
+});
+
+test('다시 듣는 중 모드 해제·세션 변경·중단·dispose는 늦은 완료와 안내 기록을 정리한다', async () => {
+  for (const action of ['off', 'session', 'stop', 'dispose']) {
+    const speech = deferredSpeaker();
+    const { controller } = setup([status('completed', { reply_text: '메뉴를 담았어요.' })], { replySpeaker: speech.speak });
+    try {
+      controller.setEnabled(true); FakeRecognition.last().final(['커피 주세요', .9]); await tick();
+      speech.replies[0].finish(true); await tick();
+      controller.replayReply(); await tick();
+      if (action === 'off') controller.setEnabled(false);
+      if (action === 'session') controller.setContext({ sessionId: 'new', screenId: 'menu' });
+      if (action === 'stop') controller.stopReply();
+      if (action === 'dispose') controller.dispose();
+      assert.equal(speech.replies[1].signal.aborted, true);
+      speech.replies[1].finish(true); await tick();
+      assert.equal(controller.getSnapshot().phase, 'idle');
+      assert.equal(FakeRecognition.instances.length, 1);
+      assert.equal(controller.getSnapshot().lastReplyText, action === 'stop' ? '메뉴를 담았어요.' : null);
+    } finally { controller.dispose(); }
+  }
+});
+
+test('모달은 진행 중 읽기와 뒤늦은 질문의 자동 읽기·재청취를 막고 닫아도 자동 재개하지 않는다', async () => {
+  for (const blockDuring of ['speaking', 'processing']) {
+    const speech = deferredSpeaker();
+    const { controller } = setup([status('needs_confirmation', { reply_text: '아이스로 할까요?' })], { replySpeaker: speech.speak });
+    try {
+      controller.setEnabled(true); FakeRecognition.last().final(['커피 주세요', .9]);
+      if (blockDuring === 'speaking') await tick();
+      controller.setReplyBlocked(true); await tick();
+      if (speech.replies[0]) { assert.equal(speech.replies[0].signal.aborted, true); speech.replies[0].finish(true); }
+      await tick();
+      assert.equal(controller.getSnapshot().phase, 'idle');
+      assert.equal(controller.replayReply(), false);
+      assert.equal(FakeRecognition.instances.length, 1);
+      controller.setReplyBlocked(false); await tick();
+      assert.equal(controller.getSnapshot().phase, 'idle');
+      assert.equal(controller.replayReply(), true); await tick();
+      assert.equal(speech.replies.at(-1).text, '아이스로 할까요?');
+    } finally { controller.dispose(); }
+  }
+});
+
 test('실제 마이크 종료 뒤 질문을 읽고 끝난 뒤에만 대답을 듣는다', async () => {
   const speech = deferredSpeaker();
   const { controller, calls } = setup([
