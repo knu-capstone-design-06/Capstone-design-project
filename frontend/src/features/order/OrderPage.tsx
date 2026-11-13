@@ -11,7 +11,7 @@ import { captureTouchLogObservation } from './touchLogObservation.ts';
 import { TouchLogPanel } from './TouchLogPanel.tsx';
 import { VoiceModeToggle } from './VoiceModeToggle.tsx';
 import { ReadAloudControls } from './ReadAloudControls.tsx';
-import { createVoiceApi, VoiceController } from '../voice/index.ts';
+import { createReplySpeaker, createVoiceApi, VoiceController } from '../voice/index.ts';
 import './order.css';
 import './orderAccessibility.css';
 
@@ -24,7 +24,7 @@ export function OrderPage() {
   }));
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const [voiceController] = useState(() => new VoiceController({
-    api: createVoiceApi(), recognitionOnly: sampleMode,
+    api: createVoiceApi(), recognitionOnly: sampleMode, replySpeaker: createReplySpeaker(),
     // tool_calls are only an explanation. The backend marks a completed Cart write with this action.
     onResult: result => { if (result.actions.includes('cart_updated')) void controller.refreshCartAfterVoice(); },
   }));
@@ -60,9 +60,23 @@ export function OrderPage() {
     if (screen !== 'menu' || (state.status !== 'ready' && state.status !== 'saving') || state.order) voiceController.setEnabled(false);
   }, [voiceController, screen, state.status, state.order]);
   useEffect(() => () => voiceController.dispose(), [voiceController]);
+  useEffect(() => {
+    const suspend = () => voiceController.setEnabled(false);
+    const hide = () => { if (document.visibilityState !== 'visible') suspend(); };
+    document.addEventListener('visibilitychange', hide);
+    window.addEventListener('pagehide', suspend);
+    return () => {
+      document.removeEventListener('visibilitychange', hide);
+      window.removeEventListener('pagehide', suspend);
+    };
+  }, [voiceController]);
   useEffect(() => { try { localStorage.setItem(settingsStorageKey, JSON.stringify(settings)); } catch { setStorageWarning(true); } }, [settings]);
   useEffect(() => { heading.current?.focus(); }, [screen]);
-  useLayoutEffect(() => { if (selected) dialog.current?.showModal(); else if (dialog.current?.open) dialog.current.close(); }, [selected]);
+  useLayoutEffect(() => {
+    voiceController.setReplyBlocked(selected !== null);
+    if (selected) dialog.current?.showModal();
+    else if (dialog.current?.open) dialog.current.close();
+  }, [selected, voiceController]);
   useLayoutEffect(() => {
     if (restartOpen) restartDialog.current?.showModal();
     else if (restartDialog.current?.open) restartDialog.current.close();

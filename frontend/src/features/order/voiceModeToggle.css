@@ -22,6 +22,7 @@
 .voice-mode-transcript span { display: block; color: #45554d; font-size: .8em; }
 .voice-mode-transcript strong { display: block; font-weight: 700; }
 .voice-mode-feedback { margin: 12px 4px 0; padding: 12px 16px; border-radius: 12px; background: #eaf5ed; color: #174d30; line-height: 1.6; overflow-wrap: anywhere; }
+.voice-mode-failure { margin: 12px 4px 0; padding: 12px 16px; border: 2px solid var(--ui-line); border-radius: 12px; background: var(--ui-canvas); color: var(--ui-ink); font-size: 1em; line-height: 1.6; overflow-wrap: anywhere; }
 .voice-mode-listen { margin: 12px 4px 0; padding: 12px 20px; min-height: 48px; border: 2px solid #267548; border-radius: 12px; background: #fffefb; color: #174d30; font: inherit; font-weight: 700; }
 .voice-mode-listen:hover { background: #eaf5ed; }
 .kiosk .voice-mode-copy strong { font-size: 1.125em; }

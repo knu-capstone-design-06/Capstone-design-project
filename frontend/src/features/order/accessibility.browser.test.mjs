@@ -157,13 +157,14 @@ test('화면 읽기를 중단·다시 재생하고 화면 이동 때 이전 안�
     assert.match(await page.evaluate(() => window.__speechReview.texts[0]), /메뉴를 골라 주세요/);
     await target(page, 'read-aloud-stop').click();
     assert(await target(page, 'read-aloud-stop').isDisabled());
+    assert.equal(await page.evaluate(() => window.__speechReview.cancelled), 1, '사용자 중단 시 재생 중인 안내를 취소');
     await target(page, 'read-aloud-replay').click();
     assert.equal(await page.evaluate(() => window.__speechReview.texts.length), 2);
     await target(page, 'support-toggle').click();
     await target(page, 'review-open').click();
     await page.waitForFunction(() => window.__speechReview.texts.length === 3);
     assert.match(await page.evaluate(() => window.__speechReview.texts.at(-1)), /담은 메뉴를 확인/);
-    assert(await page.evaluate(() => window.__speechReview.cancelled >= 3));
+    assert.equal(await page.evaluate(() => window.__speechReview.cancelled), 2, '화면 이동 시 이전 안내만 취소하고 빈 상태에서는 취소하지 않음');
     fixture.verify();
   } finally { await browser.close(); }
 });
