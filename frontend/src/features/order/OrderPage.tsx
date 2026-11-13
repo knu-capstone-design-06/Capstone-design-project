@@ -72,7 +72,11 @@ export function OrderPage() {
   }, [voiceController]);
   useEffect(() => { try { localStorage.setItem(settingsStorageKey, JSON.stringify(settings)); } catch { setStorageWarning(true); } }, [settings]);
   useEffect(() => { heading.current?.focus(); }, [screen]);
-  useLayoutEffect(() => { if (selected) dialog.current?.showModal(); else if (dialog.current?.open) dialog.current.close(); }, [selected]);
+  useLayoutEffect(() => {
+    voiceController.setReplyBlocked(selected !== null);
+    if (selected) dialog.current?.showModal();
+    else if (dialog.current?.open) dialog.current.close();
+  }, [selected, voiceController]);
   useLayoutEffect(() => {
     if (restartOpen) restartDialog.current?.showModal();
     else if (restartDialog.current?.open) restartDialog.current.close();

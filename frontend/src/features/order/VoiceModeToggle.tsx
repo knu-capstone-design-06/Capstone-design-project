@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { useId, useLayoutEffect, useRef } from 'react';
 import { useVoiceInput } from '../voice/index.ts';
 import type { VoiceController, VoiceInputError, VoiceRequestStatus } from '../voice/index.ts';
 import './voiceModeToggle.css';
@@ -16,8 +16,8 @@ const errorCopy: Record<VoiceInputError, string> = {
 
 function resultCopy(result: VoiceRequestStatus): string {
   switch (result.status) {
-    case 'completed': return result.actions.includes('cart_updated')
-      ? '음성 주문 결과를 장바구니에 반영하고 있어요.' : '말씀을 확인했어요.';
+    case 'completed': return result.reply_text?.trim() || (result.actions.includes('cart_updated')
+      ? '음성 주문 결과를 장바구니에 반영하고 있어요.' : '말씀을 확인했어요.');
     case 'needs_confirmation': return result.reply_text || '말씀하신 내용을 확인해 주세요.';
     case 'needs_clarification': return result.reply_text || '원하는 메뉴와 옵션을 다시 말씀해 주세요.';
     case 'ignored': return '';
@@ -33,13 +33,23 @@ export function VoiceModeToggle({ controller, ready, sampleMode }: {
 }) {
   const voice = useVoiceInput(controller);
   const hintId = useId();
+  const stopButton = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    if (voice.phase === 'speaking') stopButton.current?.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+  }, [voice.phase]);
   const recognitionTest = import.meta.env.DEV && sampleMode;
   const canUse = ready && voice.supported && (!sampleMode || recognitionTest);
   const result = voice.enabled && voice.lastResult;
   const question = result && (result.status === 'needs_confirmation' || result.status === 'needs_clarification');
-  const detail = voice.error ? errorCopy[voice.error]
+  const spokenReply = voice.phase === 'speaking' ? voice.lastReplyText : null;
+  const failure = spokenReply && question && spokenReply !== result.reply_text?.trim() ? spokenReply
+    : voice.error === 'request_failed' ? voice.failureReplyText || errorCopy.request_failed
+    : voice.error ? errorCopy[voice.error] : '';
+  const detail = spokenReply && !question ? spokenReply
+    : failure && !question ? failure
+    : failure && question ? resultCopy(result)
     : voice.phase === 'processing' ? '음성을 확인하고 있어요.'
-    : voice.phase === 'speaking' ? `${result ? resultCopy(result) : '음성 요청을 처리하지 못했어요.'} 안내를 읽고 있어요.`
+    : voice.phase === 'speaking' ? `${voice.lastReplyText || (result ? resultCopy(result) : '')} 안내를 읽고 있어요.`
     : question ? `${resultCopy(result)}${voice.phase === 'listening' ? (voice.partialText ? ` 듣는 중: ${voice.partialText}` : ' 답변을 듣고 있어요.') : ''}`
     : voice.phase === 'listening' ? (voice.partialText ? `듣는 중: ${voice.partialText}` : '듣고 있어요. 말씀해 주세요.')
     : recognitionTest && voice.lastTranscript ? '인식을 마쳤어요. 다시 말하기로 한 번 더 시험할 수 있어요.'
@@ -69,9 +79,11 @@ export function VoiceModeToggle({ controller, ready, sampleMode }: {
       : '켜면 한 문장을 듣고 마이크를 닫아요. 마이크 사용을 허용해 주세요.'}</p>
     {voice.enabled && voice.lastTranscript && <p className="voice-mode-transcript"><span>인식한 말</span><strong>{voice.lastTranscript}</strong></p>}
     {voice.enabled && detail && <p className="voice-mode-feedback" role="status" aria-live="polite">{detail}</p>}
+    {voice.enabled && question && failure && <p className="voice-mode-failure" role="status" aria-live="polite">{failure}</p>}
     {voice.enabled && voice.replyAudioError && <p role="status">음성 안내를 재생하지 못했어요. 화면을 확인하고 ‘다시 말하기’를 눌러 주세요.</p>}
     {!voice.enabled && voice.autoOff && <p className="voice-mode-feedback" role="status" aria-live="polite">한동안 말씀이 없어 음성 모드를 껐어요. 다시 쓰려면 버튼을 눌러 주세요.</p>}
     {voice.enabled && voice.phase === 'idle' && voice.error !== 'session_expired' && <button type="button" className="voice-mode-listen" data-log-target="voice-listen" onClick={() => controller.listen()}>다시 말하기</button>}
-    {voice.enabled && voice.phase === 'speaking' && <button type="button" className="voice-mode-listen" data-log-target="voice-reply-stop" onClick={() => controller.stopReply()}>안내 중단</button>}
+    {voice.enabled && voice.phase === 'speaking' && <button ref={stopButton} type="button" className="voice-mode-listen" data-log-target="voice-reply-stop" onClick={() => controller.stopReply()}>안내 중단</button>}
+    {voice.enabled && voice.lastReplyText && (voice.phase === 'idle' || voice.phase === 'listening') && <button type="button" className="voice-mode-listen" data-log-target="voice-reply-replay" onClick={() => controller.replayReply()}>마지막 안내 다시 듣기</button>}
   </section>;
 }

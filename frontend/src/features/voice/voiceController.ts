@@ -20,6 +20,10 @@ export type VoiceSnapshot = {
   /** 마지막으로 Chrome이 확정 인식한 문장. 모드를 끄거나 세션이 바뀌면 지웁니다. */
   lastTranscript: string;
   lastResult: VoiceRequestStatus | null;
+  /** 확인 질문을 덮어쓰지 않고 서버 실패 문장을 표시합니다. */
+  failureReplyText: string | null;
+  /** 현재 이용 중 마지막 안내. 다시 듣기는 주문 요청이나 자동 재청취를 하지 않습니다. */
+  lastReplyText: string | null;
   error: VoiceInputError | null;
   /** 쓰지 않아 저절로 꺼졌을 때 그 이유. 다시 켜거나 세션이 바뀌면 지웁니다. */
   autoOff: VoiceAutoOffReason | null;
@@ -104,6 +108,7 @@ export class VoiceController {
   private readonly cancelled = new WeakSet<SpeechCapture>();
   private processing: AbortController | null = null;
   private reply: AbortController | null = null;
+  private replyBlocked = false;
   private context = { sessionId: '', screenId: '' };
   // 확인·질문 결과 뒤 대답을 기다리는 중. 마이크가 닫혀도 다음 결과가 나올 때까지 유지합니다.
   private awaitingAnswer = false;
@@ -123,7 +128,7 @@ export class VoiceController {
     this.pollIntervalMs = options.pollIntervalMs ?? POLL_INTERVAL_MS;
     this.pollTimeoutMs = options.pollTimeoutMs ?? POLL_TIMEOUT_MS;
     this.createKey = options.createKey ?? (() => crypto.randomUUID());
-    this.state = { supported: this.recognition !== null, enabled: false, microphoneActive: false, phase: 'idle', partialText: '', lastTranscript: '', lastResult: null, error: null, autoOff: null, replyAudioError: false };
+    this.state = { supported: this.recognition !== null, enabled: false, microphoneActive: false, phase: 'idle', partialText: '', lastTranscript: '', lastResult: null, failureReplyText: null, lastReplyText: null, error: null, autoOff: null, replyAudioError: false };
   }
   getSnapshot = () => this.state;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
@@ -139,7 +144,7 @@ export class VoiceController {
       this.awaitingAnswer = false;
       this.sessionExpired = false;
       this.silentEnds = 0;
-      this.set({ lastTranscript: '', lastResult: null, error: null, autoOff: null, replyAudioError: false });
+      this.set({ lastTranscript: '', lastResult: null, failureReplyText: null, lastReplyText: null, error: null, autoOff: null, replyAudioError: false });
     }
     this.context = { ...context };
   }
@@ -150,13 +155,13 @@ export class VoiceController {
       this.halt();
       this.awaitingAnswer = false;
       this.silentEnds = 0;
-      this.set({ enabled: false, lastTranscript: '', lastResult: null, error: null, autoOff: null, replyAudioError: false });
+      this.set({ enabled: false, lastTranscript: '', lastResult: null, failureReplyText: null, lastReplyText: null, error: null, autoOff: null, replyAudioError: false });
       return true;
     }
     if (!this.recognition) { this.set({ error: 'not_supported' }); return false; }
     if (!this.state.enabled) {
       this.silentEnds = 0;
-      this.set({ enabled: true, lastTranscript: '', lastResult: null, error: null, autoOff: null, replyAudioError: false });
+      this.set({ enabled: true, lastTranscript: '', lastResult: null, failureReplyText: null, lastReplyText: null, error: null, autoOff: null, replyAudioError: false });
     }
     return this.listen();
   }
@@ -172,6 +177,30 @@ export class VoiceController {
     this.reply = null;
     if (this.state.phase === 'speaking') this.set({ phase: 'idle', replyAudioError: false });
     if (!this.capture && !this.processing) this.armIdle();
+  }
+
+  /** 모달 밖 안내를 조작할 수 없는 동안 읽기와 자동 재청취를 보류합니다. */
+  setReplyBlocked(blocked: boolean) {
+    this.replyBlocked = blocked;
+    if (blocked) this.stopReply();
+  }
+
+  /** 마이크를 닫고 마지막 안내만 다시 읽습니다. 끝나도 자동으로 듣지 않습니다. */
+  replayReply(): boolean {
+    const text = this.state.lastReplyText;
+    if (!this.state.enabled || !this.replySpeaker || !text || this.replyBlocked
+      || (this.state.phase !== 'idle' && this.state.phase !== 'listening')) return false;
+    this.clearIdle();
+    this.pendingListen = null;
+    const reply = new AbortController();
+    this.reply = reply;
+    this.set({ phase: 'speaking', partialText: '', replyAudioError: false });
+    if (this.capture) {
+      this.cancelled.add(this.capture);
+      this.capture.abort();
+    }
+    void this.readReply(text, reply, false);
+    return true;
   }
 
   /** answering: 확인·질문에 대한 대답이라 "네" 같은 짧은 말도 받습니다. */
@@ -203,7 +232,7 @@ export class VoiceController {
     }, { silenceMs: this.silenceMs });
     this.clearIdle();
     this.capture = capture;
-    this.set({ phase: 'listening', microphoneActive: true, partialText: '', error: null, replyAudioError: false });
+    this.set({ phase: 'listening', microphoneActive: true, partialText: '', error: null, failureReplyText: null, replyAudioError: false });
     capture.start();
     return true;
   }
@@ -213,7 +242,7 @@ export class VoiceController {
     this.halt();
     this.awaitingAnswer = false;
     this.silentEnds = 0;
-    this.set({ enabled: false, lastTranscript: '', lastResult: null, error: null, autoOff: reason });
+    this.set({ enabled: false, lastTranscript: '', lastResult: null, failureReplyText: null, lastReplyText: null, error: null, autoOff: reason, replyAudioError: false });
   }
 
   /** 마이크도 처리도 없이 쉬는 동안만 시간을 잽니다. 듣기를 시작하면 다시 잽니다. */
@@ -269,7 +298,7 @@ export class VoiceController {
     this.silentEnds = 0;
     const controller = new AbortController();
     this.processing = controller;
-    this.set({ phase: 'processing', partialText: result.text, lastTranscript: result.text });
+    this.set({ phase: 'processing', partialText: result.text, lastTranscript: result.text, failureReplyText: null });
     const { sessionId, screenId } = this.context;
     void this.process(sessionId, { text: result.text, alternatives: result.alternatives, screen_id: screenId }, controller.signal)
       .finally(() => { if (!this.processing && !this.capture) this.armIdle(); });
@@ -289,7 +318,7 @@ export class VoiceController {
       // 끝난 세션의 질문에는 더 대답할 수 없으므로 대기를 풀고, 새 주문은 부르는 쪽이 안내합니다.
       this.awaitingAnswer = false;
       this.sessionExpired = true;
-      this.set({ phase: 'idle', partialText: '', lastResult: null, error: outcome });
+      this.set({ phase: 'idle', partialText: '', lastResult: null, lastReplyText: null, error: outcome });
       return;
     }
     if (typeof outcome === 'string') {
@@ -305,7 +334,7 @@ export class VoiceController {
     if (outcome.status === 'failed') {
       // 서버도 실패한 발화를 대화 맥락에 넣지 않으므로 이전 질문과 대답 대기를 유지합니다.
       const reply = this.prepareReply(outcome);
-      this.set({ phase: reply ? 'speaking' : 'idle', partialText: '', lastResult: this.awaitingAnswer ? this.state.lastResult : outcome, error: 'request_failed', replyAudioError: false });
+      this.set({ phase: reply ? 'speaking' : 'idle', partialText: '', lastResult: this.awaitingAnswer ? this.state.lastResult : outcome, failureReplyText: outcome.reply_text?.trim() || null, lastReplyText: outcome.reply_text?.trim() || null, error: 'request_failed', replyAudioError: false });
       this.onResult(outcome);
       if (reply) await this.readReply(outcome.reply_text!, reply, false);
       return;
@@ -313,14 +342,14 @@ export class VoiceController {
     // 구독자·onResult가 세션을 바꾸거나 모드를 끄면 그 초기화가 남도록, 알리기 전에 대기 상태를 정합니다.
     this.awaitingAnswer = ASKS_USER.has(outcome.status);
     const reply = this.prepareReply(outcome);
-    this.set({ phase: reply ? 'speaking' : 'idle', partialText: '', lastResult: outcome, error: null, replyAudioError: false });
+    this.set({ phase: reply ? 'speaking' : 'idle', partialText: '', lastResult: outcome, lastReplyText: outcome.reply_text?.trim() || null, error: null, replyAudioError: false });
     this.onResult(outcome);
     if (reply) await this.readReply(outcome.reply_text!, reply, this.awaitingAnswer);
-    else if (this.awaitingAnswer && this.context.sessionId === sessionId) this.open(true);
+    else if (this.awaitingAnswer && !this.replyBlocked && this.context.sessionId === sessionId) this.open(true);
   }
 
   private prepareReply(result: VoiceRequestStatus): AbortController | null {
-    if (!this.replySpeaker || !result.reply_text?.trim()) return null;
+    if (this.replyBlocked || !this.replySpeaker || !result.reply_text?.trim()) return null;
     this.clearIdle();
     this.reply = new AbortController();
     return this.reply;
