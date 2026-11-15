@@ -24,7 +24,16 @@ async function ready(page) {
   });
 }
 const click = (page, target) => page.locator(`[data-log-target="${target}"]`).click();
+// 메뉴는 쪽으로 나뉘므로 상품이 지금 쪽에 없으면 첫 쪽부터 넘겨 찾습니다.
+async function showProduct(page, product) {
+  const card = page.locator(`[data-log-target="product:${product}"]`);
+  if (await card.count()) return;
+  const prev = page.locator('[data-log-target="menu-page:prev"]');
+  while (await prev.count() && await prev.isEnabled()) await prev.click();
+  while (!(await card.count())) await click(page, 'menu-page:next');
+}
 async function add(page, product = 'americano', temperature = '아이스') {
+  await showProduct(page, product);
   await click(page, `product:${product}`);
   if (product === 'americano') await click(page, `temperature:${temperature}`);
   await click(page, 'cart-add');
@@ -35,6 +44,18 @@ async function screenshot(page, name) {
   await mkdir(process.env.ORDER_SCREENSHOT_DIR, { recursive: true });
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: join(process.env.ORDER_SCREENSHOT_DIR, `${name}.png`) });
+}
+// 낮은 화면은 화면 도움의 설정으로 켜고 끕니다(하단 높이 전환 버튼은 새 배치에서 뺐습니다).
+async function toggleLowScreen(page) {
+  await click(page, 'support-toggle'); await click(page, 'support:lowScreen'); await click(page, 'support-close');
+}
+// 장바구니는 최근 두 줄만 보이므로 다른 줄은 '모두 보기' 시트를 열고 누릅니다.
+async function clickLine(page, target) {
+  if (!(await page.locator(`[data-log-target="${target}"]`).count())) await click(page, 'cart-sheet-open');
+  await click(page, target);
+}
+async function closeCartSheet(page) {
+  if (await page.locator('dialog.cart-sheet[open]').count()) await click(page, 'cart-sheet-close');
 }
 async function noOverflow(page) {
   assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
@@ -78,18 +99,20 @@ test('세로·가로 화면과 독립 접근성 설정에서 전체 주문·설�
           await page.setViewportSize(viewport); await ready(page);
           await click(page, 'support-toggle');
           for (const setting of settings) await click(page, `support:${setting}`);
-          await click(page, 'support:stepGuide'); await click(page, 'support-toggle');
+          await click(page, 'support:stepGuide'); await click(page, 'support-close');
           assert.equal(await page.locator('.guide p').count(), 2);
           await click(page, 'product:americano');
           await click(page, 'options-increase'); await click(page, 'cart-add');
           await page.locator('dialog[open]').waitFor({ state: 'hidden' });
           await add(page, 'americano', '핫'); await add(page, 'sandwich');
-          await click(page, 'cart:americano:아이스:increase');
+          await clickLine(page, 'cart:americano:아이스:increase');
           await page.waitForFunction(() => document.querySelector('.total')?.innerText.includes('19,500원'));
-          await click(page, 'cart:americano:아이스:decrease');
+          await clickLine(page, 'cart:americano:아이스:decrease');
           await page.waitForFunction(() => document.querySelector('.total')?.innerText.includes('16,000원'));
-          await click(page, 'cart:americano:핫:remove');
+          await closeCartSheet(page);
+          await clickLine(page, 'cart:americano:핫:remove');
           await page.waitForFunction(() => document.querySelector('.total')?.innerText.includes('12,500원'));
+          await closeCartSheet(page);
           await noOverflow(page); await bottomAction(page, 'review-open');
           if (settings.includes('largeText')) assert(await page.locator('.product-info strong').first().evaluate(element => parseFloat(getComputedStyle(element).fontSize) >= 56), '큰 글씨에서 기본 28px의 두 배 이상');
           if (settings.includes('largeButton')) assert((await page.locator('[data-log-target="review-open"]').boundingBox()).height >= 88);
@@ -138,8 +161,8 @@ test('낮은 화면에서 옵션·전체 주문·접근성 조합·새로고침�
           await page.setViewportSize(viewport); await ready(page);
           await click(page, 'support-toggle');
           for (const setting of settings) await click(page, `support:${setting}`);
-          await click(page, 'support-toggle');
-          await click(page, 'screen-height-toggle');
+          await click(page, 'support-close');
+          await toggleLowScreen(page);
           const top = Math.max(0, viewport.height - Math.max(viewport.height * .6, 720));
           const root = await page.locator('.kiosk.low-screen').boundingBox();
           assert(root && Math.abs(root.y - top) < 2, '선택한 높이에 조작 영역을 배치');
@@ -154,10 +177,10 @@ test('낮은 화면에서 옵션·전체 주문·접근성 조합·새로고침�
             }), `${selector}이 다른 요소에 가려지지 않음`);
           };
           await reachable('[data-log-target="support-toggle"]');
-          await reachable('[data-log-target="screen-height-toggle"]');
           await click(page, 'support-toggle');
+          await reachable('[data-log-target="support:lowScreen"]');
           assert.equal(await page.locator('[data-log-target="support:lowScreen"]').getAttribute('aria-pressed'), 'true');
-          await click(page, 'support-toggle');
+          await click(page, 'support-close');
           await click(page, 'product:americano');
           await reachable('dialog[open]');
           await reachable('[data-log-target="options-close"]');
@@ -168,10 +191,10 @@ test('낮은 화면에서 옵션·전체 주문·접근성 조합·새로고침�
           const lastProduct = await page.locator('.product').last().boundingBox();
           const actions = await page.locator('.order-actions').boundingBox();
           assert(lastProduct.y + lastProduct.height <= actions.y, '낮은 화면에서도 목록 끝을 하단 바 위까지 볼 수 있음');
-          await click(page, 'screen-height-toggle');
+          await toggleLowScreen(page);
           assert.equal(await page.locator('.low-screen').count(), 0);
           assert.match(await page.locator('.total').innerText(), /3,500원/, '높이 복귀에도 장바구니 유지');
-          await click(page, 'screen-height-toggle');
+          await toggleLowScreen(page);
           await screenshot(page, `low-menu-${label}`);
           await click(page, 'review-open'); await reachable('[data-log-target="review-back"]');
           await click(page, 'simulate-payment'); await page.locator('.order-number').waitFor();
@@ -253,12 +276,21 @@ test('명시적으로 켠 개발 샘플은 서버 없이 17개 메뉴·주문·�
       page.on('request', request => { if (request.url().includes('/backend/')) backendRequests.push(request.url()); });
       await page.goto(process.env.ORDER_SAMPLE_BROWSER_URL);
       await ready(page);
-      assert.match(await page.locator('.sample-badge').innerText(), /개발용 샘플/);
-      assert.equal(await page.locator('.product').count(), 17);
+      assert.equal(await page.locator('.kiosk').getAttribute('data-order-mode'), 'sample', '샘플 모드는 속성으로만 구분');
+      assert.doesNotMatch(await page.locator('.kiosk').innerText(), /샘플|테스트|DEV/, '고객 화면에는 시험·샘플 표시 없음');
+      assert.equal(await page.locator('.product').count(), 9, '한 쪽에 3 × 3 카드');
+      assert.equal(await page.locator('.pager .page').innerText(), '1 / 2');
+      let shown = 9;
+      await click(page, 'menu-page:next'); await page.locator('.pager .page', { hasText: '2 / 2' }).waitFor();
+      shown += await page.locator('.product').count();
+      assert.equal(shown, 17, '쪽을 넘겨 17개 메뉴를 모두 볼 수 있음');
+      assert(await page.locator('[data-log-target="menu-page:next"]').isDisabled());
+      await click(page, 'menu-page:prev');
+      await page.locator('.pager .page', { hasText: '1 / 2' }).waitFor();
       await page.waitForFunction(() => window.kioskTouchLogDraft?.read().serverSessionId?.startsWith('sample-session-'));
       const first = await page.evaluate(() => window.kioskTouchLogDraft.read().serverSessionId);
       if (large) {
-        await click(page, 'support-toggle'); await click(page, 'support:largeText'); await click(page, 'support:largeButton'); await click(page, 'support-toggle');
+        await click(page, 'support-toggle'); await click(page, 'support:largeText'); await click(page, 'support:largeButton'); await click(page, 'support-close');
       }
       await add(page);
       await add(page, 'sandwich');
@@ -267,7 +299,8 @@ test('명시적으로 켠 개발 샘플은 서버 없이 17개 메뉴·주문·�
       await screenshot(page, `sample-menu-${large ? 'large' : 'default'}`);
       await click(page, 'review-open'); await click(page, 'simulate-payment');
       await page.locator('.order-number').waitFor();
-      assert.match(await page.locator('.order-number').innerText(), /^DEV-SAMPLE-/);
+      assert.match(await page.locator('.order-number').getAttribute('data-order-number'), /^DEV-SAMPLE-\d+$/);
+      assert.match(await page.locator('.order-number').innerText(), /^\d+$/, '샘플 주문번호는 숫자만 보임');
       await click(page, 'new-order'); await ready(page);
       await page.waitForFunction(id => window.kioskTouchLogDraft.read().serverSessionId !== id, first);
       assert.equal(await page.locator('.cart-row').count(), 0);
@@ -290,7 +323,7 @@ test('개발 샘플 설정으로 빌드해도 프로덕션에서는 서버 API�
     await page.goto(process.env.ORDER_PRODUCTION_URL);
     await page.locator('[data-log-target="order-connect-retry"]').waitFor();
     assert.equal(await page.locator('.product').count(), 0);
-    assert.doesNotMatch(await page.locator('.sample-badge').innerText(), /개발용/);
+    assert.equal(await page.locator('.kiosk').getAttribute('data-order-mode'), 'api', '프로덕션은 서버 API 모드');
     assert.equal(await page.locator('.touch-log-tools').count(), 0);
     fixture.verify();
   } finally { await browser.close(); }
@@ -322,20 +355,24 @@ test('1080×1920: API 응답으로 상품·옵션·수량·삭제·완료·새 �
     await page.locator('dialog[open]').waitFor({ state: 'hidden' });
     await add(page, 'americano', '핫');
     await add(page, 'sandwich');
-    assert.equal(await page.locator('.cart-row').count(), 3);
+    assert.equal(await page.locator('.cart-row').count(), 1, '메뉴 화면의 장바구니에는 최근 한 줄');
     assert.match(await page.locator('.total').innerText(), /16,000원/);
-    await click(page, 'cart:americano:아이스:increase');
+    await click(page, 'cart-sheet-open');
+    assert.equal(await page.locator('dialog.cart-sheet .cart-row').count(), 3, '모두 보기 시트에 세 줄');
+    await clickLine(page, 'cart:americano:아이스:increase');
     await page.waitForFunction(() => document.querySelector('.total')?.innerText.includes('19,500원'));
-    await click(page, 'cart:americano:핫:remove');
+    await closeCartSheet(page);
+    await clickLine(page, 'cart:americano:핫:remove');
     await page.waitForFunction(() => document.querySelector('.total')?.innerText.includes('16,000원'));
+    await closeCartSheet(page);
     await noOverflow(page);
     await screenshot(page, 'order-menu-default');
     await click(page, 'support-toggle');
     await click(page, 'support:largeText');
     await click(page, 'support:largeButton');
-    await click(page, 'support-toggle');
+    await click(page, 'support-close');
     await screenshot(page, 'order-menu-large');
-    await click(page, 'product:sandwich');
+    await showProduct(page, 'sandwich'); await click(page, 'product:sandwich');
     assert.equal(await page.locator('dialog fieldset').count(), 0);
     await screenshot(page, 'order-options-large');
     await click(page, 'options-close');
@@ -447,7 +484,7 @@ test('재확인 실패 뒤 처음부터 다시 주문하고 새 연결 실패에
         await click(page, 'support-toggle');
         await click(page, 'support:largeText');
         await click(page, 'support:largeButton');
-        await click(page, 'support-toggle');
+        await click(page, 'support-close');
       }
       await add(page);
       await click(page, 'review-open');
@@ -574,11 +611,13 @@ test('긴 주문 내역 아래에서 실패해도 안내와 재확인 버튼을 
           if (large) {
             await click(page, 'support-toggle');
             await click(page, 'support:largeText'); await click(page, 'support:largeButton');
-            await click(page, 'support-toggle');
+            await click(page, 'support-close');
           }
           await click(page, 'review-open');
+          // 긴 주문은 쪽으로 나뉘므로 마지막 쪽으로 넘기고, 문서가 스크롤되는 화면이면 끝까지 내립니다.
+          while (await page.locator('[data-log-target="review-page:next"]').isEnabled()) await click(page, 'review-page:next');
           await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
-          assert(await page.evaluate(() => window.scrollY > 0));
+          assert(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight || window.scrollY > 0));
           await click(page, 'simulate-payment');
           await page.locator('.order-feedback').waitFor();
           const feedback = await page.locator('.order-feedback').boundingBox();
