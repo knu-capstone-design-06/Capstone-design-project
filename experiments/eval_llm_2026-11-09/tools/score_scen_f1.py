@@ -6,10 +6,11 @@ answers only (no model call). Same per-case tests as score_scen.py, which is imp
 No 1-second fallback. Several runs: metrics per run, then the mean of the per-run values. The held-out pool sums the counts
 of heldout1 run i and heldout2 run i (pairing by run number; the other pairings are reported as a sensitivity range).
 
-  python -I score_scen_f1.py [--repro <her repro zip or extracted dir>] [--json-out <file>] [--md-out <file>]
+  python -I score_scen_f1.py --repro <her repro zip or extracted dir> --runs <runs/scenarios folder>
+                             [--json-out <file>] [--md-out <file>]
 
-Default --repro: references/team/jiwon_jev_experiment_2026-11-09/jev_touch_experiment_repro.zip, read in memory as data
-(nothing of hers is executed or extracted). Our answers: runs/scenarios/<model>__<set>__r<n>/answers.jsonl.
+--repro is read in memory as data (nothing of hers is executed or extracted). --runs: our scenario folder with
+inputs/<set>_gold.json, inputs/<set>_rule.jsonl and <model>__<set>__r<n>/answers.jsonl.
 """
 import argparse, importlib.util, itertools, json, math, statistics, sys, zipfile
 from collections import Counter
@@ -17,10 +18,7 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
-EVAL = HERE.parent
-OURS = EVAL / "runs" / "scenarios"
-WS = EVAL.parent.parent
-REPRO_ZIP = WS / "references" / "team" / "jiwon_jev_experiment_2026-11-09" / "jev_touch_experiment_repro.zip"
+OURS = None   # our runs/scenarios folder, set from --runs
 PREFIX = "jev_touch_experiment_repro/"
 
 _spec = importlib.util.spec_from_file_location("score_scen", HERE / "score_scen.py")
@@ -183,11 +181,14 @@ def summarise(per_run: list) -> dict:
 
 
 def main():
+    global OURS
     ap = argparse.ArgumentParser()
-    ap.add_argument("--repro", type=Path, default=REPRO_ZIP)
+    ap.add_argument("--repro", type=Path, required=True, help="the teammate's repro zip or its extracted folder")
+    ap.add_argument("--runs", type=Path, required=True, help="our runs/scenarios folder (inputs/ and run folders)")
     ap.add_argument("--json-out", type=Path)
     ap.add_argument("--md-out", type=Path)
     a = ap.parse_args()
+    OURS = a.runs
     R = Repro(a.repro)
     gold = {s: json.loads((OURS / "inputs" / f"{s}_gold.json").read_text(encoding="utf-8")) for s in SETS}
     checks = []

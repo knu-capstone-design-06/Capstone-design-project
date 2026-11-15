@@ -11,7 +11,8 @@ Per run, from TP, FP, FN, TN (n = their sum):
   MCC = (TP*TN - FP*FN) / sqrt((TP+FP)(TP+FN)(TN+FP)(TN+FN))
 A ratio whose denominator is 0 is undefined and printed "–" (no substitute value).
 
-  python -I score_scen_f1_macro.py [--repro <her repro zip or extracted dir>] [--json-out <file>] [--md-out <file>]
+  python -I score_scen_f1_macro.py --repro <her repro zip or extracted dir> --runs <runs/scenarios folder>
+                                   [--json-out <file>] [--md-out <file>]
 """
 import argparse, importlib.util, json, math, statistics, sys
 from pathlib import Path
@@ -87,10 +88,12 @@ def extremes(L, title, rows: dict, metrics=METRICS):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--repro", type=Path, default=F.REPRO_ZIP)
+    ap.add_argument("--repro", type=Path, required=True, help="the teammate's repro zip or its extracted folder")
+    ap.add_argument("--runs", type=Path, required=True, help="our runs/scenarios folder (inputs/ and run folders)")
     ap.add_argument("--json-out", type=Path)
     ap.add_argument("--md-out", type=Path)
     a = ap.parse_args()
+    F.OURS = a.runs
     R = F.Repro(a.repro)
     gold = {s: json.loads((F.OURS / "inputs" / f"{s}_gold.json").read_text(encoding="utf-8")) for s in F.SETS}
     S = F.sources(R)
