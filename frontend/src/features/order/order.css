@@ -1,160 +1,55 @@
-@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap');
 :root { font-family: 'Noto Sans KR', system-ui, sans-serif; color: #213c34; background: #f7f6f2; font-synthesis: none; }
 * { box-sizing: border-box; }
 body { margin: 0; }
 button, a { -webkit-tap-highlight-color: transparent; }
 button { font: inherit; cursor: pointer; color: inherit; border: 1px solid #d9dfd7; background: white; border-radius: 12px; min-height: 48px; padding: 10px 18px; transition: background .15s, border-color .15s; }
-button:hover { background: #edf2ec; border-color: #759183; }
 button:disabled { opacity: .45; cursor: default; }
 :focus-visible { outline: 3px solid #b47421; outline-offset: 4px; }
 h1, h2, p { margin-top: 0; }
 h1:focus { outline: none; }
-.kiosk { --base-size: 16px; --order-actions-space: 150px; font-size: var(--base-size); max-width: 1600px; margin: auto; padding-bottom: var(--order-actions-space); }
-.header { display: flex; align-items: center; gap: 24px; border-bottom: 1px solid #e0e3da; padding: 24px 48px; background: #fffefb; }
-.brand { color: #163f35; font-size: 2em; font-weight: 800; text-decoration: none; letter-spacing: -.06em; line-height: 1.1; }
-.sample-badge { margin-left: auto; font-size: .75em; color: #66776c; padding: 8px 12px; background: #f1f2ea; border-radius: 6px; }
-.support-trigger { font-size: .875em; font-weight: 600; border-color: #163f35; }
-main { padding: 28px 48px 52px; min-height: calc(100dvh - 170px - var(--order-actions-space)); }
-.steps { display: flex; gap: 26px; margin-bottom: 38px; color: #7e877f; font-size: .8em; }
-.steps span { display: flex; align-items: center; gap: 8px; }
-.steps b { font-size: .8em; padding: 5px 7px; background: #eceee6; border-radius: 5px; }
-.steps [aria-current] { color: #163f35; font-weight: 700; }
-.steps [aria-current] b { background: #163f35; color: white; }
-.intro { margin-bottom: 30px; }
-.intro h1 { font-size: 2.1em; letter-spacing: -.065em; margin-bottom: 10px; }
-.intro p { color: #738078; font-size: .9em; }
-.order-layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 36px; align-items: start; }
-.categories { display: flex; gap: 10px; padding-bottom: 22px; }
-.categories button { min-width: 80px; border-radius: 28px; font-size: .875em; font-weight: 600; }
-[aria-pressed=true], .screen-height-toggle[data-active=true] { background: #163f35; color: #fff; border-color: #163f35; }
-[aria-pressed=true]:hover, .screen-height-toggle[data-active=true]:hover { background: #245747; }
-.product-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
-.product { display: flex; flex-direction: column; padding: 0; overflow: hidden; text-align: left; background: #fffefb; border: 1px solid #e7e8df; border-radius: 18px; }
-.product:hover { border-color: #60816d; background: #fffefb; }
-.product-art { display: flex; align-items: center; justify-content: center; min-height: 155px; width: 100%; font-size: 4.3em; background: radial-gradient(ellipse at 50% 65%, #ded7c8 0, #f0eade 52%, #f5f0e6 100%); }
-.art-음료 { background: radial-gradient(ellipse at 50% 65%, #d5e4d8 0, #eaf0e4 65%, #f0f3e9 100%); }
-.art-푸드 { background: radial-gradient(ellipse at 50% 65%, #ead3ba 0, #f7e8d7 65%, #faf0e4 100%); }
-.product-info { padding: 18px; width: 100%; display: flex; flex-direction: column; gap: 6px; }
-.product-category { font-size: .65em; color: #718377; }
-.product-info strong { font-size: 1.05em; letter-spacing: -.04em; }
-.description { font-size: .7em; color: #758077; line-height: 1.6; }
-.product-price { margin-top: 10px; font-size: .95em; font-weight: 700; display: flex; align-items: center; justify-content: space-between; }
-.product-price > span { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: #edf1e8; }
-.cart { position: sticky; top: 24px; border: 1px solid #e1e5da; border-radius: 18px; background: #fffefb; padding: 24px; }
-.cart-heading { display: flex; align-items: center; justify-content: space-between; padding-bottom: 20px; border-bottom: 1px solid #e7e8df; }
-.cart-heading h2 { margin: 0; font-size: 1.1em; }
-.cart-heading > span { border-radius: 20px; font-size: .75em; background: #edf1e8; padding: 4px 10px; }
+.kiosk { --base-size: 16px; --order-actions-space: 232px; font-size: var(--base-size); max-width: 1600px; margin: auto; padding-bottom: var(--order-actions-space); }
+/* 두 묶음 배치: 화면 높이에서 하단 바를 뺀 높이를 채우고, 남는 자리는 안내 영역이 받습니다. */
+.kiosk { display: flex; flex-direction: column; min-height: 100dvh; }
+.kiosk main { flex: 1 0 auto; display: flex; flex-direction: column; }
+.kiosk .order-layout { flex: 1 0 auto; display: flex; flex-direction: column; }
+[aria-pressed=true] { background: #163f35; color: #fff; border-color: #163f35; }
 ul { list-style: none; margin: 0; padding: 0; }
-.cart-row { padding: 20px 0; border-bottom: 1px solid #e7e8df; }
-.cart-row strong { display: block; font-size: .95em; }
-.cart-row > div > span { display: block; margin-top: 7px; color: #738078; font-size: .75em; }
-.cart-controls { display: flex; justify-content: space-between; margin-top: 14px; align-items: center; gap: 12px; }
-.quantity { display: flex; align-items: center; gap: 12px; }
-.quantity button { padding: 0; min-width: 48px; font-size: 1.2em; }
-.quantity > span { min-width: 22px; text-align: center; font-weight: 600; }
-.text-button { font-size: .75em; border: none; padding: 8px; color: #6e776f; }
-.empty-cart { text-align: center; padding: 58px 0; color: #738078; }
-.empty-cart > span:first-child { display: block; margin: auto auto 18px; background: #f0f2e9; border-radius: 50%; width: 48px; height: 48px; line-height: 48px; font-size: 1.5em; }
-.empty-cart p { font-size: .95em; font-weight: 500; margin-bottom: 9px; }
-.empty-cart > span:last-child { font-size: .7em; }
-.cart-summary { margin: 20px 0 0; line-height: 1.8; color: #657867; }
-.order-actions { position: fixed; bottom: 0; left: 0; right: 0; z-index: 20; height: var(--order-actions-space); background: #fffefb; border-top: 1px solid #cad6ce; box-shadow: 0 -4px 20px #173e3412; }
-.order-actions-inner { max-width: 1600px; height: 100%; margin: auto; padding: 24px 48px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, .65fr); align-items: center; gap: 40px; }
-.order-actions p { margin: 8px 0 0; font-size: .8em; line-height: 1.6; color: #657867; }
-.order-actions-summary { display: flex; align-items: center; gap: 16px; }
-.order-actions-summary .total { flex: 1; min-width: 0; flex-wrap: wrap; }
-.order-actions-summary > p { flex: 1; margin: 0; }
-.screen-height-toggle { flex-shrink: 0; font-size: .875em; padding: 10px 12px; border-color: #759183; white-space: nowrap; }
-.total { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
-.total > span { font-size: .8em; }
-.total strong { font-size: 1.5em; white-space: nowrap; }
 .primary { width: 100%; background: #163f35; color: white; border-color: #163f35; font-weight: 600; min-height: 58px; display: flex; justify-content: center; align-items: center; gap: 14px; }
-.primary:hover { background: #245747; }
-.footer { display: flex; justify-content: space-between; gap: 20px; padding: 22px 48px; border-top: 1px solid #e1e5da; color: #7a867b; font-size: .75em; }
-.support-panel { padding: 26px 48px; background: #e9eee4; border-bottom: 1px solid #d8dfd2; }
-.support-panel h2 { font-size: 1.15em; margin-bottom: 7px; }
-.support-panel p { font-size: .85em; color: #657867; }
-.support-options { display: flex; flex-wrap: wrap; gap: 10px; }
-.support-options button { font-size: .9em; }
-.guide { padding: 18px 22px; border-radius: 12px; background: #e7eee0; line-height: 1.8; }
-.guide p { margin: 0; }
-.cart-notice { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 18px; margin-bottom: 24px; border: 1px solid #b8cbb4; border-radius: 12px; background: #e7eee0; font-weight: 600; }
-.cart-notice[hidden] { display: none; }
-.cart-notice button { flex-shrink: 0; background: transparent; border: none; }
-.order-progress { padding: 12px 18px; border-radius: 12px; background: #e7eee0; }
-.order-feedback { margin-bottom: 24px; padding: 16px 18px; border: 1px solid #d5b58d; border-radius: 12px; background: #fff5e7; }
-.order-feedback p { margin: 0 0 12px; line-height: 1.6; }
-.order-feedback p:last-child { margin-bottom: 0; }
 .order-feedback-actions { display: flex; flex-wrap: wrap; gap: 12px; }
-.review-card { padding: 28px; background: white; border-radius: 18px; border: 1px solid #e1e5da; }
-.review-card h2 { font-size: 1.15em; }
-.review-card .cart-row { display: flex; gap: 24px; align-items: center; justify-content: space-between; }
-.review-card .cart-controls { margin: 0; }
-.secondary { margin-top: 24px; }
-.complete { padding: 60px 20px; text-align: center; }
-.complete h1 { font-size: 2em; }
-.complete p { color: #657867; }
-.order-number { display: block; font-size: clamp(2rem, 8vw, 6em); letter-spacing: .06em; margin: 20px 0; overflow-wrap: anywhere; }
 .options-dialog { padding: 28px; width: min(480px, calc(100% - 32px)); max-height: calc(100dvh - 32px); overflow-y: auto; border: 0; border-radius: 20px; color: #213c34; background: #fffefb; font: inherit; }
 .options-dialog::backdrop { background: #13271fb3; }
-.dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.dialog-heading h2 { font-size: 1.4em; margin: 0; }
-.dialog-heading button { border: none; }
 .options-dialog p { font-size: .9em; color: #738078; margin-top: 12px; }
-fieldset { border: none; margin: 24px 0; padding: 0; }
-legend { font-weight: 600; margin-bottom: 12px; }
-.option-buttons { display: flex; gap: 12px; }
-.option-buttons button { flex: 1; }
-.dialog-quantity { display: flex; justify-content: space-between; align-items: center; margin-bottom: 28px; gap: 16px; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
-/* 글자 확대는 상위 컨테이너의 em 기준과 배치를 바꾸지 않습니다. */
-.large-text .product-info strong { font-size: 21px; }
-.large-text .product-price { font-size: 20px; }
-.large-text .description, .large-text .product-category { font-size: 15px; }
-.large-text .intro p, .large-text .guide, .large-text .options-dialog p { font-size: 20px; }
-.large-text .cart-row strong, .large-text .cart-heading h2, .large-text legend { font-size: 21px; }
-.large-text .cart-row > div > span, .large-text .total > span, .large-text .order-actions p, .large-text .cart-summary { font-size: 16px; }
-.large-text .categories button, .large-text .support-options button, .large-text .primary, .large-text .option-buttons button { font-size: 18px; }
-.large-text .product-price > span { font-size: 16px; }
-.large-button { --order-actions-space: 176px; }
-.large-button button { min-height: 72px; padding: 16px 24px; }
-.large-button .product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px; }
-.large-button .product { padding: 0; }
-.large-button .product-art { min-height: 190px; }
-.large-button .product-info { padding: 26px; gap: 12px; }
-.large-button .product-price > span { width: 48px; height: 48px; }
-.large-button .categories, .large-button .support-options, .large-button .option-buttons { gap: 18px; }
-.large-button .quantity { gap: 16px; }
-.large-button .quantity button { min-width: 72px; padding: 0; }
-.large-button .cart-row { padding: 28px 0; }
-.large-button .cart-controls { flex-wrap: wrap; }
-.large-button .dialog-quantity { flex-wrap: wrap; }
-.large-text .order-confirm { font-size: 22px; font-weight: 800; line-height: 1; }
-.large-button .order-confirm { min-height: 88px; border: 3px solid #0d3026; box-shadow: 0 0 0 4px #d4e2c9, 0 6px 12px #163f3526; }
-.large-button .order-confirm:disabled { box-shadow: none; }
-.large-text .screen-height-toggle { font-size: 18px; }
-.large-button .screen-height-toggle { padding: 12px 16px; }
-.simple-screen .product-art, .simple-screen .description, .simple-screen .product-category { display: none; }
-.simple-screen .product-info { padding: 26px 22px; }
-.simple-screen .product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-@media (max-width: 1100px) { .header { padding: 20px 24px; } main { padding: 24px; } .order-layout { gap: 22px; grid-template-columns: minmax(0, 1fr) 310px; } .product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .footer, .support-panel { padding: 22px 24px; } .order-actions-inner { padding: 24px; gap: 24px; } }
-/* 1080×1920 시연 화면을 포함한 세로 화면에서는 기본 상품 목록을 3열로 표시합니다. */
-@media (min-width: 761px) and (max-width: 1100px) and (orientation: portrait) {
-  .product-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-}
-@media (max-width: 760px) { .header { gap: 12px; flex-wrap: wrap; } .brand { margin-right: auto; } .sample-badge { order: 3; width: 100%; text-align: center; } .order-layout { grid-template-columns: 1fr; } .cart { position: static; } .steps { gap: 14px; margin-bottom: 28px; flex-wrap: wrap; } .intro h1 { font-size: 1.7em; } .product-grid { gap: 12px; } .product-art { min-height: 120px; font-size: 3em; } .product-info { padding: 14px; } .categories { flex-wrap: wrap; } .review-card .cart-row { flex-wrap: wrap; } .simple-screen .product-grid { grid-template-columns: 1fr; } .dialog-quantity { flex-wrap: wrap; } }
-@media (max-width: 760px) { .large-button .product-grid { grid-template-columns: 1fr; } }
-@media (max-width: 760px) { .kiosk { --order-actions-space: 210px; } .large-button { --order-actions-space: 240px; } .order-actions-inner { grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 16px 24px; } .order-actions p { margin-top: 4px; } }
-@media (max-width: 760px) { .large-button { --order-actions-space: 272px; } }
 
-/* 낮은 화면 높이의 기준값은 hallmark/tokens.css의 --low-screen-height를 사용합니다. */
-.kiosk.low-screen { position: fixed; inset: auto 0 0; height: var(--low-screen-height); display: flex; flex-direction: column; background: #f7f6f2; border-top: 1px solid #d9dfd7; border-radius: 24px 24px 0 0; box-shadow: 0 -8px 32px #173e3410; }
-.low-screen > .header { flex-shrink: 0; border-radius: 24px 24px 0 0; }
-.low-screen > main { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; scroll-padding-block: 24px; scrollbar-gutter: stable; }
-.low-screen > .support-panel { flex-shrink: 0; max-height: min(360px, calc(var(--low-screen-height) - var(--order-actions-space) - 200px)); overflow-y: auto; overscroll-behavior-y: contain; }
-.low-screen > .footer { display: none; }
+
+/* 낮은 화면(한 단계): 조작은 모두 아래 조작 영역에 두고(1080 × 1920에서 y 768부터 1152 px), 위쪽은 매장 이름과
+   단계 표시만 보이는 읽기 자리입니다. 조작 영역 높이는 기존 기준(화면의 60 %, 짧은 창에서도 720 px 이상, 창 높이 이하)을 따릅니다. */
+.low-screen { --low-screen-height: min(100dvh, max(60dvh, 720px)); }
+.kiosk.low-screen { position: fixed; inset: auto 0 0; height: var(--low-screen-height); min-height: 0; display: flex; flex-direction: column; background: var(--ui-surface); }
+.low-screen > main { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; scroll-padding-block: 24px; }
 .low-screen .options-dialog { position: fixed; inset: auto 16px 24px; margin: 0 auto; max-height: calc(var(--low-screen-height) - 48px); overscroll-behavior-y: contain; scroll-padding-block: 24px; }
-.low-screen-banner { position: fixed; inset: 0 0 auto; height: calc(100dvh - var(--low-screen-height)); display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 16px; overflow: hidden; pointer-events: none; color: #657867; }
-.low-screen-banner strong { color: #163f35; font-size: 36px; letter-spacing: -.06em; }
-.low-screen-banner p { margin: 0; font-size: 18px; }
+/* 위쪽: 매장 이름과 단계 표시(읽는 자리, 조작 영역 안의 진짜 제목을 보이게 옮긴 사본) 위의 빈 곳 전체가 [화면 위로 올리기] 누름 자리입니다.
+   테두리 없이 위쪽의 옅은 바탕 그대로, 위 화살표(M 아이콘)와 이름(M, 글자색)이 아래 끝에서 32 px 위 가운데에 섭니다. */
+.low-screen-banner { position: fixed; inset: 0 0 auto; height: calc(100dvh - var(--low-screen-height)); display: flex; flex-direction: column; justify-content: flex-end;
+  padding: 0 0 var(--between); overflow: hidden; background: var(--ui-canvas); color: var(--ui-ink); word-break: keep-all; }
+.low-screen-banner .raise-area { flex: 1 1 auto; display: flex; align-items: flex-end; justify-content: center; gap: var(--pad-1); width: 100%; min-height: 0;
+  padding: 0 var(--side) var(--between); border: 0; border-radius: 0; background: transparent; color: var(--ui-ink); font-size: var(--fs-m); line-height: var(--lh); }
+.low-screen-banner .raise-area .pic { width: var(--pic-m); height: var(--pic-m); margin-bottom: calc((var(--fs-m) * var(--lh) - var(--pic-m)) / 2); fill: currentColor; flex: none; }
+.low-screen-banner .banner-copy { padding: 0 var(--side); pointer-events: none; }
+.low-screen-banner .banner-copy .store-name { display: flex; align-items: center; height: var(--h-store); }
+.low-screen-banner .step:not(.current) .disc { background: var(--ui-surface); }
 @media (max-height: 900px) { .low-screen-banner { display: none; } }
+/* 위쪽 읽기 자리가 보이는 동안 조작 영역 안의 매장 이름과 단계 표시는 화면 읽기와 초점을 위해 남기고 보이지 않게 둡니다. */
+@media (min-height: 901px) {
+  .kiosk.low-screen > .header, .kiosk.low-screen > main > .steps { position: absolute; width: 1px; height: 1px; min-height: 0; margin: 0; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+  /* 큰 글씨에서는 안내 영역이 없어 조작이 조작 영역 위 가장자리에서 16 px 아래에서 시작합니다(그 밖에는 32 px). */
+  .kiosk.low-screen.large-text .tabs-row { margin-top: var(--in); }
+}
+/* 낮은 화면과 큰 글씨의 메뉴: 장바구니가 [담은 메뉴 보기] 뒤에 있어 쪽 넘김 줄 아래에는 다음 묶음(하단 주문 바, 말로 주문 영역)까지 32 px를 둡니다. */
+.kiosk:is(.low-screen, .large-text) .menu-section { margin-bottom: var(--between); }
+/* 마우스처럼 위에 머무는 포인터가 있을 때만 머무름 모습을 둡니다(키오스크는 손으로 누릅니다). */
+@media (hover: hover) {
+  button:hover { background: #edf2ec; border-color: #759183; }
+  [aria-pressed=true]:hover { background: #245747; }
+  .primary:hover { background: #245747; }
+}
