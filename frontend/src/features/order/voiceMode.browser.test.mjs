@@ -44,7 +44,7 @@ async function open(steps, pageUrl = url) {
 test('개발 샘플에서 짧은 말도 인식하고 다시 듣기·오류·화면 이동을 처리하며 backend를 호출하지 않는다', { skip: !process.env.ORDER_SAMPLE_BROWSER_URL }, async () => {
   const { browser, page, errors, fixture } = await open([], process.env.ORDER_SAMPLE_BROWSER_URL);
   try {
-    const toggle = page.getByRole('switch', { name: '음성 인식 테스트', exact: true });
+    const toggle = page.getByRole('switch', { name: '말로 주문하기', exact: true });
     await toggle.click();
     await page.evaluate(() => window.voiceFakes.at(-1).partial('아이스 아메리카노'));
     assert.match(await page.locator('.voice-mode-feedback').innerText(), /아이스 아메리카노/);
@@ -54,12 +54,11 @@ test('개발 샘플에서 짧은 말도 인식하고 다시 듣기·오류·화�
     await page.evaluate(() => window.voiceFakes.at(-1).final('네'));
     await page.locator('[data-log-target="voice-listen"]').waitFor();
     assert.match(await page.locator('.voice-mode-transcript').innerText(), /인식한 말\s+네/);
-    assert.match(await page.locator('.voice-mode-preview').innerText(), /주문은 바뀌지 않습니다/);
+    assert.doesNotMatch(await page.locator('.kiosk').innerText(), /테스트|샘플/, '개발 샘플에서도 고객 화면에는 시험 문구 없음');
     assert.equal(await page.locator('.cart-row').count(), 0);
     await page.locator('[data-log-target="voice-listen"]').click();
     await page.evaluate(() => window.voiceFakes.at(-1).fail('not-allowed'));
     assert.match(await page.locator('.voice-mode-feedback').innerText(), /마이크 사용을 허용/);
-    assert.equal(await page.locator('.voice-mode-badge').innerText(), '마이크 권한 확인');
     await page.locator('[data-log-target="voice-listen"]').click();
     await page.evaluate(() => window.voiceFakes.at(-1).final('아메리카노 두 잔'));
     await page.locator('[data-log-target="voice-listen"]').waitFor();
@@ -164,7 +163,7 @@ test('주변 대화는 표시하지 않고 이전 확인 질문에 짧게 답할
     await page.evaluate(() => window.voiceFakes.at(-1).partial('네'));
     assert.match(await page.locator('.voice-mode-feedback').innerText(), /듣는 중: 네/);
     await page.evaluate(() => window.voiceFakes.at(-1).final('네'));
-    await page.locator('.voice-mode-feedback').getByText(/말씀을 확인했어요/).waitFor();
+    await page.locator('.voice-mode-feedback').getByText(/주문을 변경하는 기능은 아직 준비 중/).waitFor();
     assert.equal(fixture.requests.filter(request => request.method === 'POST' && request.path.endsWith('/voice/requests')).at(-1).body.text, '네');
     fixture.verify();
     assert.deepEqual(errors, []);
@@ -190,7 +189,7 @@ test('확인 질문 뒤 서버 실패를 알리고 다시 말하기에서 질문
     await page.waitForFunction(() => window.voiceFakes.length === 3);
     assert.match(await page.locator('.voice-mode-feedback').innerText(), /아이스 아메리카노 담을까요/);
     await page.evaluate(() => window.voiceFakes.at(-1).final('네'));
-    await page.locator('.voice-mode-feedback').getByText(/말씀을 확인했어요/).waitFor();
+    await page.locator('.voice-mode-feedback').getByText(/주문을 변경하는 기능은 아직 준비 중/).waitFor();
     assert.deepEqual(fixture.requests.filter(request => request.method === 'POST' && request.path.endsWith('/voice/requests')).map(request => request.body.text), ['아메리카노 주세요', '네', '네']);
     fixture.verify();
     assert.deepEqual(errors, []);
@@ -255,7 +254,7 @@ for (const enlarged of [false, true]) {
         await page.locator('[data-log-target="support-toggle"]').click();
         await page.locator('[data-log-target="support:largeText"]').click();
         await page.locator('[data-log-target="support:largeButton"]').click();
-        await page.locator('[data-log-target="support-toggle"]').click();
+        await page.locator('[data-log-target="support-close"]').click();
       }
       await page.locator('[data-log-target="voice-mode-toggle"]').click();
       await page.locator('[data-log-target="product:americano"]').click();
@@ -273,6 +272,8 @@ for (const enlarged of [false, true]) {
       assert.equal(await page.locator('.order-progress').count(), 0);
       assert.match(await page.locator('.total').innerText(), /7,000원/, '늦은 터치 응답의 3,500원 대신 음성 결과까지 표시');
       await screenshot(page, enlarged ? 'voice-cart-concurrent-large' : 'voice-cart-concurrent');
+      // 큰 글씨에서는 장바구니가 '담은 메뉴 보기' 시트 안에 있습니다.
+      if (!(await page.locator('[data-log-target="cart:americano:아이스:increase"]').count())) await page.locator('[data-log-target="cart-sheet-open"]').click();
       await page.locator('[data-log-target="cart:americano:아이스:increase"]').click();
       await page.waitForFunction(() => document.querySelector('.total')?.textContent.includes('10,500원'));
       assert.equal(fixture.requests.find(request => request.method === 'PATCH').body.expected_version, 2);
@@ -289,11 +290,10 @@ test('마이크 권한 오류를 알리고 큰 글씨·큰 버튼·낮은 화면
     await page.locator('[data-log-target="support:largeText"]').click();
     await page.locator('[data-log-target="support:largeButton"]').click();
     await page.locator('[data-log-target="support:lowScreen"]').click();
-    await page.locator('[data-log-target="support-toggle"]').click();
+    await page.locator('[data-log-target="support-close"]').click();
     await page.locator('[data-log-target="voice-mode-toggle"]').click();
     await page.evaluate(() => window.voiceFakes.at(-1).fail('not-allowed'));
     assert.match(await page.locator('.voice-mode-feedback').innerText(), /마이크 사용을 허용/);
-    assert.equal(await page.locator('.voice-mode-badge').innerText(), '마이크 권한 확인');
     assert.equal(await page.locator('[data-log-target="voice-listen"]').isVisible(), true);
     await screenshot(page, 'voice-permission-low-large');
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
@@ -306,18 +306,33 @@ test('마이크 권한 오류를 알리고 큰 글씨·큰 버튼·낮은 화면
   } finally { await browser.close(); }
 });
 
-
-test('완료 세션의 음성 오류는 새 주문 안내 배지를 표시하고 다시 듣기를 제공하지 않는다', async () => {
-  const session = 'voice-session-ended';
-  const { browser, page, fixture } = await open([
-    ...bootstrap(session),
-    mutation(session, '/voice/requests', { code: 'session_expired', detail: '새 이용 세션을 시작해 주세요.' }, { status: 410 }),
-  ]);
+test('마이크 버튼의 고리는 말로 주문이 꺼져 있고 누를 수 있을 때만 움직이고, 켜져 있거나 움직임 줄이기에서는 멈춘다', async () => {
+  const { browser, page, errors, fixture } = await open(bootstrap('voice-rings'));
   try {
-    await page.locator('[data-log-target="voice-mode-toggle"]').click();
-    await page.evaluate(() => window.voiceFakes.at(-1).final('아메리카노 주세요'));
-    await page.locator('.voice-mode-badge').getByText('주문 완료 · 새 주문 필요', { exact: true }).waitFor();
-    assert.equal(await page.locator('[data-log-target="voice-listen"]').count(), 0);
+    const toggle = page.locator('[data-log-target="voice-mode-toggle"]');
+    const rings = () => page.locator('.mic-ring').evaluateAll(elements => elements.map(element => getComputedStyle(element).display === 'none' ? 'none' : getComputedStyle(element).animationName));
+    assert.deepEqual(await rings(), ['mic-ping', 'mic-ping'], '꺼져 있고 누를 수 있으면 두 고리가 움직임');
+    await toggle.click();
+    assert.equal(await toggle.getAttribute('aria-checked'), 'true');
+    assert.deepEqual(await rings(), ['none', 'none'], '켜져 있으면 아무것도 움직이지 않음(듣는 중으로 읽히지 않게)');
+    await toggle.click();
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    const still = await page.locator('.mic-ring').evaluateAll(elements => elements.map(element => getComputedStyle(element).animationPlayState));
+    assert.deepEqual(still, ['paused', 'paused'], '움직임 줄이기에서는 한 순간에 멈춤');
+    fixture.verify(); assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
+test('음성 인식을 지원하지 않는 브라우저에서는 마이크 버튼을 두지 않고 이유는 낭독기에 남긴다', async () => {
+  const browser = await chromium.launch({ headless: true, ...(channel === 'default' ? {} : { channel }) });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1080, height: 1920 } });
+    await page.addInitScript(() => { delete window.SpeechRecognition; delete window.webkitSpeechRecognition; });
+    const fixture = await installOrderResponses(page, bootstrap('voice-unsupported'));
+    await page.goto(url);
+    await page.waitForFunction(() => document.querySelector('[data-log-target="product:americano"]')?.disabled === false);
+    assert.equal(await page.locator('[data-log-target="voice-mode-toggle"]').count(), 0);
+    assert.match(await page.locator('.voice-mode-preview').textContent(), /음성 입력을 사용할 수 없어요/);
     fixture.verify();
   } finally { await browser.close(); }
 });
