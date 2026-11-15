@@ -141,9 +141,17 @@ AI 담당의 결과 표에 있는 모델 모두가 세 세트에서 값을 갖�
 
 ## 실행
 
-입력인 평가 키트 `llm_eval_kit_2026-11-08`(창별 입력 `data/`, 질문 `questions.json`, 라벨, Jev 기준 답, 채점기 `score.py`), 앞선 Jev 실험의 기록 실행, AI 담당의 시나리오 재현 자료는 저장소에 없고 비전 담당 작업 폴더에 있습니다. GPT 실행기는 `--env`로 준 파일(`backend/.env`)의 `OPENAI_API_KEY`를, Claude 실행기는 `--env`로 준 파일의 `ANTHROPIC_API_KEY`를 읽습니다.
+도구는 저장소 루트에서 실행하고, 저장소에 없는 입력은 아래 표의 인자로 받습니다. 규칙표 응답 시간 도구 `time_rule_table.py`만 비전 담당 작업 폴더 위치를 `KIOSK_WORKSPACE`로 받습니다.
 
-도구는 비전 담당 작업 폴더의 배치를 기준으로 경로를 잡습니다. 그래서 저장소 안에서 바로 실행되지는 않고, 아래 명령은 실험 때 돌린 순서를 보여 줍니다.
+| 입력 | 인자 | 있는 곳 · 만드는 방법 |
+|---|---|---|
+| 평가 키트 `llm_eval_kit_2026-11-08`(창별 입력 `data/`, 질문 `questions.json`, 라벨 `labels/`, Jev 기준 답 `reference_answers/`) | `--kit`(`score.py`, `run_gpt.py`, `run_claude.py`), 첫째 인자(`cell_windows.py`), 둘째 인자(`one_second.py`) | 비전 담당 작업 폴더. `eval_llm_2026-11-12_rA/tools/build_kit_2026-11-08.py`로 만들었음 |
+| 모델 답(`answers.jsonl`) | `--answers`(`score.py`) | `run_gpt.py` · `run_claude.py`가 `--out` 폴더에 씀 |
+| 앞선 Jev 실험의 기록 실행(`stage2_3_J_b0_r0`, `stage2_1_swap_C_C0`가 든 폴더) | 셋째 인자(`one_second.py`) | 비전 담당 작업 폴더. Jev의 응답 시간을 이 기록에서 읽음 |
+| AI 담당의 시나리오 재현 자료 | `--repro`(`score_scen_f1.py`, `score_scen_f1_macro.py`: zip이나 푼 폴더), 첫째 인자(`scen_prep.py`: 푼 폴더) | AI 담당이 보낸 자료. 비전 담당 작업 폴더에 있음 |
+| 시나리오 세트 폴더 `runs/scenarios`(입력 `inputs/`와 실행 폴더) | `--runs`(`score_scen_f1.py`, `score_scen_f1_macro.py`), `--root`(`run_scenarios.py`), 경로 인자(`score_scen.py runs`, `score_scen_1s.py`) | `scen_prep.py`가 `inputs/`를, `run_scenarios.py`가 실행 폴더를 만듦 |
+
+GPT 실행기는 `--env`로 준 파일(`backend/.env`)의 `OPENAI_API_KEY`를, Claude 실행기는 `--env`로 준 파일의 `ANTHROPIC_API_KEY`를 읽습니다. 아래 명령은 실험 때 돌린 순서대로 적었습니다.
 
 ```powershell
 $P = "experiments\eval_llm_2026-11-09"
@@ -154,9 +162,10 @@ python "$P\tools\cell_windows.py" $K E5_J "$P\stage2_prep"
 python "$P\tools\run_gpt.py" --kit $K --arm E5_C0 --model gpt-4o-mini-2024-07-18 --env backend\.env --cache "$P\cache" --out "$P\runs\gpt-4o-mini-2024-07-18_E5_C0"
 python "$P\tools\run_gpt.py" --kit $K --arm E5_J --windows "$P\stage2_prep\E5_J_cell_windows.txt" --model gpt-4o-mini-2024-07-18 --env backend\.env --cache "$P\cache" --out "$P\runs\gpt-4o-mini-2024-07-18_E5_J_cells"
 python "$P\tools\run_claude.py" --kit $K --arm E5_C0 --model claude-haiku-5-5 --env <ANTHROPIC_API_KEY가 든 env 파일> --cache "$P\cache" --out "$P\runs\claude-haiku-5-5_E5_C0"
-# 1초 변형(호출 없음)과 채점(키트 폴더에서)
+# 1초 변형(호출 없음)과 채점
 python "$P\tools\one_second.py" $P $K "<앞선 Jev 실험의 기록 실행 폴더>"
-python score.py --data data/E5_J.jsonl --answers <runs 폴더>\gpt-4o-mini-2024-07-18_E5_J_cells\answers.jsonl
+python "$P\tools\score.py" --kit $K --data "$K\data\E5_J.jsonl" --answers "$P\runs\gpt-4o-mini-2024-07-18_E5_J_cells\answers.jsonl"
+python "$P\tools\score.py" --kit $K --check   # 키트의 Jev 기준 답을 다시 채점해 기록된 줄과 비교
 # 규칙표 응답 시간: 작업 폴더 위치를 KIOSK_WORKSPACE로 줌, 앞선 Jev 실험의 backend 가상환경(Python 3.12)
 $env:KIOSK_WORKSPACE = "<비전 담당 작업 폴더>"
 python "$P\tools\time_rule_table.py" "<PR #77 커밋 3c936ae의 backend 폴더>" "$P\stage2_prep\E5_J_cell_windows.txt" "$P\runs\rule_table_timing\timing.json"
@@ -165,6 +174,8 @@ python -I "$P\tools\scen_prep.py" "<AI 담당의 재현 폴더>" "$P\runs\scenar
 python "$P\tools\run_scenarios.py" --set novel --model claude-haiku-5-5 --run 1 --root "$P\runs\scenarios" --cache "$P\cache" --openai-env backend\.env --anthropic-env <ANTHROPIC_API_KEY가 든 env 파일>
 python -I "$P\tools\score_scen.py" runs "$P\runs\scenarios"
 python -I "$P\tools\score_scen_1s.py" "$P\runs\scenarios"
+python -I "$P\tools\score_scen_f1.py" --repro "<AI 담당의 재현 자료>" --runs "$P\runs\scenarios"
+python -I "$P\tools\score_scen_f1_macro.py" --repro "<AI 담당의 재현 자료>" --runs "$P\runs\scenarios"
 ```
 
 `run_gpt.py` 명령에 `--print-example`을 더하면 첫 창의 프롬프트를 출력합니다.
@@ -182,6 +193,7 @@ python -m unittest discover -s experiments\eval_llm_2026-11-09\tests -v
 | `tools/run_gpt.py` | GPT 실행기(`--windows`로 물을 창을 제한) |
 | `tools/run_claude.py` | Claude 실행기. 프롬프트와 출력 파일 형식은 `run_gpt.py`와 같음 |
 | `tools/run_gemini.py` | Gemini 실행기(REST, responseSchema enum, temperature 0). HTTP 403에서 더 가지 못함 |
+| `tools/score.py` | 평가 키트의 채점기. 키트의 `score.py`와 채점이 같고, 키트 폴더를 `--kit`로 받음 |
 | `tools/cell_windows.py` | 사례 창 목록과 Jev 기준 답의 제한본(제한해도 Jev 줄이 같은지 확인용) |
 | `tools/predict_cost.py` | E5_C0 실행의 토큰 사용량으로 E5_J 실행의 비용을 예측 |
 | `tools/one_second.py` | 1초 변형 답 파일(GPT, Claude, Jev) |
