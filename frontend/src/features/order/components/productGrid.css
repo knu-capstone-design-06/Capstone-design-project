@@ -1,0 +1,57 @@
+/* 상품 카드: 사진 칸 + 글자 칸(이름 M 굵게·가격 M, 120 px). 사진 카드 목록은 탭 줄과 쪽 넘김 줄 사이를 채우며, 한 쪽의 줄 수(--rows)로
+   나눈 높이에서 글자 칸을 뺀 나머지를 사진 칸이 받습니다. 한 줄의 가장 작은 높이는 글자 칸 + 주문 확인 사진(--thumb 160) + 테두리라서,
+   그보다 짧은 창에서는 문서가 스크롤합니다. 쪽마다 줄 수가 같아 마지막 쪽에서도 카드 크기가 같습니다. */
+.kiosk .grid-area { position: relative; flex: 1 0 auto; display: flex; flex-direction: column; margin-top: var(--between); }
+/* 줄의 가장 작은 높이는 기본 테두리(--bw-base)로 셉니다. 고대비의 3 px 테두리는 그 안에서 사진 칸이 2 px씩 내줍니다. */
+.kiosk .product-grid { flex: 1 0 auto; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(var(--rows, 1), minmax(calc(var(--h-card-text) + var(--thumb) + 2 * var(--bw-base)), 1fr)); gap: var(--gap-btn); }
+/* 큰 글씨: 사진 카드 두 열 */
+.kiosk.large-text .product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+/* 크게 보기 + 말로 주문: 1080 × 1920에서도 한 줄이 사진 160을 지키지 못합니다. 줄은 하나 두고 사진 칸이 남은 높이를 받습니다. */
+.kiosk.large-view.voice-on:not(.low-screen) .product-grid { grid-template-rows: repeat(var(--rows, 1), minmax(calc(var(--h-card-text) + 2 * var(--bw-base)), 1fr)); }
+.kiosk.large-view.voice-on:not(.low-screen) .product .tile { min-height: 0; }
+.kiosk .product { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 0; overflow: hidden; text-align: left;
+  color: var(--ui-ink); background: var(--ui-surface); border: var(--bw) solid var(--ui-line); border-radius: var(--r-card); }
+@media (hover: hover) { .kiosk .product:hover { color: var(--ui-ink); background: var(--ui-surface); border-color: var(--ui-line); } }
+/* 사진과 아이콘은 칸의 가운데에 둡니다(가로·세로 모두): 상품 타일, 주문 확인 사진, 옵션 시트 사진, 그림 타일 */
+.kiosk .tile { position: relative; display: grid; place-items: center; place-content: center; flex: none; overflow: hidden; background: var(--ui-photo-tile); color: var(--ui-on-photo-tile); }
+.kiosk .product .tile { width: 100%; flex: 1 1 0; min-height: calc(var(--thumb) - 2 * (var(--bw) - var(--bw-base))); }
+/* 그림: 투명한 SVG를 그대로(섞지 않고) 칸 가운데에 맞춥니다. */
+.kiosk .tile img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; object-position: center; }
+/* 그림이 없는 상품: 분류 아이콘을 그림 칸 높이의 74 %(유리잔 그림이 칸에서 차지하는 높이)로 가운데에 둡니다. */
+.kiosk .tile-pic { height: 74%; width: auto; aspect-ratio: 1; fill: var(--ui-line); }
+.kiosk .soldout { position: absolute; left: var(--pad-3); top: var(--in); font-size: var(--fs-m); line-height: var(--lh); color: var(--ui-on-photo-tile); }
+.kiosk .product-info { display: flex; flex-direction: column; justify-content: center; height: var(--h-card-text); padding: 0 var(--pad-3); gap: 0; line-height: var(--lh); }
+.kiosk .product-info strong { font-size: var(--fs-m); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 크게 보기: 이름은 두 줄 자리의 아래에 서서, 한 줄 이름도 바로 아래 가격과 한 쌍이 되고 옆 카드의 두 줄 이름의 둘째 줄과 같은 줄에 섭니다. */
+.kiosk.large-view .product:not(.product-row) .product-info strong { display: flex; align-items: flex-end; min-height: calc(2 * var(--fs-m) * var(--lh)); white-space: normal; text-overflow: clip; }
+.kiosk .product-price { font-size: var(--fs-m); font-weight: 400; font-variant-numeric: tabular-nums; }
+/* 비활성(품절·저장 중): 옅은 바탕, 테두리 없음, 보통 굵기의 보조색 글자 */
+.kiosk .product:disabled { color: var(--ui-muted); background: var(--ui-canvas); border-color: transparent; }
+.kiosk .product:disabled .product-info strong { font-weight: 400; }
+.kiosk .product:disabled .tile img { opacity: 0.4; }
+
+/* 글자 줄(간편 화면): 이름(M 굵게)과 오른쪽 가격. 간편 화면에 큰 글씨를 더하면 줄 왼쪽에 줄 안쪽 높이의 정사각형 사진 */
+.kiosk .product-grid.as-rows { flex: none; display: flex; flex-direction: column; gap: var(--gap-btn); }
+.kiosk .grid-area:has(> .as-rows) { flex: none; }
+.kiosk .product.product-row { flex-direction: row; align-items: center; gap: var(--pad-3); height: var(--h-text-row); padding: 0 var(--pad-3); }
+.kiosk .product-row .row-thumb { display: none; }
+.kiosk .product-row .product-info { flex: 1 1 auto; flex-direction: row; align-items: center; justify-content: space-between; gap: var(--in); height: auto; padding: 0; line-height: 1.1; }
+.kiosk .product-row .product-info strong { flex: 1 1 auto; min-width: 0; }
+/* 글자 줄의 품절: 사진 칸이 없거나 작으므로 가격 오른쪽 글자로 둡니다(보이는 글자이자 버튼 이름의 일부). */
+.kiosk .product-row .row-soldout { flex: none; font-size: var(--fs-m); }
+.kiosk.large-text .product.product-row { padding-left: 0; }
+.kiosk.large-text .product-row .row-thumb { display: grid; flex: none; width: calc(var(--h-text-row) - 2 * var(--bw)); height: calc(var(--h-text-row) - 2 * var(--bw));
+  border-radius: calc(var(--r-card) - var(--bw)) 0 0 calc(var(--r-card) - var(--bw)); }
+.kiosk .product-row .row-thumb .tile-pic { width: var(--pic-m); height: var(--pic-m); }
+.kiosk .product-row .row-thumb .soldout { display: none; }
+/* 목록 위에 뜨는 자리: 목록 영역 전체 너비, 아래 끝은 목록의 아래 끝(쪽 넘김 줄 18 px 위). 상품 카드를 잠깐 덮고 탭·쪽 넘김·장바구니·
+   하단 주문 바·[화면 도움] 줄는 덮지 않습니다. 자리 자체는 누름을 받지 않고, 버튼이 있는 카드(제안·오류)만 받습니다. */
+.kiosk .popup-place { position: absolute; inset: 0; z-index: 3; display: flex; flex-direction: column; justify-content: flex-end; pointer-events: none; }
+
+@media (max-width: 760px) {
+  .kiosk .product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: none; }
+  .kiosk .grid-area, .kiosk .product-grid { flex: none; }
+  /* 좁은 화면: 사진이 정사각형(800 × 800)이므로 타일도 정사각형으로 둡니다. */
+  .kiosk .product .tile { flex: none; height: auto; aspect-ratio: 1 / 1; }
+}
