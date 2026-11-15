@@ -1,0 +1,52 @@
+/* 위 묶음: 매장 이름 줄과 단계 표시(= 화면 제목). */
+:is(.kiosk, .kiosk-banner) .header { display: flex; align-items: center; gap: var(--in); min-height: calc(var(--h-store) + var(--between)); padding: var(--between) var(--side) 0; border: 0; background: var(--ui-surface); }
+:is(.kiosk, .kiosk-banner) .store-name { margin: 0; font-size: var(--fs-store); font-weight: 700; line-height: var(--lh); color: var(--ui-store); }
+
+/* 단계 표시: 모든 모드에서 한 줄. 번호 원 34(크게 보기 47, 큰 글씨 68)와 원 사이를 잇는 선, 다른 단계의 번호와 이름은 S,
+   지금 단계는 녹색 원·흰 번호와 M 굵게의 이름(화면 제목), 지난 단계는 녹색 테두리와 확인 표시입니다. */
+:is(.kiosk, .kiosk-banner) .steps { margin: var(--in) 0 0; font-size: var(--fs-s); line-height: var(--lh); color: var(--ui-muted); }
+:is(.kiosk, .kiosk-banner) .steps ol { display: flex; align-items: center; margin: 0; padding: 0; list-style: none;
+  /* 줄 상자(M × 1.25 = 42.5)를 정수 픽셀로 올려 그 아래 자리들이 반 픽셀에 서지 않게 합니다(스크롤해 맞춘 안내가 화면 위로 0.5 px 넘지 않도록). */
+  min-height: round(up, calc(var(--fs-m) * var(--lh)), 1px); }
+:is(.kiosk, .kiosk-banner) .step { display: flex; align-items: center; gap: var(--in); flex: none; }
+:is(.kiosk, .kiosk-banner) .step:not(:last-child) { flex: 1 1 auto; }
+:is(.kiosk, .kiosk-banner) .step:not(:last-child)::after { content: ''; flex: 1 1 auto; height: 2px; margin: 0 var(--in); background: var(--ui-line); }
+:is(.kiosk, .kiosk-banner) .step .disc { display: inline-grid; place-items: center; flex: none; width: var(--step); height: var(--step); border: 2px solid var(--ui-line); border-radius: var(--r-round);
+  font-size: var(--fs-s); font-weight: 400; font-variant-numeric: tabular-nums; }
+/* 번호를 원의 가운데에: 번호의 상자를 대문자 높이와 기준선으로 잘라(숫자는 대문자 높이), 상자를 가운데에 두면 글자 모양도 가운데입니다. */
+:is(.kiosk, .kiosk-banner) .step .disc .num { display: block; line-height: 1; text-box: trim-both cap alphabetic; }
+:is(.kiosk, .kiosk-banner) .step .disc .pic { width: var(--pic-s); height: var(--pic-s); fill: currentColor; }
+:is(.kiosk, .kiosk-banner) .step .label { margin: 0; font-size: var(--fs-s); font-weight: 400; line-height: var(--lh); letter-spacing: 0; white-space: nowrap; overflow-wrap: normal; }
+:is(.kiosk, .kiosk-banner) .step.done { color: var(--ui-ink); }
+:is(.kiosk, .kiosk-banner) .step.done .disc { border-color: var(--ui-accent); color: var(--ui-accent); }
+:is(.kiosk, .kiosk-banner) .step.done::after { background: var(--ui-accent); }
+:is(.kiosk, .kiosk-banner) .step.current { color: var(--ui-ink); }
+:is(.kiosk, .kiosk-banner) .step.current .disc { background: var(--ui-accent); border-color: var(--ui-accent); color: var(--ui-on-accent); }
+:is(.kiosk, .kiosk-banner) .step.current .label { font-size: var(--fs-m); font-weight: 700; }
+:is(.kiosk, .kiosk-banner) .steps h1:focus { outline: none; }
+/* 큰 글씨: 같은 한 줄에 세 번호와 지금 단계의 이름만(두 배 크기의 세 이름은 984 px에 들어가지 않음). 줄 높이는 큰 글씨의 글자 줄과 같은 1.1입니다. */
+:is(.kiosk, .kiosk-banner).large-text .step:not(.current) .label { display: none; }
+:is(.kiosk, .kiosk-banner).large-text :is(.steps, .step .label) { line-height: var(--lh-total); }
+:is(.kiosk, .kiosk-banner).large-text .steps ol { min-height: round(up, calc(var(--fs-m) * var(--lh-total)), 1px); }
+
+/* 분류 탭과 말로 주문 줄: 같은 너비의 탭 넷(사이 18)이 줄을 채우고, 오른쪽 끝에 마이크 버튼이 섭니다(큰 글씨에서도 한 줄: 고른 탭이 넓어지면 나머지가 남은 너비를 나눕니다). */
+.kiosk .tabs-row { display: flex; align-items: center; gap: var(--between); margin-top: var(--between); }
+.kiosk .categories { flex: 1 1 auto; min-width: 0; display: grid; grid-template-columns: repeat(4, minmax(min-content, 1fr)); gap: var(--gap-btn); padding: 0; }
+.kiosk .tab { display: inline-flex; align-items: center; justify-content: center; gap: var(--pad-1); min-height: var(--h-control); min-width: 0; padding: 0 var(--in); font-size: var(--fs-m); line-height: var(--lh); white-space: nowrap; overflow-wrap: normal; color: var(--ui-ink); background: var(--ui-surface); border-color: var(--ui-line); }
+.kiosk .tab[aria-pressed=true] { color: var(--ui-on-selected); background: var(--ui-selected); border-color: var(--ui-selected); font-weight: 700; }
+.kiosk .tab .pic { width: var(--pic-m); height: var(--pic-m); fill: currentColor; flex: none; }
+.kiosk.large-text .tab { white-space: normal; padding-block: var(--pad-1); line-height: var(--lh-total); }
+/* 큰 글씨: 안쪽 여백 16 px을 지키려고 고르지 않은 탭은 아이콘을 빼고, 고른 탭은 확인 표시를 둡니다. */
+.kiosk.large-text .tab:not([aria-pressed=true]) .pic { display: none; }
+
+/* 쪽 넘김 줄: [이전] "n / m" [다음]이 카드 세 열에 맞춰 섭니다. */
+.kiosk .pager { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--gap-btn); align-items: center; margin-top: var(--gap-btn); }
+.kiosk .pager button { min-height: var(--h-control); padding: 0; font-size: var(--fs-m); line-height: var(--lh); }
+.kiosk .pager .page { text-align: center; font-size: var(--fs-s); color: var(--ui-muted); font-variant-numeric: tabular-nums; }
+
+@media (max-width: 760px) {
+  .kiosk .header { padding: var(--in) var(--in) 0; }
+  .kiosk .steps ol { flex-wrap: wrap; row-gap: var(--pad-1); }
+  .kiosk .step .label { white-space: normal; }
+  .kiosk .categories { flex-basis: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
