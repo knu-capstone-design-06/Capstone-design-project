@@ -377,11 +377,13 @@ test('1080×1920: API 응답으로 상품·옵션·수량·삭제·완료·새 �
     await screenshot(page, 'order-options-large');
     await click(page, 'options-close');
     await click(page, 'review-open');
+    assert.match(await page.locator('.review-block .simulation-note').innerText(), /모의 주문.*실제 결제나 매장 주문은 진행되지 않아요/);
     await noOverflow(page);
     await screenshot(page, 'order-review-large');
     await click(page, 'simulate-payment');
     await page.locator('.order-number').waitFor();
     assert.equal(await page.locator('.order-number').innerText(), 'DEMO-042', '서버 번호 형식을 가정하지 않음');
+    assert.match(await page.locator('.done-block .simulation-note').innerText(), /실제 결제나 매장 주문은 진행되지 않았어요/);
     await screenshot(page, 'order-complete-large');
     await click(page, 'new-order');
     await click(page, 'order-connect-retry');
