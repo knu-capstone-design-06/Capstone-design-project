@@ -17,7 +17,7 @@
 | 추론 | `app/inference/vision.py` | MediaPipe 3종 모델 불러오기와 프레임별 추론만(AGENTS.md: 직접 실행하는 모델의 로딩 · 추론 코드는 `app/inference/`에). 결과를 단순한 배열(`FrameInference`)로 넘김. 이 폴더의 `inference.py`는 같은 이름을 다시 내보내는 호환용. blendshape는 `MediaPipeModels(blendshapes=True)`일 때만 냄(기본은 꺼짐; 실행기는 `--blendshapes`로 켬) |
 | 추론 | `app/inference/head.py` · `app/inference/head_direction.py` | H1 머리 탐지기(YOLOX-Nano)와 P1 카메라 시점 분류기(ResNet-18, AI Hub 70 '촬영방향' 라벨로 학습)를 ONNX Runtime으로 CPU에서 돌림(스레드 기본 1). ONNX 파일은 `tools/export_onnx.py`가 만듦. 자리는 같은 AGENTS.md 문장(모델 로딩 · 추론 코드는 `app/inference/`)을 따름 |
 | 관측값 | `features.py` | 추론 결과로 관측값 계산(아래 CSV 열): 기하 · 연속 구간 · 밝기와 선명도. MediaPipe 없이도 돌아감 |
-| 관측값 | `columns.py` | 규칙이 쓰는 선택 열을 만듦(아래 '선택 열'): 뒤에 선 사람 수 · 동행자 상자 · 어깨 위치 · 입 움직임 · 주 사용자 머리의 P1 카메라 시점 확률(관측만) |
+| 관측값 | `columns.py` | 규칙이 쓰는 선택 열을 만듦(아래 '선택 열'): 머리 상자 트랙 · 주 사용자 트랙 · 뒤에 선 사람 수 · 동행자 상자 · 어깨 위치 · 입 움직임 · 주 사용자 머리의 P1 카메라 시점 확률(관측만) · 모든 머리 상자와 단서(관측만) |
 | 사건 | `events.py` | 관측값 줄을 사건으로 묶음(8종, 아래 '상황 층'). 고개를 한 번 돌린 것은 사건 하나. 창 길이 · 횟수 · 각도 · 품질 하한은 모두 `PilotParams`(기본값 없음, `[파일럿]`) |
 | 상황 | `situation.py` | 상황 태그 규칙 3개 구현, 값은 `[파일럿]`. 창마다 한 줄(근거 사건 · 품질 · 확신 정보 · 대안)을 내고 검사 규칙으로 확인함. 재생 · 실시간 실행기가 창마다 부름(`run.py` · 엔드포인트는 부르지 않음) |
 | 판단 | `judgment/rule_table_v0.py` · `judgment/jev_stub.py` | 장면 3-1 · 3-2 · 4-1 · 4-2의 규칙표 v0: 창마다 지원 하나 · 출력 형태 · 전이를 냄. Jev 질문은 만들어 기록만 함(그림자 모드, 아래 '기존 재생용 규칙표 v0') |
@@ -30,6 +30,7 @@
 | `models/` | MediaPipe 모델 내려받기 스크립트, ONNX 모델 2개의 해시 · 만드는 법, 출처 · 라이선스(가중치는 Git에 없음) |
 | `params.py` | 실행 파이프라인의 값과 출처(`PilotParams`, 기본값 있음), 값 묶음 파일 읽기(상황 규칙 13개는 기본값 없음) |
 | `tools/export_onnx.py` | H1 · P1 체크포인트를 ONNX로 바꿈. torch · YOLOX가 든 별도 환경에서 돌림(`models/README.md`) |
+| `tools/companion_eval.py` | 사람 라벨이 있는 녹화로 동행자 · 뒤 사람 단서와 주 사용자 트랙을 평가함: 재생, 단서 분포, 경계 후보별 라벨 일치율, 확인 시트. 평가 전용이라 값을 정하지 않음(아래 '머리 트랙과 역할') |
 | `requirements.txt` | 이 모듈만 쓰는 패키지(mediapipe 0.10.33 · onnxruntime 1.30.0 고정). 서버 `requirements.txt` · Dockerfile은 그대로 |
 
 ## 현재 상태 (2026-10-22)
@@ -52,7 +53,7 @@
 | 태그 이름 | 표시 문구 | 묶는 관찰(같은 창 안) | 빼는 조건 | 근거 수준 |
 |---|---|---|---|---|
 | `looking_back_with_people_behind` | 뒤에 사람이 있어 서두르는 듯함 | 뒤에 기다리는 사람(주 사용자보다 작은 상자, 뒤쪽, 멈춰 선 사람만) + 뒤돌아봄(yaw 커짐, 얼굴 점 사라짐, 어깨 점 남음, 복귀)의 반복. 터치 빨라짐 · 빗나감과 표정 변동은 보조 근거 | 지나가는 사람만 있을 때, 뒤돌아봄 없이 뒷사람만 있을 때(붐빔 자체는 근거가 아님) | 문헌 + AI Hub 71827 일부(뒷사람의 높이 비). 뒤돌아봄은 측정 전 |
-| `consulting_companion` | 일행과 상의하는 듯함 | 동행자(비슷한 크기의 두 번째 상자, 옆) + 주 사용자 yaw가 일행 쪽 + 입 움직임(blendshape, 켜야 함) + 안 누르고 머묾, 몸 점 제자리 | Face Landmarker의 `num_faces`를 2 이상으로 두면 smoothing이 꺼짐(현재 코드는 `num_faces=1`, 얼굴 수는 별도 검출기로 셈). 흔들림을 입 움직임으로 세지 않음 | AI Hub 71827 동행 라벨 + 문헌. 말함은 측정 전 |
+| `consulting_companion` | 일행과 상의하는 듯함 | 동행자(비슷한 크기의 두 번째 상자, 옆) + 주 사용자 yaw가 일행 쪽 + 입 움직임(blendshape, 켜야 함) + 안 누르고 머묾, 몸 점 제자리. 입 움직임을 관측하지 못하면(blendshape 꺼짐, 값 없음) 그 조건은 결측으로 보고 조건 묶음에서 빼며, 근거(`evidence`)에는 실제로 쓴 단서만 남고 `confidence.quality_ok`가 거짓이 됨 | Face Landmarker의 `num_faces`를 2 이상으로 두면 smoothing이 꺼짐(현재 코드는 `num_faces=1`, 얼굴 수는 별도 검출기로 셈). 흔들림을 입 움직임으로 세지 않음 | AI Hub 71827 동행 라벨 + 문헌. 말함은 측정 전 |
 | `looking_around` | 무언가를 찾는 듯함 | 화면 밖으로 크게 오가는 yaw 왕복(창 안 횟수) + 몸 점 제자리 + 터치 없음 + 뒤에 사람 없음 | 메뉴 읽기의 작은 yaw(범위는 `[파일럿]`) | 문헌. 71827에는 없음 |
 
 - 역할: 목표 구조 제안(팀 합의 전)에서는 비전 쪽이 관측값과 상황 태그를 창 출력으로 제공하고, backend가 터치 로그와 함께 Jev로 판단해 접근성 기능을 고릅니다. 표정은 근거 하나로만 쓰고 혼자 쓰지 않습니다. 감정 이름과 결제 수단은 태그에 넣지 않습니다.
@@ -65,9 +66,9 @@
 녹화 재생(`replay.py`)과 웹캠 실시간(`live.py`)이 같은 파이프라인(`chain.py`)을 씁니다. 파이프라인은 프레임마다 한 줄을 만들고, `segment_s`초마다 창 하나를 판단하며, 입력이 끝나면 남은 구간을 길이를 적은 창(`partial`) 하나로 더 판단합니다.
 
 ```
-프레임 ─ MediaPipe 3종 + blendshape ─ features.Observer 한 줄 ─────────┐
-       └ H1 머리 상자 ─ 주 사용자 · 동행자 · 뒤 사람 ─ P1 카메라 시점 ─┤ columns.py: 선택 열
-터치 로그 ─ touch.py: 영상 시간축, 직전 줄 이후의 누름 · 버튼 밖 누름 ───┘
+프레임 ─ MediaPipe 3종 + blendshape ─ features.Observer 한 줄 ─────────────────────┐
+       └ H1 머리 상자 ─ 트랙 · 주 사용자 트랙 · 동행자 · 뒤 사람 ─ P1 카메라 시점 ─┤ columns.py: 선택 열
+터치 로그 ─ touch.py: 영상 시간축, 직전 줄 이후의 누름 · 버튼 밖 누름 ─────────────┘
 segment_s마다 ─ situation.assess([t − window_s, t]) + 모름 이유
               ─ 구간 (t − segment_s, t]의 터치 횟수 · measurable · 화면 · 고개 방향
               ─ judgment/rule_table_v0.py: 지원 하나 · 형태 · 전이 (Jev 질문은 기록만)
@@ -135,6 +136,8 @@ segment_s마다 ─ situation.assess([t − window_s, t]) + 모름 이유
  "screen": {"name": "menu", "steps_left": 2, "pause_s": 4.5, "options_open": false},
  "vision": {"frames": 10, "face_seen_ratio": 1.0, "body_seen_ratio": 1.0, "head_count_max": 1.0,
             "people_behind_max": 0.0, "companion_frames": 0, "mouth_motion_max": null, "facing_screen": true},
+ "turns": [{"event_id": "yaw_sweep_offscreen@10", "kind": "yaw_sweep_offscreen", "t_start": 1.0, "t_end": 1.4,
+            "obs": {"yaw_deg": 55.0, "side": "right", "offscreen_s": 0.4}}, "..."],
  "measurable": true,
  "decision": {"transition": "open", "support": "highlight_next_action", "scene": "4-2", "action": "apply",
               "intervention": "바로 적용", "rank": 7, "scope": ["screen", "menu", 1.0], "withdraw_on": "cart_progress",
@@ -160,6 +163,7 @@ segment_s마다 ─ situation.assess([t − window_s, t]) + 모름 이유
 - `screen`: 그 시각의 화면(`menu` · `review` · `complete`; 로그가 멈춘 뒤는 `null`), 주문 끝까지 남은 화면 수, 이 화면 방문에서 누른 뒤 지난 초(`pause_s`; 이 방문에서 아직 누르지 않았으면 `null`), 옵션 창이 열려 있는지(`options_open`)입니다.
 - `vision.facing_screen`: 구간에서 얼굴이나 몸을 마지막으로 본 프레임 기준으로, 얼굴이 보이고 |yaw|가 `offscreen_yaw_deg` 미만이면 참, 그 이상이면 거짓입니다. 그 프레임에 얼굴 없이 몸만 보이면 고개 방향을 못 잰 것이라 `null`이고(터치 행은 올린 기준으로 봄, tree §4 ⑦), 본 프레임이 없거나 값 묶음이 없어도 `null`입니다.
 - `measurable`: 팀 자리표시자(`app/inference/placeholder.py`)와 같은 뜻입니다. 구간에 누름이나 되돌아감이 있거나 얼굴이 한 번이라도 보이면 참입니다. JP §0-1 2항의 뜻(고른 뒤 멈춤 같은 터치 단서와 카메라 관측도 셈)과 맞추는 일은 2026-10-14 안건 3이라, 여기서는 자리표시자의 뜻을 따릅니다.
+- `turns`: 창 안의 고개 돌림 사건(`look_back` · `yaw_sweep_offscreen`) 목록입니다. 사건마다 `event_id` · `kind` · `t_start` · `t_end`와 관찰 값(`obs`)이 있고, 뒤돌아봄은 아래 '사건 8종'의 맥락 값 넷도 담습니다. 관측 기록이라 계약 변환 출력에는 넣지 않습니다. 값 묶음이 없으면 사건을 찾지 않으므로 `null`입니다.
 - `session_reset`: 터치 로그의 세션(`sessionId`)이 바뀐 창이면 참이고, 그 창부터 판단 상태(유지 중인 결정 · 거절 · 거둔 목록)를 처음부터 다시 셉니다(tree §4 ①). 세션이 바뀐 뒤의 창은 새 세션의 첫 기록 이후 관측 줄만 읽습니다. 그래서 이전 사용자의 관측은 상황 · `measurable` · 고개 방향에 들어가지 않습니다. `partial`은 입력의 마지막 남은 구간을 판단한 창에만 있고 그 길이를 적습니다.
 
 ### 기존 재생용 규칙표 v0 (`judgment/rule_table_v0.py`)
@@ -229,25 +233,28 @@ JP §0-2 · §0-3과 장면 표, tree 표 3-가 · 3-나 · §4에서 장면 4�
 
 요청 쪽 제안(`VisionFeatures` 선택 칸): 위 `contract`에는 관측값이 없습니다. 관측값은 창마다 창 기록의 `vision` 칸에 담깁니다(`chain.vision_summary`, 위 '창 한 줄').
 
-- 제안: `VisionFeatures`에 `vision`의 값 8개를 선택 칸으로 더합니다. `frames`(구간의 프레임 수) · `face_seen_ratio` · `body_seen_ratio`(얼굴 · 몸을 본 프레임 비율) · `head_count_max`(머리 상자 수의 최댓값) · `people_behind_max`(뒤에 선 사람 수의 최댓값) · `companion_frames`(동행자 상자가 있는 프레임 수) · `mouth_motion_max`(입 움직임의 최댓값) · `facing_screen`(위 '창 한 줄')입니다. 값은 구간 (t − `segment_s`, t]의 요약입니다. `frames`와 `companion_frames`는 개수라 늘 숫자입니다. 얼굴 · 몸 비율은 프레임이 없으면 `null`입니다. 프레임이 있으면 상태 열(`face_state` · `body_state`)이 '보임'인 프레임 수를 구간의 프레임 수로 나누므로, 상태 값이 없는 프레임은 못 본 프레임으로 셉니다(상태 값이 모두 없으면 0). 최댓값 3개(`head_count_max` · `people_behind_max` · `mouth_motion_max`)는 구간에 유한한 값이 없으면(프레임이 없거나, 그 열이 없거나, 모두 빈칸) `null`이고, `facing_screen`은 위 '창 한 줄'의 규칙을 따릅니다. `companion_frames`는 머리 탐지기가 없어도 0이라 '동행자 없음'과 구분되지 않습니다.
+- 제안: `VisionFeatures`에 `vision`의 값 8개를 선택 칸으로 더합니다. `frames`(구간의 프레임 수) · `face_seen_ratio` · `body_seen_ratio`(얼굴 · 몸을 본 프레임 비율) · `head_count_max`(머리 상자 수의 최댓값) · `people_behind_max`(뒤에 선 사람 수의 최댓값) · `companion_frames`(동행자 상자가 있는 프레임 수) · `mouth_motion_max`(입 움직임의 최댓값) · `facing_screen`(위 '창 한 줄')입니다. 값은 구간 (t − `segment_s`, t]의 요약입니다. `frames`와 `companion_frames`는 개수라 늘 숫자입니다. 얼굴 · 몸 비율은 프레임이 없으면 `null`입니다. 프레임이 있으면 상태 열(`face_state` · `body_state`)이 '보임'인 프레임 수를 구간의 프레임 수로 나누므로, 상태 값이 없는 프레임은 못 본 프레임으로 셉니다(상태 값이 모두 없으면 0). 최댓값 3개(`head_count_max` · `people_behind_max` · `mouth_motion_max`)는 구간에 유한한 값이 없으면(프레임이 없거나, 그 열이 없거나, 모두 빈칸) `null`이고, `facing_screen`은 위 '창 한 줄'의 규칙을 따릅니다. `companion_frames`는 머리 탐지기가 없거나 동행자인지 모를 때(경계값이 없는 기본 상태)도 0이라 '동행자 없음'과 구분되지 않습니다.
 - 기존 4칸(`face_detected` · `face_size_ratio` · `assistive_device` · `confidence`)은 그대로 둡니다. 이 모듈은 아직 그 4칸을 채우지 않고, 필수 칸 `face_detected` · `confidence`를 무엇으로 채울지는 정하지 않았습니다(2026-10-14 안건 V04).
 - 처음 제안(관측값 14개 + `situations[]`, 2026-10-10)은 프레임 한 장의 값을 보내는 안이었습니다. 현재 재생 파일에서는 관측값을 창 요약으로 남기고, 상황 태그와 로컬 규칙표 결과를 `extension`에 담습니다. 프레임마다의 값은 재생의 `rows.csv`에 남습니다. P1의 `head_dir_*`는 관측만 하는 열이라 제안에 넣지 않았습니다.
 - 비전 값의 전달 경로와 형식을 합의한 뒤, 필요한 명세 변경은 이 README와 따로 목적 하나만 담은 PR로 올립니다(AGENTS.md 1장). `contract/`는 공용 영역이라 새 칸 추가도 PR 리뷰를 거치고, 그 형식을 쓰는 코드와 샘플을 같은 때 맞추거나 맞출 일정을 그 PR 본문에 적습니다(AGENTS.md 2장).
 
 ### [파일럿] 값과 출처 (`params.py`)
 
-실행 파이프라인이 새로 쓰는 값입니다. 모두 기본값이 있고, 값마다 출처 문장이 코드(`PilotParams` 필드의 `source`)와 `meta.json`에 함께 있습니다. `[파일럿]` 값 11개는 표준도 측정 자료도 없는 시작값이라, 촬영(2026-10-28) 전에 출처나 공개 데이터로 바꾸거나 값 묶음 여러 개로 결과를 나란히 보입니다.
+실행 파이프라인이 새로 쓰는 값입니다. 모두 기본값이 있고(동행자 · 뒤 사람 경계 3개의 기본값은 '값 없음'), 값마다 출처 문장이 코드(`PilotParams` 필드의 `source`)와 `meta.json`에 함께 있습니다. `[파일럿]` 값 11개는 표준도 측정 자료도 없는 시작값이라, 촬영(2026-10-28) 전에 출처나 공개 데이터로 바꾸거나 값 묶음 여러 개로 결과를 나란히 보입니다.
 
 | 값 | 기본값 | 단위 | 출처 |
 |---|---|---|---|
 | `head_score_min` | 0.65 | 점수 0~1 | 데이터: H1의 Open Images 검증 전부(입력 416)에서 F1이 가장 큰 점수 기준(정밀도 0.682 · 재현율 0.676). 키오스크 시점 값 아님 |
 | `head_nms_iou` | 0.65 | IoU 0~1 | 관행값: YOLOX `yolox_base.py`의 `nmsthre` 기본값(H1 평가 설정과 같음) |
 | `primary_rule` | `face_then_largest` | — | `[파일럿]` 규칙(위 '선택 열') |
-| `companion_min_area_ratio` | 0.5 | 넓이 비 | `[파일럿]` 시작값: 길이 비 약 0.71, 대략 1.4배 먼 머리까지 '비슷한 크기'(아래 상황 태그 규칙표, 촬영 대본 §1-1에서 C는 A와 같은 거리) |
-| `companion_max_dist_widths` | 3.0 | 주 사용자 머리 폭 | `[파일럿]` 시작값(아래 상황 태그 규칙표의 '옆') |
-| `behind_max_area_ratio` | 1.0 | 넓이 비 | 아래 상황 태그 규칙표의 '주 사용자보다 작은 상자' |
 | `mouth_dials` | jaw · mouth로 시작하는 27개 | — | Apple ARKit `ARFaceAnchor.BlendShapeLocation`의 'Mouth and Jaw' 묶음, 아래 상황 태그 규칙표의 '입 다이얼' |
 | `mouth_baseline_s` | 2.0 | 초 | `[파일럿]` 시작값(입 움직임은 사람별 기준선을 뺀 변화로 봄) |
+| `track_iou_min` | 0.3 | IoU 0~1 | 관행값: SORT 공개 구현(`abewley/sort`의 `sort.py`)의 `iou_threshold` 기본값. 논문(Bewley 외, ICIP 2016) §3.3은 최소 IoU를 두지만 값은 적지 않음. 이 모듈은 칼만 예측 없이 직전 상자와 견주고, 헝가리안 대신 IoU 큰 순으로 배정 |
+| `track_max_gap_s` | 1.0 | 초 | `[파일럿]` 시작값: `segment_s`와 같은 값. 이만큼 넘게 상자가 없는 트랙은 끝남 |
+| `role_window_s` | 2.0 | 초 | `[파일럿]` 시작값: `mouth_baseline_s`와 같은 값(같은 사람의 직전 구간 중앙값) |
+| `companion_rel_dist_max` | 없음 | 상대 거리 | 정할 수 없음: 아래 상황 태그 규칙표의 '비슷한 크기'. 값 묶음별 곡선으로 보고(촬영본은 평가에만 씀) |
+| `companion_lateral_min` | 없음 | 주 사용자 머리 높이 | 정할 수 없음: 같은 규칙표의 '옆'. 값 묶음별 곡선으로 보고 |
+| `behind_rel_dist_min` | 없음 | 상대 거리 | 정할 수 없음: 같은 규칙표의 '뒤쪽'. 값 묶음별 곡선으로 보고. '주 사용자보다 작은 상자'(상대 거리 > 1)는 값과 상관없이 늘 봄 |
 | `segment_s` | 1.0 | 초 | 계약 `sendFeatureWindow`의 '1~3초 구간' 안에서 고른 `[파일럿]` 값 |
 | `touch_span_s` | 5.0 | 초 | `[파일럿]` 시작값: 4-1(빗나감 뒤 바로 고침) · 4-2(되돌아감)의 터치 단서를 세는 최근 구간 |
 | `tremor_miss_min` | 2 | 번 | `[파일럿]` 읽기: tree 표 3-가 4-1 '빗나감 · 바로 고침 반복'의 '반복'을 2번 이상으로 읽음(버튼 밖 누름 뒤 그 옆 버튼을 바로 누른 횟수) |
@@ -388,7 +395,7 @@ out, events = assess(rows, t_end, params, landmarker_num_faces=1)  # 창 = [t_en
 
 | 사건 | 찾는 방법 | 쓰는 규칙 |
 |---|---|---|
-| `look_back` 뒤돌아봄 | 화면을 보던 얼굴이 `offscreen_yaw_deg`를 넘어 돌아가고, 얼굴 점이 사라진 동안 어깨 점이 남고(`shoulder_vis_min`), 다시 화면 쪽으로 돌아옴. yaw 변화 · 얼굴 사라짐 · 어깨 남음을 따로 세지 않고 사건 하나로 셈 | 1 · 3 |
+| `look_back` 뒤돌아봄 | 화면을 보던 얼굴이 돌아가는 동안 얼굴 점이 사라지고 어깨 점이 남고(`shoulder_vis_min`), 다시 화면 쪽으로 돌아옴. 시작은 두 길: 얼굴이 `offscreen_yaw_deg`를 넘어 돌아감, 또는 화면을 보던 얼굴의 점이 어깨 점을 남긴 채 바로 사라짐(크게 돌린 고개는 yaw가 커지기 전에 얼굴 점이 사라지기 때문). 두 번째 길에서 화면 밖 yaw가 한 번도 보이지 않은 돌림은 얼굴이 `gap_s`보다 오래 사라졌을 때만 셈(더 짧은 사라짐은 `gap_s`가 잇는 잠깐 끊김). 그 사건은 `yaw_deg` · `side`가 비어 있음. 뒤돌아봄마다 맥락 값 넷을 함께 적음(돌아봄과 고개 숙임 · 가림을 나중에 가르는 데 쓰는 관측, 기준값 없음): `pre_loss_yaw_deg` · `pre_loss_pitch_deg`(돌림 시작 전 `mouth_baseline_s`초 동안 화면을 본 프레임의 yaw · pitch 중앙값), `loss_duration_s`(첫 사라짐 프레임부터 마지막 사라짐 프레임까지), `shoulder_vis_mean`(사라진 프레임의 어깨 보임 평균) yaw 변화 · 얼굴 사라짐 · 어깨 남음을 따로 세지 않고 사건 하나로 셈 | 1 · 3 |
 | `yaw_sweep_offscreen` 화면 밖 고개 돌림 | 같은 돌림인데 얼굴이 끝까지 보임. 돌아간 쪽(왼쪽 · 오른쪽)을 함께 적음 | 3 |
 | `people_behind` 뒤에 선 사람 | `people_behind_count`가 1 이상인 구간이 `stay_min_s` 이상 이어짐. 더 짧으면 지나가는 사람으로 보고 세지 않음 | 1 · 3(빼는 조건) |
 | `companion_present` 동행자 | `companion_box`가 있는 구간(머문 시간 조건 없음) | 2 |
@@ -457,15 +464,43 @@ out, events = assess(rows, t_end, params, landmarker_num_faces=1)  # 창 = [t_en
 
 | 열 | 뜻 | 만드는 곳 |
 |---|---|---|
-| `people_behind_count` | 주 사용자 뒤에 선 사람 수: 주 사용자 · 동행자가 아닌 머리 상자 가운데 넓이가 주 사용자의 `behind_max_area_ratio`배 미만인 것(위 상황 태그 규칙표의 '주 사용자보다 작은 상자'). 머리가 하나도 없으면 0. 멈춰 섰는지는 사건 층(`stay_min_s`)이 봄 | `columns.py`(H1 머리 상자). H1 파일이 없으면 열이 없음(결측) |
-| `companion_box` | 주 사용자가 아닌 머리를 큰 순서로 보며, 넓이 비 `companion_min_area_ratio` 이상('비슷한 크기')이고 머리 중심 사이가 주 사용자 머리 폭의 `companion_max_dist_widths`배 이하('옆')인 첫 머리의 상자 `(x0, y0, x1, y1)`, 화면 비율. 맞는 머리가 없으면 `None`. '옆'에 가로 방향 조건은 없어(출처 없음) 바로 뒤의 비슷한 크기 머리도 동행자로 셀 수 있음 | 같은 곳 |
+| `people_behind_count` | 주 사용자 뒤에 선 사람 수: 이 프레임의 머리 상자 가운데 트랙의 역할이 `behind`인 것(아래 '머리 트랙과 역할'). 주 사용자 말고 다른 머리가 없으면 0. 뒤 사람인지 모르는 머리가 있으면 빈칸(결측). 멈춰 섰는지는 사건 층(`stay_min_s`)이 봄 | `columns.py`(H1 머리 상자). H1 파일이 없으면 열이 없음(결측) |
+| `companion_box` | 트랙의 역할이 `companion`인 머리 가운데 이 프레임에서 가장 큰 상자 `(x0, y0, x1, y1)`, 화면 비율. 다른 머리가 모두 동행자가 아니라고 정해지면 `None`. 동행자는 없고 역할을 모르는 머리가 있으면 그 줄에 이 열을 넣지 않음(사건 층은 '동행자 모름'으로 읽음). `rows.csv`에서는 두 경우 모두 빈칸이라 `head_boxes`의 역할로 가름 | 같은 곳 |
 | `mouth_motion` | 입 · 턱 blendshape 27개(`mouth_dials`) 가운데 기준선에서 가장 많이 바뀐 값. 기준선은 같은 얼굴 연속 구간의 직전 `mouth_baseline_s`초 중앙값입니다(사람별 기준선을 뺀 변화만 씀). 얼굴을 못 본 프레임, 연속 구간이 `mouth_baseline_s`보다 짧은 동안, blendshape를 끈 실행은 빈칸 | `columns.py`(MediaPipe blendshape, 실행기에 `--blendshapes`를 줄 때만 켬) |
 | `shoulder_cx` · `shoulder_cy` | 어깨 두 점(11 · 12)의 가운데, 화면 비율. 몸을 못 본 프레임은 빈칸 | `columns.py`(몸 점) |
 | `tap_count` · `miss_tap_count` | 직전 줄 이후의 누름 · 버튼 밖 누름 횟수(아래 '터치 로그'). 이름과 뜻은 `contract/frontend-backend.openapi.yaml`의 `TouchFeatures`를 따르고(0 이상의 정수), 세는 구간만 프레임 간격. 터치 로그가 관측하지 않은 구간의 줄은 빈칸(아래 '터치 로그')이고, 대상 정보가 없는 누름이 든 구간은 `miss_tap_count`가 빈칸 | `touch.py` · `chain.py`(재생만. 실시간에는 터치 로그가 없음) |
-| (관측만) `head_count` · `primary_box` · `primary_score` · `primary_from` | 머리 상자 수, 주 사용자 머리 상자 · 점수 · 고른 방법(`face` = 얼굴을 품은 상자, `largest` = 가장 큰 상자). 읽는 규칙 없음 | `columns.py` |
+| (관측만) `head_count` · `primary_box` · `primary_score` · `primary_from` | 머리 상자 수, 주 사용자 머리 상자 · 점수 · 고른 방법(`track` = 앞 프레임부터 이어진 주 사용자 트랙, `face` = 이 프레임에서 얼굴을 품은 상자로 새로 고름, `largest` = 이 프레임에서 가장 큰 상자로 새로 고름). 주 사용자 트랙이 살아 있지만 이 프레임에 상자가 없으면 `primary_box`는 빈칸. 읽는 규칙 없음 | `columns.py` |
+| (관측만) `primary_track` | 주 사용자 트랙 번호. 트랙이 살아 있는 동안은 이 프레임에 상자가 없어도 적음 | `columns.py` |
+| `face_in_primary` | Face Landmarker가 따라가는 얼굴의 중심이 주 사용자 머리 상자 안에 있는지(참 · 거짓). 얼굴이나 주 사용자가 없으면 빈칸. 주 사용자 트랙은 살아 있는데 이 프레임에 그 상자가 없으면, 얼굴 중심이 다른 트랙의 머리 상자 안에 있을 때 거짓이고 어느 머리 상자 안에도 없을 때 빈칸(머리 탐지기가 주 사용자 머리를 놓쳤을 수 있음). 거짓이면 그 얼굴은 다른 사람의 것이라, 그 줄의 얼굴 값 15개(`columns.FACE_VALUE_COLUMNS`: 고개 각도 · 눈 사이 거리 · 얼굴 위치 · 얼굴 상자 밝기와 선명도)와 `mouth_motion`을 비움. 사건 층은 이를 주 사용자의 값이 아닌 결측으로 읽음 | `chain.py`(`columns.FACE_VALUE_COLUMNS`) |
+| (관측만) `face_track` | 얼굴 중심을 품은 가장 큰 머리 상자의 트랙 번호(Face Landmarker가 누구의 얼굴을 따라가는지). 없으면 빈칸 | `chain.py` |
+| (관측만) `head_boxes` | 이 프레임의 모든 머리 상자(H1 순서). 상자마다 `track`(트랙 번호) · `cx` · `cy` · `w` · `h`(화면 비율) · `score`(H1 점수) · `role`(`primary` · `companion` · `behind` · `other` · `unknown`) · `rel_dist` · `lateral`(이 프레임의 단서) · `rel_dist_med` · `lateral_med`(직전 `role_window_s`초 중앙값). 주 사용자 상자와 계산할 수 없는 단서는 `null`. `rows.csv`에는 JSON 한 칸으로 쓰고, 머리가 없으면 `[]` | `columns.py` |
 | (관측만) `head_dir_middle` · `head_dir_up` · `head_dir_left` · `head_dir_right` · `head_dir_back` | 주 사용자 머리의 P1 카메라 시점 확률(중간 · 위 · 좌 · 우 · 뒤; AI Hub 70 '촬영방향' = 카메라가 사람을 보는 방향, 고개 방향이 아님). 읽는 규칙 없음. 한계는 아래 'P1 표시 이름과 한계' | `columns.py`(P1) |
 
-주 사용자는 `primary_rule`(`[파일럿]` 규칙)로 고릅니다. 기본값 `face_then_largest`는 Face Landmarker가 따라가는 얼굴의 중심(`face_cx`, `face_cy`)을 품은 머리 상자 가운데 가장 큰 것을 고르고, 그런 상자가 없으면 가장 큰 상자를 고릅니다(같으면 화면 가운데에 가까운 것). 얼굴을 품은 상자를 고른 프레임(`primary_from` = `face`)에서는 yaw · 입 움직임 · 머리 상자가 같은 사람의 값입니다. 얼굴을 못 본 프레임은 가장 큰 상자를 고르므로 사람이 바뀔 수 있습니다.
+### 머리 트랙과 역할 (2026-11-04부터)
+
+머리 상자는 프레임마다 트랙으로 이어집니다. 상자 하나는 직전 상자와 가장 많이 겹치는 살아 있는 트랙에 붙고(IoU가 큰 순서, `track_iou_min` 이상), 붙을 트랙이 없으면 새 트랙이 됩니다. SORT의 연결 단계를 줄여 쓴 것으로, 칼만 예측 없이 직전 상자와 견주고 헝가리안 대신 IoU 큰 순서로 배정합니다. `track_max_gap_s`초 넘게 상자가 없는 트랙은 끝납니다.
+
+주 사용자는 트랙입니다. 주 사용자 트랙이 살아 있는 동안은 그 트랙이 주 사용자이고, 트랙이 끝난 뒤에만 `primary_rule`(`[파일럿]` 규칙)로 새로 고릅니다. 기본값 `face_then_largest`는 Face Landmarker가 따라가는 얼굴의 중심(`face_cx`, `face_cy`)을 품은 머리 상자 가운데 가장 큰 것을 고르고, 그런 상자가 없으면 가장 큰 상자를 고릅니다(같으면 화면 가운데에 가까운 것). 고른 뒤에는 Face Landmarker가 따로 얼굴을 따라갑니다. 얼굴 중심이 `primary_box` 밖에 있는 프레임은 얼굴이 다른 사람의 것이므로, 그 프레임의 얼굴 값과 입 움직임을 비우고 `face_in_primary`를 거짓으로 적습니다(위 '선택 열'). 주 사용자 트랙이 살아 있지만 그 프레임에 상자가 없을 때(`track_max_gap_s` 안)도, 얼굴 중심이 다른 트랙의 머리 상자 안에 있으면 똑같이 비우고 거짓으로 적습니다. 얼굴 중심이 어느 머리 상자 안에도 없으면 머리 탐지기가 주 사용자 머리를 놓친 경우일 수 있어서, 값을 그대로 두고 `face_in_primary`를 빈칸으로 적습니다. 터치 로그의 `sessionId`가 바뀌면 트랙 · 주 사용자 · 단서 기록을 처음부터 다시 시작하고, 그 세션의 첫 프레임에서 주 사용자를 새로 고릅니다(새 세션은 처음부터 다시 판정). 트랙 번호는 한 실행 안에서 겹치지 않게 이어서 셉니다.
+
+주 사용자가 아닌 트랙마다 주 사용자와 함께 보인 프레임에서 단서 두 개를 잽니다.
+
+- 상대 거리 `rel_dist` = 주 사용자 머리 상자 높이 ÷ 그 머리 상자 높이(주 사용자 = 1). 핀홀 카메라에서 머리 상자 크기는 카메라와의 거리에 반비례하므로, 머리 크기가 비슷하면 카메라에서 떨어진 거리를 주 사용자와 견준 값이 됩니다. 머리가 작은 사람(아이)은 실제보다 멀게 읽힙니다. 폭 대신 높이를 쓰는 까닭은 화면 왼쪽 · 오른쪽 끝에서 높이가 덜 잘리기 때문입니다.
+- 옆 거리 `lateral` = (그 머리 중심 x − 주 사용자 머리 중심 x) ÷ 주 사용자 머리 높이, 픽셀 단위. 부호가 있고 +는 화면 오른쪽입니다. 화면 위의 가로 차를 주 사용자 머리 크기로 잰 값이고, 그 사람의 머리 크기로 잰 옆 거리(옆 거리 × 상대 거리)는 규칙에 쓰지 않습니다(평가 도구의 `lateral_x_rel`에만 있음).
+
+트랙마다 직전 `role_window_s`초 단서의 중앙값으로 역할을 정합니다. 주 사용자가 바뀌면 단서 기록을 새로 시작합니다.
+
+| 역할 | 조건(모두 중앙값) |
+|---|---|
+| `companion` 동행자 | 상대 거리 ≤ `companion_rel_dist_max`('비슷한 크기'), \|옆 거리\| ≥ `companion_lateral_min`('옆') |
+| `behind` 뒤 사람 | 상대 거리 > 1('주 사용자보다 작은 상자'), 상대 거리 ≥ `behind_rel_dist_min`('뒤쪽'), 동행자가 아님 |
+| `other` | 동행자도 뒤 사람도 아니라고 정해짐(예: 주 사용자보다 큰 머리가 옆에 있지 않음) |
+| `unknown` | 경계값이 없거나 창 안에 단서가 없어 정할 수 없음 |
+
+경계값 3개는 출처가 없어 값이 없습니다. 녹화로 값을 정하지 않고, 값 묶음별 곡선으로 보고합니다(촬영본은 평가에만 씀). 값 묶음 파일의 `chain`에 값을 넣기 전에는 동행자 여부와 주 사용자보다 작은 머리의 뒤 사람 여부가 `unknown`입니다. 그래서 다른 머리가 보이는 프레임은 `companion_box` 열이 빠지고, 주 사용자보다 작은 머리가 보이면 `people_behind_count`도 빈칸입니다. 단서는 그때도 `head_boxes`에 프레임마다 남습니다.
+
+넓이 비 0.5배('비슷한 크기')와 머리 폭 3.0배 거리('옆') 조건은 2026-11-04에 뺐습니다. 10-28 팀 촬영(평가 전용)에서 넓이 비 조건은 옆의 일행을 자주 뒤 사람으로 셌고, 3.0배 거리 조건은 주 사용자 바로 뒤에 선 사람도 모두 품었습니다.
+
+평가 도구(`tools/companion_eval.py`)는 사람 라벨이 있는 녹화로 이 단서들을 잽니다. `replay`는 영상 폴더의 녹화를 이 파이프라인으로 재생하고, `analyze`는 라벨과 이어 단서 분포 · 경계 후보별 라벨 일치율 · 주 사용자가 라벨의 사용자인 프레임 비율을 CSV와 그림으로 냅니다. `analyze --behind-only`는 일행 조건 없이 상대 거리만으로 뒤 사람인지 아닌지를 가를 때의 일치율도 냅니다. `sheets`는 상자 · 트랙 · 역할을 그린 확인 시트를 만듭니다. 시트에는 찍힌 사람이 나오므로 저장소에 두지 않습니다. 도구는 경계값을 고르지 않습니다. 쓰는 법은 파일 머리말에 있습니다.
 
 ### P1 표시 이름과 한계
 
@@ -494,7 +529,7 @@ P1은 머리 크롭 한 장을 보고 카메라가 그 사람을 어느 쪽에�
 - 추론까지: 테스트 안에서 만든 빈 화면 프레임으로 MediaPipe 모델을 실제로 돌려 CSV 열 구성, '못 봄' 상태, 처리 시간 기록을 확인합니다(모델 파일 필요).
 - 그 밖: 연속 구간 계산, 고개 각도 분해, 실측 초당 장수 공식.
 - 녹화 클립의 시각 파일(`<영상>.times.csv`): 완전한 파일만 받아들이고, 번호가 빠지거나 시각이 되돌아가면 오류로 멈추는지 봅니다(3개). 눈 사이 거리가 0인 기준 프레임이면 비율이 빈칸이 되는지도 봅니다.
-- 실행 파이프라인(`tests/test_vision_chain.py`, 56개; 필요한 패키지·파일에 따라 일부 건너뜀): 값과 출처(기본값 · 범위 · 값 묶음 파일), H1 후처리(letterbox · 격자 · 디코딩 · NMS, 점수 거르기 순서가 결과를 바꾸지 않음, ONNX 대신 가짜 세션으로 전체 호출), P1 입력(정사각 크롭 · 회색 바깥 · RGB · 정규화), 선택 열(주 사용자 · 동행자 · 뒤 사람 · 어깨 · 입 움직임 기준선), 터치 로그(시계 파일 · 시작 오프셋 · 누름 · 버튼 밖 · 빗나감 뒤 바로 고침 · 되돌아감 · 관측 구간 · 세션 · 1,000개 잘림 · 옵션 창 상태), 규칙표 v0(장면 4개의 여는 조건 · 고개 방향 게이트 · 미룸의 전제 · 순서 · 교체 · 기다림의 신호와 재진입 · 유지 결정의 내용 · 실행 칸 · 무응답 · 거절 · 범위, 규칙표에 숫자가 없음), 창 판단(`WindowJudge`: 고른 뒤 멈춤 · 얼굴 없는 몸 · 세션 초기화 · 새 세션은 그 세션의 관측 줄만 읽음 · 취소되거나 저장되지 않은 '담기' 누름은 지원을 거두지 않음), 모름 이유(열 결측 · 센서 실패 · 동점 · 근거 부족, 모든 `unknown` 창에 이유가 있음), 창 기록이 전체 기록과 같은 결과를 내는지, 가짜 추론 결과로 돌린 재생(두리번 태그가 나오고 4-2 강조가 열리는지, 출력 검사: `SupportDecision` 형식과 `extension`의 관측 가능 여부·모델 버전, `analyze_response` 제외), 창 없는 실시간(가짜 카메라), 그린 영상으로 돌린 실제 모델 재생(창 1초 · 2초 · 남은 0.9초, 머리 상자 0: 도형이라 H1 → P1 경로는 안 돎)을 봅니다. 사람 머리 사진으로 H1 → P1을 확인하는 테스트는 환경 변수 `VISION_TEST_HEAD_IMAGE`에 사진 경로를 줄 때만 돌고, 사진은 저장소에 두지도 보여 주지도 않습니다. 숫자는 합성 입력용이고 기준값 제안이 아닙니다. ONNX 파일이나 MediaPipe가 없으면 그 테스트만 건너뜁니다. 별도 교차 검사(`ContractViewTests`)는 백엔드 파일을 경로로 불러와 `measurable=true` · `states=null`의 거부와 `measurable=false` · `states=null`의 허용을 확인합니다. 이 검사는 GPU·ONNX·OpenCV 없이 돌며, 백엔드 파일이나 pydantic v2 등 import에 필요한 항목이 없으면 이유를 남기고 건너뜁니다.
+- 실행 파이프라인(`tests/test_vision_chain.py`, 70개; 필요한 패키지·파일에 따라 일부 건너뜀): 값과 출처(기본값 · 범위 · 값 묶음 파일 · 값이 없는 경계 3개), H1 후처리(letterbox · 격자 · 디코딩 · NMS, 점수 거르기 순서가 결과를 바꾸지 않음, ONNX 대신 가짜 세션으로 전체 호출), P1 입력(정사각 크롭 · 회색 바깥 · RGB · 정규화), 선택 열(머리 트랙의 번호 유지와 끝남 · 주 사용자 트랙 고정과 트랙이 끝난 뒤 새로 고름 · 손으로 만든 상자의 상대 거리와 옆 거리 · 창 중앙값 · 경계값이 있을 때의 동행자 · 뒤 사람과 없을 때의 `unknown` · 모르는 역할이 사건 층에 결측으로 닿음 · 주 사용자 상자 밖 얼굴의 값을 비움 · 주 사용자 상자가 빠진 동안 다른 트랙의 얼굴 값을 비우고 상자가 돌아오면 되살림 · 어느 상자에도 없는 얼굴은 빈칸으로 둠 · 새 터치 로그 세션에서 트랙을 다시 시작(앞 세션의 다른 사람 얼굴 값이 남지 않음) · 어깨 · 입 움직임 기준선), 터치 로그(시계 파일 · 시작 오프셋 · 누름 · 버튼 밖 · 빗나감 뒤 바로 고침 · 되돌아감 · 관측 구간 · 세션 · 1,000개 잘림 · 옵션 창 상태), 규칙표 v0(장면 4개의 여는 조건 · 고개 방향 게이트 · 미룸의 전제 · 순서 · 교체 · 기다림의 신호와 재진입 · 유지 결정의 내용 · 실행 칸 · 무응답 · 거절 · 범위, 규칙표에 숫자가 없음), 창 판단(`WindowJudge`: 고른 뒤 멈춤 · 얼굴 없는 몸 · 세션 초기화 · 새 세션은 그 세션의 관측 줄만 읽음 · 취소되거나 저장되지 않은 '담기' 누름은 지원을 거두지 않음 · 창 기록의 고개 돌림 목록 `turns`), 모름 이유(열 결측 · 센서 실패 · 동점 · 근거 부족, 모든 `unknown` 창에 이유가 있음), 창 기록이 전체 기록과 같은 결과를 내는지, 가짜 추론 결과로 돌린 재생(두리번 태그가 나오고 4-2 강조가 열리는지, 출력 검사: `SupportDecision` 형식과 `extension`의 관측 가능 여부·모델 버전, `analyze_response` 제외), 창 없는 실시간(가짜 카메라), 그린 영상으로 돌린 실제 모델 재생(창 1초 · 2초 · 남은 0.9초, 머리 상자 0: 도형이라 H1 → P1 경로는 안 돎)을 봅니다. 사람 머리 사진으로 H1 → P1을 확인하는 테스트는 환경 변수 `VISION_TEST_HEAD_IMAGE`에 사진 경로를 줄 때만 돌고, 사진은 저장소에 두지도 보여 주지도 않습니다. 숫자는 합성 입력용이고 기준값 제안이 아닙니다. ONNX 파일이나 MediaPipe가 없으면 그 테스트만 건너뜁니다. 별도 교차 검사(`ContractViewTests`)는 백엔드 파일을 경로로 불러와 `measurable=true` · `states=null`의 거부와 `measurable=false` · `states=null`의 허용을 확인합니다. 이 검사는 GPU·ONNX·OpenCV 없이 돌며, 백엔드 파일이나 pydantic v2 등 import에 필요한 항목이 없으면 이유를 남기고 건너뜁니다.
 - 사진 · 사람이 나온 영상 · `runs/`는 쓰지 않습니다(재생 시험의 영상은 테스트가 도형을 그려 만듦). 필요한 패키지나 모델 파일이 없으면 그 테스트만 건너뛰므로, 서버 패키지만 깔린 환경의 `python -m unittest discover -s tests`에는 영향이 없습니다.
 
 ## V 모델 추적표 (실행 파이프라인, 2026-10-22)
@@ -505,7 +540,7 @@ P1은 머리 크롭 한 장을 보고 카메라가 그 사람을 어느 쪽에�
 |---|---|---|---|---|
 | V1 | 머리 상자를 키오스크 PC의 CPU에서 찾는다(H1) | `app/inference/head.py`, `tools/export_onnx.py` | 변환 확인(ONNX와 PyTorch의 출력 차이 · NMS 뒤 상자, `models/onnx_export.json`), `HeadPostprocessTests`, `OnnxModelTests` | `models/README.md` 표의 크기 · 해시, '처리 시간'의 `ms_heads` |
 | V2 | 주 사용자 머리의 카메라 시점 확률(P1, 관측만) | `app/inference/head_direction.py` | 변환 확인(logits 차이, 입력 변환과 torchvision의 차이), `HeadDirectionInputTests`, `OnnxModelTests` | `rows.csv`의 `head_dir_*` |
-| V3 | 규칙이 쓰는 선택 열(뒤 사람 · 동행자 · 어깨 · 입 움직임) | `columns.py`, `chain.py` | `ColumnsTests`, `FrameChainTests` | `rows.csv`의 선택 열, `windows.jsonl`의 `vision` |
+| V3 | 규칙이 쓰는 선택 열(머리 트랙 · 주 사용자 트랙 · 뒤 사람 · 동행자 · 어깨 · 입 움직임) | `columns.py`, `chain.py` | `ColumnsTests`, `FrameChainTests` | `rows.csv`의 선택 열, `windows.jsonl`의 `vision` |
 | V4 | 터치 로그를 영상 시간에 맞춰 센다 | `touch.py` | `TouchTests` | `windows.jsonl`의 `touch` · `screen`, `meta.json`의 `touch.anchor` |
 | V5 | 창마다 상황 태그 · 근거 사건 ID · 모름 이유 · 대안 | `chain.py`(`WindowJudge`, `unknown_reasons`), `situation.py` | `UnknownReasonTests`, `HistoryTests`, `ReplayWithFakePerceptionTests` | `windows.jsonl`의 `situation` |
 | V6 | 판단 층 규칙표 v0(장면 4개)와 Jev 그림자 기록 | `judgment/` | `RuleTableTests`, `WindowJudgeTests` | `windows.jsonl`의 `decision` · `session` · `jev` |
@@ -558,7 +593,7 @@ P1은 머리 크롭 한 장을 보고 카메라가 그 사람을 어느 쪽에�
 | `lapvar_frame` · `lapvar_face` | 선명도 = 라플라시안 분산(클수록 선명), 화면 전체 · 얼굴 점 상자 안 |
 | `ms_read` · `ms_prep` · `ms_face_lm` · `ms_face_det` · `ms_pose` · `ms_features` · `ms_quality` · `ms_total` | 단계별 처리 시간(ms): 파일 읽기 · 입력 준비 · 얼굴 점 · 얼굴 검출 · 몸 점 · 기하 계산 · 밝기와 선명도 · 합계(입력 준비부터, 파일 읽기 제외) |
 
-재생의 `rows.csv`는 위 열 뒤에 선택 열(위 '선택 열'), 터치 횟수, 처리 시간 넷을 붙입니다: `ms_heads`(H1 전처리 · 추론 · 후처리), `ms_head_dir`(P1 크롭 · 추론), `ms_chain`(프레임 한 장의 파이프라인 전체, 벽시계), `cpu_ms_chain`(같은 구간의 프로세스 CPU 시간; 이 PC에서는 15.6 ms 단위로 올라감). 상자 칸은 `x0;y0;x1;y1`입니다.
+재생의 `rows.csv`는 위 열 뒤에 선택 열(위 '선택 열'), 터치 횟수, 처리 시간 넷을 붙입니다: `ms_heads`(H1 전처리 · 추론 · 후처리), `ms_head_dir`(P1 크롭 · 추론), `ms_chain`(프레임 한 장의 파이프라인 전체, 벽시계), `cpu_ms_chain`(같은 구간의 프로세스 CPU 시간; 이 PC에서는 15.6 ms 단위로 올라감). 상자 칸은 `x0;y0;x1;y1`이고, `head_boxes`는 JSON 한 칸입니다.
 
 ## 발표·보고서에 쓸 수 있는 데이터 (라이선스 대장, 비전 담당 작업 노트 기준)
 

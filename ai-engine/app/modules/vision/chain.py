@@ -1,8 +1,11 @@
 """The runtime chain shared by replay.py and live.py.
 
 Per frame (FrameChain.process): features.Observer row (MediaPipe face / face detector / pose, plus blendshapes when
-on) -> H1 head boxes (app/inference/head.py) -> main user, companion, people behind and the main user's P1 direction
-(columns.py) -> shoulders, mouth_motion -> touch counts since the previous row (touch.py). Each part that is not
+on) -> H1 head boxes (app/inference/head.py) -> head tracks, the main user as a track, companion and people behind
+from the tracks' cues, and the main user's P1 direction (columns.py HeadPeople; its state lives as long as the
+FrameChain and starts again when the touch log's sessionId changes) -> the face values blanked where the tracked face
+is someone else's (columns.FACE_VALUE_COLUMNS, face_in_primary False) -> shoulders, mouth_motion ->
+touch counts since the previous row (touch.py). Each part that is not
 available (no ONNX model, blendshapes off, no touch log) leaves its columns blank or absent, so the events layer treats
 the cue as missing ('모름'), never as 'absent'.
 
@@ -31,6 +34,7 @@ from .touch import SCREEN_FLOW
 LANDMARKER_NUM_FACES = 1        # app/inference/vision.py runs the Face Landmarker with num_faces=1 (smoothing on)
 SOURCE_KIND = {"video": "영상", "folder": "이미지", "camera": "카메라"}   # run.py's source_kind column values
 BEHIND, COMPANION, AROUND = TAGS
+TURN_KINDS = ("look_back", "yaw_sweep_offscreen")   # the window record's 'turns': these events with their observations
 
 
 def finite(v):
@@ -66,6 +70,8 @@ class FrameChain:
         self.blendshapes = bool(blendshapes)
         self.source_kind = source_kind
         self.mouth = C.MouthMotion(params.mouth_dials, params.mouth_baseline_s)
+        self.people = C.HeadPeople(params)
+        self.session = None                     # the touch log's sessionId at the previous row
         self.prev_t = None
 
     def process(self, frame) -> dict:
@@ -73,18 +79,38 @@ class FrameChain:
         row, _ = self.observer.process(frame, source_kind=self.source_kind)
         inf = self.capture.last
         t = float(row["t_s"])
+        if self.timeline is not None:           # tree section 4 ①: a new session is judged from the start
+            session = self.timeline.session_at(t)
+            if session is not None and self.session is not None and session != self.session:
+                self.people.reset()
+            if session is not None:
+                self.session = session
         if self.heads is not None:
             heads = self.heads(frame.image)
-            roles = C.assign_heads(heads.boxes, heads.frame_wh, C.face_xy(row), self.p)
+            face = C.face_xy(row)
+            roles = self.people.update(t, heads.boxes, heads.frame_wh, face)
             probs = None
             row["ms_head_dir"] = 0.0
             if self.direction is not None and roles.primary is not None:
                 probs = self.direction.probs(frame.image, heads.boxes_px[[roles.primary]])[0]
                 row["ms_head_dir"] = sum(self.direction.last_ms.values())
             row.update(C.head_columns(heads, roles, probs))
+            k = C.face_box(heads.boxes, face)
+            row["face_track"] = None if k is None else roles.tracks[k]
+            if face is None or roles.primary_track is None:
+                row["face_in_primary"] = None     # no face, or no main user: cannot be told
+            elif roles.primary is not None:
+                row["face_in_primary"] = C.inside(face, heads.boxes[roles.primary])
+            else:   # the main user's track is alive without a box here: a face in another track's box is someone
+                    # else's; a face in no box cannot be told (it may be the main user's, missed by the head detector)
+                row["face_in_primary"] = False if k is not None else None
+            if row["face_in_primary"] is False:  # someone else's face: its values are not the main user's
+                for col in C.FACE_VALUE_COLUMNS:
+                    if col in row:
+                        row[col] = None
             row["ms_heads"] = sum(heads.ms.values())
         row.update(C.shoulder_columns(inf.pose if inf is not None else None))
-        face_seen = row.get("face_state") == SEEN
+        face_seen = row.get("face_state") == SEEN and row.get("face_in_primary") is not False
         scores = inf.blendshapes if (self.blendshapes and face_seen and inf is not None) else None
         row["mouth_motion"] = self.mouth.update(t, scores)
         if self.timeline is not None:
@@ -279,11 +305,15 @@ class WindowJudge:
         if session_start is not None:
             rows = [r for r in rows if float(r["t_s"]) >= session_start]
         seg_rows = [r for r in rows if t_end - seg_len < float(r["t_s"]) <= t_end]
+        turns = None                                   # head turns of the window (observation only)
         if sp is None:
             out, reasons = None, [{"code": "no_value_bundle"}]
         else:
-            out, _ = assess(rows, t_end, sp, landmarker_num_faces=LANDMARKER_NUM_FACES)
+            out, events = assess(rows, t_end, sp, landmarker_num_faces=LANDMARKER_NUM_FACES,
+                                 baseline_s=p.mouth_baseline_s)
             reasons = unknown_reasons(rows, t_end, sp) if out["name"] == UNKNOWN else []
+            turns = [{"event_id": e["event_id"], "kind": e["kind"], "t_start": e["t_start"], "t_end": e["t_end"],
+                      "obs": e["obs"]} for e in events if e["kind"] in TURN_KINDS]
         situation = situation_view(out, reasons)
         seg, recent, screen, progress, _ = self._touch(t_end, seg_len)
         face_seen = any(r.get("face_state") == SEEN for r in seg_rows)
@@ -315,7 +345,7 @@ class WindowJudge:
             "t": round(t_end, 4), "segment_s": [round(t_end - seg_len, 4), round(t_end, 4)],
             "frames": len(seg_rows), "situation": situation, "touch": seg,
             "screen": {**screen, "pause_s": None if screen["pause_s"] is None else round(screen["pause_s"], 3)},
-            "vision": vision_summary(seg_rows, gaze), "measurable": measurable, "decision": d,
+            "vision": vision_summary(seg_rows, gaze), "turns": turns, "measurable": measurable, "decision": d,
             "session": self.state.snapshot(), "session_reset": session_reset, "jev": jev,
         }
         if seg_len != p.segment_s:

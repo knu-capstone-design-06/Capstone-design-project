@@ -14,7 +14,7 @@ import tokenize
 import unittest
 
 from app.modules.vision.events import PilotParams, detect_events, observe_window
-from app.modules.vision.situation import DISPLAY_TEXT, NONE, TAGS, UNKNOWN, assess, check_output
+from app.modules.vision.situation import DISPLAY_TEXT, NONE, TAGS, UNKNOWN, assess, check_output, consulting_companion
 
 NAN = float("nan")
 DT = 0.1                                     # synthetic frame interval (s)
@@ -158,9 +158,48 @@ class EventTests(unittest.TestCase):
         self.assertEqual(turns[0]["obs"]["side"], "left")
         self.assertAlmostEqual(turns[0]["obs"]["offscreen_s"], 0.4)
 
+    def test_face_lost_straight_from_facing_is_a_look_back(self):
+        """Face-lost onset path (dec section 3: face points lost, shoulders kept, return): facing, then the face points
+        are lost while the shoulders stay, then facing again - one look_back without a visible off-screen yaw, so its
+        yaw and side are empty."""
+        rows = rows_of(face(5), [(5, LOST)], face(5))
+        turns = [e for e in detect_events(rows, P, landmarker_num_faces=1)
+                 if e["kind"] in ("look_back", "yaw_sweep_offscreen")]
+        self.assertEqual([(e["kind"], e["event_id"]) for e in turns], [("look_back", "look_back@5")])
+        event = turns[0]
+        self.assertEqual(event["source_frames"], list(range(5, 11)))       # first lost frame 5 .. return 10
+        self.assertEqual((event["obs"]["yaw_deg"], event["obs"]["side"]), (None, None))
+        self.assertAlmostEqual(event["obs"]["face_lost_s"], 0.5)            # first lost frame 0.5 -> return 1.0
+        self.assertEqual(event["obs"]["pose_vis_shoulders"], 0.9)
+
+    def test_a_face_lost_turn_records_its_context(self):
+        """pre_loss_yaw_deg / pre_loss_pitch_deg = median of the facing frames in baseline_s before the onset (here
+        0.25 s before 0.4 s: frames at 0.2 and 0.3 s), loss_duration_s = first to last lost frame, shoulder_vis_mean
+        over the lost frames; without baseline_s the two pre-loss values stay empty."""
+        facing = [(1, {"yaw_deg": y, "pitch_deg": p}) for y, p in ((2.0, 20.0), (4.0, 22.0), (6.0, 24.0), (8.0, 26.0))]
+        lost = [(1, {**LOST, "pose_vis_shoulders": v}) for v in (0.6, 0.8, 0.7, 0.9)]
+        rows = rows_of(facing, lost, face(3))
+        (event,) = [e for e in detect_events(rows, P, landmarker_num_faces=1, baseline_s=0.25)
+                    if e["kind"] == "look_back"]
+        self.assertEqual((event["obs"]["pre_loss_yaw_deg"], event["obs"]["pre_loss_pitch_deg"]), (7.0, 25.0))
+        self.assertAlmostEqual(event["obs"]["loss_duration_s"], 0.3)        # lost frames at 0.4 .. 0.7 s
+        self.assertAlmostEqual(event["obs"]["face_lost_s"], 0.4)            # to the return at 0.8 s
+        self.assertAlmostEqual(event["obs"]["shoulder_vis_mean"], 0.75)
+        (plain,) = [e for e in detect_events(rows, P, landmarker_num_faces=1) if e["kind"] == "look_back"]
+        self.assertEqual((plain["obs"]["pre_loss_yaw_deg"], plain["obs"]["pre_loss_pitch_deg"]), (None, None))
+
+    def test_both_onset_paths_in_one_sequence(self):
+        """Yaw path (the face passes offscreen_yaw_deg, then is lost) and face-lost path (lost straight from facing):
+        two look_backs, the first with its largest visible yaw and side, the second without."""
+        rows = rows_of(face(5), look_back(), face(5), [(4, LOST)], face(5))
+        turns = [e for e in detect_events(rows, P, landmarker_num_faces=1) if e["kind"] == "look_back"]
+        self.assertEqual([(e["event_id"], e["obs"]["yaw_deg"], e["obs"]["side"]) for e in turns],
+                         [("look_back@5", 60.0, "right"), ("look_back@18", None, None)])
+
     def test_face_loss_that_is_not_a_turn_gives_no_turn_event(self):
         cases = {
-            "no onset (occlusion)": rows_of(face(5), [(5, LOST)], face(5)),
+            "face and body lost from facing (no shoulders)": rows_of(face(5), [(5, GONE)], face(5)),
+            "face lost for gap_s or less (face-lost path)": rows_of(face(5), [(2, LOST)], face(5)),   # 0.2 <= 0.25
             "body lost too, longer than gap_s": rows_of(face(5), [(1, {"yaw_deg": 50.0}), (5, GONE)], face(5)),
             "no return in the window": rows_of(face(5), [(1, {"yaw_deg": 50.0}), (5, LOST)]),
             "small yaw (menu reading)": rows_of(face(3), [(4, {"yaw_deg": 15.0}), (4, {"yaw_deg": -15.0})], face(3)),
@@ -277,7 +316,9 @@ class LookingBackWithPeopleBehindTests(unittest.TestCase):
         self.assertEqual(out["alternatives"], [])
         self.assertEqual(check_output(out, events, P), [])
         look = [item for item in out["evidence"] if item["event_id"] == "look_back@5"]
-        self.assertEqual([item["obs"] for item in look], ["yaw_deg", "side", "face_lost_s", "pose_vis_shoulders"])
+        self.assertEqual([item["obs"] for item in look], ["yaw_deg", "side", "face_lost_s", "pose_vis_shoulders",
+                                                          "pre_loss_yaw_deg", "pre_loss_pitch_deg", "loss_duration_s",
+                                                          "shoulder_vis_mean"])
         self.assertEqual({item["t"] for item in look}, {1.3})        # the event's time = its end (the return)
 
     def test_low_face_visibility_does_not_block_it(self):
@@ -356,6 +397,20 @@ class ConsultingCompanionTests(unittest.TestCase):
         out, _ = run(rows)
         self.assertEqual(out["name"], COMPANION)
         self.assertEqual(out["confidence"], {"events": 3, "quality_ok": False})
+
+    def test_blendshapes_off_drop_the_mouth_condition_and_the_evidence_shows_the_cues_used(self):
+        """Fallback (README tag table, situation.py): with blendshapes off the chain writes mouth_motion blank on every
+        row. The mouth condition of the conjunction is then missing (결측) and dropped: the tag stands on the other
+        cues, the evidence holds only those three kinds, the verdict records the skipped cue, quality_ok is false."""
+        rows = put(companion_window(sweep(+1)), 0, 18, mouth_motion=None)
+        out, events = run(rows)
+        self.assertEqual(out["name"], COMPANION)
+        self.assertEqual(sorted({k.split("@")[0] for k in ids(out)}),
+                         ["companion_present", "dwell_no_touch", "yaw_toward_companion"])
+        self.assertEqual(out["confidence"], {"events": 3, "quality_ok": False})
+        cues = observe_window(rows, (rows[0]["t_s"], rows[-1]["t_s"]), P, landmarker_num_faces=1)
+        self.assertEqual(consulting_companion(cues, P).skipped, ("mouth_moving",))
+        self.assertEqual(check_output(out, events, P), [])
 
     def test_turning_away_from_the_companion(self):
         out, _ = run(companion_window(sweep(-1)))

@@ -2,9 +2,12 @@
 
 Two kinds live here:
 - PilotParams: the values the chain added on 2026-10-22 (head boxes, the optional columns, the runners' segment, the
-  rule table v0). Every field has a default and a `source` text in its metadata. A value with no standard and no
-  measured data behind it is tagged [파일럿] in its source: it is a start value to be replaced from sources or public
-  data before the 2026-10-28 recording, or reported per value bundle (decision list 2026-10-13, items 3 and 19).
+  rule table v0) and on 2026-11-04 (head tracks and the roles of the other heads). Every field has a default and a
+  `source` text in its metadata. A value with no standard and no measured data behind it is tagged [파일럿] in its
+  source: it is a start value to be replaced from sources or public data before the 2026-10-28 recording, or reported
+  per value bundle (decision list 2026-10-13, items 3 and 19). The three role boundaries (ROLE_BOUNDARIES) have no
+  value at all (None, source UNDECIDED): the roles they decide stay 'unknown' until a bundle gives a value, and the
+  cues behind them are still written every frame (columns.py).
 - events.PilotParams (re-exported here as SituationParams): the 13 values of the events and situation rules. They keep
   NO defaults on purpose (vision README '상황 층'; tests/test_situation.py checks it), so they only come from a value
   bundle file (load_bundle). Without one the runners still run and the situation output is 'unknown'.
@@ -42,6 +45,8 @@ MOUTH_AND_JAW_DIALS = (
     "mouthStretchRight", "mouthUpperUpLeft", "mouthUpperUpRight",
 )
 PRIMARY_RULES = ("face_then_largest", "largest")
+UNDECIDED = "정할 수 없음(결정 3 · 19): 값 묶음 곡선으로 보고"
+ROLE_BOUNDARIES = ("companion_rel_dist_max", "companion_lateral_min", "behind_rel_dist_min")   # None = no value yet
 
 
 def _p(default, source: str, unit: str = ""):
@@ -63,22 +68,36 @@ class PilotParams:
     primary_rule: str = _p(
         "face_then_largest", f"{PILOT} 규칙: Face Landmarker 얼굴 중심을 품은 머리 상자 가운데 가장 큰 것, 없으면 가장 "
                              "큰 머리 상자(같으면 화면 가운데에 가까운 것). 'largest' = 늘 가장 큰 상자")
-    companion_min_area_ratio: float = _p(
-        0.5, f"{PILOT} 시작값: 동행자 = 주 사용자 머리 넓이의 이 비율 이상(넓이 비 0.5 = 길이 비 약 0.71, 대략 1.4배 "
-             "먼 머리까지 '비슷한 크기'). 결정 §3 '비슷한 크기의 두 번째 상자', 대본 §1-1 C는 A와 같은 거리",
-        "area ratio")
-    companion_max_dist_widths: float = _p(
-        3.0, f"{PILOT} 시작값: 동행자 = 머리 중심 사이 거리가 주 사용자 머리 폭의 이 배수 이하. 결정 §3 '옆'",
-        "primary head widths")
-    behind_max_area_ratio: float = _p(
-        1.0, "결정 §3 '주 사용자보다 작은 상자': 머리 넓이가 주 사용자의 이 비율 미만이면 뒤에 선 사람으로 셈(1.0 = 더 "
-             "작기만 하면)", "area ratio")
     mouth_dials: tuple = _p(
         MOUTH_AND_JAW_DIALS, "Apple ARKit ARFaceAnchor.BlendShapeLocation의 'Mouth and Jaw' 묶음(jaw · mouth로 "
                              "시작하는 이름 27개); 결정 §3 '입 움직임(jawOpen 등 입 다이얼)'")
     mouth_baseline_s: float = _p(
         2.0, f"{PILOT} 시작값: 입 다이얼의 사람별 기준선 = 직전 이만큼(초)의 얼굴 프레임 중앙값(결정 목록 2026-10-10 "
-             "§16: 기준선을 뺀 창 안 변동)", "s")
+             "§16: 기준선을 뺀 창 안 변동). 뒤돌아봄 사건의 사라지기 전 고개 방향(pre_loss_yaw_deg · pre_loss_pitch_deg)도 "
+             "같은 창의 화면 보는 프레임 중앙값(관측만)", "s")
+
+    # --- head tracks and the roles of the other heads (columns.py HeadTracker, HeadPeople; 2026-11-04) -----------
+    track_iou_min: float = _p(
+        0.3, "관행값: SORT 공개 구현(github.com/abewley/sort, sort.py)의 iou_threshold 기본값 0.3. 논문(Bewley 외, "
+             "'Simple Online and Realtime Tracking', ICIP 2016) §3.3은 최소 IoU(IOU_min)를 두지만 값은 적지 않음. 이 "
+             "코드는 SORT의 연결 단계만 줄여 씀: 칼만 예측 없이 트랙의 직전 상자와 견주고, 헝가리안 대신 IoU 큰 순으로 "
+             "배정", "IoU 0~1")
+    track_max_gap_s: float = _p(
+        1.0, f"{PILOT} 시작값: segment_s(창 결과 한 줄의 간격, {PILOT} 1.0초)와 같은 값. 이만큼 넘게 안 보인 머리 "
+             "트랙은 끝나고, 주 사용자 트랙이 끝나야 새 주 사용자를 고름", "s")
+    role_window_s: float = _p(
+        2.0, f"{PILOT} 시작값: mouth_baseline_s(같은 사람의 직전 이만큼(초)의 중앙값, {PILOT} 2.0초)와 같은 값. 트랙마다 "
+             "직전 이만큼의 상대 거리 · 옆 거리 중앙값으로 역할을 정함(조사 56 §6 '사람마다 몇 초 모아 판정')", "s")
+    companion_rel_dist_max: float | None = _p(
+        None, f"{UNDECIDED}. 동행자 = 상대 거리(주 사용자 머리 높이 ÷ 그 머리 높이, 주 사용자 = 1) 중앙값이 이 값 "
+              "이하(결정 §3 '비슷한 크기'). 값이 없으면 동행자인지 모름", "primary head height / head height")
+    companion_lateral_min: float | None = _p(
+        None, f"{UNDECIDED}. 동행자 = 옆 거리(머리 중심의 가로 차 ÷ 주 사용자 머리 높이, 픽셀) 중앙값의 크기가 이 값 "
+              "이상(결정 §3 '옆'). 값이 없으면 동행자인지 모름", "primary head heights")
+    behind_rel_dist_min: float | None = _p(
+        None, f"{UNDECIDED}. 뒤 사람 = 상대 거리 중앙값이 이 값 이상(결정 §3 '뒤쪽')이고 1보다 크며(결정 §3 '주 사용자보다 "
+              "작은 상자', 값과 상관없이 늘 봄) 동행자가 아님. 값이 없으면 주 사용자보다 작은 머리가 뒤 사람인지 모름",
+        "primary head height / head height")
 
     # --- runners (replay.py, live.py) -------------------------------------------------------------------------
     segment_s: float = _p(
@@ -115,6 +134,11 @@ class PilotParams:
             if f.name == "primary_rule":
                 if value not in PRIMARY_RULES:
                     raise ValueError(f"PilotParams.primary_rule must be one of {PRIMARY_RULES}, got {value!r}")
+            elif f.name in ROLE_BOUNDARIES:
+                if value is not None and (isinstance(value, bool) or not isinstance(value, numbers.Real)
+                                          or not math.isfinite(value) or value <= 0):
+                    raise ValueError(f"PilotParams.{f.name} must be None (no value yet) or a finite number > 0, "
+                                     f"got {value!r}")
             elif f.name == "mouth_dials":
                 if not value or not all(isinstance(v, str) and v for v in value):
                     raise ValueError(f"PilotParams.mouth_dials must be a non-empty list of blendshape names, got {value!r}")
@@ -128,7 +152,7 @@ class PilotParams:
                 if isinstance(value, bool) or not isinstance(value, numbers.Real) or not math.isfinite(value) \
                         or value <= 0:
                     raise ValueError(f"PilotParams.{f.name} must be a finite number > 0, got {value!r}")
-                if f.name in ("head_score_min", "head_nms_iou") and value > 1:
+                if f.name in ("head_score_min", "head_nms_iou", "track_iou_min") and value > 1:
                     raise ValueError(f"PilotParams.{f.name} is a score / IoU and must be at most 1, got {value!r}")
 
     @staticmethod
