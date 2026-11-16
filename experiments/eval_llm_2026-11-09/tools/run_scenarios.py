@@ -7,12 +7,17 @@ json.dumps({"state": state, "questions": questions}, ensure_ascii=False); answer
 Anthropic: same system and user text, the same schema through output_config.format, thinking off as in run_claude.py,
 no temperature (non-default values are rejected), max_tokens 256.
 Each run is paid separately (the run number is part of the cache key); 2 workers; latency = perf_counter around the call.
+Each calls.jsonl line also has http_attempts, request_ms and cumulative_ms (call_time.py): HTTP retries with their
+waits, a request refused for temperature 0 and the attempt before a re-call count into the case's time.
 Usage: python run_scenarios.py --set novel|heldout1|heldout2 --model M --run N --root runs/scenarios --cache cache
        --openai-env F --anthropic-env F [--limit K] [--cap USD]
 """
 import argparse, hashlib, json, sys, threading, time, urllib.error, urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+from call_time import Attempts, add_ms, attach, ms_since  # noqa: E402
 
 SYSTEM = ("You are a decision model for an accessibility-adaptive ordering kiosk. You receive the state of one "
           "observation window and one or more questions. Answer every question from the state alone. For a "
@@ -51,7 +56,7 @@ class OpenAI:
 
     def call(self, b):
         data = json.dumps(b).encode("utf-8")
-        retries = 0
+        retries, tries = 0, Attempts()  # a refused body's attempt stays in: it is part of this cache key
         while True:
             req = urllib.request.Request("https://api.openai.com/v1/chat/completions", data=data, method="POST",
                                          headers={"Authorization": f"Bearer {self.key}", "Content-Type": "application/json"})
@@ -62,12 +67,16 @@ class OpenAI:
                 lat = (time.perf_counter() - t0) * 1000
                 p = json.loads(raw)
                 u = p.get("usage") or {}
-                return {"latency_ms": round(lat, 1), "model": p.get("model"), "content": p["choices"][0]["message"].get("content"),
-                        "stop": p["choices"][0].get("finish_reason"), "in": u.get("prompt_tokens"),
-                        "out": u.get("completion_tokens"), "cache_in": (u.get("prompt_tokens_details") or {}).get("cached_tokens") or 0,
-                        "retries": retries, "error": None}
+                rec = {"latency_ms": round(lat, 1), "model": p.get("model"), "content": p["choices"][0]["message"].get("content"),
+                       "stop": p["choices"][0].get("finish_reason"), "in": u.get("prompt_tokens"),
+                       "out": u.get("completion_tokens"), "cache_in": (u.get("prompt_tokens_details") or {}).get("cached_tokens") or 0,
+                       "retries": retries, "error": None}
+                tries.add(lat, "ok")
+                rec["http_attempts"], rec["request_ms"] = tries.items, tries.total()
+                return rec
             except urllib.error.HTTPError as e:
                 msg = e.read().decode("utf-8", "replace")
+                tries.add(ms_since(t0), f"http {e.code}")
                 if e.code == 400 and "temperature" in msg and "temperature" in b:
                     self.use_temperature = False
                     b = dict(b)
@@ -76,15 +85,18 @@ class OpenAI:
                     continue
                 if (e.code == 429 or e.code >= 500) and retries < 5:
                     retries += 1
-                    time.sleep(2 ** retries)
+                    tries.wait(2 ** retries)
                     continue
-                return {"error": f"http {e.code}: {msg[:200]}", "retries": retries}
+                return {"error": f"http {e.code}: {msg[:200]}", "retries": retries,
+                        "http_attempts": tries.items, "request_ms": tries.total()}
             except Exception as e:
+                tries.add(ms_since(t0), type(e).__name__)
                 if retries < 2:
                     retries += 1
-                    time.sleep(2 ** retries)
+                    tries.wait(2 ** retries)
                     continue
-                return {"error": type(e).__name__, "retries": retries}
+                return {"error": type(e).__name__, "retries": retries,
+                        "http_attempts": tries.items, "request_ms": tries.total()}
 
 
 class Claude:
@@ -99,24 +111,31 @@ class Claude:
                 "thinking": THINKING[self.model], "output_config": {"format": {"type": "json_schema", "schema": schema(questions)}}}
 
     def call(self, b):
-        retries = 0
+        retries, tries = 0, Attempts()
         while True:
             try:
                 t0 = time.perf_counter()
                 r = self.client.messages.create(**b)
                 lat = (time.perf_counter() - t0) * 1000
                 text = next((x.text for x in r.content if x.type == "text"), None)
-                return {"latency_ms": round(lat, 1), "model": r.model, "content": text, "stop": r.stop_reason,
-                        "in": r.usage.input_tokens, "out": r.usage.output_tokens,
-                        "cache_in": getattr(r.usage, "cache_read_input_tokens", None) or 0, "retries": retries, "error": None}
+                rec = {"latency_ms": round(lat, 1), "model": r.model, "content": text, "stop": r.stop_reason,
+                       "in": r.usage.input_tokens, "out": r.usage.output_tokens,
+                       "cache_in": getattr(r.usage, "cache_read_input_tokens", None) or 0, "retries": retries, "error": None}
+                tries.add(lat, "ok")
+                rec["http_attempts"], rec["request_ms"] = tries.items, tries.total()
+                return rec
             except (self.A.RateLimitError, self.A.InternalServerError, self.A.APIConnectionError) as e:
+                tries.add(ms_since(t0), type(e).__name__)
                 if retries < 5:
                     retries += 1
-                    time.sleep(2 ** retries)
+                    tries.wait(2 ** retries)
                     continue
-                return {"error": type(e).__name__, "retries": retries}
+                return {"error": type(e).__name__, "retries": retries,
+                        "http_attempts": tries.items, "request_ms": tries.total()}
             except self.A.APIStatusError as e:
-                return {"error": f"http {e.status_code}: {str(e)[:200]}", "retries": retries}
+                tries.add(ms_since(t0), f"http {e.status_code}")
+                return {"error": f"http {e.status_code}: {str(e)[:200]}", "retries": retries,
+                        "http_attempts": tries.items, "request_ms": tries.total()}
 
 
 def main():
@@ -143,7 +162,7 @@ def main():
         ck = hashlib.sha256(json.dumps(["scen", a.model, b, a.run, attempt], sort_keys=True).encode()).hexdigest()
         cf = cache / f"{ck}.json"
         if cf.exists():
-            r = json.loads(cf.read_text(encoding="utf-8"))
+            r = attach(json.loads(cf.read_text(encoding="utf-8")))
             r["cached"] = True
             return r
         r = cl.call(b)
@@ -158,9 +177,10 @@ def main():
         q = row["questions"]
         opts = list(q["support_choice"]["criteria"])
         user = json.dumps({"state": row["state"], "questions": q}, ensure_ascii=False)
-        logs, choice = [], None
+        logs, choice, so_far = [], None, 0.0
         for attempt in range(2):
             r = ask(user, q, attempt)
+            so_far = add_ms(so_far, r.get("request_ms"))
             ch = None
             if not r.get("error") and r.get("content"):
                 try:
@@ -174,7 +194,9 @@ def main():
             logs.append({"case_id": row["case_id"], "attempt": attempt, "choice": ch, "raw": r.get("content"),
                          "model": r.get("model"), "stop": r.get("stop"), "latency_ms": r.get("latency_ms"),
                          "prompt_tokens": r.get("in"), "completion_tokens": r.get("out"), "cost_usd": c,
-                         "cached": r["cached"], "retries": r.get("retries"), "error": r.get("error")})
+                         "cached": r["cached"], "retries": r.get("retries"), "error": r.get("error"),
+                         "http_attempts": r.get("http_attempts"), "request_ms": r.get("request_ms"),
+                         "cumulative_ms": so_far})
             with lock:
                 if not r["cached"]:
                     spend["new"] += c

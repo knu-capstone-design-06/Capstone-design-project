@@ -5,7 +5,8 @@ Same system and user text as run_gpt.py (build_messages). Answer forced with str
 {"type": "disabled"}, Sonnet 5.5 {"type": "between_tools"} (its thinking-off mode; "disabled" is a 400 there).
 No temperature: both models reject non-default sampling values (Anthropic model-migration guide).
 Invalid answer or refusal -> one retry, then null. Per-request cache as in run_gpt.py. Output files have the
-same fields as run_gpt.py so score.py, one_second.py and the summaries work unchanged.
+same fields as run_gpt.py so score.py, one_second.py and the summaries work unchanged, the time fields of
+call_time.py included (HTTP retries with their waits and the attempt before a re-call count into the call's time).
 The API key is read from an env file and never printed or written.
 """
 import argparse, hashlib, json, sys, threading, time
@@ -15,6 +16,7 @@ from pathlib import Path
 import anthropic
 
 sys.path.insert(0, str(Path(__file__).parent))
+from call_time import Attempts, add_ms, attach, ms_since  # noqa: E402
 from run_gpt import build_messages, parse  # noqa: E402
 
 # USD per 1M tokens (input, cache read, output); https://platform.claude.com/docs/en/about-claude/pricing, fetched
@@ -60,8 +62,8 @@ class Client:
         if cf.exists():
             rec = json.loads(cf.read_text(encoding="utf-8"))
             rec["cached"], rec["request_hash"] = True, ck
-            return rec
-        retries = 0
+            return attach(rec)
+        retries, tries = 0, Attempts()
         while True:
             try:
                 t0 = time.perf_counter()
@@ -74,17 +76,23 @@ class Client:
                        "cached_tokens": getattr(u, "cache_read_input_tokens", None) or 0,
                        "reasoning_tokens": None, "retries": retries, "temperature_0": False, "schema": True,
                        "error": None}
+                tries.add(lat, "ok")
+                rec["http_attempts"], rec["request_ms"] = tries.items, tries.total()
                 cf.write_text(json.dumps(rec), encoding="utf-8")
                 rec["cached"], rec["request_hash"] = False, ck
                 return rec
             except RETRYABLE as e:
+                tries.add(ms_since(t0), type(e).__name__)
                 if retries < 5:
                     retries += 1
-                    time.sleep(2 ** retries)
+                    tries.wait(2 ** retries)
                     continue
-                return {"error": type(e).__name__, "retries": retries, "cached": False}
+                return {"error": type(e).__name__, "retries": retries, "cached": False,
+                        "http_attempts": tries.items, "request_ms": tries.total()}
             except anthropic.APIStatusError as e:
-                return {"error": f"http {e.status_code}: {str(e)[:200]}", "retries": retries, "cached": False}
+                tries.add(ms_since(t0), f"http {e.status_code}")
+                return {"error": f"http {e.status_code}: {str(e)[:200]}", "retries": retries, "cached": False,
+                        "http_attempts": tries.items, "request_ms": tries.total()}
 
 
 def main():
@@ -120,19 +128,22 @@ def main():
         q = qdoc[st["questions"]]["questions"]["support_choice"]
         assert list(q["criteria"]) == st["options"], row["window_id"]
         msgs = build_messages(q, st["state"])
-        logs, choice = [], None
+        logs, choice, so_far = [], None, 0.0
         for attempt in range(2):
             r = client.ask(msgs, st["options"], attempt)
             ch = None if r.get("error") or r.get("content") is None else parse(r["content"], st["options"])
             c = 0.0 if r.get("error") else cost(a.model, r.get("prompt_tokens"), r.get("completion_tokens"),
                                                 r.get("cached_tokens"))
+            so_far = add_ms(so_far, r.get("request_ms"))
             logs.append({"window_id": row["window_id"], "attempt": attempt, "model": r.get("model"), "choice": ch,
                          "raw": r.get("content"), "finish_reason": r.get("finish_reason"),
                          "latency_ms": r.get("latency_ms"), "prompt_tokens": r.get("prompt_tokens"),
                          "completion_tokens": r.get("completion_tokens"), "cached_tokens": r.get("cached_tokens"),
                          "reasoning_tokens": None, "cost_usd": c, "cached": r.get("cached"),
                          "request_hash": r.get("request_hash"), "temperature_0": False,
-                         "retries": r.get("retries"), "error": r.get("error")})
+                         "retries": r.get("retries"), "error": r.get("error"),
+                         "http_attempts": r.get("http_attempts"), "request_ms": r.get("request_ms"),
+                         "cumulative_ms": so_far})
             with lock:
                 if not r.get("cached"):
                     spend["new"] += c
