@@ -1,0 +1,290 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Touch interaction contract proposal — NOT ADOPTED",
+    "version": "0.0.0-draft",
+    "description": "팀 합의 전 검토용 제안. 기존 API에 미적용. source PR #72 3d4b79c. paths 없음: 새 엔드포인트를 만들지 않음."
+  },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "TouchInteractionProposal": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schema_version",
+          "visit_id",
+          "window_sequence",
+          "outside_tap_ratio",
+          "outside_nearest_distance_mean_px",
+          "outside_nearest_distance_sample_count",
+          "pointer_cancel_count",
+          "pointer_interrupted_count",
+          "scroll_event_count",
+          "category_change_count",
+          "options_open_count",
+          "options_close_count",
+          "screen_transition_count",
+          "screen_revisit_count",
+          "cart_change_count",
+          "selection_change_count",
+          "ui_settings_change_count",
+          "voice_state_change_count",
+          "since_last_input_ms",
+          "order_busy_ms",
+          "options_open",
+          "order_busy",
+          "voice_enabled",
+          "microphone_active",
+          "voice_processing",
+          "voice_auto_off",
+          "ui_settings"
+        ],
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "const": "touch-interaction-pilot-v1",
+            "description": "계산 정책 식별자. 지원 버전 확정은 별도 합의."
+          },
+          "visit_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "구간 종료 시 화면 방문 식별자. 서버 세션 ID나 인증 수단 아님."
+          },
+          "window_sequence": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "현재 서버 세션에서 전송 시도 구간의 순서. 추적용이며 중복 제거 키 아님."
+          },
+          "outside_tap_ratio": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1,
+            "description": "miss_tap_count / tap_count. 누름 0회면 null. 조작 실패율 아님."
+          },
+          "outside_nearest_distance_mean_px": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "대상 밖 누름에서 관측된 가장 가까운 활성 대상 거리 평균(CSS px). 표본 없음은 null."
+          },
+          "outside_nearest_distance_sample_count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "거리 평균에 사용한 누름 수. 동률 대상이 여럿이어도 누름당 한 표본."
+          },
+          "pointer_cancel_count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "구간 내 취소로 끝난 입력 수. 실패 수 아님."
+          },
+          "pointer_interrupted_count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "끝까지 관측하지 못해 중단 기록이 생긴 입력 수."
+          },
+          "scroll_event_count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "전체 관측 영역의 스크롤 이벤트 수. 제스처 횟수나 이동 거리 아님."
+          },
+          "category_change_count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "구간 내 메뉴 분류 변경 수."
+          },
+          "options_open_count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "구간 내 옵션 창 열기 수."
+          },
+          "options_close_count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "구간 내 옵션 창 닫기 수. 닫기를 선택 포기로 단정하지 않음."
+          },
+          "screen_transition_count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "출발 화면이 있는 화면 진입 수."
+          },
+          "screen_revisit_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "이미 방문한 화면에 다시 진입한 수. 세션 시작 기록 유실 시 null."
+          },
+          "cart_change_count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "서버 Cart 버전 증가를 관측한 횟수. 최초 기준선 제외, 개별 요청 성공이나 원인 식별 아님."
+          },
+          "selection_change_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "상품·옵션·수량 선택 상태 변화 수. 최초 기준선 제외, 세션 시작/최초 기준선 없으면 null."
+          },
+          "ui_settings_change_count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "구간 내 접근성 설정 변경 수. 수락·거절 이벤트 아님."
+          },
+          "voice_state_change_count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "음성 모드·마이크·처리 단계 변화 수. 최초 기준선 제외, 발화 횟수 아님."
+          },
+          "since_last_input_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "현재 방문의 마지막 터치 누름 이후 벽시계 ms. 누름 없으면 null, 숨김·대기 포함."
+          },
+          "order_busy_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "구간 내 화면 주문 상태 loading/saving 지속 시간(ms). 시작 상태 모름은 null. 실제 서버 지연 아님."
+          },
+          "options_open": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "끝 시점 옵션 창 열림 여부. 미관측은 null."
+          },
+          "order_busy": {
+            "type": "boolean",
+            "description": "끝 시점 주문 상태 loading/saving 여부. 이 버전의 전송 전제에서 항상 관측됨."
+          },
+          "voice_enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "끝 시점 음성 모드 켜짐 여부. 미관측은 null."
+          },
+          "microphone_active": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "끝 시점 마이크 활성 여부. 미관측은 null."
+          },
+          "voice_processing": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "끝 시점 backend 음성 요청 처리 processing 여부. 미관측은 null."
+          },
+          "voice_phase": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "idle",
+              "listening",
+              "processing",
+              "speaking",
+              null
+            ],
+            "description": "끝 시점 음성 단계. 미관측/미지원 단계는 null. 이전 생산자는 생략 가능."
+          },
+          "voice_speaking": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "끝 시점 speaking 단계 여부. 마이크 종료 대기 포함, 순수 음향 재생 시간 아님. 미관측은 null."
+          },
+          "voice_busy": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "끝 시점 processing 또는 speaking 여부. 미관측은 null. 이전 생산자는 생략 가능."
+          },
+          "voice_busy_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "구간 내 processing/speaking 관측 시간 합(ms). 시작/중간 상태 모름은 null."
+          },
+          "since_last_input_excluding_system_busy_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "현재 방문 마지막 누름 이후 주문 loading/saving 및 음성 processing/speaking 시간의 합집합을 뺀 ms. 누름 없음/이력 누락/대상 기간 숨김·중단은 null. 수동 화면 읽기는 제외되지 않음."
+          },
+          "voice_auto_off": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "silence",
+              "idle",
+              null
+            ],
+            "description": "음성 모드 자동 종료 사유 silence/idle. null은 자동 종료가 아니거나 사유 미관측이며 둘을 구별하지 않음."
+          },
+          "ui_settings": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "large_text",
+              "large_button",
+              "simple_screen",
+              "step_guide",
+              "low_screen",
+              "high_contrast"
+            ],
+            "properties": {
+              "large_text": {
+                "type": "boolean"
+              },
+              "large_button": {
+                "type": "boolean"
+              },
+              "simple_screen": {
+                "type": "boolean"
+              },
+              "step_guide": {
+                "type": "boolean"
+              },
+              "low_screen": {
+                "type": "boolean"
+              },
+              "high_contrast": {
+                "type": "boolean"
+              }
+            },
+            "description": "끝 시점 설정 6개. 수동 화면 읽기 상태와 지원 결정/사용자 반응은 포함하지 않음."
+          }
+        }
+      }
+    }
+  },
+  "x-proposal-status": "unadopted",
+  "x-source-ref": "3d4b79c119aecf750148dc20e306be316b00f9d5"
+}
