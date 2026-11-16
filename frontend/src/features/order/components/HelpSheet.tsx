@@ -27,8 +27,8 @@ export function SettingTile({ target, icon, label, on, disabled = false, onClick
  * 모달이라 터치 기록의 가까운 후보도 이 시트 안에서만 찾습니다. 화면 읽기 상태를 지키려고 닫혀도 내용을 남겨 둡니다.
  * 직원 호출은 설정 타일 아래 한 줄입니다. 받는 쪽이 아직 없어 누르면 준비 중이라는 팝업(제목 한 줄과 [확인])이 화면 가운데에
  * 뜹니다. 팝업도 모달 창이라 [확인]·Esc·어두운 곳 누름으로 닫히고, 닫히면 [직원 부르기]로 초점이 돌아갑니다. 이 시트가 어떤 길로든
- * 닫히면 팝업도 함께 닫고 초점은 [화면 도움]으로 보냅니다. 터치 기록은 처음 열린 창 안에서 가까운 후보를 찾으므로 팝업을 이 시트보다
- * 앞에 두어, 팝업이 열린 동안에는 팝업 안에서만 찾게 합니다.
+ * 닫히면 팝업도 함께 닫고 초점은 [화면 도움]으로 보냅니다. 터치 기록은 DOM 순서상 첫 번째 열린 dialog에서 가까운 후보를 찾으므로,
+ * 직원 호출 팝업을 이 시트보다 앞에 둡니다.
  */
 export function HelpSheet({ ref, settings, combined, onToggle, onCombined, onReset, onClose, readAloud }: {
   ref: Ref<HTMLDialogElement>; settings: Settings; combined: boolean;
