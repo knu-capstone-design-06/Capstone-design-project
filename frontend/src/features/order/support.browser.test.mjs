@@ -146,19 +146,22 @@ test('뺀 줄은 다음 터치까지 제자리에 남고 [되돌리기]는 같�
   } finally { await browser.close(); }
 });
 
-test('직원 부르기는 화면 도움 안의 한 줄이며 누르면 준비 중 팝업이 뜨고 [확인]·Esc·어두운 곳 누름으로 닫힌다', async () => {
+test('직원 부르기는 화면 도움 안의 한 줄이며 누르면 준비 중 팝업이 뜨고 [확인]·Esc·어두운 곳 누름이나 화면 도움이 닫힐 때 닫힌다', async () => {
   const browser = await chromium.launch(launchOptions);
   try {
     const { page, errors, fixture } = await open(browser, bootstrap('staff-call'));
     assert.equal(await page.locator('.entry-row [data-log-target="staff-call"]').count(), 0, '[화면 도움] 줄에는 직원 호출이 없음');
     await target(page, 'support-toggle').click();
     const call = page.locator('#support-panel [data-log-target="staff-call"]');
+    const popup = page.locator('dialog.staff-popup[open]'), sheet = page.locator('dialog#support-panel[open]');
+    const focused = () => page.evaluate(() => document.activeElement?.dataset.logTarget);
     const lastPress = () => page.evaluate(() => window.kioskTouchLogDraft.read().events.filter(event => event.kind === 'pointer_start').at(-1).data);
     for (const way of ['확인', 'Esc', '어두운 곳']) {
       await call.click();
-      await page.locator('dialog.staff-popup[open]').waitFor();
-      assert.equal(await page.locator('dialog.staff-popup h2').innerText(), '직원 호출은 아직 준비 중이에요');
+      await popup.waitFor();
+      assert.equal(await page.getByRole('dialog', { name: '직원 호출은 아직 준비 중이에요' }).count(), 1, '팝업의 이름은 제목');
       assert.equal(await target(page, 'staff-call-close').innerText(), '확인');
+      assert.equal(await focused(), 'staff-call-close', '열리면 초점은 [확인]');
       assert.equal(await call.innerText(), '직원 부르기', '누른 뒤에도 이름은 그대로');
       assert.equal(await call.getAttribute('aria-pressed'), null, '호출 상태를 두지 않음');
       assert.equal(await page.locator('#support-panel [role="status"]').count(), 0, '불렀다는 알림을 두지 않음');
@@ -174,10 +177,38 @@ test('직원 부르기는 화면 도움 안의 한 줄이며 누르면 준비 �
         assert.equal(press.target, null, '팝업만 닫는 누름은 대상 밖 누름으로 기록');
         assert.deepEqual(press.nearestCandidates.map(candidate => candidate.id), ['staff-call-close'], '가려진 화면 도움의 버튼은 후보가 아님');
       }
-      await page.locator('dialog.staff-popup[open]').waitFor({ state: 'detached' });
-      assert.equal(await page.locator('dialog#support-panel[open]').count(), 1, `${way}: 팝업만 닫히고 화면 도움은 남음`);
-      assert.equal(await page.evaluate(() => document.activeElement?.dataset.logTarget), 'staff-call', `${way}: 초점은 [직원 부르기]로 돌아감`);
+      await popup.waitFor({ state: 'detached' });
+      assert.equal(await sheet.count(), 1, `${way}: 팝업만 닫히고 화면 도움은 남음`);
+      assert.equal(await focused(), 'staff-call', `${way}: 초점은 [직원 부르기]로 돌아감`);
     }
+    // Esc를 두 번 누르면 팝업, 그다음 화면 도움이 닫힙니다.
+    await call.click(); await popup.waitFor();
+    await page.keyboard.press('Escape'); await popup.waitFor({ state: 'detached' });
+    assert.equal(await sheet.count(), 1);
+    await page.keyboard.press('Escape'); await sheet.waitFor({ state: 'detached' });
+    // 낮은 화면과 크게 보기에서도 팝업은 화면 안(낮은 화면은 아래 조작 영역 안)에 뜨고 [확인]을 누를 수 있습니다.
+    for (const mode of ['낮은 화면', '크게 보기']) {
+      if (mode === '크게 보기') {
+        await page.evaluate(response => window.kioskSupportDraft.receive(response), decision('staff-call', 'large_text', false));
+        await page.locator('.kiosk.large-view').waitFor();
+      }
+      await target(page, 'support-toggle').click(); await sheet.waitFor();
+      if (mode === '낮은 화면') await target(page, 'support:lowScreen').click();
+      await call.click(); await popup.waitFor();
+      const area = await page.locator('.kiosk').boundingBox(), box = await popup.boundingBox(), button = await target(page, 'staff-call-close').boundingBox();
+      assert(box.x >= 0 && box.x + box.width <= 1080 && box.y >= area.y && box.y + box.height <= 1920, `${mode}: 팝업이 화면 안에 섬`);
+      assert(button.x >= box.x && button.x + button.width <= box.x + box.width && button.y + button.height <= box.y + box.height, `${mode}: [확인]이 팝업 안에 섬`);
+      await target(page, 'staff-call-close').click(); await popup.waitFor({ state: 'detached' });
+      if (mode === '낮은 화면') await target(page, 'support:lowScreen').click();
+      await target(page, 'support-close').click(); await sheet.waitFor({ state: 'detached' });
+    }
+    // 화면 도움이 코드에서 닫혀도 팝업이 함께 닫히고 초점은 [화면 도움]으로 갑니다.
+    await target(page, 'support-toggle').click(); await sheet.waitFor();
+    await call.click(); await popup.waitFor();
+    await page.evaluate(() => document.querySelector('#support-panel').close());
+    await popup.waitFor({ state: 'detached' });
+    assert.equal(await sheet.count(), 0);
+    assert.equal(await focused(), 'support-toggle', '시트와 함께 닫히면 초점은 [화면 도움]');
     fixture.verify(); assert.deepEqual(errors, []);
   } finally { await browser.close(); }
 });
