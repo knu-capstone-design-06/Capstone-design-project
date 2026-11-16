@@ -42,6 +42,7 @@ def stand_in_anthropic():
 sys.modules["anthropic"] = stand_in_anthropic()
 import call_time  # noqa: E402
 import run_claude  # noqa: E402
+import run_gemini  # noqa: E402
 import run_gpt  # noqa: E402
 import run_scenarios  # noqa: E402
 
@@ -66,6 +67,12 @@ def openai_reply(choice, key="choice"):
     return json.dumps({"model": "m", "choices": [{"message": {"content": json.dumps({key: choice})},
                                                   "finish_reason": "stop"}],
                        "usage": {"prompt_tokens": 10, "completion_tokens": 2}}).encode()
+
+
+def gemini_reply(choice):
+    return json.dumps({"modelVersion": "gemini-3.8-flash", "candidates": [
+        {"content": {"parts": [{"text": json.dumps({"choice": choice})}]}, "finishReason": "STOP"}],
+        "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 2}}).encode()
 
 
 class Reply:
@@ -321,16 +328,72 @@ class OneSecondTool(TempDir):
                          [("w1", True, 1200.0), ("w2", True, 1200.0), ("w3", True, 250.0)])
         self.assertEqual([len(c["refused_now"] or []) for c in rerun], [1, 0, 0])
 
+    def test_gemini_refusal_and_retry_reach_the_one_second_judgment(self):
+        # w1: thinking level refused (100 ms), then 503 (900 ms) and a 2 s wait, then the answer (300 ms);
+        # w2 shares w1's prompt and is answered from the cache; w3 is answered in 250 ms
+        kit, e5 = self.make_kit({"w1": {"k": 1}, "w2": {"k": 1}, "w3": {"k": 3}})
+        root, env = self.dir / "root", self.dir / "env"
+        env.write_text("GEMINI_API_KEY=not-a-key\n", encoding="utf-8")
+        steps = [(100, (400, "Thinking level is not supported for this model.")), (900, (503, "busy")),
+                 (300, gemini_reply("a")), (250, gemini_reply("a"))]
+        argv = ["run_gemini.py", "--kit", str(kit), "--arm", "E5_C0", "--model", "gemini-3.8-flash",
+                "--env", str(env), "--out", str(root / "runs/gemini_E5_C0"), "--cache", str(self.dir / "cache"),
+                "--workers", "1"]
+        with self.clock.patch(), http(self.clock, steps), mock.patch.object(sys, "argv", argv), \
+                redirect_stdout(io.StringIO()):
+            run_gemini.main()
+        calls = read_jsonl(root / "runs/gemini_E5_C0/calls.jsonl")
+        self.assertEqual([(c["window_id"], c["cached"], c["latency_ms"], c["cumulative_ms"]) for c in calls],
+                         [("w1", False, 300.0, 3300.0), ("w2", True, 300.0, 3300.0), ("w3", False, 250.0, 250.0)])
+        self.assertEqual([a["result"] for a in calls[0]["http_attempts"]],
+                         ["http 400, thinking level refused", "http 503", "ok"])
+        self.run_one_second(root, kit, e5)
+        answers = {r["window_id"]: r["choice"] for r in read_jsonl(root / "runs/gemini_E5_C0/answers_1s.jsonl")}
+        self.assertEqual(answers, {"w1": None, "w2": None, "w3": "a"})
+
 
 class ScenarioOneSecondTool(TempDir):
-    def test_score_scen_1s(self):
-        root = self.dir / "scen"
+    def make_inputs(self, root):
         for s in ("novel", "heldout1", "heldout2"):
             (root / "inputs").mkdir(parents=True, exist_ok=True)
             gold = {"c1": {"kind": "help", "acceptable": ["a"]}, "c2": {"kind": "wait", "acceptable": []}}
             (root / f"inputs/{s}_gold.json").write_text(json.dumps(gold), encoding="utf-8")
             write_jsonl(root / f"inputs/{s}_rule.jsonl", [{"window_id": "c1", "choice": "none"},
                                                           {"window_id": "c2", "choice": "none"}])
+
+    def score(self, root):
+        out = io.StringIO()
+        with mock.patch.object(sys, "argv", ["score_scen_1s.py", str(root)]), redirect_stdout(out):
+            runpy.run_path(str(TOOLS / "score_scen_1s.py"), run_name="__main__")
+        text = out.getvalue()
+        return json.loads(text[:text.index("rule:")]), ast.literal_eval(text.rsplit("(cases per run): ", 1)[1].strip())
+
+    def test_runner_re_call_reaches_the_one_second_judgment(self):
+        # c1: an answer outside the options after 900 ms, the re-call answers in 300 ms; c2 answers in 250 ms
+        root, env = self.dir / "scen", self.dir / "env"
+        self.make_inputs(root)
+        env.write_text("OPENAI_API_KEY=not-a-key\n", encoding="utf-8")
+        q = {"support_choice": {"criteria": {"a": "Help.", "none": "Wait."}}}
+        write_jsonl(root / "inputs/novel.jsonl", [{"case_id": c, "state": {"case": c}, "questions": q} for c in ("c1", "c2")])
+        steps = [(900, openai_reply("not-an-option", "support_choice")), (300, openai_reply("a", "support_choice")),
+                 (250, openai_reply("none", "support_choice"))]
+        argv = ["run_scenarios.py", "--set", "novel", "--model", "gpt-4o-mini-2024-07-18", "--run", "1",
+                "--root", str(root), "--cache", str(self.dir / "cache"), "--openai-env", str(env),
+                "--anthropic-env", str(env), "--workers", "1"]
+        with self.clock.patch(), http(self.clock, steps), mock.patch.object(sys, "argv", argv), \
+                redirect_stdout(io.StringIO()):
+            run_scenarios.main()
+        calls = read_jsonl(root / "gpt-4o-mini-2024-07-18__novel__r1/calls.jsonl")
+        self.assertEqual([(c["case_id"], c["attempt"], c["latency_ms"], c["cumulative_ms"]) for c in calls],
+                         [("c1", 0, 900.0, 900.0), ("c1", 1, 300.0, 1200.0), ("c2", 0, 250.0, 250.0)])
+        scores, unknown = self.score(root)
+        # c1's answer took 1,200 ms from its first request: the rule table's answer is used (help missed)
+        self.assertEqual(scores["gpt-4o-mini-2024-07-18 | novel"]["runs"], [0.5])
+        self.assertEqual(unknown["gpt-4o-mini-2024-07-18 | novel"], [0])
+
+    def test_score_scen_1s(self):
+        root = self.dir / "scen"
+        self.make_inputs(root)
         c2 = {"case_id": "c2", "attempt": 0, "choice": "none", "latency_ms": 300.0, "retries": 0, "cumulative_ms": 300.0}
         runs = {"r1": [{"case_id": "c1", "attempt": 0, "choice": "a", "latency_ms": 400.0, "retries": 0}, c2],
                 "r2": [{"case_id": "c1", "attempt": 0, "choice": "a", "latency_ms": 400.0, "retries": 1}, c2],
@@ -342,12 +405,7 @@ class ScenarioOneSecondTool(TempDir):
             write_jsonl(root / f"m__novel__{r}/calls.jsonl", lines)
             write_jsonl(root / f"m__novel__{r}/answers.jsonl", [{"case_id": "c1", "choice": "a"},
                                                                 {"case_id": "c2", "choice": "none"}])
-        out = io.StringIO()
-        with mock.patch.object(sys, "argv", ["score_scen_1s.py", str(root)]), redirect_stdout(out):
-            runpy.run_path(str(TOOLS / "score_scen_1s.py"), run_name="__main__")
-        text = out.getvalue()
-        scores = json.loads(text[:text.index("rule:")])
-        unknown = ast.literal_eval(text.rsplit("(cases per run): ", 1)[1].strip())
+        scores, unknown = self.score(root)
         # r1: stored line with no retry, used as it is; r2: stored line with a retry, time unknown;
         # r3: 900 ms then 300 ms after a format error, over 1 s
         self.assertEqual(scores["m | novel"]["runs"], [1.0, 0.5, 0.5])
