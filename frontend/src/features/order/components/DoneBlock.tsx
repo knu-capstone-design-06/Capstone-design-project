@@ -1,5 +1,5 @@
 import type { CartItem } from '../../../shared/api/index.ts';
-import { money, orderNumberText, temperatureText } from '../model.ts';
+import { money, temperatureText } from '../model.ts';
 import { Icon } from './icons.tsx';
 import './orderBlocks.css';
 
@@ -8,7 +8,7 @@ export function DoneBlock({ orderNumber, items, total }: { orderNumber: string; 
   return <section className="done-block" aria-label="주문 완료">
     <p className="done-head"><Icon name="check_circle" className="pic done-pic" /><span className="done-title">주문이 끝났어요</span></p>
     <p className="done-label">주문번호</p>
-    <strong className="order-number" data-order-number={orderNumber}>{orderNumberText(orderNumber)}</strong>
+    <strong className="order-number" data-order-number={orderNumber}>{orderNumber}</strong>
     <ul className="sum-list" aria-label="주문한 메뉴">
       {items.map(item => {
         const option = temperatureText(item.temperature);

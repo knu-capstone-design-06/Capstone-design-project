@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { categoryLabels, initialSettings, money, orderNumberText, readSettings, temperatureLabel, temperatureText } from './model.ts';
+import { categoryLabels, initialSettings, money, readSettings, temperatureLabel, temperatureText } from './model.ts';
 import { ApiError } from '../../shared/api/client.ts';
 import { OrderController } from './orderController.ts';
 import { OrderResponseError, readOrderResponse } from './orderResponse.ts';
@@ -19,10 +19,6 @@ test('API 값과 화면 표시를 구분하고 푸드 온도는 null로 다룬�
 test('고객 화면의 온도 이름은 아이스·핫이고 푸드에는 온도를 쓰지 않는다', () => {
   assert.equal(temperatureText('iced'), '아이스');
   assert.equal(temperatureText('hot'), '핫');
-  // 개발 샘플의 주문번호는 숫자만 보이고, 서버 번호는 형식을 가정하지 않고 그대로 보입니다.
-  assert.equal(orderNumberText('DEV-SAMPLE-001'), '001');
-  assert.equal(orderNumberText('DEMO-042'), 'DEMO-042');
-  assert.equal(orderNumberText('A001'), 'A001');
   assert.equal(temperatureText(null), '');
   assert.equal(temperatureLabel('iced'), '아이스');
 });
