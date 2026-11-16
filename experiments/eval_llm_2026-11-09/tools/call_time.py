@@ -1,4 +1,5 @@
-"""Time of one model call from its first HTTP request to its valid answer, recorded by the runners.
+"""Time of one model call from its first HTTP request to its valid answer, recorded by the runners and read by the 1-s
+tools (one_second.py, score_scen_1s.py) through whole_ms().
 
 A call is the question for one window (or one scenario case). It can take several HTTP attempts: a 429, a 5xx,
 a timeout or an unreadable response is retried after a wait, and a request whose setting the model refuses
@@ -71,3 +72,17 @@ def attach(rec, before=()):
 def add_ms(so_far, ms):
     """Running cumulative time of a call; None once any part is unknown."""
     return None if so_far is None or ms is None else round(so_far + ms, 1)
+
+
+def whole_ms(line):
+    """Time from the call's first request to the answer on this calls.jsonl line, or None when the line cannot give it.
+
+    A line with cumulative_ms carries it. A line stored before that field is used as it is only when it shows no
+    HTTP retry (retries 0) and no earlier attempt (attempt 0): then the answering request's latency_ms is the whole
+    time. For any other such line the time is unknown; the 1-s tools do not count it as within 1 s and report how
+    many there were."""
+    if "cumulative_ms" in line:
+        return line["cumulative_ms"]
+    if line.get("retries") == 0 and line.get("attempt") == 0:
+        return line.get("latency_ms")
+    return None
