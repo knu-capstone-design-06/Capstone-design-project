@@ -277,7 +277,7 @@ test('명시적으로 켠 개발 샘플은 서버 없이 17개 메뉴·주문·�
       await page.goto(process.env.ORDER_SAMPLE_BROWSER_URL);
       await ready(page);
       assert.equal(await page.locator('.kiosk').getAttribute('data-order-mode'), 'sample', '샘플 모드는 속성으로만 구분');
-      assert.doesNotMatch(await page.locator('.kiosk').innerText(), /샘플|테스트|DEV/, '고객 화면에는 시험·샘플 표시 없음');
+      assert.doesNotMatch(await page.locator('.kiosk').innerText(), /샘플|테스트|DEV|DEMO/, '메뉴 화면에는 시험·샘플 표시 없음');
       assert.equal(await page.locator('.product').count(), 9, '한 쪽에 3 × 3 카드');
       assert.equal(await page.locator('.pager .page').innerText(), '1 / 2');
       let shown = 9;
@@ -299,8 +299,8 @@ test('명시적으로 켠 개발 샘플은 서버 없이 17개 메뉴·주문·�
       await screenshot(page, `sample-menu-${large ? 'large' : 'default'}`);
       await click(page, 'review-open'); await click(page, 'simulate-payment');
       await page.locator('.order-number').waitFor();
-      assert.match(await page.locator('.order-number').getAttribute('data-order-number'), /^DEV-SAMPLE-\d+$/);
-      assert.match(await page.locator('.order-number').innerText(), /^\d+$/, '샘플 주문번호는 숫자만 보임');
+      assert.equal(await page.locator('.order-number').getAttribute('data-order-number'), 'DEMO-001');
+      assert.equal(await page.locator('.order-number').innerText(), 'DEMO-001', '샘플 주문번호는 DEMO-가 붙은 그대로 보임');
       await click(page, 'new-order'); await ready(page);
       await page.waitForFunction(id => window.kioskTouchLogDraft.read().serverSessionId !== id, first);
       assert.equal(await page.locator('.cart-row').count(), 0);
