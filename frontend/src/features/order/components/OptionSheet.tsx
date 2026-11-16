@@ -14,7 +14,7 @@ export function OptionSheet({ ref, product, temperature, quantity, remaining, wr
   writeDisabled: boolean; status: ReactNode | null; hint?: string | null;
   onTemperature: (temperature: Temperature) => void; onQuantity: (quantity: number) => void; onAdd: () => void; onClose: () => void;
 }) {
-  return <Sheet ref={ref} className="option-sheet" labelledBy="option-title" onClose={onClose}>
+  return <Sheet ref={ref} className="option-sheet" labelledBy="option-title" logTarget="option-content" onClose={onClose}>
     {product && <>
       <div className="sheet-head">
         <ProductTile product={product} />

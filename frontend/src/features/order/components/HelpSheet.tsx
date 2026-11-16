@@ -29,7 +29,7 @@ export function HelpSheet({ ref, settings, combined, onToggle, onCombined, onRes
   ref: Ref<HTMLDialogElement>; settings: Settings; combined: boolean;
   onToggle: (key: keyof Settings) => void; onCombined: () => void; onReset: () => void; onClose: () => void; readAloud: ReactNode;
 }) {
-  return <Sheet ref={ref} id="support-panel" className="help-sheet" labelledBy="help-sheet-title" onClose={onClose}>
+  return <Sheet ref={ref} id="support-panel" className="help-sheet" labelledBy="help-sheet-title" logTarget="support-panel" onClose={onClose}>
       <div>
         <h2 id="help-sheet-title" className="sheet-name">편한 화면으로 주문해 주세요</h2>
         <div className="sheet-support"><p className="sheet-desc">설정을 바꿔도 담은 메뉴는 그대로예요.</p></div>

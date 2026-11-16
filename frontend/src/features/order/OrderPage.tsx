@@ -302,7 +302,7 @@ export function OrderPage() {
       <div className="banner-copy" aria-hidden="true"><p className="store-name">온기 카페</p><StepsBar screen={screen} /></div>
     </div>}
     <StoreRow />
-    <main>
+    <main data-log-target="order-content">
       <StepsBar screen={screen} headingRef={heading} />
       {standingTop && standing && <div className="guide guide-lines" role="status">{standing.map(line => <p key={line}>{line}</p>)}</div>}
       {storageWarning && <p role="alert">화면 설정을 기억하지 못했어요. 새로고침하면 기본 화면으로 돌아갈 수 있어요.</p>}
