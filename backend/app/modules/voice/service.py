@@ -455,6 +455,7 @@ def match_spoken_details(
         # a count or temperature of its own ("한 잔만 주세요") is a correction, checked below.
         return result
     last = history[-1] if history else None
+    passed_count = False
     if (not counts and last is not None and last.result.status == "needs_clarification"
             and (last.result.reply_text or "").endswith("?")
             and answers_question(request.text, last.result.reply_text)
@@ -462,7 +463,10 @@ def match_spoken_details(
         # An answer to the kiosk's question about a product ("아메리카노, 따뜻한 것과 아이스 중?")
         # keeps the counts of the utterance asked about, also when the question had to be
         # repeated in between. A general "어떤 메뉴를 주문할까요?" carries nothing over.
-        counts = spoken_mentions(_asked_utterance(history, menu), menu)[0]
+        # A count passed over on the way ("아니 한 잔이요") may have changed the order, so
+        # whatever count the tool input ends with is read back, not run.
+        asked, passed_count = _asked_utterance(history, menu)
+        counts = spoken_mentions(asked, menu)[0]
     products = {item.product_id: item for item in menu}
     in_cart = {(line.product_id, line.temperature): line.quantity for line in cart}
     removals = removal_intents(request.text, menu)
@@ -579,6 +583,7 @@ def match_spoken_details(
             if intent == "unclear":
                 unspoken = True
         calls.append(call)
+    unspoken = unspoken or passed_count
     if not (changed or unspoken):
         return result
     if unspoken:
@@ -586,25 +591,31 @@ def match_spoken_details(
     return VoiceInterpretation(status="needs_confirmation", tool_calls=calls, reply_text="?")
 
 
-def _asked_utterance(history: Sequence[VoiceTurn], menu: list[MenuItem]) -> str:
-    """The utterance the kiosk's last question was first asked about.
+def _asked_utterance(history: Sequence[VoiceTurn], menu: list[MenuItem]) -> tuple[str, bool]:
+    """The utterance the kiosk's last question was first asked about, and whether a count was passed over.
 
     When the same question was repeated over words that neither answered it, named a
     product nor said a count ("네", "잠깐만요", "화면이 하나도 안 보여요"), the order that drew it
     is the earlier one: "아메리카노 두 잔 주세요" → question → "네" → same question → "아이스로요"
     is two cups. A count said on its own in between ("한 잔만요") is a correction, so the walk
-    stops there; a count inside other words ("하나만 물어볼게요") is not one.
+    stops there. A count inside other words is passed over ("하나만 물어볼게요"), but it may
+    still have been a correction ("아니 한 잔이요", "세 잔으로 할게요"), so the second value says
+    so and the caller reads the order back instead of running it.
     """
     question = history[-1].result.reply_text
     index = len(history) - 1
+    passed_count = False
     while (index > 0 and history[index - 1].result.status == "needs_clarification"
            and history[index - 1].result.reply_text == question
            and not answers_question(history[index].request.text, question)
-           and not _name_positions(_compact(history[index].request.text), menu)
-           and not (spoken_mentions(history[index].request.text, menu)[0]
-                    and _cart_words_only(history[index].request.text))):
+           and not _name_positions(_compact(history[index].request.text), menu)):
+        between = history[index].request.text
+        if spoken_mentions(between, menu)[0]:
+            if _cart_words_only(between):
+                break
+            passed_count = True
         index -= 1
-    return history[index].request.text
+    return history[index].request.text, passed_count
 
 
 ASK_MENU_REPLY = "어떤 메뉴를 주문할까요?"

@@ -1493,6 +1493,20 @@ class ToolExecutionApiTests(VoiceApiCase):
                 self.assertEqual((body["status"], body["reply_text"], body["actions"]),
                                  ("needs_confirmation", "아이스 아메리카노 1잔 담을까요?", []), between)
                 self.assertEqual(self.cart()["items"], [])
+        # The vision reviewer's next regression: a count inside other words in between
+        # ("아니 한 잔이요", "세 잔으로 할게요") may be a correction, so even when the model
+        # answers with the two cups first asked about, nothing is added unheard.
+        for between in ["아니 한 잔이요", "세 잔으로 할게요", "한 잔만 할게요", "그냥 한 잔만요", "아니요 한 잔만요",
+                        "하나만 물어볼게요"]:
+            with self.subTest(between=between):
+                self.session_id = self.client.post("/api/v1/sessions").json()["session_id"]
+                self.interpreter.result = interpretation(reply_text=question)
+                self.say("아메리카노 두 잔 주세요")
+                self.assertEqual(self.status(self.say(between)).json()["reply_text"], question)
+                self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 2))
+                body = self.status(self.say("아이스로요")).json()
+                self.assertEqual((body["status"], body["actions"]), ("needs_confirmation", []), between)
+                self.assertEqual(self.cart()["items"], [])
 
     def test_two_line_question_answered_by_a_temperature_picks_that_line(self):
         self.add_by_touch("americano", "iced", 1)
