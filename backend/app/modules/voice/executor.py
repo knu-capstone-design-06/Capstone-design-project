@@ -14,7 +14,7 @@ from app.modules.ordering.repository import OrderingRepository
 from app.modules.ordering.schemas import AddItemRequest, Cart, UpdateItemRequest
 from app.modules.ordering.service import OrderingService
 from app.modules.voice.schemas import (
-    AddCartItemCall, RemoveCartItemCall, ToolCall, UpdateCartItemCall, VoiceErrorCode,
+    AddCartItemCall, CartLine, RemoveCartItemCall, ToolCall, UpdateCartItemCall, VoiceErrorCode,
     VoiceErrorResponse,
 )
 
@@ -40,21 +40,50 @@ class ToolExecutionFailed(Exception):
         self.reply_text = reply_text
 
 
+class CartChanged(Exception):
+    """The cart is no longer what the tool inputs were checked against; nothing was changed.
+
+    "하나 더요" over two cups was read as "3잔으로"; a touch in between made it five, so
+    running the three now would throw the touch away. The caller reads the inputs back
+    against the cart as it is now.
+    """
+
+    def __init__(self, cart: list[CartLine]):
+        super().__init__("cart changed since the tool inputs were checked")
+        self.cart = cart
+
+
+def cart_lines(cart: Cart) -> list[CartLine]:
+    return [CartLine(product_id=i.product_id, temperature=i.temperature, quantity=i.quantity) for i in cart.items]
+
+
 class CartExecutor(Protocol):
-    def execute(self, session_id: str, request_id: str, calls: Sequence[ToolCall]) -> Cart: ...
+    def execute(
+        self, session_id: str, request_id: str, calls: Sequence[ToolCall],
+        expected: Sequence[CartLine] | None = None,
+    ) -> Cart: ...
 
 
 @dataclass
 class OrderingCartExecutor:
-    """Applies tool inputs in the order spoken inside one ordering transaction."""
+    """Applies tool inputs in the order spoken inside one ordering transaction.
+
+    expected is the cart the tool inputs were checked against; inside the lock the cart
+    must still be that, or nothing runs (CartChanged).
+    """
 
     service: OrderingService
     repository: OrderingRepository
 
-    def execute(self, session_id: str, request_id: str, calls: Sequence[ToolCall]) -> Cart:
+    def execute(
+        self, session_id: str, request_id: str, calls: Sequence[ToolCall],
+        expected: Sequence[CartLine] | None = None,
+    ) -> Cart:
         try:
             with self.repository.transaction(session_id):
                 cart = self.service.cart(session_id)
+                if expected is not None and cart_lines(cart) != list(expected):
+                    raise CartChanged(cart_lines(cart))
                 for index, call in enumerate(calls):
                     # One key per tool input: a replayed voice request never runs twice.
                     cart = self._apply(session_id, f"voice:{request_id}:{index}", cart, call)
