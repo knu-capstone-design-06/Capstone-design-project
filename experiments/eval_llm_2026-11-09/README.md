@@ -154,6 +154,12 @@ python -I "$P\tools\score_scen_1s.py" "$P\runs\scenarios"
 
 `run_gpt.py` 명령에 `--print-example`을 더하면 첫 창의 프롬프트를 출력합니다.
 
+`tests/test_call_time.py`는 실행기의 시간 기록과 1초 변형을 확인합니다. HTTP 응답 · 시계 · 대기를 가짜로 바꿔 돌리므로 API를 부르지 않고, 표준 라이브러리만 쓰며, 저장소 안에서 바로 실행됩니다. 확인하는 경우는 첫 응답이 900 ms 뒤 실패하고 다시 보낸 요청이 300 ms에 답한 호출(1초 이내가 아님), 재시도가 없는 호출, 대기 뒤 HTTP 재시도, temperature 0을 거부당해 다시 보낸 요청, 새 시간 필드가 없는 저장 기록(재시도와 앞선 시도가 없는 기록과 있는 기록)입니다.
+
+```powershell
+python -m unittest discover -s experiments\eval_llm_2026-11-09\tests -v
+```
+
 ## 파일
 
 | 파일 | 내용 |
@@ -168,6 +174,7 @@ python -I "$P\tools\score_scen_1s.py" "$P\runs\scenarios"
 | `tools/scen_prep.py`, `tools/run_scenarios.py` | 시나리오 세트 입력 만들기와 실행 |
 | `tools/score_scen.py`, `tools/score_scen_1s.py` | 시나리오 세트의 균형 정확도와 1초 변형 |
 | `tools/score_scen_f1.py`, `tools/score_scen_f1_macro.py` | 시나리오 세트의 정밀도 · 재현율 · F1, 대기 F1과 Macro-F1(저장된 답만 씀, 호출 없음) |
+| `tests/test_call_time.py` | 실행기의 시간 기록과 1초 변형 테스트(가짜 HTTP 응답, 호출 없음) |
 
 아래 실행 기록과 모델 답 캐시는 저장소에 넣지 않았고 비전 담당 작업 폴더에 있습니다.
 
