@@ -55,4 +55,3 @@ export const hintCopy = {
   'cart-remove': "빼려는 메뉴 옆 '삭제'를 눌러 주세요",
 };
 export type HintKind = keyof typeof hintCopy;
-
