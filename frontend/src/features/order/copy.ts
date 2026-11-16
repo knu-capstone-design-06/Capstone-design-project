@@ -56,9 +56,3 @@ export const hintCopy = {
 };
 export type HintKind = keyof typeof hintCopy;
 
-/** 직원 호출 줄의 문구입니다. 받는 쪽이 아직 없어 이 화면 안에서만 상태를 바꿉니다. */
-export const staffCopy = {
-  call: '직원 부르기',
-  cancel: '호출 취소',
-  called: '직원을 불렀어요. 잠시만 기다려 주세요.',
-};

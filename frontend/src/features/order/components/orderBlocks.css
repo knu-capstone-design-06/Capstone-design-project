@@ -1,5 +1,6 @@
 /* 주문 확인: 안내 영역은 단계 표시 아래 32 px에, 주문 묶음은 하단 주문 바 바로 위에 섭니다. */
 .kiosk .review-block { flex: none; margin: 0 0 var(--between); }
+.kiosk .simulation-note { margin: 0 0 var(--in); color: var(--ui-muted); font-size: var(--fs-s); }
 .kiosk .review-back { min-width: var(--col); min-height: var(--h-control); padding: 0 var(--in); font-size: var(--fs-m); line-height: var(--lh); }
 .kiosk .review-lines .cart-line { grid-template-columns: var(--thumb) minmax(0, 1fr) auto var(--w-price) var(--w-delete); min-height: var(--h-review-row); }
 .kiosk .review-lines .cart-line .item { flex-direction: column; align-items: flex-start; gap: 0; }

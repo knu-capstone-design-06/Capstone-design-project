@@ -4,7 +4,7 @@ import type { CartItem, Product, Temperature } from '../../shared/api/index.ts';
 import { categoryLabels, initialSettings, MAX_QUANTITY, readSettings, settingsStorageKey, temperatureLabel } from './model.ts';
 import type { Settings } from './model.ts';
 import { OrderController } from './orderController.ts';
-import { hintCopy, orderCopy, staffCopy, supportCopy } from './copy.ts';
+import { hintCopy, orderCopy, supportCopy } from './copy.ts';
 import type { HintKind } from './copy.ts';
 import { createSampleOrderApi } from './sampleOrderApi.ts';
 import { useTouchLog } from './useTouchLog.ts';
@@ -76,9 +76,6 @@ export function OrderPage() {
   const [restartOpen, setRestartOpen] = useState(false);
   const [cartSheetOpen, setCartSheetOpen] = useState(false);
   const [autoOffClosed, setAutoOffClosed] = useState(false);
-  // 직원 호출(화면 도움 안): 받는 쪽이 아직 없어 이 화면 안의 상태만 바꿉니다(아무에게도 알리지 않음). 부르면 알림이 잠깐 섭니다.
-  const [staffCalled, setStaffCalled] = useState(false);
-  const [staffNotice, setStaffNotice] = useState(false);
   // 버튼 강조 힌트: 고리와 그 한 줄 안내는 그 조작을 쓰거나 화면이 바뀔 때까지 남습니다(안내는 누름을 받지 않음).
   const [hint, setHint] = useState<HintKind | null>(null);
   const [reviewPage, setReviewPage] = useState(0);
@@ -276,7 +273,6 @@ export function OrderPage() {
   const voiceOn = screen === 'menu' && voice.enabled;
   // 늘 서 있는 줄: 단계별 안내를 켰을 때의 그 화면 안내입니다.
   const standing = settings.stepGuide ? guideLines[screen] : null;
-  useNextTouch(staffNotice, touchLog.root, () => setStaffNotice(false));
   // 잠깐 뜨는 알림의 시간: 힌트 한 줄과 말로 주문이 꺼진 알림은 다음 터치(힌트는 그 조작)까지 남습니다.
   const briefShown = !feedback && !hintLine && (appliedNotice !== '' || state.notice !== '');
   useEffect(() => {
@@ -284,11 +280,6 @@ export function OrderPage() {
     const timer = setTimeout(() => { controller.clearNotice(); support.closeApplied(); }, briefNoticeMs);
     return () => clearTimeout(timer);
   }, [briefShown, appliedNotice, state.notice]);
-  useEffect(() => {
-    if (!staffNotice) return;
-    const timer = setTimeout(() => setStaffNotice(false), briefNoticeMs);
-    return () => clearTimeout(timer);
-  }, [staffNotice]);
   const standingTop = standing !== null && settings.largeText;
   // 키오스크의 제안은 시트가 열려 있거나 오류·처리 중 안내가 있는 동안 기다리고, 그 밖의 다음 터치에 닫힙니다.
   const offerCard = support.offer && !sheetOpen && !supportOpen && !restartOpen && !feedback ? <OfferCard support={support.offer.support} onAccept={support.accept} onDecline={support.decline} /> : null;
@@ -336,13 +327,12 @@ export function OrderPage() {
         cartButton={cartInBar ? { ref: cartOpener, amount: lowMenu ? sum : null, onClick: () => setCartSheetOpen(true) } : null}
         restart={screen === 'complete' ? null : { ref: restartTrigger, disabled: busy || state.status === 'uncertain', onClick: () => { voiceController.setEnabled(false); setRestartOpen(true); } }}
         primary={{ target: screen === 'complete' ? 'new-order' : screen === 'menu' ? 'review-open' : 'simulate-payment',
-          label: screen === 'complete' ? '새 주문 시작' : screen === 'menu' ? '주문 확인' : '주문하기',
+          label: screen === 'complete' ? '새 주문 시작' : screen === 'menu' ? '주문 확인' : '모의 주문 완료',
           disabled: screen === 'complete' ? busy : !count || writeDisabled,
           onClick: () => { if (screen === 'complete') { support.endUse(); void startNewOrder(); } else if (screen === 'menu') openReview(); else void controller.checkout(); } }} />
       <EntryRow supportOpen={supportOpen} onToggleSupport={() => setSupportOpen(!supportOpen)} onUndo={support.largeView ? support.undo : null} />
     </section>
-    <HelpSheet ref={helpDialog} settings={settings} combined={combinedEnlargement} staffCalled={staffCalled} status={staffNotice ? staffCopy.called : ''}
-      onStaff={() => { setStaffCalled(!staffCalled); setStaffNotice(!staffCalled); }}
+    <HelpSheet ref={helpDialog} settings={settings} combined={combinedEnlargement}
       onToggle={key => setSettings(current => ({ ...current, [key]: !current[key] }))}
       onCombined={toggleCombinedEnlargement}
       onReset={() => { support.resetView(); setSettings({ ...initialSettings }); }} onClose={() => setSupportOpen(false)}

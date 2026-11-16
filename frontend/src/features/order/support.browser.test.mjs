@@ -146,21 +146,13 @@ test('뺀 줄은 다음 터치까지 제자리에 남고 [되돌리기]는 같�
   } finally { await browser.close(); }
 });
 
-test('직원 호출은 화면 도움 안의 한 줄이며 호출 중에는 [호출 취소]로 바뀌고 다시 누르면 거둔다', async () => {
+test('직원 호출이 연결되지 않은 동안 호출 버튼과 완료 안내를 표시하지 않는다', async () => {
   const browser = await chromium.launch(launchOptions);
   try {
     const { page, errors, fixture } = await open(browser, bootstrap('staff-call'));
-    assert.equal(await page.locator('.entry-row [data-log-target="staff-call"]').count(), 0, '[화면 도움] 줄에는 직원 호출이 없음');
     await target(page, 'support-toggle').click();
-    const call = page.locator('#support-panel [data-log-target="staff-call"]');
-    assert.equal(await call.innerText(), '직원 부르기');
-    await call.click();
-    assert.equal(await call.getAttribute('aria-pressed'), 'true');
-    assert.equal(await call.innerText(), '호출 취소');
-    assert.match(await page.locator('#support-panel [role="status"]').innerText(), /직원을 불렀어요/);
-    await call.click();
-    assert.equal(await call.getAttribute('aria-pressed'), 'false');
-    assert.equal(await call.innerText(), '직원 부르기');
+    assert.equal(await page.locator('[data-log-target="staff-call"]').count(), 0);
+    assert.doesNotMatch(await page.locator('#support-panel').innerText(), /직원을 불렀어요|호출 취소/);
     fixture.verify(); assert.deepEqual(errors, []);
   } finally { await browser.close(); }
 });

@@ -300,7 +300,7 @@ test('명시적으로 켠 개발 샘플은 서버 없이 17개 메뉴·주문·�
       await click(page, 'review-open'); await click(page, 'simulate-payment');
       await page.locator('.order-number').waitFor();
       assert.match(await page.locator('.order-number').getAttribute('data-order-number'), /^DEV-SAMPLE-\d+$/);
-      assert.match(await page.locator('.order-number').innerText(), /^\d+$/, '샘플 주문번호는 숫자만 보임');
+      assert.match(await page.locator('.order-number').innerText(), /^DEV-SAMPLE-\d+$/, '개발 샘플 주문번호의 접두사를 유지함');
       await click(page, 'new-order'); await ready(page);
       await page.waitForFunction(id => window.kioskTouchLogDraft.read().serverSessionId !== id, first);
       assert.equal(await page.locator('.cart-row').count(), 0);
