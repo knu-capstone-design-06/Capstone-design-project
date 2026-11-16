@@ -146,21 +146,38 @@ test('뺀 줄은 다음 터치까지 제자리에 남고 [되돌리기]는 같�
   } finally { await browser.close(); }
 });
 
-test('직원 호출은 화면 도움 안의 한 줄이며 호출 중에는 [호출 취소]로 바뀌고 다시 누르면 거둔다', async () => {
+test('직원 부르기는 화면 도움 안의 한 줄이며 누르면 준비 중 팝업이 뜨고 [확인]·Esc·어두운 곳 누름으로 닫힌다', async () => {
   const browser = await chromium.launch(launchOptions);
   try {
     const { page, errors, fixture } = await open(browser, bootstrap('staff-call'));
     assert.equal(await page.locator('.entry-row [data-log-target="staff-call"]').count(), 0, '[화면 도움] 줄에는 직원 호출이 없음');
     await target(page, 'support-toggle').click();
     const call = page.locator('#support-panel [data-log-target="staff-call"]');
-    assert.equal(await call.innerText(), '직원 부르기');
-    await call.click();
-    assert.equal(await call.getAttribute('aria-pressed'), 'true');
-    assert.equal(await call.innerText(), '호출 취소');
-    assert.match(await page.locator('#support-panel [role="status"]').innerText(), /직원을 불렀어요/);
-    await call.click();
-    assert.equal(await call.getAttribute('aria-pressed'), 'false');
-    assert.equal(await call.innerText(), '직원 부르기');
+    const lastPress = () => page.evaluate(() => window.kioskTouchLogDraft.read().events.filter(event => event.kind === 'pointer_start').at(-1).data);
+    for (const way of ['확인', 'Esc', '어두운 곳']) {
+      await call.click();
+      await page.locator('dialog.staff-popup[open]').waitFor();
+      assert.equal(await page.locator('dialog.staff-popup h2').innerText(), '직원 호출은 아직 준비 중이에요');
+      assert.equal(await target(page, 'staff-call-close').innerText(), '확인');
+      assert.equal(await call.innerText(), '직원 부르기', '누른 뒤에도 이름은 그대로');
+      assert.equal(await call.getAttribute('aria-pressed'), null, '호출 상태를 두지 않음');
+      assert.equal(await page.locator('#support-panel [role="status"]').count(), 0, '불렀다는 알림을 두지 않음');
+      if (way === '확인') {
+        await target(page, 'staff-call-close').click();
+        assert.equal((await lastPress()).target?.id, 'staff-call-close');
+      } else if (way === 'Esc') await page.keyboard.press('Escape');
+      else {
+        // 팝업 아래로 가려진 [직원 부르기] 위의 어두운 곳을 누릅니다. 가까운 후보는 팝업 안에서만 찾습니다.
+        const box = await call.boundingBox();
+        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+        const press = await lastPress();
+        assert.equal(press.target, null, '팝업만 닫는 누름은 대상 밖 누름으로 기록');
+        assert.deepEqual(press.nearestCandidates.map(candidate => candidate.id), ['staff-call-close'], '가려진 화면 도움의 버튼은 후보가 아님');
+      }
+      await page.locator('dialog.staff-popup[open]').waitFor({ state: 'detached' });
+      assert.equal(await page.locator('dialog#support-panel[open]').count(), 1, `${way}: 팝업만 닫히고 화면 도움은 남음`);
+      assert.equal(await page.evaluate(() => document.activeElement?.dataset.logTarget), 'staff-call', `${way}: 초점은 [직원 부르기]로 돌아감`);
+    }
     fixture.verify(); assert.deepEqual(errors, []);
   } finally { await browser.close(); }
 });
