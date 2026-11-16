@@ -334,6 +334,7 @@ test('1080×1920: API 응답으로 상품·옵션·수량·삭제·완료·새 �
   try {
     const a = 'session-test-1', b = 'session-test-2', c = 'session-test-3';
     const confirmed = cartResponse(a, 5, [iced(3), food]);
+    const serverNumber = 'SIM-3F2A9C1E7B4D4E8A9F0C5B6D2E1A7C3F'; // 지금 서버의 형식: SIM- 뒤 16진수 32자리
     const { page, errors, fixture } = await open(browser, [
       ...bootstrap(a),
       mutation(a, '/cart/items', cartResponse(a, 1, [iced(2)])),
@@ -341,7 +342,7 @@ test('1080×1920: API 응답으로 상품·옵션·수량·삭제·완료·새 �
       mutation(a, '/cart/items', cartResponse(a, 3, [iced(2), hot, food])),
       mutation(a, '/cart/items/item-iced', cartResponse(a, 4, [iced(3), hot, food]), { method: 'PATCH' }),
       mutation(a, '/cart/items/item-hot?expected_version=4', confirmed, { method: 'DELETE' }),
-      mutation(a, '/orders', orderResponse(confirmed), { status: 201 }),
+      mutation(a, '/orders', { ...orderResponse(confirmed), order_number: serverNumber }, { status: 201 }),
       { method: 'GET', path: '/api/v1/products', body: productsResponse },
       { method: 'POST', path: '/api/v1/sessions', fail: true },
       ...bootstrap(b),
@@ -381,7 +382,8 @@ test('1080×1920: API 응답으로 상품·옵션·수량·삭제·완료·새 �
     await screenshot(page, 'order-review-large');
     await click(page, 'simulate-payment');
     await page.locator('.order-number').waitFor();
-    assert.equal(await page.locator('.order-number').innerText(), 'DEMO-042', '서버 번호 형식을 가정하지 않음');
+    assert.equal(await page.locator('.order-number').innerText(), serverNumber, '서버 번호 형식을 가정하지 않음');
+    assert.equal(await page.locator('.order-number').getAttribute('data-order-number'), serverNumber);
     await screenshot(page, 'order-complete-large');
     await click(page, 'new-order');
     await click(page, 'order-connect-retry');
