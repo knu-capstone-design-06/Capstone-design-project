@@ -56,9 +56,9 @@ export const hintCopy = {
 };
 export type HintKind = keyof typeof hintCopy;
 
-/** 직원 호출 줄의 문구입니다. 받는 쪽이 아직 없어 이 화면 안에서만 상태를 바꿉니다. */
+/** 직원 호출 줄과 그 팝업의 문구입니다. 받는 쪽(연결 API·운영 연락처)이 아직 없어 누르면 준비 중이라는 팝업만 뜹니다. */
 export const staffCopy = {
   call: '직원 부르기',
-  cancel: '호출 취소',
-  called: '직원을 불렀어요. 잠시만 기다려 주세요.',
+  notReady: '직원 호출은 아직 준비 중이에요',
+  close: '확인',
 };

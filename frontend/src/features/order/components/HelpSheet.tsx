@@ -1,3 +1,4 @@
+import { useRef } from 'react';
 import type { ReactNode, Ref } from 'react';
 import type { Settings } from '../model.ts';
 import { staffCopy } from '../copy.ts';
@@ -24,28 +25,38 @@ export function SettingTile({ target, icon, label, on, disabled = false, onClick
 /**
  * 화면 도움: 옵션·장바구니 시트와 같은 모달 시트(<dialog>, 여는 쪽은 OrderPage)입니다. [닫기]·Esc·어두운 곳 누름으로 닫힙니다.
  * 모달이라 터치 기록의 가까운 후보도 이 시트 안에서만 찾습니다. 화면 읽기 상태를 지키려고 닫혀도 내용을 남겨 둡니다.
- * 직원 호출은 설정 타일 아래 한 줄입니다. 받는 쪽이 아직 없어 이 화면 안의 상태만 바꾸며, 호출 중에는 고른 모습의 [호출 취소]가
- * 호출을 거두는 길입니다. 시트의 일에 대한 알림(status)은 시트의 설명 줄 자리에 잠깐 섭니다.
+ * 직원 호출은 설정 타일 아래 한 줄입니다. 받는 쪽이 아직 없어 누르면 준비 중이라는 팝업(제목 한 줄과 [확인])이 화면 가운데에
+ * 뜹니다. 팝업도 모달 창이라 [확인]·Esc·어두운 곳 누름으로 닫히고, 닫히면 [직원 부르기]로 초점이 돌아갑니다. 터치 기록은 처음 열린
+ * 창 안에서 가까운 후보를 찾으므로 팝업을 이 시트보다 앞에 두어, 팝업이 열린 동안에는 팝업 안에서만 찾게 합니다.
  */
-export function HelpSheet({ ref, settings, combined, staffCalled, status, onToggle, onCombined, onStaff, onReset, onClose, readAloud }: {
-  ref: Ref<HTMLDialogElement>; settings: Settings; combined: boolean; staffCalled: boolean; status: string;
-  onToggle: (key: keyof Settings) => void; onCombined: () => void; onStaff: () => void; onReset: () => void; onClose: () => void; readAloud: ReactNode;
+export function HelpSheet({ ref, settings, combined, onToggle, onCombined, onReset, onClose, readAloud }: {
+  ref: Ref<HTMLDialogElement>; settings: Settings; combined: boolean;
+  onToggle: (key: keyof Settings) => void; onCombined: () => void; onReset: () => void; onClose: () => void; readAloud: ReactNode;
 }) {
-  return <Sheet ref={ref} id="support-panel" className="help-sheet" labelledBy="help-sheet-title" onClose={onClose}>
+  const staffButton = useRef<HTMLButtonElement>(null);
+  const staffPopup = useRef<HTMLDialogElement>(null);
+  const closeStaffPopup = () => { staffPopup.current?.close(); staffButton.current?.focus(); };
+  return <>
+    <Sheet ref={staffPopup} className="staff-popup" labelledBy="staff-popup-title" onClose={closeStaffPopup}>
+      <h2 id="staff-popup-title" className="sheet-name">{staffCopy.notReady}</h2>
+      <button type="button" data-log-target="staff-call-close" className="primary" onClick={closeStaffPopup}>{staffCopy.close}</button>
+    </Sheet>
+    <Sheet ref={ref} id="support-panel" className="help-sheet" labelledBy="help-sheet-title" onClose={onClose}>
       <div>
         <h2 id="help-sheet-title" className="sheet-name">편한 화면으로 주문해 주세요</h2>
-        <div className="sheet-support">{status ? <p className="sheet-desc sheet-status" role="status">{status}</p> : <p className="sheet-desc">설정을 바꿔도 담은 메뉴는 그대로예요.</p>}</div>
+        <div className="sheet-support"><p className="sheet-desc">설정을 바꿔도 담은 메뉴는 그대로예요.</p></div>
       </div>
       <div className="support-options cols">
         {tiles.map(([key, label, icon]) => <SettingTile key={key} target={`support:${key}`} icon={icon} label={label} on={settings[key]} onClick={() => onToggle(key)} />)}
         {import.meta.env.DEV && <SettingTile target="support:combinedEnlargement" icon="text_increase" label="큰 글씨 + 큰 버튼" on={combined} onClick={onCombined} />}
       </div>
-      <button type="button" data-log-target="staff-call" className={`staff-row${staffCalled ? ' is-call' : ''}`} aria-pressed={staffCalled} onClick={onStaff}>
-        <Icon name="notifications" />{staffCalled ? staffCopy.cancel : staffCopy.call}</button>
+      <button type="button" ref={staffButton} data-log-target="staff-call" className="staff-row" onClick={() => staffPopup.current?.showModal()}>
+        <Icon name="notifications" />{staffCopy.call}</button>
       {readAloud}
       <div className="sheet-bar">
         <button type="button" data-log-target="support-reset" className="sheet-reset" onClick={onReset}><Icon name="undo" />기본 화면으로</button>
         <button type="button" data-log-target="support-close" className="sheet-cancel" onClick={onClose}><Icon name="close" />닫기</button>
       </div>
-  </Sheet>;
+    </Sheet>
+  </>;
 }

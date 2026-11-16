@@ -77,9 +77,14 @@
 @media (max-width: 760px) {
   .kiosk .help-sheet { padding: var(--in); }
 }
-/* 화면 도움 안의 직원 호출 한 줄: 전체 너비의 외곽선 버튼, 호출 중에는 고른 모습(행동색 채움, 굵게)의 [호출 취소] */
+/* 화면 도움 안의 직원 호출 한 줄: 전체 너비의 외곽선 버튼 */
 .kiosk .help-sheet .staff-row { justify-content: flex-start; width: 100%; padding: 0 var(--pad-3); }
-.kiosk .help-sheet .staff-row.is-call { color: var(--ui-on-selected); background: var(--ui-selected); border-color: var(--ui-selected); font-weight: 700; }
+/* 직원 호출 팝업: 시트와 같은 덮개·안쪽 여백(32·48)·제목(M 굵게)·주요 버튼(360)으로 화면 가운데에 뜨는 층(모서리 24, 그림자 하나).
+   낮은 화면에서는 아래 조작 영역의 가운데에 섭니다. */
+.kiosk dialog.sheet.staff-popup { inset: 0; width: fit-content; max-width: calc(100% - 2 * var(--side)); height: fit-content; margin: auto;
+  align-items: center; text-align: center; border-radius: var(--r-float); box-shadow: var(--shadow-float); }
+.kiosk.low-screen dialog.sheet.staff-popup { inset: calc(100dvh - var(--low-screen-height)) 0 0; }
+.kiosk .staff-popup .sheet-name { text-wrap: balance; }
+.kiosk .staff-popup .primary { width: auto; min-width: var(--w-action); font-weight: 700; }
 /* 장바구니 시트의 제목 줄은 메뉴 화면 장바구니의 제목 줄과 같습니다(같은 높이와 그 아래 선). */
 .kiosk .cart-sheet-head .sheet-support { margin-top: var(--pad-1); }
-@media (hover: hover) { .kiosk .help-sheet .staff-row.is-call:hover { color: var(--ui-on-selected); background: var(--ui-selected); border-color: var(--ui-selected); } }

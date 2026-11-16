@@ -7,7 +7,7 @@
 export const doubleClickMs = 500;
 
 /**
- * 고객이 한 일(담기·수량·빼기·적용·직원 호출)의 짧은 알림이 스스로 사라지는 시간: Android Snackbar의 LENGTH_LONG(2,750 ms)을
+ * 고객이 한 일(담기·수량·빼기·적용)의 짧은 알림이 스스로 사라지는 시간: Android Snackbar의 LENGTH_LONG(2,750 ms)을
  * 시작값으로 씁니다(모바일 플랫폼 상수). 그 전에 다음 터치가 오면 그때 닫힙니다.
  */
 export const briefNoticeMs = 2750;
