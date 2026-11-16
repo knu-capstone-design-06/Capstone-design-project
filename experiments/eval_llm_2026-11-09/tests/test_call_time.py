@@ -185,6 +185,34 @@ class GptRunner(TempDir):
             self.assertEqual((r["cached"], r["request_ms"]), (True, expected))
 
 
+class FailedCacheWrite(TempDir):
+    """A response that succeeds but whose cache write fails: one HTTP attempt, its time counted once, no second
+    request, and the answer is returned although it is not cached."""
+
+    def test_failed_cache_write(self):
+        clients = {"gpt": (run_gpt.Client("not-a-key", "gpt-4o-mini-2024-07-18", 30, 256, self.dir / "gpt"),
+                           openai_reply("a")),
+                   "gemini": (run_gemini.Client("not-a-key", "gemini-3.8-flash", 30, 256, self.dir / "gemini"),
+                              gemini_reply("a"))}
+        for name, (client, reply) in clients.items():
+            with self.subTest(name):
+                sent = []
+
+                def urlopen(req, timeout=None, reply=reply):
+                    sent.append(req)
+                    self.clock.t += 0.25
+                    return Reply(reply)
+
+                with self.clock.patch(), mock.patch("urllib.request.urlopen", urlopen), \
+                        mock.patch("pathlib.Path.write_text", side_effect=OSError("disk full")):
+                    r = client.ask(MSGS, OPTIONS, 0)
+                self.assertEqual(len(sent), 1)
+                self.assertEqual((r["error"], r["cached"], r["content"], r["request_ms"]),
+                                 (None, False, '{"choice": "a"}', 250.0))
+                self.assertEqual(r["http_attempts"], [{"ms": 250.0, "result": "ok", "wait_ms": 0.0}])
+                self.assertEqual(list(client.cache_dir.glob("*.json")), [])
+
+
 class ClaudeRunner(TempDir):
     def test_http_retry_counts_the_failed_attempt_and_the_wait(self):
         client = run_claude.Client("not-a-key", "claude-haiku-5-5", 30, 256, self.dir / "cache")

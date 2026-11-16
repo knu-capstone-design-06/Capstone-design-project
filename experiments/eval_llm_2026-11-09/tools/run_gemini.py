@@ -84,14 +84,6 @@ class Client:
                            "reasoning_tokens": u.get("thoughtsTokenCount") or 0, "retries": retries,
                            "temperature_0": True, "thinking_level": "minimal" if self.use_thinking_level else "default",
                            "schema": True, "error": None}
-                    tries.add(lat, "ok")
-                    # the cache keeps the whole request that produced this answer (a refused body's attempts
-                    # included, although that body is not part of this cache key) and the accepted body's own time
-                    rec["http_attempts"], rec["request_ms"] = tries.items, tries.total()
-                    rec["accepted_ms"] = tries.total(start)
-                    cf.write_text(json.dumps(rec), encoding="utf-8")
-                    rec["cached"], rec["request_hash"] = False, ck
-                    return rec
                 except urllib.error.HTTPError as e:
                     msg = e.read().decode("utf-8", "replace")
                     tries.add(ms_since(t0), f"http {e.code}")
@@ -114,6 +106,19 @@ class Client:
                         continue
                     return {"error": type(e).__name__, "retries": retries, "cached": False,
                             "http_attempts": tries.items, "request_ms": tries.total()}
+                # the HTTP attempt succeeded (every except branch above leaves this pass): it is recorded once here,
+                # outside the retry handling, so nothing below can send the request again
+                tries.add(lat, "ok")
+                # the cache keeps the whole request that produced this answer (a refused body's attempts
+                # included, although that body is not part of this cache key) and the accepted body's own time
+                rec["http_attempts"], rec["request_ms"] = tries.items, tries.total()
+                rec["accepted_ms"] = tries.total(start)
+                try:
+                    cf.write_text(json.dumps(rec), encoding="utf-8")
+                except OSError:  # a failed write leaves this answer out of the cache; it is still returned and used
+                    pass
+                rec["cached"], rec["request_hash"] = False, ck
+                return rec
             if not changed:
                 return {"error": "unreachable", "cached": False, "http_attempts": tries.items,
                         "request_ms": tries.total()}
