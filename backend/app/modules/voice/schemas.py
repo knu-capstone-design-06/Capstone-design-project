@@ -47,6 +47,14 @@ class MenuItem(BaseModel):
     temperatures: list[Literal["iced", "hot"]]
 
 
+class CartLine(BaseModel):
+    """What is in the cart now, as the interpreter sees it: enough to read "하나 더" and "빼 줘"."""
+
+    product_id: str
+    temperature: Temperature
+    quantity: int
+
+
 class _Arguments(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
