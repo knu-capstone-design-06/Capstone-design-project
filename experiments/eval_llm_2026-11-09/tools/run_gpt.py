@@ -4,11 +4,17 @@ Prompt: system = the question's `instructions` + its options with their `criteri
 questions.json) + one output-format line; user = the window's `state` JSON. The answer is forced to one option
 with a strict json_schema enum. Invalid answer -> one retry, then null. Per-request cache (sha256 of model,
 request body, attempt) so a rerun never pays twice. Standard library only.
+Time: each calls.jsonl line also has http_attempts, request_ms and cumulative_ms (call_time.py), so the time from
+the window's first request to its valid answer counts HTTP retries, their waits, a request refused for temperature 0
+or json_schema (sent again without it) and the attempt before a format re-call.
 The API key is read from an env file and never printed or written.
 """
 import argparse, hashlib, json, sys, threading, time, urllib.error, urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+from call_time import Attempts, add_ms, attach, ms_since  # noqa: E402
 
 API = "https://api.openai.com/v1/chat/completions"
 # USD per 1M tokens (input, cached input, output); https://developers.openai.com/api/docs/pricing, fetched 2026-11-09
@@ -58,6 +64,7 @@ class Client:
         return b
 
     def ask(self, messages, options, attempt):
+        tries = Attempts()  # every HTTP attempt of this request line, a refused body's included
         while True:
             b = self.body(messages, options)
             ck = hashlib.sha256(json.dumps([self.model, b, attempt], sort_keys=True).encode()).hexdigest()
@@ -65,9 +72,9 @@ class Client:
             if cf.exists():
                 rec = json.loads(cf.read_text(encoding="utf-8"))
                 rec["cached"], rec["request_hash"] = True, ck
-                return rec
+                return attach(rec, tries.items)
             data = json.dumps(b).encode("utf-8")
-            retries, changed = 0, False
+            retries, changed, start = 0, False, len(tries.items)
             while True:
                 req = urllib.request.Request(API, data=data, method="POST", headers={
                     "Authorization": f"Bearer {self.key}", "Content-Type": "application/json"})
@@ -86,11 +93,15 @@ class Client:
                            "reasoning_tokens": (u.get("completion_tokens_details") or {}).get("reasoning_tokens"),
                            "retries": retries, "temperature_0": self.use_temperature, "schema": self.use_schema,
                            "error": None}
+                    tries.add(lat, "ok")
+                    # the cache keeps this body's attempts only; a refused body is not part of this cache key
+                    rec["http_attempts"], rec["request_ms"] = tries.items[start:], tries.total(start)
                     cf.write_text(json.dumps(rec), encoding="utf-8")
                     rec["cached"], rec["request_hash"] = False, ck
-                    return rec
+                    return attach(rec, tries.items[:start])
                 except urllib.error.HTTPError as e:
                     msg = e.read().decode("utf-8", "replace")
+                    tries.add(ms_since(t0), f"http {e.code}")
                     if e.code == 400 and "temperature" in msg and "temperature" in b:
                         self.use_temperature = False
                         changed = True
@@ -101,17 +112,21 @@ class Client:
                         break
                     if (e.code == 429 or e.code >= 500) and retries < 5:
                         retries += 1
-                        time.sleep(2 ** retries)
+                        tries.wait(2 ** retries)
                         continue
-                    return {"error": f"http {e.code}: {msg[:200]}", "retries": retries, "cached": False}
+                    return {"error": f"http {e.code}: {msg[:200]}", "retries": retries, "cached": False,
+                            "http_attempts": tries.items, "request_ms": tries.total()}
                 except Exception as e:  # timeout, connection, bad JSON
+                    tries.add(ms_since(t0), type(e).__name__)
                     if retries < 2:
                         retries += 1
-                        time.sleep(2 ** retries)
+                        tries.wait(2 ** retries)
                         continue
-                    return {"error": type(e).__name__, "retries": retries, "cached": False}
+                    return {"error": type(e).__name__, "retries": retries, "cached": False,
+                            "http_attempts": tries.items, "request_ms": tries.total()}
             if not changed:
-                return {"error": "unreachable", "cached": False}
+                return {"error": "unreachable", "cached": False, "http_attempts": tries.items,
+                        "request_ms": tries.total()}
 
 
 def parse(content, options):
@@ -159,7 +174,7 @@ def main():
         st = [s for s in row["stages"] if s["stage"] == "support_choice"][0]
         q = qdoc[st["questions"]]["questions"]["support_choice"]
         assert list(q["criteria"]) == st["options"], row["window_id"]
-        logs, choice = [], None
+        logs, choice, so_far = [], None, 0.0
         for attempt in range(2):
             msgs = build_messages(q, st["state"])
             if not client.use_schema:
@@ -168,12 +183,15 @@ def main():
             ch = None if r.get("error") else parse(r.get("content"), st["options"])
             c = 0.0 if r.get("error") else cost(a.model, r.get("prompt_tokens"), r.get("completion_tokens"),
                                                 r.get("cached_tokens"))
+            so_far = add_ms(so_far, r.get("request_ms"))
             logs.append({"window_id": row["window_id"], "attempt": attempt, "model": r.get("model"), "choice": ch,
                          "raw": r.get("content"), "finish_reason": r.get("finish_reason"),
                          "latency_ms": r.get("latency_ms"), "prompt_tokens": r.get("prompt_tokens"),
                          "completion_tokens": r.get("completion_tokens"), "cached_tokens": r.get("cached_tokens"),
                          "reasoning_tokens": r.get("reasoning_tokens"), "cost_usd": c, "cached": r.get("cached"), "request_hash": r.get("request_hash"),
-                         "temperature_0": r.get("temperature_0"), "retries": r.get("retries"), "error": r.get("error")})
+                         "temperature_0": r.get("temperature_0"), "retries": r.get("retries"), "error": r.get("error"),
+                         "http_attempts": r.get("http_attempts"), "request_ms": r.get("request_ms"),
+                         "cumulative_ms": so_far})
             with lock:
                 if not r.get("cached"):
                     spend["new"] += c

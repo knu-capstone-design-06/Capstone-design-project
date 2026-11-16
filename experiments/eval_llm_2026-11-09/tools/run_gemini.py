@@ -2,7 +2,8 @@
 
 Same system and user text as run_gpt.py (build_messages). Answer forced with responseSchema (enum of the window's
 options), temperature 0, thinkingLevel "minimal" (the lowest level; dropped automatically if the model rejects it).
-Invalid answer -> one retry, then null. Per-request cache as in run_gpt.py; output files have the same fields.
+Invalid answer -> one retry, then null. Per-request cache as in run_gpt.py; output files have the same fields,
+the time fields of call_time.py included (a request refused for its thinking level counts into the call's time).
 The API key is read from an env file, sent only in the x-goog-api-key header, and never printed or written.
 """
 import argparse, hashlib, json, sys, threading, time, urllib.error, urllib.request
@@ -10,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+from call_time import Attempts, add_ms, attach, ms_since  # noqa: E402
 from run_gpt import build_messages, parse  # noqa: E402
 
 URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
@@ -51,6 +53,7 @@ class Client:
                 "generationConfig": gc}
 
     def ask(self, messages, options, attempt):
+        tries = Attempts()  # every HTTP attempt of this request line, a refused body's included
         while True:
             b = self.body(messages, options)
             ck = hashlib.sha256(json.dumps([self.model, b, attempt], sort_keys=True).encode()).hexdigest()
@@ -58,9 +61,9 @@ class Client:
             if cf.exists():
                 rec = json.loads(cf.read_text(encoding="utf-8"))
                 rec["cached"], rec["request_hash"] = True, ck
-                return rec
+                return attach(rec, tries.items)
             data = json.dumps(b).encode("utf-8")
-            retries, changed = 0, False
+            retries, changed, start = 0, False, len(tries.items)
             while True:
                 req = urllib.request.Request(URL.format(model=self.model), data=data, method="POST", headers={
                     "x-goog-api-key": self.key, "Content-Type": "application/json"})
@@ -81,28 +84,36 @@ class Client:
                            "reasoning_tokens": u.get("thoughtsTokenCount") or 0, "retries": retries,
                            "temperature_0": True, "thinking_level": "minimal" if self.use_thinking_level else "default",
                            "schema": True, "error": None}
+                    tries.add(lat, "ok")
+                    # the cache keeps this body's attempts only; a refused body is not part of this cache key
+                    rec["http_attempts"], rec["request_ms"] = tries.items[start:], tries.total(start)
                     cf.write_text(json.dumps(rec), encoding="utf-8")
                     rec["cached"], rec["request_hash"] = False, ck
-                    return rec
+                    return attach(rec, tries.items[:start])
                 except urllib.error.HTTPError as e:
                     msg = e.read().decode("utf-8", "replace")
+                    tries.add(ms_since(t0), f"http {e.code}")
                     if e.code == 400 and "thinking" in msg.lower() and "thinkingConfig" in b["generationConfig"]:
                         self.use_thinking_level = False
                         changed = True
                         break
                     if (e.code == 429 or e.code >= 500) and retries < 5:
                         retries += 1
-                        time.sleep(2 ** retries)
+                        tries.wait(2 ** retries)
                         continue
-                    return {"error": f"http {e.code}: {msg[:200]}", "retries": retries, "cached": False}
+                    return {"error": f"http {e.code}: {msg[:200]}", "retries": retries, "cached": False,
+                            "http_attempts": tries.items, "request_ms": tries.total()}
                 except Exception as e:
+                    tries.add(ms_since(t0), type(e).__name__)
                     if retries < 2:
                         retries += 1
-                        time.sleep(2 ** retries)
+                        tries.wait(2 ** retries)
                         continue
-                    return {"error": type(e).__name__, "retries": retries, "cached": False}
+                    return {"error": type(e).__name__, "retries": retries, "cached": False,
+                            "http_attempts": tries.items, "request_ms": tries.total()}
             if not changed:
-                return {"error": "unreachable", "cached": False}
+                return {"error": "unreachable", "cached": False, "http_attempts": tries.items,
+                        "request_ms": tries.total()}
 
 
 def main():
@@ -138,18 +149,21 @@ def main():
         q = qdoc[st["questions"]]["questions"]["support_choice"]
         assert list(q["criteria"]) == st["options"], row["window_id"]
         msgs = build_messages(q, st["state"])
-        logs, choice = [], None
+        logs, choice, so_far = [], None, 0.0
         for attempt in range(2):
             r = client.ask(msgs, st["options"], attempt)
             ch = None if r.get("error") or r.get("content") is None else parse(r["content"], st["options"])
             c = 0.0 if r.get("error") else cost(a.model, r.get("prompt_tokens"), r.get("completion_tokens"))
+            so_far = add_ms(so_far, r.get("request_ms"))
             logs.append({"window_id": row["window_id"], "attempt": attempt, "model": r.get("model"), "choice": ch,
                          "raw": r.get("content"), "finish_reason": r.get("finish_reason"),
                          "latency_ms": r.get("latency_ms"), "prompt_tokens": r.get("prompt_tokens"),
                          "completion_tokens": r.get("completion_tokens"), "cached_tokens": r.get("cached_tokens"),
                          "reasoning_tokens": r.get("reasoning_tokens"), "cost_usd": c, "cached": r.get("cached"),
                          "request_hash": r.get("request_hash"), "temperature_0": True,
-                         "thinking_level": r.get("thinking_level"), "retries": r.get("retries"), "error": r.get("error")})
+                         "thinking_level": r.get("thinking_level"), "retries": r.get("retries"), "error": r.get("error"),
+                         "http_attempts": r.get("http_attempts"), "request_ms": r.get("request_ms"),
+                         "cumulative_ms": so_far})
             with lock:
                 if not r.get("cached"):
                     spend["new"] += c
