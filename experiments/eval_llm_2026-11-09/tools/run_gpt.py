@@ -6,7 +6,8 @@ with a strict json_schema enum. Invalid answer -> one retry, then null. Per-requ
 request body, attempt) so a rerun never pays twice. Standard library only.
 Time: each calls.jsonl line also has http_attempts, request_ms and cumulative_ms (call_time.py), so the time from
 the window's first request to its valid answer counts HTTP retries, their waits, a request refused for temperature 0
-or json_schema (sent again without it) and the attempt before a format re-call.
+or json_schema (sent again without it) and the attempt before a format re-call. The cache keeps that whole time with
+the answer, so a window answered from the cache is judged on the time of the request that produced the answer.
 The API key is read from an env file and never printed or written.
 """
 import argparse, hashlib, json, sys, threading, time, urllib.error, urllib.request
@@ -72,7 +73,7 @@ class Client:
             if cf.exists():
                 rec = json.loads(cf.read_text(encoding="utf-8"))
                 rec["cached"], rec["request_hash"] = True, ck
-                return attach(rec, tries.items)
+                return attach(rec, refused_now=tries.items)
             data = json.dumps(b).encode("utf-8")
             retries, changed, start = 0, False, len(tries.items)
             while True:
@@ -94,19 +95,23 @@ class Client:
                            "retries": retries, "temperature_0": self.use_temperature, "schema": self.use_schema,
                            "error": None}
                     tries.add(lat, "ok")
-                    # the cache keeps this body's attempts only; a refused body is not part of this cache key
-                    rec["http_attempts"], rec["request_ms"] = tries.items[start:], tries.total(start)
+                    # the cache keeps the whole request that produced this answer (a refused body's attempts
+                    # included, although that body is not part of this cache key) and the accepted body's own time
+                    rec["http_attempts"], rec["request_ms"] = tries.items, tries.total()
+                    rec["accepted_ms"] = tries.total(start)
                     cf.write_text(json.dumps(rec), encoding="utf-8")
                     rec["cached"], rec["request_hash"] = False, ck
-                    return attach(rec, tries.items[:start])
+                    return rec
                 except urllib.error.HTTPError as e:
                     msg = e.read().decode("utf-8", "replace")
                     tries.add(ms_since(t0), f"http {e.code}")
                     if e.code == 400 and "temperature" in msg and "temperature" in b:
+                        tries.items[-1]["result"] += ", temperature refused"
                         self.use_temperature = False
                         changed = True
                         break
                     if e.code == 400 and "response_format" in msg and "response_format" in b:
+                        tries.items[-1]["result"] += ", response_format refused"
                         self.use_schema = False
                         changed = True
                         break
@@ -191,7 +196,7 @@ def main():
                          "reasoning_tokens": r.get("reasoning_tokens"), "cost_usd": c, "cached": r.get("cached"), "request_hash": r.get("request_hash"),
                          "temperature_0": r.get("temperature_0"), "retries": r.get("retries"), "error": r.get("error"),
                          "http_attempts": r.get("http_attempts"), "request_ms": r.get("request_ms"),
-                         "cumulative_ms": so_far})
+                         "refused_now": r.get("refused_now"), "cumulative_ms": so_far})
             with lock:
                 if not r.get("cached"):
                     spend["new"] += c

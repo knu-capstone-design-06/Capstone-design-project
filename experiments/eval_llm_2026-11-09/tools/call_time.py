@@ -7,12 +7,17 @@ a timeout or an unreadable response is retried after a wait, and a request whose
 runner asks once more (calls.jsonl line with attempt 1). Each calls.jsonl line therefore carries
     latency_ms     the HTTP attempt that returned this line's response (meaning unchanged)
     retries        HTTP retries of the request body that answered (meaning unchanged)
-    http_attempts  every HTTP attempt of this line's request: {"ms", "result", "wait_ms" (wait before the next one)}
+    http_attempts  every HTTP attempt of this line's request, those of a refused body included:
+                   {"ms", "result", "wait_ms" (wait before the next one)}
     request_ms     the sum of those attempts and waits
+    accepted_ms    (run_gpt.py, run_gemini.py) the part of request_ms spent on the body that was accepted
+    refused_now    (a line answered from the cache only) attempts the present call sent with a body that was then
+                   refused, before the cache was read; recorded, not added (see attach)
     cumulative_ms  request_ms of this line plus that of the call's earlier lines: the time from the call's first
                    request to the end of this line's request; on the answering line, the time to the valid answer
 Times are perf_counter around each HTTP exchange (request and reading the response) and around each wait.
-A response read from the cache brings the attempts stored with it, i.e. those of the call that produced it.
+The cache keeps a response with the whole time of the request that produced it (refused bodies included), and a
+response read from the cache is judged on that time.
 Standard library only.
 """
 import time
@@ -57,15 +62,20 @@ def stored_request_ms(rec):
     return None
 
 
-def attach(rec, before=()):
-    """Set http_attempts and request_ms on rec, with the attempts sent in this run before the request body that
-    answered (a refused setting) in front. Returns rec."""
-    before = list(before)
-    own, t = rec.get("http_attempts"), stored_request_ms(rec)
-    if own is None and t is not None:  # stored before these fields, no retry: one attempt
-        own = [{"ms": rec["latency_ms"], "result": "ok", "wait_ms": 0.0}]
-    rec["http_attempts"] = before + (own or [])
-    rec["request_ms"] = None if t is None else round(total(before) + t, 1)
+def attach(rec, refused_now=()):
+    """Time fields of a response read from the cache. Returns rec.
+
+    The answer is judged on the stored time of the request that produced it (http_attempts and request_ms, a refused
+    body's attempts included). A record stored before these fields counts as one attempt when it shows no HTTP retry
+    (retries 0); otherwise request_ms is None (unknown). Attempts the present call sent with a body that was refused
+    before the cache was read go to refused_now and are not added: the stored time stands for the whole request that
+    produced the answer, which may already hold a refusal of its own."""
+    t = stored_request_ms(rec)
+    if rec.get("http_attempts") is None and t is not None:  # stored before these fields, no retry: one attempt
+        rec["http_attempts"] = [{"ms": rec["latency_ms"], "result": "ok", "wait_ms": 0.0}]
+    rec["request_ms"] = t
+    if refused_now:
+        rec["refused_now"] = list(refused_now)
     return rec
 
 

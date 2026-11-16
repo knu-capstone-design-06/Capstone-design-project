@@ -61,7 +61,7 @@ class Client:
             if cf.exists():
                 rec = json.loads(cf.read_text(encoding="utf-8"))
                 rec["cached"], rec["request_hash"] = True, ck
-                return attach(rec, tries.items)
+                return attach(rec, refused_now=tries.items)
             data = json.dumps(b).encode("utf-8")
             retries, changed, start = 0, False, len(tries.items)
             while True:
@@ -85,15 +85,18 @@ class Client:
                            "temperature_0": True, "thinking_level": "minimal" if self.use_thinking_level else "default",
                            "schema": True, "error": None}
                     tries.add(lat, "ok")
-                    # the cache keeps this body's attempts only; a refused body is not part of this cache key
-                    rec["http_attempts"], rec["request_ms"] = tries.items[start:], tries.total(start)
+                    # the cache keeps the whole request that produced this answer (a refused body's attempts
+                    # included, although that body is not part of this cache key) and the accepted body's own time
+                    rec["http_attempts"], rec["request_ms"] = tries.items, tries.total()
+                    rec["accepted_ms"] = tries.total(start)
                     cf.write_text(json.dumps(rec), encoding="utf-8")
                     rec["cached"], rec["request_hash"] = False, ck
-                    return attach(rec, tries.items[:start])
+                    return rec
                 except urllib.error.HTTPError as e:
                     msg = e.read().decode("utf-8", "replace")
                     tries.add(ms_since(t0), f"http {e.code}")
                     if e.code == 400 and "thinking" in msg.lower() and "thinkingConfig" in b["generationConfig"]:
+                        tries.items[-1]["result"] += ", thinking level refused"
                         self.use_thinking_level = False
                         changed = True
                         break
@@ -163,7 +166,7 @@ def main():
                          "request_hash": r.get("request_hash"), "temperature_0": True,
                          "thinking_level": r.get("thinking_level"), "retries": r.get("retries"), "error": r.get("error"),
                          "http_attempts": r.get("http_attempts"), "request_ms": r.get("request_ms"),
-                         "cumulative_ms": so_far})
+                         "refused_now": r.get("refused_now"), "cumulative_ms": so_far})
             with lock:
                 if not r.get("cached"):
                     spend["new"] += c

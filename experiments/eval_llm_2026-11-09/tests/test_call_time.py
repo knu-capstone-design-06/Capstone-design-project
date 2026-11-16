@@ -4,7 +4,7 @@ Standard library only and no network: urllib.request.urlopen, time.perf_counter 
 anthropic package is replaced by a small stand-in. From the repository root:
     python -m unittest discover -s experiments/eval_llm_2026-11-09/tests -v
 """
-import ast, io, json, runpy, sys, tempfile, types, unittest, urllib.error
+import ast, hashlib, io, json, runpy, sys, tempfile, types, unittest, urllib.error
 from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
@@ -146,12 +146,36 @@ class GptRunner(TempDir):
         self.assertEqual((again["cached"], again["request_ms"]), (True, 3200.0))
 
     def test_request_refused_for_temperature_counts_into_the_call(self):
-        r = self.ask([(120, (400, "Unsupported value: 'temperature' does not support 0")), (300, openai_reply("a"))])
+        refusal = (400, "Unsupported value: 'temperature' does not support 0")
+        r = self.ask([(120, refusal), (300, openai_reply("a"))])
         self.assertEqual((r["latency_ms"], r["retries"], r["temperature_0"]), (300.0, 0, False))
-        self.assertEqual([a["result"] for a in r["http_attempts"]], ["http 400", "ok"])
-        self.assertEqual(r["request_ms"], 420.0)
+        self.assertEqual([a["result"] for a in r["http_attempts"]], ["http 400, temperature refused", "ok"])
+        self.assertEqual((r["request_ms"], r["accepted_ms"]), (420.0, 300.0))
+        # the cache keeps the whole request that produced the answer, and the accepted body's own time apart
         stored = json.loads(next((self.dir / "cache").glob("*.json")).read_text(encoding="utf-8"))
-        self.assertEqual(stored["request_ms"], 300.0)  # the refused body is not part of this cache key
+        self.assertEqual((stored["request_ms"], stored["accepted_ms"]), (420.0, 300.0))
+        # the same client reuses the answer (no refusal any more) and still sees the producing request's time
+        again = self.ask([])
+        self.assertEqual((again["cached"], again["request_ms"]), (True, 420.0))
+        self.assertNotIn("refused_now", again)
+        # a new client (a rerun) is refused again before it reads the cache: recorded once, not added
+        self.client = run_gpt.Client("not-a-key", "gpt-4o-mini-2024-07-18", 30, 256, self.dir / "cache")
+        rerun = self.ask([(150, refusal)])
+        self.assertEqual((rerun["cached"], rerun["request_ms"]), (True, 420.0))
+        self.assertEqual(rerun["refused_now"], [{"ms": 150.0, "result": "http 400, temperature refused", "wait_ms": 0.0}])
+
+    def test_cache_written_before_these_fields(self):
+        # one cache file per attempt number: no HTTP retry (one attempt, latency_ms is the whole request) and
+        # one retry (time unknown)
+        for attempt, retries, expected in ((0, 0, 400.0), (1, 1, None)):
+            b = self.client.body(MSGS, OPTIONS)
+            ck = hashlib.sha256(json.dumps([self.client.model, b, attempt], sort_keys=True).encode()).hexdigest()
+            (self.dir / "cache" / f"{ck}.json").write_text(json.dumps(
+                {"latency_ms": 400.0, "model": "m", "content": '{"choice": "a"}', "finish_reason": "stop",
+                 "retries": retries, "temperature_0": True, "schema": True, "error": None}), encoding="utf-8")
+            with self.clock.patch(), http(self.clock, []):
+                r = self.client.ask(MSGS, OPTIONS, attempt)
+            self.assertEqual((r["cached"], r["request_ms"]), (True, expected))
 
 
 class ClaudeRunner(TempDir):
@@ -199,7 +223,9 @@ class StoredLineRule(unittest.TestCase):
 class OneSecondTool(TempDir):
     """run_gpt.py writes the runs, one_second.py reads them (both run in this process)."""
 
-    def make_kit(self):
+    def make_kit(self, states=None):
+        """Kit with windows w1..w3; states maps a window to its state (windows with the same state share a prompt)."""
+        states = states or {w: {"window": w} for w in ("w1", "w2", "w3")}
         kit = self.dir / "kit"
         q = {"qs": {"questions": {"support_choice": {"instructions": "Pick one.",
                                                      "criteria": {"a": "Help.", "none": "Wait."}}}}}
@@ -207,7 +233,7 @@ class OneSecondTool(TempDir):
         (kit / "data/questions.json").write_text(json.dumps(q), encoding="utf-8")
         write_jsonl(kit / "data/E5_C0.jsonl", [
             {"window_id": w, "stages": [{"stage": "support_choice", "questions": "qs", "options": OPTIONS,
-                                         "state": {"window": w}}]} for w in ("w1", "w2", "w3")])
+                                         "state": s}]} for w, s in states.items()])
         e5 = self.dir / "e5"
         for arm, d in (("E5_J", "stage2_3_J_b0_r0"), ("E5_C0", "stage2_1_swap_C_C0")):
             write_jsonl(kit / f"reference_answers/{arm}.jsonl", [{"window_id": "take@1.0", "choice": "a"}])
@@ -245,10 +271,7 @@ class OneSecondTool(TempDir):
             {"window_id": "w3", "attempt": 1, "choice": "a", "latency_ms": 300.0, "retries": 0}])
         write_jsonl(root / "runs/stored_E5_C0/answers.jsonl", [{"window_id": w, "choice": "a"} for w in ("w1", "w2", "w3")])
 
-        out = io.StringIO()
-        with mock.patch.object(sys, "argv", ["one_second.py", str(root), str(kit), str(e5)]), redirect_stdout(out):
-            runpy.run_path(str(TOOLS / "one_second.py"), run_name="__main__")
-        report = json.loads(out.getvalue())
+        report = self.run_one_second(root, kit, e5)
 
         def answers(run):
             return {r["window_id"]: r["choice"] for r in read_jsonl(root / f"runs/{run}/answers_1s.jsonl")}
@@ -259,6 +282,44 @@ class OneSecondTool(TempDir):
         self.assertEqual(answers("stored_E5_C0"), {"w1": "a", "w2": None, "w3": None})
         self.assertEqual(report["stored_E5_C0"], {"windows": 3, "set_null_over_1s": 0, "set_null_time_unknown": 2})
         self.assertEqual(answers("jev_E5_C0_1s"), {"take@1.0": "a"})
+
+    def run_one_second(self, root, kit, e5):
+        out = io.StringIO()
+        with mock.patch.object(sys, "argv", ["one_second.py", str(root), str(kit), str(e5)]), redirect_stdout(out):
+            runpy.run_path(str(TOOLS / "one_second.py"), run_name="__main__")
+        return json.loads(out.getvalue())
+
+    def test_cached_answer_keeps_the_time_of_the_request_that_produced_it(self):
+        # w1 and w2 share a prompt; w1's request is refused for temperature 0 (900 ms) and answered in 300 ms,
+        # w2 is answered from the cache by the same client; w3 has its own prompt, answered in 250 ms
+        kit, e5 = self.make_kit({"w1": {"k": 1}, "w2": {"k": 1}, "w3": {"k": 3}})
+        root, env = self.dir / "root", self.dir / "env"
+        env.write_text("OPENAI_API_KEY=not-a-key\n", encoding="utf-8")
+        steps = [(900, (400, "Unsupported value: 'temperature'")), (300, openai_reply("a")), (250, openai_reply("a"))]
+        argv = ["run_gpt.py", "--kit", str(kit), "--arm", "E5_C0", "--model", "gpt-4o-mini-2024-07-18",
+                "--env", str(env), "--out", str(root / "runs/new_E5_C0"), "--cache", str(self.dir / "cache"),
+                "--workers", "1"]
+        with self.clock.patch(), http(self.clock, steps), mock.patch.object(sys, "argv", argv), \
+                redirect_stdout(io.StringIO()):
+            run_gpt.main()
+        calls = read_jsonl(root / "runs/new_E5_C0/calls.jsonl")
+        self.assertEqual([(c["window_id"], c["cached"], c["latency_ms"], c["cumulative_ms"]) for c in calls],
+                         [("w1", False, 300.0, 1200.0), ("w2", True, 300.0, 1200.0), ("w3", False, 250.0, 250.0)])
+        report = self.run_one_second(root, kit, e5)
+        answers = {r["window_id"]: r["choice"] for r in read_jsonl(root / "runs/new_E5_C0/answers_1s.jsonl")}
+        self.assertEqual(answers, {"w1": None, "w2": None, "w3": "a"})
+        self.assertEqual(report["new_E5_C0"], {"windows": 3, "set_null_over_1s": 2, "set_null_time_unknown": 0})
+
+        # a rerun (new process) is refused once more before it reads the cache: the line records that refusal
+        # and keeps the producing request's time, without adding the refusal a second time
+        argv[argv.index("--out") + 1] = str(root / "runs/rerun_E5_C0")
+        with self.clock.patch(), http(self.clock, [(100, (400, "Unsupported value: 'temperature'"))]), \
+                mock.patch.object(sys, "argv", argv), redirect_stdout(io.StringIO()):
+            run_gpt.main()
+        rerun = read_jsonl(root / "runs/rerun_E5_C0/calls.jsonl")
+        self.assertEqual([(c["window_id"], c["cached"], c["cumulative_ms"]) for c in rerun],
+                         [("w1", True, 1200.0), ("w2", True, 1200.0), ("w3", True, 250.0)])
+        self.assertEqual([len(c["refused_now"] or []) for c in rerun], [1, 0, 0])
 
 
 class ScenarioOneSecondTool(TempDir):
