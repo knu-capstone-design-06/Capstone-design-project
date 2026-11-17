@@ -6,9 +6,10 @@ import json, sys
 from pathlib import Path
 
 kit, arm, out = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3])
-sys.path.insert(0, str(kit))
-import score  # noqa: E402  (kit scorer, read-only use of load_labels)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import score  # noqa: E402  (kit scorer in this folder, read-only use of load_labels)
 
+score.use_kit(kit)
 wins, cells, _ = score.load_labels()
 table_cells = {cid for cid, a in cells.items()
                if a["cls"] == "wait_only" or (a["cls"] == "designated" and "true" in a["v0_row"].split(";"))}
