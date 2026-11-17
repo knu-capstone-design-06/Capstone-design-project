@@ -106,7 +106,7 @@ test('힌트는 이름 붙은 조작에 고리를 두고 한 줄 안내를 보�
     await target(page, 'product:americano').click();
     await page.evaluate(() => window.kioskSupportDraft.hint('option-add'));
     await page.locator('[data-log-target="cart-add"].hint-ring').waitFor();
-    assert.match(await page.locator('dialog .hint-callout').innerText(), /아래 '담기'를 눌러 주세요/);
+    assert.match(await page.locator('dialog .hint-callout').innerText(), /아래 '담기'를\s+눌러 주세요/);
     const outline = await target(page, 'cart-add').evaluate(element => getComputedStyle(element).outlineWidth);
     assert.equal(outline, '6px');
     await target(page, 'cart-add').click();
