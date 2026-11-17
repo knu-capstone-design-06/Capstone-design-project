@@ -6,6 +6,22 @@ import { OrderController } from './orderController.ts';
 import { OrderResponseError, readOrderResponse } from './orderResponse.ts';
 import { clampPage, menuColumns, menuPageSize, pageCount, pageItems, reviewPageSize } from './utils/paging.ts';
 import { alreadyLarge, readSupportDecision } from './utils/supportDecision.ts';
+import { readBackendSupport, supportSettings } from './backendSupport.ts';
+
+test('서버의 네 가지 제안은 각각의 설정에 연결하고 켜진 설정·잘못된 응답은 무시한다', () => {
+  const response = preset => ({ session_id: 'session', ai_available: true, support: { preset, requires_confirmation: true, decided_by: 'jev' } });
+  for (const [preset, { key }] of Object.entries(supportSettings)) {
+    assert.equal(readBackendSupport(response(preset), 'session', initialSettings), preset);
+    assert.equal(readBackendSupport(response(preset), 'session', { ...initialSettings, [key]: true }), null);
+    assert.equal(readBackendSupport({ ...response(preset), support: { ...response(preset).support, requires_confirmation: false } }, 'session', initialSettings), preset);
+  }
+  for (const value of [null, {}, response('none'), response('voice_guide'), response('__proto__'),
+    { ...response('large_text'), ai_available: false }, { ...response('large_text'), session_id: 'old' },
+    { ...response('large_text'), support: { preset: 'large_text', requires_confirmation: 'true', decided_by: 'jev' } },
+    { ...response('large_text'), support: { preset: 'large_text', requires_confirmation: true, decided_by: 'unknown' } }]) {
+    assert.equal(readBackendSupport(value, 'session', initialSettings), null);
+  }
+});
 
 test('API 값과 화면 표시를 구분하고 푸드 온도는 null로 다룬다', () => {
   assert.equal(categoryLabels.coffee, '커피');

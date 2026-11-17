@@ -4,6 +4,64 @@ import { createTouchLog, distanceToRect, logLimit, touchLogKey } from './touchLo
 import { summarizeTouchLog } from './touchLogSummary.ts';
 import { measureTouchPilot } from './touchLogFeatures.ts';
 import { captureTouchLogObservation } from './touchLogObservation.ts';
+import { buildSupportWindow, createSupportTransport } from './backendSupport.ts';
+import { ApiError } from '../../shared/api/client.ts';
+
+test('기본 특징 요청은 기존 파일럿 기준의 다섯 정수만 보내며 미관측·미산출을 0으로 바꾸지 않는다', () => {
+  const { saved, emit } = pilotLog();
+  emit(1000, 'screen_enter', { visibility: 'visible' });
+  assert.equal(buildSupportWindow(saved, 2000), null);
+  assert.deepEqual(buildSupportWindow(saved, 4000), {
+    screen_id: 'menu_list', window_start: new Date(2000).toISOString(), window_end: new Date(4000).toISOString(),
+    touch: { tap_count: 0, miss_tap_count: 0, repeat_tap_count: 0, back_count: 0, dwell_ms: 3000 }, vision: null,
+  });
+  emit(4100, 'pointer_start', {});
+  assert.equal(buildSupportWindow(saved, 5000), null);
+  emit(5100, 'screen_enter', { visibility: 'visible', from: 'menu' }, 'visit-2', 'review');
+  assert.equal(buildSupportWindow(saved, 8000).screen_id, 'order_review');
+  emit(8100, 'screen_enter', { visibility: 'visible', from: 'review' }, 'visit-3', 'complete');
+  assert.equal(buildSupportWindow(saved, 11000), null);
+});
+
+test('전송은 중복 요청을 막고 화면·세션 변경 및 중단 뒤의 늦은 응답을 버린다', async () => {
+  const { saved, emit } = pilotLog(); emit(1000, 'screen_enter', { visibility: 'visible' });
+  const calls = [], received = [];
+  const transport = createSupportTransport((session, body, signal) => new Promise(resolve => calls.push({ session, body, signal, resolve })), () => saved, response => received.push(response), () => 4000);
+  transport.setContext('server', 'menu', true);
+  const first = transport.tick(); await transport.tick();
+  assert.equal(calls.length, 1);
+  transport.setContext('server', 'review', true);
+  assert.equal(calls[0].signal.aborted, true);
+  calls[0].resolve({ session_id: 'server' }); await first;
+  assert.equal(received.length, 0);
+  const second = transport.tick();
+  // 같은 화면으로 돌아와도 다른 방문이면 이전 요청을 재사용하지 않습니다.
+  emit(4000, 'screen_enter', { visibility: 'visible', from: 'review' }, 'visit-2');
+  calls[1].resolve({ session_id: 'server' }); await second;
+  assert.equal(received.length, 0);
+  transport.setContext('new-server', 'menu', true); await transport.tick(); assert.equal(calls.length, 2);
+  transport.setContext('server', 'menu', true);
+  const third = transport.tick(); transport.dispose();
+  calls[2].resolve({ session_id: 'server' }); await third;
+  assert.equal(received.length, 0);
+});
+
+test('네트워크 실패 뒤에는 새 구간을 보내고 종료된 세션은 다음 세션까지 중단한다', async () => {
+  const { saved, emit } = pilotLog(); emit(1000, 'screen_enter', { visibility: 'visible' });
+  let count = 0;
+  const received = [];
+  const transport = createSupportTransport(async session => {
+    count++;
+    if (count === 1) throw new TypeError('offline');
+    if (count === 2) throw new ApiError(410, {});
+    return { session_id: session };
+  }, () => saved, response => received.push(response), () => 4000);
+  transport.setContext('server', 'menu', true);
+  await transport.tick(); await transport.tick(); await transport.tick();
+  assert.equal(count, 2);
+  saved.serverSessionId = 'next'; transport.setContext('next', 'menu', true); await transport.tick();
+  assert.equal(count, 3); assert.equal(received.length, 1); transport.dispose();
+});
 
 test('주문·옵션·음성 관측은 필요한 필드만 복사하고 인식문·서버 오류 상세를 보관하지 않는다', () => {
   const order = { status: 'ready', order: null, message: '서버 오류 상세', cart: {

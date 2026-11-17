@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { createTouchLog, distanceToRect } from './touchLog.ts';
 import type { LogContext, Point, Rect, SavedLog } from './touchLog.ts';
 import { summarizeTouchLog } from './touchLogSummary.ts';
@@ -250,5 +250,6 @@ export function useTouchLog(screen: string, category: string, productId: string 
     previous.current = { screen, category, productId, settings: { ...settings } };
   }, [screen, category, productId, settings, serverSessionId, observation]);
 
-  return { root };
+  const read = useCallback(() => tracker.current?.read() ?? null, []);
+  return { root, read };
 }
