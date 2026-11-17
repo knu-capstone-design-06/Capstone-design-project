@@ -61,6 +61,8 @@ QUEUE, BUSY, AROUND = "looking_back_with_people_behind", "consulting_companion",
 SCENE_OF_TAG = {QUEUE: "queue", BUSY: "busy", AROUND: "lost"}   # tree 5-1 index 1 (looking_around: 4-2's aid)
 WAIT, NOTICE, DELAY, BIG, HIGHLIGHT = ("wait_hold_timer", "remaining_steps_notice", "delay_responsibility_notice",
                                        "large_button", "highlight_next_action")
+# DELAY is the encouragement message (격려 메시지); the code name delay_responsibility_notice is kept because the
+# experiment records under experiments/ use it.
 DEFER = "defer_big_button_question"       # JP 0-2: an option of the 3-1 choice, not a row
 HOLD_TIMER = "hold_timer"                 # JP 0-1 item 3 / 2-5: session_signal name of a kept 3-2 wait
 INTERVENTION = {"wait": "기다림", "propose": "묻기", "apply": "바로 적용", "call_staff": "직원 호출"}
@@ -70,7 +72,7 @@ CONTRACT_FORM = {WAIT: ("none", False), NOTICE: ("step_guide", False), DELAY: ("
 QUIET_APPLY = {NOTICE, DELAY, HIGHLIGHT}  # JP 2-1: notices and highlights
 WHAT = {   # one English line per support for Jev (JP 2-2: names and English only)
     NOTICE: "Tell the user how many steps are left before payment, without a popup",
-    DELAY: "Tell the user that waiting customers are the store's matter, without a popup",
+    DELAY: "Encourage the user with one line that there is no need to hurry, without a popup",
     BIG: "Ask the user whether the buttons should become bigger",
     HIGHLIGHT: "Highlight the next action on this screen with one line of guidance, without changing the layout",
     DEFER: "Show nothing now and do not ask about bigger buttons while people wait behind the user",
