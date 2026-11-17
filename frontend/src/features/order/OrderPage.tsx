@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { backendApi } from '../../shared/api/index.ts';
 import type { CartItem, Product, Temperature } from '../../shared/api/index.ts';
 import { categoryLabels, initialSettings, MAX_QUANTITY, readSettings, settingsStorageKey, temperatureLabel } from './model.ts';
@@ -36,6 +36,8 @@ import { useNextTouch } from './hook/useNextTouch.ts';
 import { briefNoticeMs } from './utils/timing.ts';
 import { useSupportDraft, useSupportOffer } from './hook/useSupportOffer.ts';
 import { OfferCard } from './components/OfferCard.tsx';
+import { SupportConfirmSheet } from './components/SupportConfirmSheet.tsx';
+import { useBackendSupport } from './hook/useBackendSupport.ts';
 import { clampPage, menuColumns, menuPageSize, pageCount, pageItems, reviewPageSize } from './utils/paging.ts';
 
 const sampleMode = import.meta.env.DEV && import.meta.env.VITE_ORDER_SAMPLE === 'true';
@@ -60,10 +62,14 @@ export function OrderPage() {
     onResult: result => { if (result.actions.includes('cart_updated')) void controller.refreshCartAfterVoice(); },
   }));
   const voice = useSyncExternalStore(voiceController.subscribe, voiceController.getSnapshot);
-  const [settings, setSettings] = useState(() => {
+  const [manualSettings, setManualSettings] = useState(() => {
     try { return readSettings(localStorage.getItem(settingsStorageKey) ?? localStorage.getItem('kiosk-sample-order-v1')); }
     catch { return { ...initialSettings }; }
   });
+  const [automaticSettings, setAutomaticSettings] = useState<{ sessionId: string; values: Partial<Settings> }>({ sessionId: '', values: {} });
+  const sessionId = state.session?.session_id ?? null;
+  // 고객 설정만 저장합니다. 서버 제안으로 켠 설정은 새 세션·새로고침에서 끝납니다.
+  const settings = useMemo(() => ({ ...manualSettings, ...(automaticSettings.sessionId === sessionId ? automaticSettings.values : {}) }), [manualSettings, automaticSettings, sessionId]);
   const [screen, setScreen] = useState<'menu' | 'review' | 'complete'>('menu');
   const [category, setCategory] = useState<CategoryFilter>('all');
   const [menuPaging, setMenuPaging] = useState({ key: '', page: 0 });
@@ -107,7 +113,7 @@ export function OrderPage() {
   const support = useSupportOffer({ settings, screen, sessionId: state.session?.session_id ?? null, orderDone: state.order !== null });
   // 크게 보기: 고객이 큰 글씨(200 %)를 켜면 그쪽이 앞섭니다.
   const largeView = support.largeView && !settings.largeText;
-  useEffect(() => { try { localStorage.setItem(settingsStorageKey, JSON.stringify(settings)); } catch { setStorageWarning(true); } }, [settings]);
+  useEffect(() => { try { localStorage.setItem(settingsStorageKey, JSON.stringify(manualSettings)); } catch { setStorageWarning(true); } }, [manualSettings]);
   useEffect(() => { heading.current?.focus(); }, [screen]);
   useLayoutEffect(() => { if (selected) dialog.current?.showModal(); else if (dialog.current?.open) dialog.current.close(); }, [selected]);
   useLayoutEffect(() => {
@@ -152,6 +158,13 @@ export function OrderPage() {
 
   const busy = state.status === 'loading' || state.status === 'saving';
   const writeDisabled = state.status !== 'ready' || state.order !== null;
+  const backendSupport = useBackendSupport({
+    sessionId, settings, read: touchLog.read,
+    contextKey: JSON.stringify([sessionId, screen, category, menuPaging, state.cart?.version, settings]),
+    enabled: !sampleMode && !writeDisabled && !selected && !supportOpen && !restartOpen && !cartSheetOpen
+      && !voice.enabled && state.message === '' && !support.offer,
+    onApply: key => { if (sessionId) setAutomaticSettings(current => ({ sessionId, values: { ...(current.sessionId === sessionId ? current.values : {}), [key]: true } })); },
+  });
   const count = state.cart?.total_quantity ?? 0;
   const sum = state.cart?.total_amount ?? 0;
   const remaining = MAX_QUANTITY - (state.cart?.items.find(item => item.product_id === selected?.product_id && item.temperature === temperature)?.quantity ?? 0);
@@ -163,9 +176,15 @@ export function OrderPage() {
   const menuPage = menuPaging.key === menuKey ? clampPage(menuPaging.page, menuProducts.length, menuSize) : 0;
   const menuPages = pageCount(menuProducts.length, menuSize);
   function toggleCombinedEnlargement() {
-    setSettings(current => {
-      const enabled = !(current.largeText && current.largeButton);
-      return { ...current, largeText: enabled, largeButton: enabled };
+    const enabled = !(settings.largeText && settings.largeButton);
+    setManualSettings(current => ({ ...current, largeText: enabled, largeButton: enabled }));
+    clearAutomaticSettings(['largeText', 'largeButton']);
+  }
+  function clearAutomaticSettings(keys: (keyof Settings)[]) {
+    setAutomaticSettings(current => {
+      const values = { ...current.values };
+      for (const key of keys) delete values[key];
+      return { ...current, values };
     });
   }
   function closeOptions() { setSelected(null); opener.current?.focus(); }
@@ -297,7 +316,7 @@ export function OrderPage() {
   return <><div ref={touchLog.root} data-order-mode={sampleMode ? 'sample' : 'api'} data-listening={voiceOn && voice.phase === 'listening' ? 'on' : undefined} className={`kiosk ${settings.largeText ? 'large-text' : ''} ${settings.largeButton ? 'large-button' : ''} ${settings.simpleScreen ? 'simple-screen' : ''} ${settings.lowScreen ? 'low-screen' : ''} ${settings.highContrast ? 'high-contrast' : ''}${largeView ? ' large-view' : ''}${voiceOn ? ' voice-on' : ''}`}>
     {settings.lowScreen && <div className="low-screen-banner">
       {/* 낮은 화면의 비어 있는 위쪽 전체가 하나의 누름 자리입니다(화면 위로 올리기). 터치 기록에 남도록 주문 화면 안에 둡니다. */}
-      <button type="button" className="raise-area" data-log-target="screen-position-pad" onClick={() => setSettings(current => ({ ...current, lowScreen: false }))}>
+      <button type="button" className="raise-area" data-log-target="screen-position-pad" onClick={() => setManualSettings(current => ({ ...current, lowScreen: false }))}>
         <Icon name="arrow_upward" />화면 위로 올리기</button>
       <div className="banner-copy" aria-hidden="true"><p className="store-name">온기 카페</p><StepsBar screen={screen} /></div>
     </div>}
@@ -333,9 +352,9 @@ export function OrderPage() {
       <EntryRow supportOpen={supportOpen} onToggleSupport={() => setSupportOpen(!supportOpen)} onUndo={support.largeView ? support.undo : null} />
     </section>
     <HelpSheet ref={helpDialog} settings={settings} combined={combinedEnlargement}
-      onToggle={key => setSettings(current => ({ ...current, [key]: !current[key] }))}
+      onToggle={key => { setManualSettings(current => ({ ...current, [key]: !settings[key] })); clearAutomaticSettings([key]); }}
       onCombined={toggleCombinedEnlargement}
-      onReset={() => { support.resetView(); setSettings({ ...initialSettings }); }} onClose={() => setSupportOpen(false)}
+      onReset={() => { support.resetView(); setAutomaticSettings({ sessionId: '', values: {} }); setManualSettings({ ...initialSettings }); }} onClose={() => setSupportOpen(false)}
       readAloud={<ReadAloudControls root={touchLog.root} voiceController={voiceController} screenKey={`${state.session?.session_id}:${screen}:${selected?.product_id ?? ''}:${restartOpen}:${cartSheetOpen}`} />} />
     <OptionSheet ref={dialog} product={selected} temperature={temperature} quantity={quantity} remaining={remaining} writeDisabled={writeDisabled}
       status={feedback} hint={hint === 'option-add' ? hintCopy['option-add'] : null}
@@ -344,6 +363,7 @@ export function OrderPage() {
     <CartSheet ref={cartDialog} open={cartSheetOpen} lines={cartLines} count={count} total={sum} actions={lineActions}
       status={feedback ?? (notice ? <p className="sheet-status" role="status">{notice}</p> : null)}
       reviewDisabled={!count || writeDisabled} onClose={closeCartSheet} onReview={openReview} />
+    {backendSupport.preset && <SupportConfirmSheet key={backendSupport.preset} preset={backendSupport.preset} onAccept={backendSupport.accept} onDecline={backendSupport.decline} />}
     <dialog ref={restartDialog} className="options-dialog" aria-labelledby="restart-title" onCancel={event => { event.preventDefault(); closeRestart(); }}>
       <h2 id="restart-title">처음부터 주문할까요?</h2>
       <p>담은 메뉴를 비우고 새 주문을 시작합니다. 화면 도움 설정은 유지합니다.</p>

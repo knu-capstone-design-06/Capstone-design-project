@@ -37,12 +37,20 @@ export const mutation = (session, suffix, body, options = {}) => ({
 });
 
 export async function installOrderResponses(page, steps) {
-  const queue = [...steps], requests = [], errors = [];
+  const queue = [...steps], requests = [], featureRequests = [], errors = [];
   await page.route('**/backend/**', async route => {
     const request = route.request();
     const parsed = new URL(request.url());
     const actual = { method: request.method(), path: parsed.pathname.replace(/^\/backend/, '') + parsed.search,
       key: request.headers()['idempotency-key'], body: request.postData() ? request.postDataJSON() : null };
+    // 기본 통계 전송은 주문 변경 요청 큐와 별도로 확인합니다.
+    if (actual.method === 'POST' && /^\/api\/v1\/sessions\/[^/]+\/features$/.test(actual.path)) {
+      featureRequests.push(actual);
+      return await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+        session_id: decodeURIComponent(actual.path.split('/')[4]), ai_available: true,
+        support: { preset: 'none', requires_confirmation: false, decided_by: 'rule_placeholder' },
+      }) });
+    }
     requests.push(actual);
     try {
       const expected = queue.shift();
@@ -57,5 +65,5 @@ export async function installOrderResponses(page, steps) {
       await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ detail: '테스트 응답 불일치' }) });
     }
   });
-  return { requests, verify() { assert.deepEqual(errors, []); assert.equal(queue.length, 0, '준비된 요청 흐름을 모두 확인'); } };
+  return { requests, featureRequests, verify() { assert.deepEqual(errors, []); assert.equal(queue.length, 0, '준비된 요청 흐름을 모두 확인'); } };
 }

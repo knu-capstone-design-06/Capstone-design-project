@@ -1,0 +1,215 @@
+// 실제 /features 요청에 서버 고정 응답을 돌려주어 수신 → 확인 → 개별 설정 적용을 검사합니다.
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { mkdir } from 'node:fs/promises';
+import { bootstrap, cartResponse, iced, installOrderResponses } from './orderApiFixture.mjs';
+
+const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ?? 'playwright');
+const url = process.env.ORDER_BROWSER_URL ?? 'http://127.0.0.1:5173';
+const channel = process.env.PLAYWRIGHT_CHANNEL ?? 'msedge';
+const options = { headless: true, ...(channel === 'default' ? {} : { channel }) };
+const dialog = page => page.locator('dialog.support-confirm-sheet[open]');
+const target = (page, name) => page.locator(`[data-log-target="${name}"]`);
+const decision = (preset, extra = {}) => ({ session_id: 'support-session', ai_available: true,
+  support: { preset, requires_confirmation: true, decided_by: 'jev' }, ...extra });
+
+async function open(browser, reply, settings = {}, steps = bootstrap('support-session'), address = url) {
+  const page = await browser.newPage({ viewport: { width: 1080, height: 1920 }, deviceScaleFactor: 1 });
+  const errors = [], requests = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.addInitScript(value => localStorage.setItem('kiosk-ui-settings-v1', JSON.stringify(value)), settings);
+  const fixture = await installOrderResponses(page, steps);
+  await page.route('**/api/v1/sessions/*/features', async route => {
+    const body = route.request().postDataJSON(); requests.push(body);
+    const response = await reply(route, requests.length);
+    if (response) await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(response) }).catch(() => {});
+  });
+  await page.goto(address);
+  await target(page, 'product:americano').waitFor();
+  await page.waitForFunction(() => !document.querySelector('[data-log-target="product:americano"]').disabled);
+  return { page, requests, fixture, errors };
+}
+
+async function answer(page, action) {
+  await page.locator('.support-confirm-actions[data-armed="true"]').waitFor();
+  await target(page, `support-confirm:${action}`).click();
+  await dialog(page).waitFor({ state: 'hidden' });
+}
+
+for (const [preset, css, key] of [
+  ['large_text', 'large-text', 'largeText'], ['large_button', 'large-button', 'largeButton'],
+  ['simple_screen', 'simple-screen', 'simpleScreen'], ['step_guide', '', 'stepGuide'],
+]) test(`${preset}: 서버 제안을 확인한 뒤 해당 설정만 켜고 자동 설정을 저장하지 않는다`, async () => {
+  const browser = await chromium.launch(options);
+  try {
+    const steps = bootstrap('support-session'); steps[2].body = cartResponse('support-session', 1, [iced(2)]);
+    const { page, requests, fixture, errors } = await open(browser, async () => decision(preset), {}, steps);
+    await dialog(page).waitFor();
+    assert.equal(await dialog(page).getAttribute('aria-labelledby'), 'support-confirm-title');
+    assert.equal(await target(page, 'support-confirm:decline').evaluate(element => element === document.activeElement), true);
+    assert.deepEqual(Object.keys(requests[0]).sort(), ['screen_id', 'touch', 'vision', 'window_end', 'window_start']);
+    assert.equal(requests[0].screen_id, 'menu_list'); assert.equal(requests[0].vision, null);
+    assert.equal(Date.parse(requests[0].window_end) - Date.parse(requests[0].window_start), 2000);
+    assert.deepEqual(Object.keys(requests[0].touch).sort(), ['back_count', 'dwell_ms', 'miss_tap_count', 'repeat_tap_count', 'tap_count']);
+    assert(Object.values(requests[0].touch).every(value => Number.isSafeInteger(value) && value >= 0));
+    if (process.env.SUPPORT_SCREENSHOT_DIR && preset === 'large_text') {
+      await mkdir(process.env.SUPPORT_SCREENSHOT_DIR, { recursive: true });
+      await page.screenshot({ path: `${process.env.SUPPORT_SCREENSHOT_DIR}/backend-support-confirm.png`, fullPage: true });
+    }
+    await answer(page, 'accept');
+    if (css) await page.locator(`.kiosk.${css}`).waitFor();
+    else await page.locator('.guide').first().waitFor();
+    for (const other of ['large-text', 'large-button', 'simple-screen']) {
+      assert.equal(await page.locator(`.kiosk.${other}`).count(), other === css ? 1 : 0);
+    }
+    assert.equal(await page.locator('.kiosk.large-view').count(), 0, '개발용 일괄 확대를 사용하지 않음');
+    assert.equal(await page.evaluate(key => JSON.parse(localStorage.getItem('kiosk-ui-settings-v1'))[key], key), false);
+    assert.equal(fixture.requests.length, 3, '서버 장바구니 변경 없이 설정만 적용');
+    if (process.env.SUPPORT_SCREENSHOT_DIR && preset === 'large_text') await page.screenshot({ path: `${process.env.SUPPORT_SCREENSHOT_DIR}/backend-support-large-text.png`, fullPage: true });
+    await page.waitForTimeout(2300);
+    assert.equal(await dialog(page).count(), 0, '같은 제안을 반복해서 띄우지 않음');
+    fixture.verify(); assert.deepEqual(errors, []); await page.close();
+  } finally { await browser.close(); }
+});
+
+test('거절한 제안은 반복하지 않고 다른 설정의 제안은 계속 받을 수 있다', async () => {
+  const browser = await chromium.launch(options);
+  try {
+    let preset = 'large_text';
+    const { page, fixture, errors } = await open(browser, async () => decision(preset));
+    await dialog(page).waitFor(); await answer(page, 'decline');
+    await page.waitForTimeout(2300); assert.equal(await dialog(page).count(), 0);
+    assert.equal(await page.locator('.kiosk.large-text').count(), 0);
+    preset = 'large_button'; await dialog(page).waitFor(); await answer(page, 'accept');
+    await page.locator('.kiosk.large-button').waitFor();
+    fixture.verify(); assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
+test('none·AI 불가·다른 세션·음성 제안·잘못된 응답은 적용하지 않고 false 확인 플래그도 사용자에게 묻는다', async () => {
+  const browser = await chromium.launch(options);
+  try {
+    const responses = [decision('none'), decision('large_text', { ai_available: false }), decision('large_text', { session_id: 'old' }),
+      decision('voice_guide'), { ...decision('large_text'), support: { preset: 'large_text' } },
+      decision('step_guide', { support: { preset: 'step_guide', requires_confirmation: false, decided_by: 'jev' } })];
+    const { page, requests, fixture, errors } = await open(browser, async (_, count) => responses[Math.min(count - 1, responses.length - 1)]);
+    await dialog(page).waitFor({ timeout: 25000 });
+    assert.equal(requests.length, 6); assert.match(await dialog(page).innerText(), /주문 순서/);
+    assert.equal(await page.locator('.guide').count(), 0);
+    await page.keyboard.press('Escape'); await dialog(page).waitFor({ state: 'hidden' });
+    assert.equal(await page.locator('.guide').count(), 0); fixture.verify(); assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
+test('다른 창을 조작하는 동안 제안은 띄우지 않으며 이전 화면의 늦은 응답을 버린다', async () => {
+  const browser = await chromium.launch(options);
+  try {
+    let release, started;
+    const requestStarted = new Promise(resolve => { started = resolve; });
+    let useDelayed = true;
+    const { page, fixture, errors } = await open(browser, async () => {
+      if (useDelayed) { started(); await new Promise(resolve => { release = resolve; }); return decision('large_text'); }
+      return decision('large_button');
+    });
+    await requestStarted;
+    await target(page, 'product:americano').click();
+    release(); await page.waitForTimeout(300);
+    assert.equal(await dialog(page).count(), 0); assert.equal(await page.locator('.kiosk.large-text').count(), 0);
+    useDelayed = false;
+    await page.keyboard.press('Escape');
+    await dialog(page).waitFor(); assert.match(await dialog(page).innerText(), /버튼/);
+    await answer(page, 'decline'); fixture.verify(); assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
+test('큰 글씨·큰 버튼·낮은 화면에서도 확인 팝업과 두 대답을 화면 안에 배치한다', async () => {
+  const browser = await chromium.launch(options);
+  try {
+    const { page, fixture, errors } = await open(browser, async () => decision('step_guide'), { largeText: true, largeButton: true, lowScreen: true });
+    await dialog(page).waitFor();
+    const bounds = await dialog(page).boundingBox();
+    assert(bounds.y >= 768 && bounds.y + bounds.height <= 1920);
+    for (const action of ['accept', 'decline']) {
+      const box = await target(page, `support-confirm:${action}`).boundingBox();
+      assert(box.x >= 0 && box.x + box.width <= 1080 && box.y >= 768 && box.y + box.height <= 1920);
+      assert(box.height >= 96);
+    }
+    if (process.env.SUPPORT_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.SUPPORT_SCREENSHOT_DIR}/backend-support-low-large.png`, fullPage: true });
+    await answer(page, 'accept'); fixture.verify(); assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
+test('새 서버 세션에서는 자동 적용을 해제하고 같은 종류의 제안을 다시 확인한다', async () => {
+  const browser = await chromium.launch(options);
+  try {
+    const { page, fixture, errors } = await open(browser, async route => decision('large_text', { session_id: new URL(route.request().url()).pathname.split('/').at(-2) }), {}, [...bootstrap('support-session'), ...bootstrap('new-session')]);
+    await dialog(page).waitFor(); await answer(page, 'accept');
+    await target(page, 'order-restart').click();
+    await target(page, 'order-restart-confirm').click();
+    await page.waitForFunction(() => !document.querySelector('.kiosk.large-text'));
+    await dialog(page).waitFor(); await answer(page, 'decline'); fixture.verify(); assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
+test('페이지를 숨기면 요청을 취소하고 늦은 제안은 버린 뒤 새 구간에서 재개한다', async () => {
+  const browser = await chromium.launch(options);
+  try {
+    let started, release;
+    const sent = new Promise(resolve => { started = resolve; });
+    const { page, fixture, errors } = await open(browser, async (_, count) => {
+      if (count === 1) { started(); await new Promise(resolve => { release = resolve; }); return decision('large_text'); }
+      return decision('step_guide');
+    });
+    await sent;
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    release(); await page.waitForTimeout(300);
+    assert.equal(await dialog(page).count(), 0);
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await dialog(page).waitFor(); assert.match(await dialog(page).innerText(), /주문 순서/);
+    await answer(page, 'decline'); fixture.verify(); assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
+test('전송 오류로 주문을 막지 않고 410 이후에는 화면을 바꿔도 재전송하지 않는다', async () => {
+  const browser = await chromium.launch(options);
+  try {
+    const { page, requests, fixture, errors } = await open(browser, async (route, count) => {
+      if (count === 1) await route.abort('failed');
+      else await route.fulfill({ status: 410, contentType: 'application/json', body: JSON.stringify({ detail: 'Session ended' }) });
+    });
+    await page.waitForFunction(() => document.querySelector('[data-log-target="product:americano"]').disabled === false);
+    await page.waitForTimeout(6500);
+    assert.equal(requests.length, 2); assert.equal(await dialog(page).count(), 0);
+    await page.getByRole('button', { name: '커피', exact: true }).click();
+    await page.waitForTimeout(2500); assert.equal(requests.length, 2);
+    await target(page, 'product:americano').click();
+    await page.locator('dialog.option-sheet[open]').waitFor();
+    fixture.verify(); assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
+test('개발 샘플은 서버 특징을 전송하지 않는다', { skip: !process.env.ORDER_SAMPLE_BROWSER_URL }, async () => {
+  const browser = await chromium.launch(options);
+  try {
+    const { page, requests, fixture, errors } = await open(browser, async () => decision('large_text'), {}, [], process.env.ORDER_SAMPLE_BROWSER_URL);
+    await page.waitForTimeout(4500); assert.equal(requests.length, 0); assert.equal(await dialog(page).count(), 0);
+    fixture.verify(); assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
+test('배포 빌드에서도 서버 제안 확인 후 적용하고 개발용 시험 장치는 노출하지 않는다', { skip: !process.env.ORDER_PRODUCTION_URL }, async () => {
+  const browser = await chromium.launch(options);
+  try {
+    const { page, fixture, errors } = await open(browser, async () => decision('simple_screen'), {}, bootstrap('support-session'), process.env.ORDER_PRODUCTION_URL);
+    await dialog(page).waitFor();
+    assert.equal(await page.evaluate(() => typeof window.kioskSupportDraft), 'undefined');
+    await answer(page, 'accept'); await page.locator('.kiosk.simple-screen').waitFor();
+    fixture.verify(); assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
