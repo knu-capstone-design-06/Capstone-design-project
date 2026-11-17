@@ -1,0 +1,7 @@
+| Group | Condition | TP | FP | FN | TN | Accuracy | Precision | Recall | F1 | Designated-support recall | False alarms under long no-input (C4) |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| Evaluated implementation | Rule table (evaluated implementation) | 43 | 5 | 24 | 65 | 0.788 | 0.896 | 0.642 | 0.748 | 0.582 | 3/9 |
+| Jev selection (shadow flow) | Jev: score, then choose | 42 | 5 | 25 | 65 | 0.781 | 0.894 | 0.627 | 0.737 | 0.567 | 3/9 |
+| Jev selection (shadow flow) | Jev: unconstrained choice | 49 | 52 | 18 | 18 | 0.489 | 0.485 | 0.731 | 0.583 | 0.612 | 9/9 |
+| Jev from camera numbers (shadow flow) | Jev raw: choose only (RAW-1) | 48 | 51 | 19 | 19 | 0.489 | 0.485 | 0.716 | 0.578 | 0.567 | 9/9 |
+| Jev from camera numbers (shadow flow) | Jev raw: score, then choose (RAW-2) | 58 | 55 | 9 | 15 | 0.533 | 0.513 | 0.866 | 0.644 | 0.776 | 9/9 |

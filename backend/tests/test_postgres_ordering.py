@@ -7,14 +7,19 @@ a test target.
 
 from concurrent.futures import ThreadPoolExecutor
 import os
+from threading import Barrier
 import unittest
+from unittest.mock import call, patch
 from urllib.parse import urlsplit
 from uuid import uuid4
 
 import psycopg
+from fastapi.testclient import TestClient
 from psycopg.rows import dict_row
 
+from app.common.config.settings import Settings
 from app.infrastructure.database.postgres import PostgresDatabase
+from app.main import create_app
 from app.modules.ordering.exceptions import OrderingError
 from app.modules.ordering.postgres_repository import PostgresOrderingRepository
 from app.modules.ordering.schemas import AddItemRequest, OrderRequest
@@ -128,6 +133,140 @@ class PostgresOrderingTests(unittest.TestCase):
                 (self.session_id, "voice:vr_rollback:%"),
             ).fetchone()["count"]
         self.assertEqual(replay_count, 0)
+
+    def test_concurrent_cart_changes_with_same_version_only_one_succeeds(self):
+        start = Barrier(2)
+
+        def add_item(_):
+            service = OrderingService(
+                self.sessions.exists, PostgresOrderingRepository(self.database),
+            )
+            start.wait(timeout=10)
+            try:
+                return self._add(service)
+            except OrderingError as error:
+                return error
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes = list(pool.map(add_item, range(2)))
+
+        successes = [outcome for outcome in outcomes if not isinstance(outcome, OrderingError)]
+        failures = [outcome for outcome in outcomes if isinstance(outcome, OrderingError)]
+        self.assertEqual(len(successes), 1)
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(failures[0].status_code, 409)
+        self.assertEqual(failures[0].code, "cart_version_conflict")
+        self.assertEqual(failures[0].cart, successes[0])
+        persisted = self.service.cart(self.session_id)
+        self.assertEqual(persisted, successes[0])
+        self.assertEqual(persisted.version, 1)
+        self.assertEqual(persisted.total_quantity, 1)
+
+    def test_reused_key_with_changed_payload_is_rejected_after_restart(self):
+        key = str(uuid4())
+        original = self._add(key=key)
+        restarted = OrderingService(
+            self.sessions.exists, PostgresOrderingRepository(self.database),
+        )
+        with self.assertRaises(OrderingError) as raised:
+            restarted.add_item(
+                self.session_id, key,
+                AddItemRequest(product_id="americano", temperature="iced",
+                               quantity=2, expected_version=0),
+            )
+        self.assertEqual(raised.exception.status_code, 409)
+        self.assertEqual(raised.exception.code, "idempotency_key_reused")
+        self.assertEqual(restarted.cart(self.session_id), original)
+        self.assertEqual(self._add(restarted, key=key), original)
+
+    def test_completed_order_rejects_new_cart_changes_but_replays_order(self):
+        self._add()
+        order_key = str(uuid4())
+        request = OrderRequest(expected_version=1)
+        order = self.service.create_order(self.session_id, order_key, request)
+        restarted = OrderingService(
+            self.sessions.exists, PostgresOrderingRepository(self.database),
+        )
+        with self.assertRaises(OrderingError) as raised:
+            restarted.add_item(
+                self.session_id, str(uuid4()),
+                AddItemRequest(product_id="americano", temperature="iced",
+                               quantity=1, expected_version=2),
+            )
+        self.assertEqual(raised.exception.status_code, 410)
+        self.assertEqual(raised.exception.code, "session_expired")
+        self.assertEqual(restarted.create_order(self.session_id, order_key, request), order)
+        with self.database.connect() as connection:
+            row = connection.execute(
+                "select (select count(*) from kiosk.orders where session_id = %s) as orders, "
+                "(select count(*) from kiosk.cart_items where session_id = %s) as items",
+                (self.session_id, self.session_id),
+            ).fetchone()
+        self.assertEqual(row["orders"], 1)
+        self.assertEqual(row["items"], 0)
+
+
+class PostgresOrderingHttpTests(unittest.TestCase):
+    """Exercise HTTP serialization and application startup against the disposable DB."""
+
+    SETTINGS_DATABASE_URL = "postgresql://kiosk_backend:test@localhost/postgres"
+
+    @classmethod
+    def setUpClass(cls):
+        url = os.environ.get("TEST_DATABASE_URL")
+        if not url:
+            raise unittest.SkipTest("TEST_DATABASE_URL is not set")
+        if urlsplit(url).hostname not in {"localhost", "127.0.0.1"}:
+            raise RuntimeError("PostgreSQL integration tests require a local disposable DB")
+        cls.database = LocalTestDatabase(url)
+        cls.database.check()
+
+    def app(self):
+        # The local DB is injected below. The placeholder only passes settings validation;
+        # no production URL, secret, or external AI service is used.
+        settings = Settings(
+            _env_file=None,
+            database_url=self.SETTINGS_DATABASE_URL,
+            openai_api_key=None,
+            jev_api_key=None,
+        )
+        return create_app(settings)
+
+    def test_order_replay_survives_application_restart(self):
+        add_key, order_key = str(uuid4()), str(uuid4())
+        with patch("app.main.PostgresDatabase", return_value=self.database) as database_factory:
+            with TestClient(self.app()) as client:
+                created = client.post("/api/v1/sessions")
+                self.assertEqual(created.status_code, 201)
+                base = f"/api/v1/sessions/{created.json()['session_id']}"
+                added = client.post(
+                    f"{base}/cart/items", headers={"Idempotency-Key": add_key},
+                    json={"product_id": "americano", "temperature": "iced",
+                          "quantity": 2, "expected_version": 0},
+                )
+                self.assertEqual(added.status_code, 200)
+                self.assertEqual(added.json()["total_quantity"], 2)
+                ordered = client.post(
+                    f"{base}/orders", headers={"Idempotency-Key": order_key},
+                    json={"expected_version": 1},
+                )
+                self.assertEqual(ordered.status_code, 201)
+                order = ordered.json()
+                self.assertEqual(order["status"], "simulated")
+
+            with TestClient(self.app()) as restarted:
+                replay = restarted.post(
+                    f"{base}/orders", headers={"Idempotency-Key": order_key},
+                    json={"expected_version": 1},
+                )
+                self.assertEqual(replay.status_code, 201)
+                self.assertEqual(replay.json(), order)
+                cart = restarted.get(f"{base}/cart")
+                self.assertEqual((cart.status_code, cart.json()["code"]),
+                                 (410, "session_expired"))
+            self.assertEqual(database_factory.call_args_list, [
+                call(self.SETTINGS_DATABASE_URL), call(self.SETTINGS_DATABASE_URL),
+            ])
 
 
 if __name__ == "__main__":
