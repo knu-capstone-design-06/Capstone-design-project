@@ -21,7 +21,7 @@ function resultCopy(result: VoiceRequestStatus): string {
     case 'needs_confirmation': return result.reply_text || '말씀하신 내용을 확인해 주세요.';
     case 'needs_clarification': return result.reply_text || '원하는 메뉴와 옵션을 다시 말씀해 주세요.';
     case 'ignored': return '';
-    case 'failed': return '음성을 처리하지 못했어요. 다시 말하거나 화면을 눌러 주문해 주세요.';
+    case 'failed': return result.reply_text?.trim() || '음성을 처리하지 못했어요. 다시 말하거나 화면을 눌러 주문해 주세요.';
     default: return '';
   }
 }

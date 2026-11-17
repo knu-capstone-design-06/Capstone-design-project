@@ -129,6 +129,7 @@ test('처음으로의 취소는 장바구니를 보존하고 확인하면 새 �
     await target(page, 'order-restart-confirm').click();
     await page.waitForFunction(() => window.kioskTouchLogDraft.read().serverSessionId === 'reset-after');
     assert.notEqual(await page.evaluate(() => window.kioskTouchLogDraft.read().sessionId), before);
+    await page.locator('.order-progress').waitFor({ state: 'hidden' });
     assert(await target(page, 'review-open').isDisabled());
     fixture.verify();
   } finally { await browser.close(); }

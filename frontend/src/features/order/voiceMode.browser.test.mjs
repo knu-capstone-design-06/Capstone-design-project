@@ -191,9 +191,18 @@ test('서버 실패 문장을 읽는 동안 같은 문장을 표시하고 서버
     await screenshot(page, 'tts-failure-visible');
     await page.evaluate(() => window.ttsFakes.finish());
     await page.locator('[data-log-target="voice-listen"]').click();
+    await page.locator('[data-log-target="voice-reply-replay"]').click();
+    await page.waitForFunction(() => window.ttsFakes.playing);
+    assert.equal(await page.locator('.voice-mode-feedback').innerText(), failure);
+    await page.evaluate(() => window.ttsFakes.finish());
+    await page.locator('[data-log-target="voice-listen"]').waitFor();
+    assert.equal(await page.locator('.voice-mode-feedback').innerText(), failure, '다시 듣기가 끝나도 같은 서버 실패 문장을 유지함');
+    assert.equal(fixture.requests.filter(request => request.method === 'POST').length, 2, '세션 생성과 첫 음성 요청 외에는 보내지 않음');
+    await screenshot(page, 'tts-failure-replay-finished');
+    await page.locator('[data-log-target="voice-listen"]').click();
     await page.evaluate(() => window.voiceFakes.at(-1).final('커피 주세요'));
     await page.locator('.voice-mode-feedback').getByText(/음성 요청을 처리하지 못했어요/).waitFor();
-    assert.equal(await page.evaluate(() => window.ttsFakes.utterances.length), 1);
+    assert.equal(await page.evaluate(() => window.ttsFakes.utterances.length), 2);
     fixture.verify(); assert.deepEqual(errors, []);
   } finally { await browser.close(); }
 });
