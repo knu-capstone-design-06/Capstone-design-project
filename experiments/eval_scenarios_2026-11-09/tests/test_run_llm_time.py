@@ -124,6 +124,27 @@ class Ask(unittest.TestCase):
         self.assertEqual((other["error"], other["request_ms"]), ("http 400: bad request", 100.0))
 
 
+    def test_error_body_that_cannot_be_read_does_not_stop_the_run(self):
+        class Dropped(urllib.error.HTTPError):
+            def read(self, *args):
+                self.close()
+                raise ConnectionResetError("reset while reading the error body")
+
+        def urlopen(req, timeout=None):
+            self.clock.t += 0.1
+            raise Dropped(req.full_url, 503, "error", {}, io.BytesIO(b""))
+
+        with self.clock.patch(), mock.patch("urllib.request.urlopen", urlopen):
+            r = self.client.ask({"touch": {}}, CHOICE)
+        self.assertEqual((r["error"], r["retries"], len(r["http_attempts"])), ("http 503", 3, 4))
+
+    def test_the_two_retry_rules_share_one_count(self):
+        # as in the bundle's runner: a timeout after an HTTP retry is not sent again
+        r = self.ask([(100, (503, "busy")), (30000, TimeoutError())])
+        self.assertEqual((r["error"], r["retries"]), ("TimeoutError", 1))
+        self.assertEqual(r["request_ms"], 100 + 2000 + 30000)
+
+
 class Window(unittest.TestCase):
     """cumulative_ms runs over the stages of one window; the 1-s tools read the last line with whole_ms."""
 
@@ -182,8 +203,8 @@ class Main(unittest.TestCase):
             self.assertNotIn("not-a-key", (out / "calls.jsonl").read_text(encoding="utf-8"))
             summary = json.loads((out / "summary.json").read_text(encoding="utf-8"))
             self.assertEqual((summary["windows"], summary["calls"], summary["errors"]), (2, 4, 0))
-            self.assertEqual((summary["window_ms_p50"], summary["windows_within_1s"],
-                              summary["calls_with_more_than_one_http_attempt"]), (1875.0, 1, 1))
+            self.assertEqual((summary["window_ms_p50"], summary["windows_timed"], summary["windows_within_1s"],
+                              summary["calls_with_more_than_one_http_attempt"]), (1875.0, 2, 1, 1))
 
 
 if __name__ == "__main__":

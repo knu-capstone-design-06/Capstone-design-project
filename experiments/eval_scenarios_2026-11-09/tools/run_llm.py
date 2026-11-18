@@ -107,7 +107,10 @@ class Client:
                 latency = ms_since(started)
                 answers = json.loads(payload["choices"][0]["message"]["content"])
             except urllib.error.HTTPError as e:
-                message = e.read().decode("utf-8", "replace")
+                try:
+                    message = e.read().decode("utf-8", "replace")
+                except Exception:  # the connection dropped while the error body was read: the status still stands
+                    message = ""
                 tries.add(ms_since(started), f"http {e.code}")
                 if e.code == 400 and "temperature" in body:
                     if "temperature" in message:
@@ -214,6 +217,7 @@ def main() -> int:
         "latency_ms_p95": lat[int(0.95 * (len(lat) - 1))] if lat else None,
         "window_ms_p50": statistics.median(whole) if whole else None,
         "window_ms_p95": whole[int(0.95 * (len(whole) - 1))] if whole else None,
+        "windows_timed": len(whole),  # windows whose last stage answered; the base of windows_within_1s
         "windows_within_1s": sum(1 for t in whole if t <= 1000),
         "calls_with_more_than_one_http_attempt": sum(1 for c in calls if len(c["http_attempts"]) > 1),
         "prompt_tokens": sum(c["prompt_tokens"] or 0 for c in ok),

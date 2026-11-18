@@ -14,7 +14,7 @@ from app.main import create_app
 from app.modules.voice.interpreter import OpenAiVoiceInterpreter, StubVoiceInterpreter
 from app.modules.voice.exceptions import VoiceSessionCompleted
 from app.modules.voice.repository import HISTORY_TURNS, VoiceRepository
-from app.modules.voice.service import OFF_MENU_REPLY
+from app.modules.voice.service import OFF_MENU_REPLY, REPLY_MAX, SOLD_OUT_REPLY
 from app.modules.voice.schemas import (
     MenuItem, VoiceErrorResponse, VoiceInterpretation, VoiceRequestCreate, VoiceTurn,
 )
@@ -217,11 +217,11 @@ class VoiceApiTests(VoiceApiCase):
         self.assertEqual(self.status(request_id).json()["tool_calls"], valid)
 
     def test_tool_calls_off_menu_are_rejected(self):
-        for bad in (
-            call("add_cart_item", "mocha", "iced", 1),     # not on menu
-            call("add_cart_item", "latte", "hot", 1),      # unavailable
-            call("add_cart_item", "sandwich", "hot", 1),   # no temperature for food
-            call("remove_cart_item", "latte", "iced"),     # temperature not allowed
+        for bad, reply in (
+            (call("add_cart_item", "mocha", "iced", 1), OFF_MENU_REPLY),     # not on menu
+            (call("remove_cart_item", "mocha", "iced"), OFF_MENU_REPLY),     # not on menu, whatever the tool
+            (call("add_cart_item", "latte", "hot", 1), SOLD_OUT_REPLY),      # unavailable
+            (call("remove_cart_item", "latte", "iced"), OFF_MENU_REPLY),     # the drink does not come iced
         ):
             for reply_text in (None, "담을까요?"):  # completed and proposals alike
                 self.interpreter.result = interpretation(ADD_AMERICANO, bad, reply_text=reply_text)
@@ -229,8 +229,25 @@ class VoiceApiTests(VoiceApiCase):
                 # Voice still works, so ask again rather than send the customer to the screen.
                 self.assertEqual(body["status"], "needs_clarification", bad)
                 self.assertEqual(body["tool_calls"], [])
-                self.assertEqual(body["reply_text"], OFF_MENU_REPLY)
+                self.assertEqual(body["reply_text"], reply, bad)
                 self.assertIsNone(body["error"])
+                self.assertLessEqual(len(reply), REPLY_MAX)
+
+    def test_temperature_on_a_product_without_one_stays_a_failure(self):
+        # The customer named a product on sale; the fault is the model's format, so the
+        # kiosk must not say the product cannot be ordered.
+        for reply_text in (None, "담을까요?"):
+            self.interpreter.result = interpretation(call("add_cart_item", "sandwich", "hot", 1), reply_text=reply_text)
+            body = self.status(self.say("에그 샌드위치 하나 주세요")).json()
+            self.assertEqual((body["status"], body["error"]["code"]), ("failed", "ai_unavailable"))
+            self.assertEqual(body["tool_calls"], [])
+
+    def test_menu_that_cannot_be_read_fails_the_request_and_frees_the_session(self):
+        with patch("app.main.menu_from_products", side_effect=RuntimeError("store down")):
+            body = self.status(self.say("아메리카노")).json()
+        self.assertEqual((body["status"], body["error"]["code"]), ("failed", "ai_unavailable"))
+        # The request left "processing", so the next one is accepted instead of 409.
+        self.assertEqual(self.post().status_code, 202)
 
     def test_drink_without_temperature_becomes_temperature_question(self):
         for reply_text in (None, "담을까요?"):  # completed and proposals alike
@@ -706,6 +723,28 @@ class ToolExecutionApiTests(VoiceApiCase):
         self.say("아이스 아메리카노 두 잔이요")
         mocha = [t for t in self.interpreter.histories[-1] if t.request.text == "모카로 할게요"]
         self.assertEqual([(t.result.status, t.result.tool_calls) for t in mocha], [("needs_clarification", [])])
+
+    def test_sold_out_answer_does_not_let_a_later_yes_add_anything(self):
+        self.interpreter.result = interpretation(call("add_cart_item", "latte", "hot", 2))
+        asked = self.status(self.say("카페 라떼 두 잔 주세요")).json()
+        self.assertEqual((asked["status"], asked["reply_text"]), ("needs_clarification", SOLD_OUT_REPLY))
+        for text in ("네", "두 잔이요", "따뜻한 걸로요"):
+            with self.subTest(text=text):
+                body = self.status(self.say(text)).json()
+                self.assertNotEqual(body["status"], "completed")
+                self.assertEqual(self.cart()["items"], [])
+
+    def test_off_menu_answer_in_between_drops_an_open_temperature_question(self):
+        # "다시 말씀해 주세요" replaces the question, so the earlier order does not come back
+        # with a later "아이스로요": the customer says the order again.
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", None, 2))
+        self.assertEqual(self.status(self.say("아메리카노 두 잔 주세요")).json()["status"], "needs_clarification")
+        self.interpreter.result = interpretation(call("add_cart_item", "mocha", "iced", 1))
+        self.assertEqual(self.status(self.say("모카로 할게요")).json()["reply_text"], OFF_MENU_REPLY)
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 2))
+        body = self.status(self.say("아이스로요")).json()
+        self.assertEqual(body["status"], "needs_clarification")
+        self.assertEqual(self.cart()["items"], [])
 
     def test_crash_still_reports_the_outage_reply(self):
         self.interpreter.result = RuntimeError("boom")

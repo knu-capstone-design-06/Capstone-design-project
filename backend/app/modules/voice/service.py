@@ -21,10 +21,13 @@ from app.modules.voice.schemas import (
 logger = logging.getLogger(__name__)
 
 FALLBACK_REPLY = "지금은 음성 주문이 어려워요. 화면을 눌러 주문해 주세요."
-# The model named something the store does not sell now (not on the menu, sold out, or a
-# temperature it does not come in). Voice still works, so ask again instead of the
-# outage reply, which would send the customer to the screen.
-OFF_MENU_REPLY = "말씀하신 메뉴는 지금 주문할 수 없어요. 다시 말씀해 주세요."
+# The model named something the store does not sell (not on the menu, or a temperature the
+# drink does not come in) or cannot add now (sold out). Voice still works, so ask again
+# instead of the outage reply, which would send the customer to the screen. Neither reply
+# names a product or ends in a question mark, so a later short answer ("아이스로요", "두
+# 잔이요") is not read as an answer about a product.
+OFF_MENU_REPLY = "말씀하신 메뉴를 찾지 못했어요. 다시 말씀해 주세요."
+SOLD_OUT_REPLY = "그 메뉴는 지금 품절이에요. 다른 메뉴를 말씀해 주세요."
 # Plain acceptances: they take a proposal as it stands and cannot pick an option such
 # as a temperature. "어" is left out because "어?" is a question, not a yes.
 BARE_YES = {"네", "넵", "예", "응", "그래", "그래요", "좋아요", "맞아요"}
@@ -824,6 +827,27 @@ def matches_menu(
     return True
 
 
+def off_menu_reply(result: VoiceInterpretation, menu: list[MenuItem]) -> str | None:
+    """What to tell the customer when matches_menu turns the tool inputs down.
+
+    None when nothing the customer said is at fault: a temperature on a product that has
+    none ("에그 샌드위치" as iced) or a drink left without one is the model's format, and
+    that stays a failure rather than telling the customer the product cannot be ordered.
+    """
+    products = {item.product_id: item for item in menu}
+    sold_out = False
+    for call in result.tool_calls:
+        item = products.get(call.arguments.product_id)
+        if item is None:
+            return OFF_MENU_REPLY
+        temperature = call.arguments.temperature
+        if temperature is not None and item.temperatures and temperature not in item.temperatures:
+            return OFF_MENU_REPLY
+        if isinstance(call, AddCartItemCall) and not item.available:
+            sold_out = True
+    return SOLD_OUT_REPLY if sold_out else None
+
+
 class VoiceService:
     def __init__(
         self, session_exists: Callable[[str], bool], repository: VoiceRepository,
@@ -874,7 +898,9 @@ class VoiceService:
         self, session_id: str, request_id: str, request: VoiceRequestCreate
     ) -> None:
         self._repository.update(request_id, "processing")
-        off_menu = False
+        off_menu: str | None = None
+        # Set before anything can raise: the handling below reads it after a crash too.
+        proposal = None
         try:
             menu = self._menu_provider()
             if not menu:
@@ -910,8 +936,8 @@ class VoiceService:
                 result = await self._interpreter.interpret(request, menu, history, cart)
             if result is not None and not matches_menu(result, menu, allow_missing_temperature=True):
                 logger.warning("voice interpretation rejected (not on menu)")
+                off_menu = off_menu_reply(result, menu)
                 result = None
-                off_menu = True
             if result is not None:
                 cart = list(self._cart(session_id))
                 if expected is None:
@@ -927,8 +953,8 @@ class VoiceService:
                 result = require_cart_items(result, cart, menu)
             if result is not None and not matches_menu(result, menu):
                 logger.warning("voice interpretation rejected (not on menu)")
+                off_menu = off_menu_reply(result, menu)
                 result = None
-                off_menu = True
             if (result is not None and result.status in ("completed", "needs_confirmation") and proposal is not None
                     and result.tool_calls == proposal.tool_calls and not is_acceptance(request.text)):
                 # The model repeated the offer, but the customer did not take it: "아니요 그거
@@ -967,16 +993,16 @@ class VoiceService:
             # A voice failure must not affect touch ordering; record it as unavailable.
             logger.exception("voice interpretation crashed")
             result = None
-            off_menu = False
+            off_menu = None
         if proposal is not None and (result is None or result.status != "completed"):
             # The proposal was not accepted (declined, ignored, failed, or replaced by a new
             # one), so its question leaves the context: a later "그걸로 주세요" must not be
             # read against an offer that is no longer open. The reconfirm mark stays until
             # an order actually goes through.
             self._repository.discard_proposal_turn(session_id)
-        if result is None and off_menu:
+        if result is None and off_menu is not None:
             # Only the question goes into the context, not the rejected tool inputs.
-            result = VoiceInterpretation(status="needs_clarification", tool_calls=[], reply_text=OFF_MENU_REPLY)
+            result = VoiceInterpretation(status="needs_clarification", tool_calls=[], reply_text=off_menu)
         if result is None:
             # Failed exchanges stay out of the context so later turns read cleanly.
             self._repository.update(
