@@ -277,7 +277,7 @@ test('명시적으로 켠 개발 샘플은 서버 없이 17개 메뉴·주문·�
       await page.goto(process.env.ORDER_SAMPLE_BROWSER_URL);
       await ready(page);
       assert.equal(await page.locator('.kiosk').getAttribute('data-order-mode'), 'sample', '샘플 모드는 속성으로만 구분');
-      assert.doesNotMatch(await page.locator('.kiosk').innerText(), /샘플|테스트|DEV/, '고객 화면에는 시험·샘플 표시 없음');
+      assert.doesNotMatch(await page.locator('.kiosk').innerText(), /샘플|테스트|모의 주문|DEMO|DEV/, '메뉴 화면에 별도 시연 표시가 없음');
       assert.equal(await page.locator('.product').count(), 9, '한 쪽에 3 × 3 카드');
       assert.equal(await page.locator('.pager .page').innerText(), '1 / 2');
       let shown = 9;
@@ -297,10 +297,15 @@ test('명시적으로 켠 개발 샘플은 서버 없이 17개 메뉴·주문·�
       assert.match(await page.locator('.total').innerText(), /9,000원/);
       await noOverflow(page);
       await screenshot(page, `sample-menu-${large ? 'large' : 'default'}`);
-      await click(page, 'review-open'); await click(page, 'simulate-payment');
+      await click(page, 'review-open');
+      assert.equal(await page.locator('[data-log-target="simulate-payment"]').innerText(), '주문하기');
+      await screenshot(page, `sample-review-${large ? 'large' : 'default'}`);
+      await click(page, 'simulate-payment');
       await page.locator('.order-number').waitFor();
+      assert.equal(await page.locator('.done-title').innerText(), '주문이 끝났어요');
       assert.match(await page.locator('.order-number').getAttribute('data-order-number'), /^DEV-SAMPLE-\d+$/);
       assert.match(await page.locator('.order-number').innerText(), /^DEV-SAMPLE-\d+$/, '개발 샘플 주문번호의 접두사를 유지함');
+      await screenshot(page, `sample-complete-${large ? 'large' : 'default'}`);
       await click(page, 'new-order'); await ready(page);
       await page.waitForFunction(id => window.kioskTouchLogDraft.read().serverSessionId !== id, first);
       assert.equal(await page.locator('.cart-row').count(), 0);
@@ -341,7 +346,7 @@ test('1080×1920: API 응답으로 상품·옵션·수량·삭제·완료·새 �
       mutation(a, '/cart/items', cartResponse(a, 3, [iced(2), hot, food])),
       mutation(a, '/cart/items/item-iced', cartResponse(a, 4, [iced(3), hot, food]), { method: 'PATCH' }),
       mutation(a, '/cart/items/item-hot?expected_version=4', confirmed, { method: 'DELETE' }),
-      mutation(a, '/orders', orderResponse(confirmed), { status: 201 }),
+      mutation(a, '/orders', { ...orderResponse(confirmed), order_number: 'A001' }, { status: 201 }),
       { method: 'GET', path: '/api/v1/products', body: productsResponse },
       { method: 'POST', path: '/api/v1/sessions', fail: true },
       ...bootstrap(b),
@@ -377,13 +382,15 @@ test('1080×1920: API 응답으로 상품·옵션·수량·삭제·완료·새 �
     await screenshot(page, 'order-options-large');
     await click(page, 'options-close');
     await click(page, 'review-open');
-    assert.match(await page.locator('.review-block .simulation-note').innerText(), /모의 주문.*실제 결제나 매장 주문은 진행되지 않아요/);
+    assert.equal(await page.locator('[data-log-target="simulate-payment"]').innerText(), '주문하기');
+    assert.doesNotMatch(await page.locator('.review-block').innerText(), /모의 주문|실제 결제|DEMO/);
     await noOverflow(page);
     await screenshot(page, 'order-review-large');
     await click(page, 'simulate-payment');
     await page.locator('.order-number').waitFor();
-    assert.equal(await page.locator('.order-number').innerText(), 'DEMO-042', '서버 번호 형식을 가정하지 않음');
-    assert.match(await page.locator('.done-block .simulation-note').innerText(), /실제 결제나 매장 주문은 진행되지 않았어요/);
+    assert.equal(await page.locator('.order-number').innerText(), 'A001', '서버 번호를 원문 그대로 표시');
+    assert.equal(await page.locator('.done-title').innerText(), '주문이 끝났어요');
+    assert.doesNotMatch(await page.locator('.done-block').innerText(), /모의 주문|실제 결제|DEMO/);
     await screenshot(page, 'order-complete-large');
     await click(page, 'new-order');
     await click(page, 'order-connect-retry');

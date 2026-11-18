@@ -15,7 +15,6 @@ export function ReviewBlock({ lines, count, products, page, pages, size, actions
   actions: CartLineActions; onBack: () => void; onPage: (page: number) => void;
 }) {
   return <section className="review-block" aria-label="주문 내역">
-    <p className="simulation-note">모의 주문 · 실제 결제나 매장 주문은 진행되지 않아요.</p>
     <div className="cart-head">
       <h2 className="cart-title">담은 메뉴 {count}개</h2>
       <button type="button" data-log-target="review-back" className="review-back" onClick={onBack}>메뉴 더 고르기</button>

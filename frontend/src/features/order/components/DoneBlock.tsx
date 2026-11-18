@@ -3,11 +3,10 @@ import { money, orderNumberText, temperatureText } from '../model.ts';
 import { Icon } from './icons.tsx';
 import './orderBlocks.css';
 
-/** 모의 주문 완료: 완료 안내, 실제 결제·매장 전달 없음, 원래 주문번호와 주문 내역을 표시합니다. */
+/** 주문 완료 안내와 원래 주문번호, 주문 내역을 표시합니다. */
 export function DoneBlock({ orderNumber, items, total }: { orderNumber: string; items: CartItem[]; total: number }) {
   return <section className="done-block" aria-label="주문 완료">
-    <p className="done-head"><Icon name="check_circle" className="pic done-pic" /><span className="done-title">모의 주문을 마쳤어요</span></p>
-    <p className="simulation-note">실제 결제나 매장 주문은 진행되지 않았어요.</p>
+    <p className="done-head"><Icon name="check_circle" className="pic done-pic" /><span className="done-title">주문이 끝났어요</span></p>
     <p className="done-label">주문번호</p>
     <strong className="order-number" data-order-number={orderNumber}>{orderNumberText(orderNumber)}</strong>
     <ul className="sum-list" aria-label="주문한 메뉴">

@@ -346,7 +346,7 @@ export function OrderPage() {
         cartButton={cartInBar ? { ref: cartOpener, amount: lowMenu ? sum : null, onClick: () => setCartSheetOpen(true) } : null}
         restart={screen === 'complete' ? null : { ref: restartTrigger, disabled: busy || state.status === 'uncertain', onClick: () => { voiceController.setEnabled(false); setRestartOpen(true); } }}
         primary={{ target: screen === 'complete' ? 'new-order' : screen === 'menu' ? 'review-open' : 'simulate-payment',
-          label: screen === 'complete' ? '새 주문 시작' : screen === 'menu' ? '주문 확인' : '모의 주문 완료',
+          label: screen === 'complete' ? '새 주문 시작' : screen === 'menu' ? '주문 확인' : '주문하기',
           disabled: screen === 'complete' ? busy : !count || writeDisabled,
           onClick: () => { if (screen === 'complete') { support.endUse(); void startNewOrder(); } else if (screen === 'menu') openReview(); else void controller.checkout(); } }} />
       <EntryRow supportOpen={supportOpen} onToggleSupport={() => setSupportOpen(!supportOpen)} onUndo={support.largeView ? support.undo : null} />
