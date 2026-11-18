@@ -102,6 +102,58 @@ test('확인·질문 결과에는 대답을 듣기 위해 마이크를 다시 �
   assert.equal(FakeRecognition.instances.length, 2);
 });
 
+test('다른 질문이 이어져도 자동 재청취는 세 번까지만 하고 수동 재개로 상한을 초기화한다', async () => {
+  const questions = ['온도를 골라 주세요.', '몇 잔으로 할까요?', '사이즈를 골라 주세요.', '이대로 주문할까요?'];
+  const replies = [...questions, questions.at(-1)].map(reply_text => status('needs_clarification', { reply_text }));
+  const { controller, calls } = setup(replies);
+  try {
+    controller.setEnabled(true);
+    for (const [index, question] of questions.entries()) {
+      FakeRecognition.last().final([index === 0 ? '커피 주세요' : '네', .9]);
+      await tick();
+      assert.equal(controller.getSnapshot().lastResult.reply_text, question);
+      assert.equal(FakeRecognition.instances.length, Math.min(index + 2, 4));
+    }
+    assert.equal(controller.getSnapshot().phase, 'idle');
+    assert.equal(controller.getSnapshot().microphoneActive, false);
+    assert.equal(calls.length, 4);
+    assert.equal(controller.listen(), true);
+    assert.equal(FakeRecognition.instances.length, 5);
+    FakeRecognition.last().final(['네', .9]);
+    await tick();
+    assert.equal(calls.at(-1).body.text, '네');
+    assert.equal(controller.getSnapshot().phase, 'listening');
+    assert.equal(FakeRecognition.instances.length, 6);
+  } finally { controller.dispose(); }
+});
+
+test('직전과 같은 질문은 다시 읽어도 마이크가 자동으로 열리지 않는다', async () => {
+  const speech = deferredSpeaker();
+  const question = '온도를 골라 주세요.';
+  const { controller, calls } = setup([
+    status('needs_confirmation', { reply_text: question }),
+    status('needs_clarification', { reply_text: ` ${question} ` }),
+  ], { replySpeaker: speech.speak });
+  try {
+    controller.setEnabled(true);
+    FakeRecognition.last().final(['커피 주세요', .9]);
+    await tick();
+    speech.replies[0].finish(true);
+    await tick();
+    FakeRecognition.last().final(['네', .9]);
+    await tick();
+    speech.replies[1].finish(true);
+    await tick();
+    assert.equal(controller.getSnapshot().lastReplyText, question);
+    assert.equal(controller.getSnapshot().phase, 'idle');
+    assert.equal(controller.getSnapshot().microphoneActive, false);
+    assert.equal(FakeRecognition.instances.length, 2);
+    assert.equal(calls.length, 2);
+    assert.equal(controller.listen(), true);
+    assert.equal(FakeRecognition.instances.length, 3);
+  } finally { controller.dispose(); }
+});
+
 test('확인 질문 뒤의 "네"는 같은 세션의 다음 요청으로 보낸다', async () => {
   const { calls, controller, delivered } = setup([
     status('needs_confirmation', { tool_calls: [addAmericano], reply_text: '아이스 아메리카노 2잔 담을까요?' }),

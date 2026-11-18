@@ -60,6 +60,7 @@ export const VOICE_AUTO_OFF_MS = 30_000;
 // 계약(contract/voice.openapi.yaml)의 상태 조회 간격 1초 이상을 따릅니다.
 const POLL_INTERVAL_MS = 1_000;
 const POLL_TIMEOUT_MS = 15_000;
+const MAX_AUTO_RELISTENS = 3;
 const SETTLED = new Set<VoiceStatus>(['completed', 'needs_confirmation', 'needs_clarification', 'ignored', 'failed']);
 // 손님의 대답이 필요한 결과에서는 마이크를 다시 엽니다.
 const ASKS_USER = new Set<VoiceStatus>(['needs_confirmation', 'needs_clarification']);
@@ -112,6 +113,8 @@ export class VoiceController {
   private context = { sessionId: '', screenId: '' };
   // 확인·질문 결과 뒤 대답을 기다리는 중. 마이크가 닫혀도 다음 결과가 나올 때까지 유지합니다.
   private awaitingAnswer = false;
+  private autoRelistenCount = 0;
+  private lastAutoRelistenQuestion: string | null = null;
   // backend가 이 세션의 새 음성 요청을 410으로 거절함. 세션이 바뀔 때까지 다시 듣지 않습니다.
   private sessionExpired = false;
 
@@ -168,7 +171,26 @@ export class VoiceController {
 
   /** 모드가 켜져 있고 쉬는 중일 때 한 문장을 듣습니다(예: 부르는 쪽의 마이크 버튼). */
   listen(): boolean {
+    if (this.state.phase === 'idle') this.resetAutoRelisten();
     return this.open(this.awaitingAnswer);
+  }
+
+  private resetAutoRelisten() {
+    this.autoRelistenCount = 0;
+    this.lastAutoRelistenQuestion = null;
+  }
+
+  private canAutoRelisten(question: string | null): boolean {
+    return this.state.enabled && this.awaitingAnswer && !this.replyBlocked
+      && this.autoRelistenCount < MAX_AUTO_RELISTENS
+      && (question === null || question !== this.lastAutoRelistenQuestion);
+  }
+
+  private autoRelisten(question: string | null): boolean {
+    if (!this.canAutoRelisten(question) || this.state.phase !== 'idle' || !this.open(true)) return false;
+    this.autoRelistenCount++;
+    this.lastAutoRelistenQuestion = question;
+    return true;
   }
 
   /** 안내만 중단합니다. 제안을 수락하지 않으며 다음 듣기는 사용자가 시작합니다. */
@@ -269,6 +291,7 @@ export class VoiceController {
   private halt() {
     this.clearIdle();
     this.pendingListen = null;
+    this.resetAutoRelisten();
     this.processing?.abort();
     this.processing = null;
     this.reply?.abort();
@@ -342,10 +365,11 @@ export class VoiceController {
     // 구독자·onResult가 세션을 바꾸거나 모드를 끄면 그 초기화가 남도록, 알리기 전에 대기 상태를 정합니다.
     this.awaitingAnswer = ASKS_USER.has(outcome.status);
     const reply = this.prepareReply(outcome);
-    this.set({ phase: reply ? 'speaking' : 'idle', partialText: '', lastResult: outcome, lastReplyText: outcome.reply_text?.trim() || null, error: null, replyAudioError: false });
+    const question = outcome.reply_text?.trim() || null;
+    this.set({ phase: reply ? 'speaking' : 'idle', partialText: '', lastResult: outcome, lastReplyText: question, error: null, replyAudioError: false });
     this.onResult(outcome);
     if (reply) await this.readReply(outcome.reply_text!, reply, this.awaitingAnswer);
-    else if (this.awaitingAnswer && !this.replyBlocked && this.context.sessionId === sessionId) this.open(true);
+    else if (this.context.sessionId === sessionId) this.autoRelisten(question);
   }
 
   private prepareReply(result: VoiceRequestStatus): AbortController | null {
@@ -367,8 +391,8 @@ export class VoiceController {
     if (!live()) return;
     this.reply = null;
     this.set({ phase: 'idle', replyAudioError: !played });
-    if (played && listenAfter && this.awaitingAnswer) this.open(true);
-    else if (!this.capture && !this.processing) this.armIdle();
+    const reopened = played && listenAfter && this.autoRelisten(text.trim() || null);
+    if (!reopened && !this.capture && !this.processing) this.armIdle();
   }
 
   private waitForMicrophoneEnd(signal: AbortSignal): Promise<boolean> {
