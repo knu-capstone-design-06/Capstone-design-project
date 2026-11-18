@@ -3,7 +3,7 @@
   "info": {
     "title": "Touch interaction contract proposal — NOT ADOPTED",
     "version": "0.0.0-draft",
-    "description": "팀 합의 전 검토용 제안. 기존 API에 미적용. source PR #72 3d4b79c. paths 없음: 새 엔드포인트를 만들지 않음."
+    "description": "팀 합의 전 검토용 제안. 기존 API에 미적용. source PR #72 3d4b79c. paths 없음: 새 엔드포인트를 만들지 않음. interaction:null 거절은 기존 프론트 타입보다 엄격한 미채택 제안. 내부 analyze 전달은 보류하며 이 컴포넌트를 내부 계약에 자동 공유하지 않음."
   },
   "paths": {},
   "components": {
@@ -226,7 +226,7 @@
               "null"
             ],
             "minimum": 0,
-            "description": "구간 내 processing/speaking 관측 시간 합(ms). 시작/중간 상태 모름은 null."
+            "description": "구간 내 processing/speaking 관측 시간 합(ms). 시작/중간 상태 모름은 null. listening 시간은 포함하지 않음."
           },
           "since_last_input_excluding_system_busy_ms": {
             "type": [
@@ -234,7 +234,7 @@
               "null"
             ],
             "minimum": 0,
-            "description": "현재 방문 마지막 누름 이후 주문 loading/saving 및 음성 processing/speaking 시간의 합집합을 뺀 ms. 누름 없음/이력 누락/대상 기간 숨김·중단은 null. 수동 화면 읽기는 제외되지 않음."
+            "description": "현재 방문 마지막 누름 이후 주문 loading/saving 및 음성 processing/speaking 시간의 합집합을 뺀 ms. 누름 없음/이력 누락/대상 기간 숨김·중단은 null. 수동 화면 읽기는 제외되지 않음. 음성 listening(이용자 발화) 시간도 제외하지 않음. pause_s 연결은 보류하며 후속 연결 시 listening 또는 마이크 활성 중 None 보호 조건을 제안."
           },
           "voice_auto_off": {
             "type": [
@@ -281,10 +281,12 @@
             },
             "description": "끝 시점 설정 6개. 수동 화면 읽기 상태와 지원 결정/사용자 반응은 포함하지 않음."
           }
-        }
+        },
+        "description": "객체 생략은 호환 요청에서 허용하는 안. 명시적 interaction:null 거절은 #72 타입보다 엄격한 새 제안으로 D02/D03 재확인 필요. 구조 검증과 규칙/Jev 사용은 별도."
       }
     }
   },
   "x-proposal-status": "unadopted",
-  "x-source-ref": "3d4b79c119aecf750148dc20e306be316b00f9d5"
+  "x-source-ref": "3d4b79c119aecf750148dc20e306be316b00f9d5",
+  "x-internal-analyze-proposal": "미채택 D04 수정안: backend 판단에는 원창 보존, AnalyzeRequest에서는 interaction 제외. 내부 TouchFeatures의 외부 계약 $ref 분리 필요."
 }
