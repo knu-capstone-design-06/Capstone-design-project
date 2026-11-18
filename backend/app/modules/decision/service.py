@@ -43,14 +43,26 @@ def window_input(window: FeatureWindowRequest, measurable: bool, situation: dict
     vision situation and gaze arrive only when the vision values are passed on (docs/Jev-Integration.md).
     """
     touch = window.touch
-    forward = (previous_screen in SCREEN_FLOW and window.screen_id in SCREEN_FLOW
-               and SCREEN_FLOW.index(window.screen_id) == SCREEN_FLOW.index(previous_screen) + 1)
+    # Progress is known only between two screens of the flow: with a screen id outside it (the voice API's
+    # "menu_list", a new screen) or no window before, it is None, not "no progress". A window lost in between
+    # (menu, then complete) is still a step forward.
+    known = previous_screen in SCREEN_FLOW and window.screen_id in SCREEN_FLOW
+    forward = known and SCREEN_FLOW.index(window.screen_id) > SCREEN_FLOW.index(previous_screen)
     return WindowInput(
         t=window.window_end.timestamp(), measurable=measurable, situation=situation, screen=window.screen_id,
         steps_left=steps_left(window.screen_id), gaze=gaze, misses_recent=touch.miss_tap_count,
         backs_recent=touch.back_count, taps_segment=touch.tap_count,
-        progress_segment=True if forward else (None if previous_screen is None else False),
+        progress_segment=forward if known else None,
     )
+
+
+FUTURE_TOLERANCE_S = 5.0   # how far ahead of the server clock the last-judged mark may run (clock skew)
+
+
+def log_task_failure(task: asyncio.Task) -> None:
+    """A background Jev chain that died outside its own handling (a store error) is logged, never raised."""
+    if not task.cancelled() and task.exception() is not None:
+        logger.error("jev shadow task failed", exc_info=task.exception())
 
 
 def stale_decision() -> Decision:
@@ -74,12 +86,14 @@ def passed_answer(answer):
 
 class DecisionService:
     def __init__(self, repository: DecisionRepository, params: DecisionParams = PILOT_PARAMS,
-                 jev: JevClient | None = None, stages: Sequence[JevStage] = DEFAULT_STAGES, clock=time.perf_counter):
+                 jev: JevClient | None = None, stages: Sequence[JevStage] = DEFAULT_STAGES, clock=time.perf_counter,
+                 now=time.time):
         self._repository = repository
         self._params = params
         self._jev = jev
         self._stages = tuple(stages)   # Jev calls in order; each sees the answers before it (stackable)
         self._clock = clock
+        self._now = now                # wall clock, to bound a window that claims to end in the future
         self._tasks: set[asyncio.Task] = set()
         self._in_flight: dict[str, asyncio.Task] = {}   # one Jev call chain per session at a time
         if self._stages and self._jev is None:
@@ -126,7 +140,9 @@ class DecisionService:
         state, timed_out = tick(state, inp.t, self._params)      # an unanswered ask lapses first
         before = copy.deepcopy(state)
         state, decision = apply(state, decide(inp, state, self._params))
-        state.last_t = inp.t
+        # A window whose end is ahead of the server clock (a wrong frontend clock, a bad request) must not make
+        # every later window "earlier than the last one": the mark never runs further ahead than the tolerance.
+        state.last_t = min(inp.t, self._now() + FUTURE_TOLERANCE_S)
         self._repository.save_state(session_id, state)
         return decision, before, timed_out
 
@@ -164,6 +180,7 @@ class DecisionService:
             self._tasks.add(task)
             self._in_flight[session_id] = task
             task.add_done_callback(self._tasks.discard)
+            task.add_done_callback(log_task_failure)
             task.add_done_callback(lambda done, sid=session_id: self._in_flight.pop(sid, None))
         return decision
 

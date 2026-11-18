@@ -97,7 +97,7 @@
 | 1. 비교 실험 | 같은 창 입력에서 규칙표 결정과 Jev 답을 나란히 기록하고, 출처 있는 기준으로 둔 임계값의 결과를 촬영본으로 확인함 | 그대로 | 0단계 기록, 파일럿 촬영 데이터, 기록 분석 스크립트 |
 | 2. 적용 | 합의된 `T_LOWER`·`T_AID`·`T_CHOICE`로 결정을 바꿈 | `decided_by: jev`인 창이 생김 | 5장 7번, 임계값 합의, 프론트의 확인 UI(`requires_confirmation`)가 이미 동작하는지 확인 |
 
-0단계를 먼저 병합해 두면 촬영 기간 동안 Jev 답이 쌓입니다. 임계값은 출처(표준·관행·문헌)가 있는 기준을 찾아 두고, 그 기록(촬영본)으로는 결과를 확인합니다(7.1). 2단계 전까지는 Jev가 화면을 바꾸는 일이 없습니다.
+0단계를 먼저 병합하고 `JEV_STAGES`를 켜 두면 촬영 기간 동안 Jev 답이 쌓입니다. 다만 기록은 지금 프로세스 메모리에만 있어(세션 유휴 1시간이나 재시작에 사라짐) 내보내거나 DB로 옮기기 전에는 남지 않고, 프론트가 `/features`를 보내기 시작해야 창이 들어옵니다. 임계값은 출처(표준·관행·문헌)가 있는 기준을 찾아 두고, 그 기록(촬영본)으로는 결과를 확인합니다(7.1). 2단계 전까지는 Jev가 화면을 바꾸는 일이 없습니다.
 
 ## 7. 기록과 실험
 
@@ -173,7 +173,7 @@ backend입니다. 터치 통계는 프론트 → backend로, 비전 창 결과�
    "normal": {"type": "noul", "instructions": "Is the user ordering without any sign of trouble?", "criteria": {"true": "Accurate taps, steady progress, no long pauses.", "false": "Any of the difficulties above."}}}}
 ```
 
-- `touch`는 기존 5개와 #72의 `touch.interaction` 필드(대상 밖 비율, 가장 가까운 대상까지 거리, 재방문, 마지막 입력 뒤 시간, 음성 처리 중, 자동 꺼짐)를 씁니다. `vision`은 비전 창 결과의 `situation`과 `vision` 요약입니다(README '창 한 줄'). 값은 전부 이름과 숫자이고 원본 영상·음성·인식 문장은 없습니다.
+- `touch`는 지금 계약의 기존 5개만 씁니다(코드가 5개 이름을 명시해 고릅니다). #72의 `touch.interaction` 확장(대상 밖 비율, 가장 가까운 대상까지 거리, 재방문, 마지막 입력 뒤 시간, 음성 처리 중, 자동 꺼짐)은 계약 합의(#89) 뒤 필드별로 따로 켭니다. 수신만으로 Jev 질문에 싣지 않습니다. `vision`은 비전 창 결과의 `situation`과 `vision` 요약입니다(README '창 한 줄'). 값은 전부 이름과 숫자이고 원본 영상·음성·인식 문장은 없습니다.
 - 질문과 기준은 영어이고 `state` 값은 코드 이름입니다(비전 테스트가 한글 없음을 확인하는 것과 같은 이유). 기준 문구는 초안이며 촬영 데이터로 고칩니다.
 - `hesitation`과 `touch_difficulty`의 `false` 기준에 "일행과 대화 중", "뒤를 봄", "시스템 처리 중"을 둔 것이 멀티모달의 핵심입니다. 터치만 보면 모두 "멈춤"이지만 비전·음성 상태가 그 멈춤의 이유를 가릅니다.
 
@@ -232,9 +232,9 @@ backend입니다. 터치 통계는 프론트 → backend로, 비전 창 결과�
 |---|---|
 | `schemas.py` | 창 입력 한 줄(`WindowInput`), 규칙표의 결정(`Decision`), 세션 상태(`SessionState`: 유지·켬·거절·거둔 목록), 기준값(`DecisionParams`; 값마다 비전 `params.py`의 출처를 따름: 정의 1개, 평가 스위치 2개, 나머지는 `[파일럿]`), 창 기록(`WindowRecord`), Jev 기록(`JevRecord`). 화면 순서(`SCREEN_FLOW`)는 프론트 `OrderPage.tsx`의 화면 값과 단계 표시 순서(`menu`→`review`→`complete`)를 출처로 적었고, 그림자 단계의 설정(최근 창 5개, 예측 10초)은 "기준 없음"으로 표시 |
 | `rule_table.py` | 비전 `judgment/rule_table_v0.py`를 행 그대로 옮긴 규칙표 v0: 장면 3-1·3-2·4-1·4-2, 순서, 전이(open·replace·keep·withdraw), 거두는 조건, 무응답 거두기(`tick`: 서비스가 창마다 판단 앞에서 부름), 반응(`react`: 프론트의 반응 전달이 아직 없어 함수만 있음). 규칙표의 Jev 질문(`proposal_fits`·`queue_support`)과 `state`(비전과 같은 칸 이름)도 여기서 만듭니다 |
-| `jev_questions.py` | 9장의 상태 점수 질문 5개(`noul`, 계약 `StateScores`와 이름이 같음)와 그림자 호출의 `state`(규칙표 state + 계약의 터치 5개). Jev 호출은 **단계(`JevStage`) 목록**으로 쌓습니다. 단계마다 `build(ctx)`가 자기 `state`와 질문을 만들고, `ctx.previous`로 앞 단계들의 답을 받아 `state.jev`에 넣습니다(9.5의 ①→② 연쇄). 기본은 `ScoreStage` 하나이고, 단계를 더하는 데 서비스 코드는 바뀌지 않습니다 |
+| `jev_questions.py` | 9장의 상태 점수 질문 5개(`noul`, 계약 `StateScores`와 이름이 같음)와 그림자 호출의 `state`(규칙표 state + 계약의 터치 5개). Jev 호출은 **단계(`JevStage`) 목록**으로 쌓습니다. 단계마다 `build(ctx)`가 자기 `state`와 질문을 만들고, `ctx.previous`로 앞 단계들의 답을 받아 `state.jev`에 넣습니다(9.5의 ①→② 연쇄). 클래스의 기본 단계는 `ScoreStage` 하나지만 앱은 `JEV_STAGES`로 단계를 정하고 그 기본값은 `off`(단계 없음)이며, 단계를 더하는 데 서비스 코드는 바뀌지 않습니다 |
 | `repository.py` | 세션별 상태, 창 기록(세션 전체), Jev 기록을 메모리에 보관. 1시간 지난 세션은 읽기·쓰기마다 먼저 정리(음성 맥락과 같은 기간). 만료된 세션의 이전 창·이력은 읽지 않고, 만료 뒤 도착한 Jev 답은 기록하지 않음 |
-| `service.py` | `/features` 창마다 규칙표를 돌려 상태를 갱신하고(`judge`), 키가 있으면 **백그라운드에서** 단계들을 차례로 Jev에 묻고 기록만 남김(`observe` → `ask_shadow`). 응답은 Jev를 기다리지 않고(`jev_deadline: next_segment`), 세션당 진행 중 호출은 하나만 둡니다(답이 오기 전에 들어온 창은 `skipped_in_flight`로 기록). 창마다 `WindowRecord`를 남기고(`off` 조건 포함) 단계 결과가 오는 대로 붙입니다 |
+| `service.py` | `/features` 창마다 규칙표를 돌려 상태를 갱신하고(`judge`), 키가 있고 `JEV_STAGES`에 단계가 있으면 **백그라운드에서** 단계들을 차례로 Jev에 묻고 기록만 남김(`observe` → `ask_shadow`). 응답은 Jev를 기다리지 않고(`jev_deadline: next_segment`), 세션당 진행 중 호출은 하나만 둡니다(답이 오기 전에 들어온 창은 `skipped_in_flight`로 기록). 창마다 `WindowRecord`를 남기고(`off` 조건 포함) 단계 결과가 오는 대로 붙입니다 |
 
 연결: `sessions/service.analyze`가 ai-engine 답을 받은 뒤 `DecisionService.observe()`를 부릅니다. 어느 단계를 돌릴지는 `JEV_STAGES`(7.1의 조건)로 정하고, `off`면 키가 있어도 Jev를 부르지 않습니다. `support_choice` 단계는 규칙표가 그 창에 열 수 있는 후보(`allowed_supports`)와 `none` 중 하나를 고르게 하므로 규칙이 막은 지원은 선택지에 오르지 않습니다. 판단 층의 어떤 오류도 응답을 바꾸지 않습니다. `main.py`는 키가 있을 때만 Jev 클라이언트를 만들고, 없어도 규칙표는 돕니다.
 
@@ -250,7 +250,7 @@ backend입니다. 터치 통계는 프론트 → backend로, 비전 창 결과�
 
 실제 키 확인(2026-11-04, 시연 PC 아님): 9장 예시 state로 상태 점수 5개를 물었을 때 응답 0.2~0.5초, 입력 약 900토큰. 비전 단서(`looking_around`)가 있을 때 `hesitation` 0.51, 없을 때 0.76으로, 같은 멈춤을 "찾는 중"으로 읽어 주었습니다.
 
-다음: (1) 비전 단서 입구(`extension` 또는 프론트 요청) 확정 뒤 `situation`·`gaze` 채우기, (2) #72 병합 뒤 `interaction` 필드로 `pause_s`·`options_open`·`fixes_recent` 채우기, (3) 기록을 Supabase(#73) 테이블로, (4) 출처 있는 기준으로 임계값을 두고 촬영본으로 확인한 뒤 `StateScores`·`decided_by`를 Jev 답으로 바꾸기, (5) 프론트의 반응 전달이 생기면 `react` 연결.
+다음: (1) 비전 단서 입구(`extension` 또는 프론트 요청) 확정 뒤 `situation`·`gaze` 채우기, (2) 터치 확장 계약(#89) 합의 뒤 `options_open` 연결. `pause_s`는 보정 경과(시스템 대기 제외)와 음성 듣는 중 처리를 정한 뒤 연결하고, `fixes_recent`는 프론트 값이 없어 None으로 둠. 2초 창을 5초 근거(`touch_span_s`)로 쓰는 방법도 함께 정함, (3) 기록을 Supabase(#73) 테이블로, (4) 출처 있는 기준으로 임계값을 두고 촬영본으로 확인한 뒤 `StateScores`·`decided_by`를 Jev 답으로 바꾸기, (5) 프론트의 반응 전달이 생기면 `react` 연결.
 
 ## 11. 참고 링크
 

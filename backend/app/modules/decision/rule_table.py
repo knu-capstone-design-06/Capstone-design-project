@@ -8,7 +8,8 @@ the way JP 0-1 describes. Thresholds come from DecisionParams only; this file ho
   scene  support                 output   rank  opens when                                              Jev
   3-2    wait_hold_timer         wait     2     tag consulting_companion                                none
   3-1    remaining_steps_notice  apply    3     tag looking_back_with_people_behind, steps left/unknown  fit, or choice
-         (delay_responsibility_notice with the switch on)                                               with DEFER
+         (delay_responsibility_notice with the switch on:                                               with DEFER
+          an encouragement line since the vision table's change of 2026-11-17, the code name kept)
   4-1    large_button            propose  4     near misses fixed at once >= tremor_miss_min (facing),  fit (facing)
                                                 >= tremor_miss_min_no_gaze (gaze unknown); steps left
   4-2    highlight_next_action   apply    7     a back, or a pause after choosing >= lost_pause_s      fit
@@ -31,7 +32,7 @@ from app.modules.decision.schemas import (
 WHAT = {   # one English line per support for Jev (names and English only)
     WAIT: "Wait and show nothing while the user talks with a companion",
     NOTICE: "Tell the user how many steps are left before payment, without a popup",
-    DELAY: "Tell the user that waiting customers are the store's matter, without a popup",
+    DELAY: "Encourage the user with one line that there is no need to hurry, without a popup",
     BIG: "Ask the user whether the buttons should become bigger",
     HIGHLIGHT: "Highlight the next action on this screen with one line of guidance, without changing the layout",
     DEFER: "Show nothing now and do not ask about bigger buttons while people wait behind the user",

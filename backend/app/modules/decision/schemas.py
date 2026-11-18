@@ -42,7 +42,7 @@ class DecisionParams:
     lost_pause_s: float          # 4-2: pause after choosing, on a screen with steps left
     lost_pause_s_vision: float   # 4-2: the lowered pause with looking_around or a gaze at the screen
     no_response_s: float         # an unanswered ask is withdrawn after this
-    delay_notice_on: bool        # evaluation switch: 3-1 offers the delay-responsibility notice instead
+    delay_notice_on: bool        # evaluation switch: 3-1 offers the encouragement line (delay_responsibility_notice) instead
     defer_option_on: bool        # evaluation switch: 3-1 may defer the big-button question
 
 

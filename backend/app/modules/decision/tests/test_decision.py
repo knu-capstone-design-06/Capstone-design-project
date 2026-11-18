@@ -141,6 +141,18 @@ class ShadowQuestionTests(unittest.TestCase):
         self.assertEqual(json.dumps(state), json.dumps(json.loads(json.dumps(state))), "plain JSON only")
 
 
+    def test_a_touch_field_the_contract_adds_later_does_not_reach_the_jev_state(self):
+        class Extended(type(feature_window().touch)):
+            interaction: dict | None = None
+
+        touch = Extended(tap_count=4, miss_tap_count=3, repeat_tap_count=2, back_count=1, dwell_ms=12000,
+                         interaction={"visit_id": "v1", "ui_settings": {"large_button": True}})
+        state = shadow_state(window_input(feature_window(), measurable=True), SessionState(), touch)
+        self.assertEqual(set(state["touch"]), {"misses_recent", "fixes_recent", "backs_recent", "pause_s", "tap_count",
+                                               "miss_tap_count", "repeat_tap_count", "back_count", "dwell_ms"})
+        self.assertNotIn("visit_id", json.dumps(state))
+
+
 RESPONSE = {
     "model": "jev-1.13.0",
     "answers": {name: {"type": "noul", "noul": 0.5} for name in STATE_QUESTIONS} | {"proposal_fits": {"type": "noul", "noul": 0.8}},
@@ -188,6 +200,19 @@ class DecisionServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(seen["body"]["model"], "jev-1.13.0")
         self.assertEqual(set(seen["body"]["questions"]), set(STATE_QUESTIONS), "no fit question without a known situation")
         self.assertEqual(seen["body"]["state"]["touch"]["back_count"], 1)
+
+    async def test_a_store_error_in_the_background_chain_is_logged_and_the_next_window_asks_again(self):
+        service = self.service(lambda request: httpx.Response(200, json=RESPONSE))
+        attach, self.repository.attach = self.repository.attach, lambda *a, **k: (_ for _ in ()).throw(RuntimeError("store down"))
+        with self.assertLogs("app.modules.decision.service", level="ERROR") as logs:
+            service.observe("s1", ending_at(2, back_count=1), measurable=True)
+            await service.drain()
+        self.assertIn("jev shadow task failed", logs.output[0])
+        self.assertFalse(service.in_flight("s1"))
+        self.repository.attach = attach
+        service.observe("s1", ending_at(4), measurable=True)
+        await service.drain()
+        self.assertEqual(self.repository.windows("s1")[-1].jev, "asked")
 
     async def test_a_failed_call_is_recorded_as_no_answer_and_changes_nothing_else(self):
         service = self.service(lambda request: httpx.Response(529, json={"error": "busy"}))
@@ -354,6 +379,8 @@ class StageArmTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(Settings(_env_file=None).jev_stages, "off", "a key alone never starts paid calls")
         self.assertEqual(build_stages(Settings(_env_file=None, jev_api_key="jev-secret-value").jev_stages), ())
         self.assertEqual([s.name for s in build_stages("state_scores")], ["state_scores"])
+        self.assertEqual([s.name for s in build_stages(" State_Scores , SUPPORT_CHOICE ")], ["state_scores", "support_choice"])
+        self.assertEqual(build_stages("OFF"), ())
         self.assertEqual([s.name for s in build_stages(" state_scores , support_choice ")], ["state_scores", "support_choice"])
         self.assertEqual(build_stages("off"), ())
         self.assertEqual(build_stages(""), ())
@@ -490,6 +517,33 @@ class ObservationTests(unittest.TestCase):
         back = service.observe("s1", at(8, "menu"), measurable=True)
         self.assertIs(repository.windows("s1")[-1].inputs["progress_segment"], False)
         self.assertIsNone(service.observe("s1", at(10, "menu_list"), measurable=True).execution.get("steps_left"))
+
+    def test_progress_is_unknown_outside_the_screen_flow_and_a_skipped_screen_is_still_forward(self):
+        repository = DecisionRepository()
+        service = DecisionService(repository, P, None)
+        # The voice API's ids are not the flow's: nothing is asserted about progress between them.
+        service.observe("s1", ending_at(2, "menu_list"), measurable=True)
+        service.observe("s1", ending_at(4, "order_review"), measurable=True)
+        service.observe("s1", ending_at(6, "menu"), measurable=True)
+        self.assertEqual([w.inputs["progress_segment"] for w in repository.windows("s1")], [None, None, None])
+        # The review window was lost (a skipped request): menu, then complete, is progress and withdraws 4-2.
+        opened = service.observe("s2", ending_at(2, "menu", back_count=1), measurable=True)
+        self.assertEqual((opened.transition, opened.support), ("open", HIGHLIGHT))
+        jumped = service.observe("s2", ending_at(4, "complete"), measurable=True)
+        self.assertIs(repository.windows("s2")[-1].inputs["progress_segment"], True)
+        self.assertEqual(jumped.transition, "withdraw")
+
+    def test_a_window_ending_in_the_future_does_not_shut_out_the_windows_after_it(self):
+        repository = DecisionRepository()
+        clock = {"now": T0.timestamp() + 4}
+        service = DecisionService(repository, P, None, now=lambda: clock["now"])
+        service.observe("s1", ending_at(4), measurable=True)
+        service.observe("s1", ending_at(86400), measurable=True)          # a frontend clock a day ahead, once
+        self.assertEqual(repository.state("s1").last_t, T0.timestamp() + 4 + 5, "the mark stops at the tolerance")
+        clock["now"] = T0.timestamp() + 12
+        decision = service.observe("s1", ending_at(12, back_count=1), measurable=True)
+        self.assertEqual((decision.transition, decision.support), ("open", HIGHLIGHT), "judged, not recorded as stale")
+        self.assertNotEqual(repository.windows("s1")[-1].jev, STALE)
 
     def test_an_unanswered_ask_lapses_before_the_next_window_is_judged(self):
         repository = DecisionRepository()

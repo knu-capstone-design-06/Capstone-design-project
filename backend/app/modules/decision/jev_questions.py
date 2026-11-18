@@ -53,11 +53,18 @@ STATE_QUESTIONS: dict[str, dict] = {
 assert set(STATE_QUESTIONS) == set(StateScores.model_fields), "one question per contract state score"
 
 
+SHADOW_TOUCH_FIELDS = ("tap_count", "miss_tap_count", "repeat_tap_count", "back_count", "dwell_ms")
+
+
 def shadow_state(inp: WindowInput, state: SessionState, touch: TouchFeatures | None) -> dict:
-    """The rule table's state plus the window's raw touch counts (the contract's five fields)."""
+    """The rule table's state plus the window's raw touch counts (the contract's five fields).
+
+    The five are named here, not dumped from the model: a field the contract adds later (the touch.interaction
+    extension) must not reach a Jev question until it is agreed and switched on field by field.
+    """
     result = jev_state(inp, state)
     if touch is not None:
-        result["touch"] = {**result["touch"], **touch.model_dump()}
+        result["touch"] = {**result["touch"], **{name: getattr(touch, name) for name in SHADOW_TOUCH_FIELDS}}
     return result
 
 
@@ -184,7 +191,7 @@ OFF = "off"
 
 def build_stages(names: str) -> tuple[JevStage, ...]:
     """The stages named in JEV_STAGES ("state_scores,support_choice"); "off" or empty = none (rule table only)."""
-    wanted = [name.strip() for name in names.split(",") if name.strip()]
+    wanted = [name.strip().lower() for name in names.split(",") if name.strip()]
     if not wanted or wanted == [OFF]:
         return ()
     unknown = [name for name in wanted if name not in STAGE_REGISTRY]
