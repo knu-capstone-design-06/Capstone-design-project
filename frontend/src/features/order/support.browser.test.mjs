@@ -153,21 +153,23 @@ test('뺀 줄은 다음 터치까지 제자리에 남고 [되돌리기]는 같�
       mutation(session, '/cart/items', cartResponse(session, 3, [iced(2)])),
       mutation(session, '/cart/items/item-iced?expected_version=3', cartResponse(session, 4), { method: 'DELETE' })]);
     const count = (method, path) => fixture.requests.filter(request => request.method === method && request.path.startsWith(`/api/v1/sessions/${session}${path}`)).length;
-    // [삭제]를 250 ms 간격으로 두 번 누릅니다(PR #87 리뷰의 재현). 둘째 누름은 같은 자리에 선 [되돌리기]에 닿지만 두 번 클릭 간격 안이라 받지 않습니다.
-    const removeTwice = async () => {
+    // [삭제]를 250 ms 간격으로 세 번 누릅니다. 같은 자리의 [되돌리기]에 닿는 연속 누름도 보호를 연장합니다.
+    const removeRepeatedly = async () => {
       const box = await target(page, 'cart:americano:아이스:remove').boundingBox();
       const point = [box.x + box.width / 2, box.y + box.height / 2];
+      await page.mouse.click(...point);
+      await page.waitForTimeout(250);
       await page.mouse.click(...point);
       await page.waitForTimeout(250);
       await page.mouse.click(...point);
       const under = await page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest('[data-log-target]')?.dataset.logTarget ?? null, point);
       assert.equal(under, 'cart:americano:아이스:undo', '[되돌리기]는 [삭제]의 자리에 섬');
       await page.locator('[data-log-target="cart:americano:아이스:undo"][data-armed="true"]').waitFor();
-      assert.equal(await page.locator('.cart-removed').count(), 1, '두 번 클릭 간격 안의 둘째 누름은 되돌리지 않음');
+      assert.equal(await page.locator('.cart-removed').count(), 1, '보호 중 이어진 연속 누름은 되돌리지 않음');
     };
     await target(page, 'product:americano').click(); await target(page, 'options-increase').click(); await target(page, 'cart-add').click();
     await page.locator('dialog[open]').waitFor({ state: 'hidden' });
-    await removeTwice();
+    await removeRepeatedly();
     assert.equal(count('DELETE', '/cart/items/'), 1);
     assert.equal(count('POST', '/cart/items'), 1, '다시 담는 요청이 없음');
     assert.equal(await page.locator('.cart-row').count(), 0, '뺀 줄은 담은 줄로 세지 않음');
@@ -182,7 +184,7 @@ test('뺀 줄은 다음 터치까지 제자리에 남고 [되돌리기]는 같�
     // 주문 확인 화면의 줄도 같습니다.
     await page.locator('[data-log-target="review-open"][data-armed="true"]').waitFor();
     await target(page, 'review-open').click();
-    await removeTwice();
+    await removeRepeatedly();
     assert.equal(count('DELETE', '/cart/items/'), 2);
     assert.equal(count('POST', '/cart/items'), 2, '주문 확인 화면에서도 다시 담는 요청이 없음');
     fixture.verify(); assert.deepEqual(errors, []);

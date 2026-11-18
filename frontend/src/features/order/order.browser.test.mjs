@@ -674,7 +674,25 @@ test('긴 주문 내역 아래에서 실패해도 안내와 재확인 버튼을 
 const centerOf = box => [box.x + box.width / 2, box.y + box.height / 2];
 const targetAt = (page, point) => page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest('[data-log-target]')?.dataset.logTarget ?? null, point);
 
-test('옵션 창의 [담기] 자리를 250 ms 간격으로 세 번 눌러도 한 번만 담고 주문 확인·주문으로 넘어가지 않는다', async () => {
+test('옵션 창의 [취소] 자리를 연달아 눌러도 처음으로 확인 창을 열지 않는다', async () => {
+  const browser = await chromium.launch(launchOptions);
+  try {
+    const { page, errors, fixture } = await open(browser, bootstrap('repeat-option-cancel'));
+    await ready(page); await click(page, 'product:americano');
+    const point = centerOf(await page.locator('[data-log-target="options-close"]').boundingBox());
+    await page.mouse.click(...point);
+    await page.waitForTimeout(250);
+    assert.equal(await targetAt(page, point), 'order-restart');
+    await page.mouse.click(...point);
+    assert.equal(await page.locator('dialog[open]').count(), 0, '같은 자리의 연속 입력으로 처음으로 창을 열지 않음');
+    await page.locator('[data-log-target="order-restart"][data-armed="true"]').waitFor();
+    await page.mouse.click(...point);
+    await page.locator('dialog#restart-dialog[open], dialog[aria-labelledby="restart-title"][open]').waitFor();
+    fixture.verify(); assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
+test('옵션 창의 [담기] 자리를 250 ms 간격으로 네 번 눌러도 한 번만 담고 주문 확인·주문으로 넘어가지 않는다', async () => {
   const browser = await chromium.launch(launchOptions);
   try {
     const session = 'repeat-add';
@@ -683,6 +701,8 @@ test('옵션 창의 [담기] 자리를 250 ms 간격으로 세 번 눌러도 한
     await page.route('**/cart/items', async route => { await new Promise(resolve => setTimeout(resolve, 60)); await route.fallback(); });
     await click(page, 'product:americano');
     const point = centerOf(await page.locator('[data-log-target="cart-add"]').boundingBox());
+    await page.mouse.click(...point);
+    await page.waitForTimeout(250);
     await page.mouse.click(...point);
     await page.waitForTimeout(250);
     await page.mouse.click(...point);

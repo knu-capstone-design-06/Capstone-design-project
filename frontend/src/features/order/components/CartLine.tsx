@@ -23,11 +23,12 @@ export type CartLineActions = {
 export function CartLine({ line, actions, thumbnail = null }: { line: CartDisplayLine; actions: CartLineActions; thumbnail?: ReactNode }) {
   const { item, removed } = line;
   const [armed, setArmed] = useState(!removed);
+  const [blockedPress, setBlockedPress] = useState(0);
   useEffect(() => {
     if (!removed) return;
     const timer = setTimeout(() => setArmed(true), doubleClickMs);
     return () => clearTimeout(timer);
-  }, [removed]);
+  }, [removed, blockedPress]);
   const target = `cart:${item.product_id}:${temperatureLabel(item.temperature)}`;
   const option = temperatureText(item.temperature);
   const name = option ? `${item.name} ${option}` : item.name;
@@ -43,7 +44,7 @@ export function CartLine({ line, actions, thumbnail = null }: { line: CartDispla
     </div>
     <span className="line-price">{money(item.line_amount)}</span>
     {removed
-      ? <button type="button" data-log-target={`${target}:undo`} className="line-action" aria-label={`${name} 되돌리기`} data-armed={armed} disabled={actions.disabled} onClick={() => { if (armed) actions.onUndo(); }}>되돌리기</button>
+      ? <button type="button" data-log-target={`${target}:undo`} className="line-action" aria-label={`${name} 되돌리기`} data-armed={armed} disabled={actions.disabled} onClick={() => { if (armed) actions.onUndo(); else setBlockedPress(count => count + 1); }}>되돌리기</button>
       : <button type="button" data-log-target={`${target}:remove`} className="line-action" aria-label={`${name} 삭제`} disabled={actions.disabled} onClick={() => actions.onRemove(item)}>삭제</button>}
   </li>;
 }

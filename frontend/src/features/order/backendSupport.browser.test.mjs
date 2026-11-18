@@ -9,7 +9,7 @@ const url = process.env.ORDER_BROWSER_URL ?? 'http://127.0.0.1:5173';
 const channel = process.env.PLAYWRIGHT_CHANNEL ?? 'msedge';
 const options = { headless: true, ...(channel === 'default' ? {} : { channel }) };
 const dialog = page => page.locator('section.support-confirm-sheet');
-const target = (page, name) => page.locator(`[data-log-target="${name}"]`);
+const target = (page, name) => page.locator(`[data-log-target="${name}"]:not([data-armed="false"])`);
 const decision = (preset, extra = {}) => ({ session_id: 'support-session', ai_available: true,
   support: { preset, requires_confirmation: true, decided_by: 'jev' }, ...extra });
 
