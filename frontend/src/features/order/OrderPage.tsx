@@ -181,7 +181,7 @@ export function OrderPage() {
   }
   async function startNewOrder(resetCurrent = false) {
     voiceController.setEnabled(false);
-    closeOptions();
+    closeOptions(); setCartSheetOpen(false);
     setScreen('menu'); setOrderNumber(''); setCategory('all'); setMenuPaging({ key: '', page: 0 });
     if (resetCurrent && state.status === 'ready' && !state.order) await controller.restartCurrentOrder();
     else await controller.startNewOrder();
