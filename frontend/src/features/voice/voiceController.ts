@@ -61,6 +61,7 @@ export const VOICE_AUTO_OFF_MS = 30_000;
 const POLL_INTERVAL_MS = 1_000;
 const POLL_TIMEOUT_MS = 15_000;
 const MAX_AUTO_RELISTENS = 3;
+const POST_REPLY_MIC_DELAY_MS = 400;
 const SETTLED = new Set<VoiceStatus>(['completed', 'needs_confirmation', 'needs_clarification', 'ignored', 'failed']);
 // 손님의 대답이 필요한 결과에서는 마이크를 다시 엽니다.
 const ASKS_USER = new Set<VoiceStatus>(['needs_confirmation', 'needs_clarification']);
@@ -382,16 +383,23 @@ export class VoiceController {
   private async readReply(text: string, reply: AbortController, listenAfter: boolean) {
     const live = () => this.reply === reply && !reply.signal.aborted && this.state.enabled;
     if (!live()) return;
+    const question = text.trim() || null;
     let played = false;
+    let resume = false;
     try {
       // stop() 뒤에도 실제 onend까지 마이크가 살아 있으므로 재생을 기다립니다.
       const closed = await this.waitForMicrophoneEnd(reply.signal);
       if (closed && live()) played = await this.replySpeaker!(text, reply.signal);
+      if (played && live() && listenAfter && this.canAutoRelisten(question)) {
+        // 합성 종료 이벤트 뒤에도 스피커에 남을 수 있는 끝소리가 지나기를 기다립니다.
+        await wait(POST_REPLY_MIC_DELAY_MS, reply.signal);
+        resume = true;
+      }
     } catch { /* 재생 실패 시 화면 표시와 수동 재청취로 계속할 수 있습니다. */ }
     if (!live()) return;
     this.reply = null;
     this.set({ phase: 'idle', replyAudioError: !played });
-    const reopened = played && listenAfter && this.autoRelisten(text.trim() || null);
+    const reopened = resume && this.autoRelisten(question);
     if (!reopened && !this.capture && !this.processing) this.armIdle();
   }
 
