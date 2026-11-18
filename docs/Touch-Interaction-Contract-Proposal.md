@@ -4,7 +4,7 @@
 - 상태: **팀 검토용 제안 / 미채택 / 서비스 미적용**
 - 검토 반영일: 2026-11-18
 - 작성 범위 결정: 백엔드 담당자가 PR #72의 전체 확장에 대한 계약 합의안 작성을 요청했다. 이는 아래 정책의 팀 채택이나 기존 계약 수정 허용을 뜻하지 않는다.
-- 기준: PR #72 `3d4b79c119aecf750148dc20e306be316b00f9d5`, AI 리뷰 기준 PR #77 `a56381a568152176079d4a00233151b50a85c7f9` 및 두 OpenAPI의 TouchFeatures. #77의 이후 수정과 아래 검토 의견은 구분한다.
+- 기준: PR #72 병합 커밋 `f316e708a98a5299e48d7fcfcdc3805dd22eb9ca`의 프론트 생산자·전송기와 두 OpenAPI의 TouchFeatures. #77 판단 계층은 해당 PR의 검토 중 변경으로 구분한다.
 - 검토 자료: 이 합의안, [독립 검토 스키마](touch-interaction-contract-proposal.openapi.json), [합성 요청 예시 6종](touch-interaction-contract-examples.json).
 
 ## 1. 제안하는 결과와 범위
@@ -23,8 +23,8 @@
 | D02 | 필수·선택·결측 | 객체가 없으면 이전 클라이언트. 객체가 있으면 27개 필수, 음성 추가 5개만 선택. 하위 null 허용은 표대로 | 프론트·백엔드 |
 | D03 | 버전·알 수 없는 필드 | backend 입구의 interaction 및 ui_settings에 미지원 버전·추가 속성 422를 제안. 오류 본문·필드 위치와 전송 중단의 복구 절차는 7절대로 계약 PR에서 확정. ai-engine에 새 422 정책을 적용하는 안은 아님 | 프론트·백엔드·AI |
 | D04 | 전달·실패 경로 | 검증된 원창은 backend 판단에 직접 전달. AI 수정 의견에 따라 내부 AnalyzeRequest에서는 interaction 제외 제안. 내부 TouchFeatures의 외부 $ref 분리 필요. 분석 실패 fallback과 그림자 판단 배선은 유지 | 백엔드·AI |
-| D05 | 시각·구간 | 집계는 `(window_start, window_end]`, 프론트 파일럿 2초. 5초 터치 집계 범위를 정확히 복원할 수 없어 원창 근거만 보존. 집계 범위 변경·생산 주기 변경·별도 5초 집계 중 선택 필요(6절) | 프론트·AI·비전·백엔드 |
-| D06 | 순서·중복·누락 | sequence는 추적용. 정확히 한 번 처리나 연속 관측 보장 없음. 늦은 창 정책은 #77의 처리를 유지하고, 동일 시각·중복 제거 강화는 별도 합의 | 백엔드·AI·비전 |
+| D05 | 시각·구간 | 프론트 파일럿은 `(window_start, window_end]`의 2초 창 경계를 이어서 전송한다. 5초 터치 집계 범위를 정확히 복원할 수 없어 원창 근거부터 보존한다. 집계 범위 변경·창 길이 변경·별도 5초 집계는 6절에서 검토한다. | 프론트·AI·비전·백엔드 |
+| D06 | 순서·중복·누락 | sequence는 추적용. 같은 세션의 창 경계를 비교해 공백을 확인한다. 지연 도착, 동일 시각, 중복 제거는 별도 합의하며 #77의 시각 처리 검토를 참고한다. | 백엔드·AI·비전 |
 | D07 | 화면 식별 | 이번 스키마에서는 screen_id를 string으로 유지하고 menu/menu_list를 자동 치환하지 않음. 공통 표준값·매핑은 별도 확정 | 프론트·AI·백엔드 |
 | D08 | pause_s와 fixes_recent | 보정 경과는 근거 보존만 하고 pause_s 미연결. 후속 연결 시 listening/마이크 활성 중 None을 제안. fixes_recent는 #72 확장·백엔드 입력에 없으므로 None 유지(비전 replay의 계산과 구분) | 프론트·AI·비전 |
 | D09 | 설정·판단 상태 | ui_settings는 프론트 관측 맥락으로만 전달. active/refused/withdrawn 같은 서버 판단 상태를 설정값으로 덮어쓰지 않음 | 프론트·AI·백엔드 |
@@ -40,9 +40,10 @@
 | 프론트 · 2026-11-16 · [리뷰](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/89#pullrequestreview-5920084506) | D01/D02의 32개·27+5·null 대조, D03의 visit_id·422 중단 확인. 문서 추가 승인, 팀 정책 채택과 구분 | 정상 생산자는 현재 32키를 보낸다는 설명 추가. #70 화면 개편의 수집 범위·largeView는 후속 버전 검토로 분리 |
 | AI · 2026-11-17 · [리뷰](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/89#pullrequestreview-5935066824) | D01/D03/D06/D08/D09/D10/D11 채택 의견. D04 직접 전달 동의·내부 전달 보류, options_open 직접 매핑 동의. D05 시간 집계 제안 | D04 수정안을 반영. D05 집계 제안은 아래 11-18 정정으로 대체. D02/D07을 비롯한 미답·공동 결정은 자동 채택하지 않음 |
 | 비전 · 2026-11-17 · [리뷰](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/89#pullrequestreview-5937683293) | D05/D06/D08/D11 채택 의견. 5초는 터치 단서 집계 범위이며 비전 replay는 fixes_recent 계산. null 거절은 새 제한 | 집계 범위·서버 입력/비전 replay 구분과 더 엄격한 null 제안을 명시. 당시 동의한 D05의 집계 방법은 AI 정정 후 재확인 필요 |
-| AI · 2026-11-18 · [추가 리뷰](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/89#pullrequestreview-5949603279) | D04에서 확장 제외 및 내부 $ref 분리 제안. D05의 끝 시각 기준 5초 합산안을 철회. listening 보호·누락 원인·예시·422 보완 요청 | 1·5~9절과 예시에 반영. #77의 Jev state 필드 선택과 설명 수정은 AI 담당 후속으로 남기며 이 브랜치에서 구현하지 않음 |
+| AI · 2026-11-18 · [추가 리뷰](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/89#pullrequestreview-5949603279) | D04에서 확장 제외 및 내부 $ref 분리 제안. D05의 끝 시각 기준 5초 합산안을 철회. listening 보호·누락 원인·예시·422 보완 요청 | 1·5~9절과 예시에 반영. Jev 요청에 기존 터치 5개만 고르는 변경은 #77의 `ce3fcf4`에 반영됨 |
+| 비전 · 2026-11-18 · [재검토](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/89#pullrequestreview-5952727263) | #72 병합으로 달라진 전송기 동작과 5초 집계 설명 수정 요청. 시선 관측 시 4초 기준 및 비전 replay와의 집계 범위 확인 권고 | 병합된 전송기 기준으로 6절을 정리하고, 4초 기준과 backend·비전 replay의 집계 범위를 4.3절과 D05에 반영 |
 
-D04의 원창은 판단 층까지 보존하되 Jev 요청에는 별도 허용 필드만 골라야 한다. 리뷰 기준 #77의 `shadow_state`는 `touch.model_dump()`를 사용하므로, backend 모델에 확장을 추가하기 전에 기존 5개만 선택하도록 한 AI 담당 후속 수정도 확인한다. 수신 모델 추가만으로 `visit_id`·`ui_settings`를 포함한 32개 전부를 Jev에 보내지 않는다.
+D04 수정안은 원창을 판단 층까지 보존하고 Jev 요청에는 허용된 필드만 보낸다. #77의 `ce3fcf4`에서 `shadow_state`를 수정해 프론트의 터치 필드 중 기존 5개만 명시적으로 선택한다. 판단 계층이 만드는 터치 단서와는 별개다. 이 변경은 #77 브랜치 기준이며, `AnalyzeRequest`에서 확장을 제외하는 작업은 D04에 따라 별도로 검증한다.
 
 ## 3. 공통 표기와 검증 제안
 
@@ -96,7 +97,7 @@ D04의 원창은 판단 층까지 보존하되 Jev 요청에는 별도 허용 �
 
 `order_busy_ms + voice_busy_ms`를 전체 시스템 대기로 더하지 않는다. 두 대기가 겹칠 수 있다. 마지막 입력 이후 보정값은 현재 2초 구간보다 클 수 있고, 원래 경과와 dwell_ms도 구간 길이로 잘라서는 안 된다. 수동 화면 읽기와 음성 `listening`(키오스크 이용자 발화) 시간은 현재 보정값에서 제외되지 않는다.
 
-예를 들어 마지막 누름 뒤 9초 동안 listening이면 보정값도 9000ms일 수 있다. 이를 그대로 `pause_s=9`로 쓰면 파일럿 `lost_pause_s=8.0`을 넘어 발화 중 헤맴으로 판단할 수 있다. D08의 연결 보류를 유지하며, 후속 연결에서는 `voice_phase == listening` 또는 `microphone_active == true`일 때 `pause_s=None`으로 두는 보호 조건을 제안한다. 연결이 채택된 관측 가능 구간에서만 `since_last_input_excluding_system_busy_ms / 1000`을 사용하고, 결측은 None으로 둔다. 음성 맥락이 결측인 구간과 수동 읽기 중의 판정 기준도 별도 합의하며, 원래 경과·dwell_ms로 대체하지 않는다.
+예를 들어 마지막 누름 뒤 9초 동안 listening이면 보정값도 9000ms일 수 있다. 이를 그대로 `pause_s=9`로 쓰면 파일럿 `lost_pause_s=8.0`을 넘어 발화 중 헤맴으로 판단할 수 있다. 이후 비전 정보를 연결하면 이용자가 화면을 향하거나 두리번거림 단서가 있을 때 4-2의 `lost_pause_s_vision=4.0`이 적용돼 더 짧은 발화도 해당 기준에 걸릴 수 있다. D08의 연결 보류를 유지하며, 후속 연결에서는 `voice_phase == listening` 또는 `microphone_active == true`일 때 `pause_s=None`으로 두는 보호 조건을 제안한다. 연결이 채택된 관측 가능 구간에서만 `since_last_input_excluding_system_busy_ms / 1000`을 사용하고, 결측은 None으로 둔다. 음성 맥락이 결측인 구간과 수동 읽기 중의 판정 기준도 별도 합의하며, 원래 경과·dwell_ms로 대체하지 않는다.
 
 ### 4.4 구간 끝 시점 맥락
 
@@ -139,8 +140,10 @@ AI 리뷰 기준 #77은 수신 창마다 판단하며 2초 창의 miss/back을 �
 
 ## 6. 시간·중복·화면·품질
 
-- 시간 구간은 timezone이 있는 window_start/end, end > start를 유지한다. 파일럿 생산자의 2초 주기와 서버가 허용하는 모든 기존 요청 길이를 혼동하지 않는다. 서버에서 길이=2초를 일괄 강제하는 변경은 제안하지 않는다.
-- 프론트는 요청 중 지나간 구간을 대기열에 쌓지 않는다. 재전송할 원창을 쌓는 대신 최신 구간을 만들며, 시작·복귀 직후 관측 부족, 끝나지 않은 누름, 로컬 로그 1000개 제한에 따른 기록 잘림·기준선 손실에도 창을 건너뛴다. 같은 화면에서 스크롤 기록이 쌓여 screen_enter가 사라지면 다음 화면 진입까지 창을 만들지 못할 수 있다. 누락을 0회 관측으로 채우지 않는다.
+- 시간 구간은 timezone이 있는 window_start/end, end > start를 유지한다. 2초는 #72 생산자의 창 길이이며, 기존 서버 요청에는 계약의 허용 범위를 적용한다.
+- #72가 병합된 main의 전송기는 250ms 간격으로 준비 여부를 확인하고 요청은 한 건씩 보낸다. 한 창을 전송할 때 다음 종료 시각을 현재 종료 시각에 2초를 더해 정한다. 요청이 느려도 필요한 기록이 남아 있으면 지나간 창을 이 경계로 순서대로 집계해 보낸다. 종료를 기다리는 누름이 있고 다른 관측 근거가 충분하면 같은 종료 시각으로 다시 확인한다.
+- 시작·전경 복귀 직후 또는 기록 한도 초과로 관측이 부족하면 창을 건너뛸 수 있다. 시험 전송용 메모리는 스크롤과 나머지 이벤트를 각각 최대 1,000개 보관한다. 스크롤이 쌓여도 전송용 화면 진입·주문 상태 기록은 별도 버퍼에 남으며, 스크롤 버퍼에서 필요한 구간이 잘린 창은 제외된다. 일반 로컬 저장·내보내기는 전체 이벤트 최근 1,000개를 사용한다.
+- 일시 실패한 요청에 같은 구간을 자동 재전송하지 않는다. 같은 세션의 수신 창을 관측 시각 순서로 비교할 때 `window_start == 직전 window_end`이면 경계가 이어지고, 더 뒤이면 두 창 사이에 관측 근거가 비어 있다. 건너뛴 창·전송 실패에 따른 비어 있는 구간은 0회로 채우지 않는다. 겹침과 지연 도착의 처리 기준은 D06에서 별도로 정한다. [병합된 전송기 설명](Jev-Touch-Features.md#5-전송-조건과-실패-처리)
 - sequence는 새 서버 세션 범위의 추적 값이다. 여러 탭·생산자·프로세스 사이 전역 유일성과 저장 키로의 사용은 미정이다.
 - 늦은 응답·창, 동일 종료 시각, 중복 창의 정책은 서로 구분한다. PR #77의 늦은 창 기록 처리가 정확히 한 번 판단을 보장하는 것은 아니다.
 - 화면·visit_id는 구간 끝 시점이고, 구간의 집계는 같은 세션의 여러 방문을 포함할 수 있다. 화면별 집계로 오해하지 않는다.
@@ -150,12 +153,12 @@ AI 리뷰 기준 #77은 수신 창마다 판단하며 2초 창의 miss/back을 �
 
 ### D05: 2초 합계로 정확한 최근 5초를 복원할 수 없는 이유와 선택지
 
-끝 시각 t=10일 때 연속 창 `(4,6]`, `(6,8]`, `(8,10]`을 끝 시각이 `(5,10]`에 든다는 이유로 합치면 실제 범위는 `(4,10]`의 6초다. 창 전체가 포함되는 것만 고르면 `(6,10]`의 4초뿐이다. 첫 2초 창 안에서 누름이 5초 전후 어디서 발생했는지 합계만으로는 알 수 없어 비례 배분도 정확한 복원이 아니다. setInterval(2000)·Date.now() 기반 창은 경계 정렬도 보장되지 않아 몇 ms의 틈·겹침이 있을 수 있다. AI 담당자의 11-17 끝 시각 기준 합산 의견은 11-18 리뷰에서 철회됐다.
+끝 시각 t=10일 때 연속 창 `(4,6]`, `(6,8]`, `(8,10]`을 끝 시각이 `(5,10]`에 든다는 이유로 합치면 실제 범위는 `(4,10]`의 6초다. 창 전체가 포함되는 것만 고르면 `(6,10]`의 4초뿐이다. 첫 2초 창 안에서 누름이 5초 전후 어디서 발생했는지 합계만으로는 알 수 없어 비례 배분으로도 정확하게 복원할 수 없다. 이 한계는 병합된 #72 전송기의 창 경계가 정확히 이어져도 동일하다. AI 담당자의 11-17 끝 시각 기준 합산 의견은 11-18 리뷰에서 철회됐다.
 
 | 회의 선택지 | 함께 정할 조건 |
 |---|---|
-| (가) 판단 층 touch_span_s를 4초 또는 6초로 변경 | AI는 6초가 구현 비용이 낮다는 의견. 규칙표 임계값·비전과 함께 검토하며 실제 창 경계·빈틈·중복도 검증. 이번에 값은 변경하지 않음 |
-| (나) 프론트 생산 주기를 1초 또는 2.5초로 변경 | 5초를 나눌 수 있어도 타이머 흔들림이 없어지는 것은 아님. 정렬 기준·전송 부하·누락·임계값 재검토 필요 |
+| (가) 판단 층 touch_span_s를 4초 또는 6초로 변경 | 연속 2초 창 2개 또는 3개가 필요하다. AI는 6초의 구현 비용이 낮다는 의견을 제시했다. 현재 backend 규칙표와 비전 replay는 5초 기준이므로 양쪽의 범위를 함께 바꿀지 backend만 다르게 둘지 정한다. 규칙표 임계값과 실험 비교 조건, 실제 창의 빈틈·중복도 함께 검증한다. |
+| (나) 프론트 창 길이와 경계 간격을 1초 또는 2.5초로 변경 | 정확히 이어진 창 5개 또는 2개가 있어야 5초를 덮는다. 창 누락 시 처리, 전송 부하, 임계값을 재검토한다. 250ms 준비 확인 간격은 별도다. |
 | (다) 프론트가 원시 기록에서 최근 5초 집계를 별도 제공 | 정확한 관측 범위·필드/버전·결측·겹친 창 중복 처리와 백엔드/비전 결합 계약 필요 |
 
 어느 안도 자동 채택하지 않는다. 관측 구간이 덮이지 않거나 부분 창의 원래 입력 시각을 알 수 없으면 임의로 보간·0 채우기하지 않는다. 비전 replay의 segment_s 파일럿 1초, 터치 집계 touch_span_s 5초, 별도 상황 태그 window_s는 서로 다른 길이이므로 값과 구간을 함께 전달하는 후속 계약에서 맞춘다.
@@ -191,7 +194,7 @@ interaction을 보내지 않는 기존 형식은 계속 유효하게 한다. 27�
 4. 이전 5개만 있는 요청, 확장 27개/32개 요청, null/생략/0, 잘못된 타입·버전·속성, 취소·완료·늦은 창·대기를 고정 응답으로 검증한다. API 수신→전달→판단 기록을 대조한다.
 5. 실제 공동 검사는 샘플 세션으로 수행한다. API 200, backend 원창 보존, 내부 analyze 제외, 판단 기록, Jev에 고른 필드만 전달, 규칙 사용은 각각 관찰 근거를 남긴다. 실제 AI 호출·DB 저장은 별도 필요성에 따라 시행한다.
 
-최초 작성 시 #88과 파일을 분리해 공용 feat/docs에 새 검토 문서 3개만 추가했다. #88은 2026-11-17에 병합됐으며, 이번 리뷰 반영은 최신 main을 feat/docs에 merge한 뒤 같은 문서 3개 안에서 수행한다. PR 병합은 작성자인 백엔드 담당자가 직접 한다. 계약안 작성은 #72/#77 병합을 기다리지 않아도 되지만 해당 서비스 파일의 구현·통합은 병합 순서를 맞춘다.
+PR #72는 `f316e70`으로 main에 병합됐다. #89의 최신 설명은 병합된 전송기를 기준으로 하며, 판단 계층 연결은 #77 반영 뒤에 진행한다. PR 병합은 작성자인 백엔드 담당자가 직접 한다.
 
 이번 수정은 단순 오탈자 정리가 아니라 전달 경계·시간 집계·호환 제한·오판 방지 조건을 보완하므로 마지막 커밋 재검토가 필요하다. AI는 D04·D05·D08과 Jev 필드 선택, 프론트는 interaction:null·422·예시와 집계 선택지, 비전은 D05의 집계 범위 변경 선택지와 fixes_recent 범위를 재확인한다. [협업 규칙](Convention.md#4-pull-request)은 승인 후 새 커밋이 있으면 마지막 커밋을 다시 검토·승인하도록 하므로, 이전 승인이 화면에 남아 있어도 재검토 완료로 간주하지 않는다.
 
@@ -207,11 +210,11 @@ interaction을 보내지 않는 기존 형식은 계속 유효하게 한다. 27�
 ## 10. 근거
 
 - [PR #72](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/72)
-- [기준 TypeScript 필드](https://github.com/knu-capstone-design-06/Capstone-design-project/blob/3d4b79c119aecf750148dc20e306be316b00f9d5/frontend/src/shared/api/interactionTypes.ts)
-- [기준 집계 구현](https://github.com/knu-capstone-design-06/Capstone-design-project/blob/3d4b79c119aecf750148dc20e306be316b00f9d5/frontend/src/features/order/interactionFeatures.ts)
-- [기준 대기 시간 집계](https://github.com/knu-capstone-design-06/Capstone-design-project/blob/3d4b79c119aecf750148dc20e306be316b00f9d5/frontend/src/features/order/interactionWait.ts)
-- [프론트 필드·미합의 정책 문서](https://github.com/knu-capstone-design-06/Capstone-design-project/blob/3d4b79c119aecf750148dc20e306be316b00f9d5/docs/Jev-Touch-Features.md)
-- [AI 리뷰 기준 PR #77 판단 입력](https://github.com/knu-capstone-design-06/Capstone-design-project/blob/a56381a568152176079d4a00233151b50a85c7f9/backend/app/modules/decision/schemas.py)
+- [기준 TypeScript 필드](https://github.com/knu-capstone-design-06/Capstone-design-project/blob/f316e708a98a5299e48d7fcfcdc3805dd22eb9ca/frontend/src/shared/api/interactionTypes.ts)
+- [기준 집계 구현](https://github.com/knu-capstone-design-06/Capstone-design-project/blob/f316e708a98a5299e48d7fcfcdc3805dd22eb9ca/frontend/src/features/order/interactionFeatures.ts)
+- [기준 대기 시간 집계](https://github.com/knu-capstone-design-06/Capstone-design-project/blob/f316e708a98a5299e48d7fcfcdc3805dd22eb9ca/frontend/src/features/order/interactionWait.ts)
+- [병합된 프론트 전송기](https://github.com/knu-capstone-design-06/Capstone-design-project/blob/f316e708a98a5299e48d7fcfcdc3805dd22eb9ca/frontend/src/features/order/touchFeatureTransport.ts), [프론트 필드·미합의 정책 문서](Jev-Touch-Features.md)
+- [PR #77의 Jev 터치 필드 선택](https://github.com/knu-capstone-design-06/Capstone-design-project/blob/ce3fcf4/backend/app/modules/decision/jev_questions.py), [PR #77의 파일럿 기준](https://github.com/knu-capstone-design-06/Capstone-design-project/blob/4c1fabb07977e66713360f86eb4a4b2947d05658/backend/app/modules/decision/schemas.py)
 - [현행 외부 계약](https://github.com/knu-capstone-design-06/Capstone-design-project/blob/main/contract/frontend-backend.openapi.yaml), [현행 내부 계약](https://github.com/knu-capstone-design-06/Capstone-design-project/blob/main/contract/backend-ai.openapi.yaml)
 
 실제 기존 계약·프론트·백엔드·ai-engine·DB 파일은 이번 작성으로 변경하지 않았다.
@@ -225,3 +228,4 @@ interaction을 보내지 않는 기존 형식은 계속 유효하게 한다. 27�
 - 최초 합의안 작성 단계에서 git status --short는 빈 출력이고 git diff --check는 통과했다. 리뷰 반영도 같은 문서 3개만 수정하며 실제 계약·서비스 코드·DB는 바꾸지 않는다. 실제 AI·DB 호출은 하지 않았다.
 - 2026-11-18 리뷰 반영 후 **293개 오프라인 부분집합 검사**가 통과했다. 32개 속성·27개 필수·5개 선택의 타입/결측/enum을 기준 TypeScript와 대조했고, 스키마의 설명을 제외한 검증 제약은 c9807dc와 동일하다. 6종 요청의 바깥 형식은 현행 FeatureWindowRequest로, 확장은 검토 스키마의 사용된 부분집합으로 검사했다. 필수 누락·각 필드 null/오타입·음수/비유한 수·추가 속성·선택 5개 생략·시각 예시·listening 반례·문서 상대 링크도 확인했다.
 - 위 검사는 전체 JSON Schema/OpenAPI 검증기, 현재 프론트 생산 함수 실행, strict 수신 서버 구현, 실제 API/DB 통합 검증을 대신하지 않는다. 문서·예시 변경이므로 제품 빌드·실제 유료 호출은 반복하지 않았다.
+- #72 병합 기준으로 프론트의 `interactionFeatures.test.mjs` 22개가 통과했다. 기록 버퍼 분리, 관측 부족 시 건너뛰기, 길게 누른 입력의 원래 창 유지, 지연 중 누락·중복 방지 및 전송 오류 후 다음 표본을 확인했다. 병합 전후 TypeScript 필드 정의는 동일하며, 예시 6종을 포함한 오프라인 부분집합 검사 295개도 통과했다.

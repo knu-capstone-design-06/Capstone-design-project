@@ -3,7 +3,7 @@
   "info": {
     "title": "Touch interaction contract proposal — NOT ADOPTED",
     "version": "0.0.0-draft",
-    "description": "팀 합의 전 검토용 제안. 기존 API에 미적용. source PR #72 3d4b79c. paths 없음: 새 엔드포인트를 만들지 않음. interaction:null 거절은 기존 프론트 타입보다 엄격한 미채택 제안. 내부 analyze 전달은 보류하며 이 컴포넌트를 내부 계약에 자동 공유하지 않음."
+    "description": "팀 합의 전 검토용 제안. 기존 API에 미적용. 기준은 PR #72 병합 커밋 f316e70. paths 없음: 새 엔드포인트를 만들지 않음. interaction:null 거절은 기존 프론트 타입보다 엄격한 미채택 제안. 내부 analyze 전달은 보류하며 이 컴포넌트를 내부 계약에 자동 공유하지 않음."
   },
   "paths": {},
   "components": {
@@ -287,6 +287,6 @@
     }
   },
   "x-proposal-status": "unadopted",
-  "x-source-ref": "3d4b79c119aecf750148dc20e306be316b00f9d5",
+  "x-source-ref": "f316e708a98a5299e48d7fcfcdc3805dd22eb9ca",
   "x-internal-analyze-proposal": "미채택 D04 수정안: backend 판단에는 원창 보존, AnalyzeRequest에서는 interaction 제외. 내부 TouchFeatures의 외부 계약 $ref 분리 필요."
 }
