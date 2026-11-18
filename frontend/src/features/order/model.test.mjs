@@ -5,7 +5,6 @@ import { ApiError } from '../../shared/api/client.ts';
 import { OrderController } from './orderController.ts';
 import { OrderResponseError, readOrderResponse } from './orderResponse.ts';
 import { clampPage, menuColumns, menuPageSize, pageCount, pageItems, reviewPageSize } from './utils/paging.ts';
-import { alreadyLarge, readSupportDecision } from './utils/supportDecision.ts';
 import { readBackendSupport, supportSettings } from './backendSupport.ts';
 
 test('서버의 네 가지 제안은 각각의 설정에 연결하고 켜진 설정·잘못된 응답은 무시한다', () => {
@@ -563,30 +562,4 @@ test('주문 확인은 화면 설정과 줄 수에 맞춰 쪽을 나눈다', () 
   assert.equal(reviewPageSize(mode({ lowScreen: true, largeButton: true }), 3), 2);
   assert.equal(reviewPageSize(mode({ lowScreen: true, largeText: true }), 3), 1);
   assert.equal(pageCount(17, reviewPageSize(mode(), 17)), 4);
-});
-
-test('화면 지원 판단은 계약의 필드만 읽고 늦거나 쓸 수 없는 응답은 무시한다', () => {
-  const response = (preset, requires_confirmation = true, extra = {}) => ({ session_id: 's1', ai_available: true, support: { preset, requires_confirmation, decided_by: 'rule_placeholder' }, ...extra });
-  const sent = { sessionId: 's1', screen: 'menu' };
-  const now = (extra = {}) => ({ sessionId: 's1', screen: 'menu', orderDone: false, settings: { ...initialSettings }, largeView: false, ...extra });
-  assert.deepEqual(readSupportDecision(response('none'), sent, now()), { kind: 'ignore', reason: 'none' });
-  assert.deepEqual(readSupportDecision(response('large_text', true, { ai_available: false }), sent, now()), { kind: 'ignore', reason: 'ai_unavailable' });
-  assert.deepEqual(readSupportDecision(response('large_text'), sent, now({ sessionId: 's2' })), { kind: 'ignore', reason: 'stale_session' });
-  assert.deepEqual(readSupportDecision(response('large_text', true, { session_id: 'other' }), sent, now()), { kind: 'ignore', reason: 'stale_session' });
-  assert.deepEqual(readSupportDecision(response('large_text'), sent, now({ screen: 'review' })), { kind: 'ignore', reason: 'stale_screen' });
-  assert.deepEqual(readSupportDecision(response('large_text'), sent, now({ orderDone: true })), { kind: 'ignore', reason: 'order_done' });
-  // 크게 보기: 이미 켜져 있거나 고객이 큰 글씨(200 %)를 켰으면 제안하지 않습니다. 큰 버튼만 켜져 있으면 제안합니다.
-  assert.deepEqual(readSupportDecision(response('large_text'), sent, now({ largeView: true })), { kind: 'ignore', reason: 'already_on' });
-  assert.deepEqual(readSupportDecision(response('large_button'), sent, now({ settings: { ...initialSettings, largeText: true } })), { kind: 'ignore', reason: 'already_on' });
-  assert.deepEqual(readSupportDecision(response('large_button'), sent, now({ settings: { ...initialSettings, largeButton: true } })), { kind: 'offer', preset: 'large_button', support: 'enlarge' });
-  for (const preset of ['simple_screen', 'step_guide', 'voice_guide']) assert.deepEqual(readSupportDecision(response(preset), sent, now()), { kind: 'ignore', reason: 'no_copy' });
-  assert.deepEqual(readSupportDecision(response('large_text', true), sent, now()), { kind: 'offer', preset: 'large_text', support: 'enlarge' });
-  assert.deepEqual(readSupportDecision(response('large_button', false), sent, now()), { kind: 'apply', preset: 'large_button', support: 'enlarge' });
-});
-
-test('크게 보기는 화면 설정과 따로인 한 단계이고, 큰 글씨(200 %)가 켜져 있으면 더 키우지 않는다', () => {
-  assert.equal(alreadyLarge({ largeView: false, settings: { ...initialSettings, largeButton: true } }), false, '큰 버튼만으로는 크게 보기가 아님');
-  assert.equal(alreadyLarge({ largeView: true, settings: initialSettings }), true);
-  assert.equal(alreadyLarge({ largeView: false, settings: { ...initialSettings, largeText: true } }), true);
-  assert.equal('largeView' in initialSettings, false, '저장하는 화면 설정에는 크게 보기가 없음');
 });

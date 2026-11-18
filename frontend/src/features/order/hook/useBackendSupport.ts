@@ -15,13 +15,16 @@ export function useBackendSupport({ sessionId, contextKey, canSend, canOffer, se
   const lastSession = useRef(sessionId);
   const suspended = useRef(false);
   const latest = useRef({ settings, sessionId, contextKey, canSend, canOffer });
-  const [transport] = useState(() => createSupportTransport(backendApi.sendFeatureWindow, read, response => {
+  // 개발용 고정 응답과 HTTP 응답 모두 같은 확인과 적용을 거칩니다.
+  const receive = useCallback((response: unknown) => {
     const current = latest.current;
-    const preset = readBackendSupport(response, current.sessionId ?? '', current.settings);
-    if (preset && !answered.current.has(preset) && !dismissed.current.presets.has(preset)) {
-      setOffer(previous => previous ?? { preset, context: current.contextKey });
-    }
-  }));
+    if (!current.canOffer || !current.sessionId || suspended.current || document.visibilityState !== 'visible') return false;
+    const preset = readBackendSupport(response, current.sessionId, current.settings);
+    if (!preset || answered.current.has(preset) || dismissed.current.presets.has(preset)) return false;
+    setOffer(previous => previous ?? { preset, context: current.contextKey });
+    return true;
+  }, []);
+  const [transport] = useState(() => createSupportTransport(backendApi.sendFeatureWindow, read, receive));
   const current = canOffer && offer?.context === contextKey && !settings[supportSettings[offer.preset].key] ? offer : null;
   const syncContext = useCallback(() => {
     const { sessionId, contextKey, canSend, canOffer } = latest.current;
@@ -69,5 +72,5 @@ export function useBackendSupport({ sessionId, contextKey, canSend, canOffer, se
     dismissed.current.presets.add(current.preset);
     setOffer(null);
   }
-  return { preset: current?.preset ?? null, accept: () => answer(true), decline: () => answer(false), dismiss };
+  return { preset: current?.preset ?? null, accept: () => answer(true), decline: () => answer(false), dismiss, receive };
 }

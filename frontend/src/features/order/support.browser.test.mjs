@@ -1,5 +1,5 @@
 // 실행 중인 Vite(개발 서버) + 외부 Playwright. 키오스크가 먼저 띄우는 화면 지원(제안·적용·되돌리기), 버튼 강조 힌트,
-// 뺀 줄 되돌리기를 개발용 시험 장치(window.kioskSupportDraft, 주소의 ?support= ?hint=)로 확인합니다.
+// 뺀 줄 되돌리기를 개발용 시험 장치(window.kioskSupportDraft, 주소의 ?support= ?preview= ?hint=)로 확인합니다.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { bootstrap, cartResponse, food, iced, installOrderResponses, mutation, productsResponse } from './orderApiFixture.mjs';
@@ -35,7 +35,7 @@ test('제안을 받아들이면 크게 보기로 바꾸고 적용 안내와 [원
       });
       observer.observe(document.body, { childList: true, subtree: true });
     }));
-    await page.evaluate(response => window.kioskSupportDraft.receive(response), decision('offer-accept', 'large_text'));
+    await page.evaluate(() => window.kioskSupportDraft.previewEnlargement());
     await early;
     const card = page.locator('.offer-card');
     await card.waitFor();
@@ -57,15 +57,14 @@ test('제안을 받아들이면 크게 보기로 바꾸고 적용 안내와 [원
 test('거절하거나 다른 곳을 누르면 제안이 닫히고 화면은 그대로다', async () => {
   const browser = await chromium.launch(launchOptions);
   try {
-    const { page, errors, fixture } = await open(browser, bootstrap('offer-decline'), '?support=large_button');
+    const { page, errors, fixture } = await open(browser, bootstrap('offer-decline'), '?preview=enlarge');
     await page.locator('.offer-card').waitFor();
-    assert.match(await page.locator('.offer-card').innerText(), /글자와 버튼을 크게 해 드릴까요\?/, '큰 버튼 판단도 크게 보기로 묶음');
+    assert.match(await page.locator('.offer-card').innerText(), /글자와 버튼을 크게 해 드릴까요\?/, '일괄 확대 시안 문구');
     await page.locator('.offer-card[data-armed="true"]').waitFor();
     await target(page, 'support-offer:decline').click();
     assert.equal(await page.locator('.offer-card').count(), 0);
     assert.equal(await page.locator('.kiosk.large-button').count(), 0);
-    await page.evaluate(() => window.kioskSupportDraft.receive({ session_id: window.kioskTouchLogDraft.read().serverSessionId, ai_available: true,
-      support: { preset: 'large_button', requires_confirmation: true, decided_by: 'rule_placeholder' } }));
+    await page.evaluate(() => window.kioskSupportDraft.previewEnlargement());
     await page.locator('.offer-card').waitFor();
     await target(page, 'category:커피').click();
     await page.locator('.offer-card').waitFor({ state: 'detached' });
@@ -74,26 +73,49 @@ test('거절하거나 다른 곳을 누르면 제안이 닫히고 화면은 그�
   } finally { await browser.close(); }
 });
 
-test('확인 없이 적용한 지원은 저장하지 않아 새로고침하면 끝나고, 늦거나 쓸 수 없는 판단은 무시한다', async () => {
+test('개발용 서버 응답도 네 가지 개별 설정을 확인 후 적용하고 저장하지 않는다', async () => {
   const browser = await chromium.launch(launchOptions);
   try {
-    const { page, errors, fixture } = await open(browser, [...bootstrap('apply-first'), ...bootstrap('apply-second')]);
-    const stale = await page.evaluate(response => window.kioskSupportDraft.receive(response), decision('other-session', 'large_text'));
-    assert.deepEqual(stale, { kind: 'ignore', reason: 'stale_session' });
-    const none = await page.evaluate(response => window.kioskSupportDraft.receive(response), decision('apply-first', 'none'));
-    assert.deepEqual(none, { kind: 'ignore', reason: 'none' });
-    const noCopy = await page.evaluate(response => window.kioskSupportDraft.receive(response), decision('apply-first', 'simple_screen'));
-    assert.deepEqual(noCopy, { kind: 'ignore', reason: 'no_copy' });
-    assert.equal(await page.locator('.offer-card').count(), 0);
-    const applied = await page.evaluate(response => window.kioskSupportDraft.receive(response), decision('apply-first', 'large_text', false));
-    assert.equal(applied.kind, 'apply');
-    await page.locator('.kiosk.large-view').waitFor();
-    assert.match(await page.locator('.cart-notice.is-kiosk').innerText(), /글자와 버튼을 크게 했어요/);
+    const session = 'apply-first';
+    const { page, errors, fixture } = await open(browser, [...bootstrap(session), ...bootstrap('apply-second')], '?support=large_button&confirm=0');
+    const dialog = page.locator('dialog.support-confirm-sheet[open]');
+    const receive = (response, sentFor) => page.evaluate(
+      ({ response, sentFor }) => window.kioskSupportDraft.receive(response, sentFor), { response, sentFor });
+    async function accept(question) {
+      await dialog.getByRole('heading', { name: question, exact: true }).waitFor();
+      await page.locator('.support-confirm-actions[data-armed="true"]').waitFor();
+      await target(page, 'support-confirm:accept').click();
+      await dialog.waitFor({ state: 'hidden' });
+    }
+    await dialog.waitFor();
+    assert.equal(await page.locator('.kiosk.large-button').count(), 0, 'confirm=0도 먼저 확인');
+    await accept('버튼을 크게 바꿀까요?');
+    await page.locator('.kiosk.large-button').waitFor();
+    assert.equal(await page.locator('.kiosk.large-text, .kiosk.large-view, .offer-card').count(), 0);
+
+    assert.equal(await receive(decision('other-session', 'large_text')), false);
+    assert.equal(await receive(decision(session, 'large_text'), { sessionId: session, screen: 'review' }), false);
+    assert.equal(await receive(decision(session, 'none')), false);
+    assert.equal(await receive(decision(session, 'voice_guide')), false);
+    assert.equal(await receive(decision(session, 'large_button')), false, '이미 켜진 설정에는 제안하지 않음');
+    assert.equal(await dialog.count(), 0);
+
+    for (const [preset, question, selector] of [
+      ['large_text', '글씨를 크게 바꿀까요?', '.kiosk.large-text'],
+      ['simple_screen', '간편한 화면으로 바꿀까요?', '.kiosk.simple-screen'],
+      ['step_guide', '주문 순서를 안내해 드릴까요?', '.guide'],
+    ]) {
+      assert.equal(await receive(decision(session, preset)), true);
+      assert.equal(await page.locator(selector).count(), 0);
+      await accept(question);
+      await page.locator(selector).first().waitFor();
+    }
     const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('kiosk-ui-settings-v1')));
-    assert.equal(saved.largeText || saved.largeButton || 'largeView' in saved, false, '키오스크가 켠 크게 보기는 저장하지 않음');
+    assert.equal(saved.largeText || saved.largeButton || saved.simpleScreen || saved.stepGuide, false);
+    await page.evaluate(() => history.replaceState(null, '', location.pathname));
     await page.reload();
     await page.waitForFunction(() => document.querySelector('[data-log-target="product:americano"]')?.disabled === false);
-    assert.equal(await page.locator('.kiosk.large-view').count(), 0, '새로고침하면 끝남');
+    assert.equal(await page.locator('.kiosk.large-text, .kiosk.large-button, .kiosk.simple-screen, .guide').count(), 0);
     fixture.verify(); assert.deepEqual(errors, []);
   } finally { await browser.close(); }
 });
@@ -191,10 +213,10 @@ test('프로덕션 빌드에는 개발용 지원 시험 장치가 없다', { ski
   try {
     const page = await browser.newPage({ viewport: { width: 1080, height: 1920 } });
     const fixture = await installOrderResponses(page, bootstrap('production-draft'));
-    await page.goto(`${process.env.ORDER_PRODUCTION_URL}/?support=large_text&hint=cart-remove`);
+    await page.goto(`${process.env.ORDER_PRODUCTION_URL}/?support=large_text&preview=enlarge&hint=cart-remove`);
     await page.waitForFunction(() => document.querySelector('[data-log-target="product:americano"]')?.disabled === false);
     assert.equal(await page.evaluate(() => typeof window.kioskSupportDraft), 'undefined');
-    assert.equal(await page.locator('.offer-card').count(), 0);
+    assert.equal(await page.locator('.offer-card, .support-confirm-sheet').count(), 0);
     assert.equal(await page.locator('.hint-ring').count(), 0);
     fixture.verify();
   } finally { await browser.close(); }
@@ -206,7 +228,7 @@ test('고객이 켠 큰 버튼은 크게 보기를 받아들였다가 [원래대
     const { page, errors, fixture } = await open(browser, bootstrap('own-button'));
     await target(page, 'support-toggle').click(); await target(page, 'support:largeButton').click(); await target(page, 'support-close').click();
     await page.locator('.kiosk.large-button').waitFor();
-    await page.evaluate(response => window.kioskSupportDraft.receive(response), decision('own-button', 'large_text'));
+    await page.evaluate(() => window.kioskSupportDraft.previewEnlargement());
     await page.locator('.offer-card[data-armed="true"]').waitFor();
     await target(page, 'support-offer:accept').click();
     await page.locator('.kiosk.large-view.large-button').waitFor();
@@ -215,8 +237,8 @@ test('고객이 켠 큰 버튼은 크게 보기를 받아들였다가 [원래대
     assert.equal(await page.locator('.kiosk.large-button').count(), 1, '고객이 켠 큰 버튼은 남음');
     await page.evaluate(() => window.kioskSupportDraft.clear());
     await target(page, 'support-toggle').click(); await target(page, 'support:largeText').click(); await target(page, 'support-close').click();
-    const ignored = await page.evaluate(response => window.kioskSupportDraft.receive(response), decision('own-button', 'large_button'));
-    assert.deepEqual(ignored, { kind: 'ignore', reason: 'already_on' }, '큰 글씨(200 %)가 켜져 있으면 제안하지 않음');
+    await page.evaluate(() => window.kioskSupportDraft.previewEnlargement());
+    assert.equal(await page.locator('.offer-card').count(), 0, '큰 글씨(200 %)가 켜져 있으면 일괄 확대 시안을 띄우지 않음');
     fixture.verify(); assert.deepEqual(errors, []);
   } finally { await browser.close(); }
 });
@@ -229,7 +251,7 @@ test('제안은 처음으로 확인 창이 열린 동안 기다리고, 그사이
     await target(page, 'product:americano').click(); await target(page, 'cart-add').click();
     await page.locator('dialog[open]').waitFor({ state: 'hidden' });
     await target(page, 'order-restart').click(); await page.locator('dialog[open]').waitFor();
-    await page.evaluate(response => window.kioskSupportDraft.receive(response), decision(session, 'large_text'));
+    await page.evaluate(() => window.kioskSupportDraft.previewEnlargement());
     await page.waitForTimeout(300);
     assert.equal(await page.locator('.offer-card').count(), 0, '처음으로 확인 창이 열린 동안 제안은 뜨지 않음');
     await target(page, 'order-restart-cancel').click();
@@ -238,7 +260,7 @@ test('제안은 처음으로 확인 창이 열린 동안 기다리고, 그사이
     assert.equal(await page.locator('.offer-card').count(), 1, '창을 닫은 누름은 제안을 닫지 않음');
     await target(page, 'support-offer:decline').click();
     await target(page, 'support-toggle').click();
-    await page.evaluate(response => window.kioskSupportDraft.receive(response), decision(session, 'large_text'));
+    await page.evaluate(() => window.kioskSupportDraft.previewEnlargement());
     await target(page, 'support:largeText').click(); await target(page, 'support-close').click();
     await page.waitForTimeout(300);
     assert.equal(await page.locator('.offer-card').count(), 0, '기다리는 동안 큰 글씨가 켜졌으면 제안을 버림');
