@@ -347,7 +347,7 @@ export function OrderPage() {
           label: screen === 'complete' ? '새 주문 시작' : screen === 'menu' ? '주문 확인' : '주문하기',
           disabled: screen === 'complete' ? busy : !count || writeDisabled,
           onClick: () => { if (screen === 'complete') { support.endUse(); void startNewOrder(); } else if (screen === 'menu') openReview(); else void controller.checkout(); } }}
-        armed={barArmed} />
+        armed={barArmed} onBlockedPress={() => setBarChange(count => count + 1)} />
       <EntryRow supportOpen={supportOpen} onToggleSupport={() => setSupportOpen(!supportOpen)} onUndo={largeView ? support.undo : null} />
     </section>
     <HelpSheet ref={helpDialog} settings={settings} combined={combinedEnlargement}

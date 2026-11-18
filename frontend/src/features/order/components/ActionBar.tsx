@@ -12,14 +12,16 @@ export type CartButton = { ref: Ref<HTMLButtonElement>; amount: number | null; o
  * armed가 false인 동안(바를 덮던 창이 닫히거나 화면이 바뀐 뒤 두 번 클릭 간격) [처음으로]와 주요 버튼은 누름을 받지 않습니다.
  * 버튼은 비활성으로 바꾸지 않고, data-armed로 그 상태를 보입니다.
  */
-export function ActionBar({ total, cartButton = null, restart, primary, armed }: {
+export function ActionBar({ total, cartButton = null, restart, primary, armed, onBlockedPress }: {
   total: number | null;
   cartButton?: CartButton | null;
   restart: { ref: Ref<HTMLButtonElement>; disabled: boolean; onClick: () => void } | null;
   primary: PrimaryAction;
   armed: boolean;
+  onBlockedPress: () => void;
 }) {
-  const press = (action: () => void) => () => { if (armed) action(); };
+  // 무시한 연속 입력도 보호를 다시 시작해, 긴 연타가 보호 종료 직후 다음 동작으로 이어지지 않게 합니다.
+  const press = (action: () => void) => () => { if (armed) action(); else onBlockedPress(); };
   return <div className={`action-bar${total === null && !cartButton ? ' only-action' : ''}`}>
     {total !== null && <div className="total"><span className="total-label">총 주문 금액</span><strong className="amount">{money(total)}</strong></div>}
     {cartButton && <button type="button" ref={cartButton.ref} data-log-target="cart-sheet-open" className={`cart-button${cartButton.amount === null ? '' : ' with-amount'}`} onClick={cartButton.onClick}>

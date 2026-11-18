@@ -667,7 +667,7 @@ test('긴 주문 내역 아래에서 실패해도 안내와 재확인 버튼을 
 const centerOf = box => [box.x + box.width / 2, box.y + box.height / 2];
 const targetAt = (page, point) => page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest('[data-log-target]')?.dataset.logTarget ?? null, point);
 
-test('옵션 창의 [담기] 자리를 250 ms 간격으로 세 번 눌러도 한 번만 담고 주문 확인·주문으로 넘어가지 않는다', async () => {
+test('옵션 창의 [담기] 자리를 250 ms 간격으로 네 번 눌러도 한 번만 담고 주문 확인·주문으로 넘어가지 않는다', async () => {
   const browser = await chromium.launch(launchOptions);
   try {
     const session = 'repeat-add';
@@ -676,6 +676,8 @@ test('옵션 창의 [담기] 자리를 250 ms 간격으로 세 번 눌러도 한
     await page.route('**/cart/items', async route => { await new Promise(resolve => setTimeout(resolve, 60)); await route.fallback(); });
     await click(page, 'product:americano');
     const point = centerOf(await page.locator('[data-log-target="cart-add"]').boundingBox());
+    await page.mouse.click(...point);
+    await page.waitForTimeout(250);
     await page.mouse.click(...point);
     await page.waitForTimeout(250);
     await page.mouse.click(...point);
