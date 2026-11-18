@@ -160,8 +160,9 @@ export function OrderPage() {
   const writeDisabled = state.status !== 'ready' || state.order !== null;
   const backendSupport = useBackendSupport({
     sessionId, settings, read: touchLog.read,
-    contextKey: JSON.stringify([sessionId, screen, category, menuPaging, state.cart?.version, settings]),
-    enabled: !sampleMode && !writeDisabled && !selected && !supportOpen && !restartOpen && !cartSheetOpen
+    contextKey: JSON.stringify([sessionId, screen, category, menuPaging, reviewPage, state.cart?.version, settings]),
+    canSend: !sampleMode && screen !== 'complete' && !state.order && (state.status === 'ready' || state.status === 'saving'),
+    canOffer: !sampleMode && !writeDisabled && !selected && !supportOpen && !restartOpen && !cartSheetOpen
       && !voice.enabled && state.message === '' && !support.offer,
     onApply: key => { if (sessionId) setAutomaticSettings(current => ({ sessionId, values: { ...(current.sessionId === sessionId ? current.values : {}), [key]: true } })); },
   });

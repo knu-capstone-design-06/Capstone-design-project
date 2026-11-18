@@ -46,9 +46,9 @@ const api = createBackendApi('/backend');
 await api.getBackendHealth();
 await api.getConnectivity();
 const session = await api.createSession();
-// 주문 화면은 같은 API로 관측 가능한 최근 2초 통계를 기본 전송합니다.
+// 주문 화면은 같은 API에 연속한 약 2초 구간의 통계를 전송합니다.
 const result = await api.sendFeatureWindow(session.session_id, {
-  screen_id: 'menu_list',
+  screen_id: 'menu',
   window_start: '2026-10-01T10:00:00Z',
   window_end: '2026-10-01T10:00:03Z',
   touch: {
@@ -61,7 +61,7 @@ const result = await api.sendFeatureWindow(session.session_id, {
 
 특징은 화면에서 실제 측정한 1~3초 구간의 통계를 전달해야 합니다. 비전 측정이 없으면 `vision: null`을 사용합니다. `dwell_ms`는 밀리초이며 터치 통계는 0 이상의 정수, 비전 비율·신뢰도와 상태 점수는 0~1입니다.
 
-2026-11-17 프론트 담당자 요청으로 기존 파일럿의 최근 2초 횟수·반복 800ms/24 CSS px·현재 방문 전경 체류 누적 `dwell_ms`를 기본 전송에 사용합니다. 다섯 값이 모두 산출된 구간만 보내며 `null`을 0으로 바꾸지 않습니다. 이는 팀 전체의 계약 확정을 뜻하지 않으며 필드 추가·서버 변경은 없습니다([터치 로그 검토](../docs/Touch-Log-Review.md)).
+2026-11-17 프론트 담당자 요청으로 기존 파일럿의 반복 800ms/24 CSS px와 현재 방문 전경 체류 누적 `dwell_ms`를 기본 전송에 사용합니다. #70 리뷰를 반영해 화면 상태가 바뀌어도 통계 구간을 이어 가며 `screen_id`는 #72·#77과 같은 `menu` 또는 `review`를 사용합니다. 다섯 값이 모두 산출된 구간만 보냅니다. [터치 로그 검토](../docs/Touch-Log-Review.md)
 
 호출자는 `ai_available: false` 또는 `preset: none`이면 화면을 유지하고, `requires_confirmation: true`이면 사용자 수락 후 지원을 적용해야 합니다. 세션이나 화면이 바뀐 뒤 도착한 이전 응답은 적용하지 않아야 합니다. 각 메서드의 마지막 인자로 `AbortSignal`을 전달해 요청을 취소할 수 있습니다.
 

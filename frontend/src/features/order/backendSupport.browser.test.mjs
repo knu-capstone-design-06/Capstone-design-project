@@ -48,7 +48,7 @@ for (const [preset, css, key] of [
     assert.equal(await dialog(page).getAttribute('aria-labelledby'), 'support-confirm-title');
     assert.equal(await target(page, 'support-confirm:decline').evaluate(element => element === document.activeElement), true);
     assert.deepEqual(Object.keys(requests[0]).sort(), ['screen_id', 'touch', 'vision', 'window_end', 'window_start']);
-    assert.equal(requests[0].screen_id, 'menu_list'); assert.equal(requests[0].vision, null);
+    assert.equal(requests[0].screen_id, 'menu'); assert.equal(requests[0].vision, null);
     assert.equal(Date.parse(requests[0].window_end) - Date.parse(requests[0].window_start), 2000);
     assert.deepEqual(Object.keys(requests[0].touch).sort(), ['back_count', 'dwell_ms', 'miss_tap_count', 'repeat_tap_count', 'tap_count']);
     assert(Object.values(requests[0].touch).every(value => Number.isSafeInteger(value) && value >= 0));
@@ -69,6 +69,35 @@ for (const [preset, css, key] of [
     await page.waitForTimeout(2300);
     assert.equal(await dialog(page).count(), 0, '같은 제안을 반복해서 띄우지 않음');
     fixture.verify(); assert.deepEqual(errors, []); await page.close();
+  } finally { await browser.close(); }
+});
+
+test('분류 연속 터치와 주문 확인·뒤로가기를 이어지는 구간에 세고 판단 층 화면 ID를 보낸다', async () => {
+  const browser = await chromium.launch(options);
+  try {
+    const steps = bootstrap('support-session');
+    steps[2].body = cartResponse('support-session', 1, [iced()]);
+    const { page, requests, fixture, errors } = await open(browser, async () => decision('none'), {}, steps);
+    const featureRequest = predicate => page.waitForRequest(req => req.url().endsWith('/features') && predicate(req.postDataJSON()));
+    await featureRequest(() => true);
+    // 2초보다 짧은 간격으로 2초 이상 계속 바꿉니다. 전송 타이머를 매번 다시 시작하면 누름을 보낼 수 없습니다.
+    for (let i = 0; i < 6; i++) {
+      await target(page, i % 2 === 0 ? 'category:커피' : 'category:전체').click();
+      await page.waitForTimeout(450);
+    }
+    assert(requests.some(body => body.screen_id === 'menu' && body.touch.tap_count > 0), '탐색 중에도 통계가 나감');
+    const review = featureRequest(body => body.screen_id === 'review');
+    await target(page, 'review-open').click();
+    await review;
+    const back = featureRequest(body => body.screen_id === 'menu' && body.touch.back_count === 1);
+    await target(page, 'review-back').click();
+    await back;
+    await featureRequest(() => true);
+    assert.equal(requests.reduce((sum, body) => sum + body.touch.tap_count, 0), 8, '분류 6회·주문 확인 1회·뒤로가기 1회를 각각 한 번만 집계');
+    assert.equal(requests.reduce((sum, body) => sum + body.touch.back_count, 0), 1);
+    assert.deepEqual([...new Set(requests.map(body => body.screen_id))], ['menu', 'review']);
+    for (let i = 1; i < requests.length; i++) assert.equal(requests[i].window_start, requests[i - 1].window_end);
+    fixture.verify(); assert.deepEqual(errors, []);
   } finally { await browser.close(); }
 });
 

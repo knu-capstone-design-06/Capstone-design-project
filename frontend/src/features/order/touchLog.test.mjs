@@ -12,13 +12,13 @@ test('기본 특징 요청은 기존 파일럿 기준의 다섯 정수만 보내
   emit(1000, 'screen_enter', { visibility: 'visible' });
   assert.equal(buildSupportWindow(saved, 2000), null);
   assert.deepEqual(buildSupportWindow(saved, 4000), {
-    screen_id: 'menu_list', window_start: new Date(2000).toISOString(), window_end: new Date(4000).toISOString(),
+    screen_id: 'menu', window_start: new Date(2000).toISOString(), window_end: new Date(4000).toISOString(),
     touch: { tap_count: 0, miss_tap_count: 0, repeat_tap_count: 0, back_count: 0, dwell_ms: 3000 }, vision: null,
   });
   emit(4100, 'pointer_start', {});
   assert.equal(buildSupportWindow(saved, 5000), null);
   emit(5100, 'screen_enter', { visibility: 'visible', from: 'menu' }, 'visit-2', 'review');
-  assert.equal(buildSupportWindow(saved, 8000).screen_id, 'order_review');
+  assert.equal(buildSupportWindow(saved, 8000).screen_id, 'review');
   emit(8100, 'screen_enter', { visibility: 'visible', from: 'review' }, 'visit-3', 'complete');
   assert.equal(buildSupportWindow(saved, 11000), null);
 });
@@ -26,40 +26,70 @@ test('기본 특징 요청은 기존 파일럿 기준의 다섯 정수만 보내
 test('전송은 중복 요청을 막고 화면·세션 변경 및 중단 뒤의 늦은 응답을 버린다', async () => {
   const { saved, emit } = pilotLog(); emit(1000, 'screen_enter', { visibility: 'visible' });
   const calls = [], received = [];
-  const transport = createSupportTransport((session, body, signal) => new Promise(resolve => calls.push({ session, body, signal, resolve })), () => saved, response => received.push(response), () => 4000);
-  transport.setContext('server', 'menu', true);
+  let now = 4000;
+  const transport = createSupportTransport((session, body, signal) => new Promise(resolve => calls.push({ session, body, signal, resolve })), () => saved, response => received.push(response), () => now);
+  transport.setContext('server', 'menu', true, true);
   const first = transport.tick(); await transport.tick();
   assert.equal(calls.length, 1);
-  transport.setContext('server', 'review', true);
-  assert.equal(calls[0].signal.aborted, true);
+  transport.setContext('server', 'review', true, false);
+  transport.setContext('server', 'menu', true, true);
+  assert.equal(calls[0].signal.aborted, false);
   calls[0].resolve({ session_id: 'server' }); await first;
   assert.equal(received.length, 0);
-  const second = transport.tick();
+  now = 6000; const second = transport.tick();
   // 같은 화면으로 돌아와도 다른 방문이면 이전 요청을 재사용하지 않습니다.
-  emit(4000, 'screen_enter', { visibility: 'visible', from: 'review' }, 'visit-2');
+  emit(6000, 'screen_enter', { visibility: 'visible', from: 'review' }, 'visit-2');
   calls[1].resolve({ session_id: 'server' }); await second;
   assert.equal(received.length, 0);
-  transport.setContext('new-server', 'menu', true); await transport.tick(); assert.equal(calls.length, 2);
-  transport.setContext('server', 'menu', true);
-  const third = transport.tick(); transport.dispose();
+  transport.setContext('new-server', 'menu', true, true); await transport.tick(); assert.equal(calls.length, 2);
+  transport.setContext('server', 'menu', true, true);
+  now = 8000; const third = transport.tick(); transport.dispose();
+  assert.equal(calls[2].signal.aborted, true);
   calls[2].resolve({ session_id: 'server' }); await third;
   assert.equal(received.length, 0);
 });
 
+test('변경 중에도 전송 구간의 경계가 이어지고 종료를 기다린 누름을 한 번만 센다', async () => {
+  const { saved, emit } = pilotLog(); emit(0, 'screen_enter', { visibility: 'visible' });
+  let now = 2000;
+  const sent = [], received = [];
+  const transport = createSupportTransport(async (session, body) => {
+    sent.push(body);
+    return { session_id: session };
+  }, () => saved, response => received.push(response), () => now);
+  transport.setContext('server', 'menu', true, true);
+  await transport.tick();
+  const inputId = emit(3999, 'pointer_start', { target: null, start: { x: 3, y: 4 }, pointerType: 'mouse', isPrimary: true });
+  transport.setContext('server', 'option', true, false);
+  now = 4000; await transport.tick(); assert.equal(sent.length, 1);
+  emit(4050, 'pointer_end', { inputId, cancelled: false, maxObservedDistance: 0 });
+  now = 4250; await transport.tick();
+  assert.equal(sent[1].window_start, sent[0].window_end);
+  assert.equal(sent[1].touch.tap_count, 1);
+  assert.equal(received.length, 1, '조작 중 수집하지만 그 응답으로는 제안하지 않음');
+  transport.setContext('server', 'menu', true, true);
+  now = 6250; await transport.tick();
+  assert.equal(sent[2].window_start, sent[1].window_end);
+  assert.equal(sent[2].touch.tap_count, 0);
+  transport.dispose();
+});
+
 test('네트워크 실패 뒤에는 새 구간을 보내고 종료된 세션은 다음 세션까지 중단한다', async () => {
   const { saved, emit } = pilotLog(); emit(1000, 'screen_enter', { visibility: 'visible' });
-  let count = 0;
+  let count = 0, now = 4000;
   const received = [];
   const transport = createSupportTransport(async session => {
     count++;
     if (count === 1) throw new TypeError('offline');
     if (count === 2) throw new ApiError(410, {});
     return { session_id: session };
-  }, () => saved, response => received.push(response), () => 4000);
-  transport.setContext('server', 'menu', true);
-  await transport.tick(); await transport.tick(); await transport.tick();
+  }, () => saved, response => received.push(response), () => now);
+  transport.setContext('server', 'menu', true, true);
+  await transport.tick();
+  now = 6000; await transport.tick();
+  now = 8000; await transport.tick();
   assert.equal(count, 2);
-  saved.serverSessionId = 'next'; transport.setContext('next', 'menu', true); await transport.tick();
+  saved.serverSessionId = 'next'; transport.setContext('next', 'menu', true, true); await transport.tick();
   assert.equal(count, 3); assert.equal(received.length, 1); transport.dispose();
 });
 
