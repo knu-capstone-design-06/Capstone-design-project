@@ -1,6 +1,6 @@
 import type { FeatureWindowRequest, TouchFeatures } from '../../shared/api/types.ts';
-import type { LogEvent, SavedLog } from './touchLog.ts';
-import { measureTouchPilot } from './touchLogFeatures.ts';
+import type { FeatureLog, LogEvent } from './touchLog.ts';
+import { measureTouchPilot, touchPilotPolicy } from './touchLogFeatures.ts';
 import { observedWaitMs, voiceBusy, voicePhase } from './interactionWait.ts';
 
 const object = (value: unknown): Record<string, unknown> => value && typeof value === 'object' ? value as Record<string, unknown> : {};
@@ -10,9 +10,17 @@ const busy = (state: Record<string, unknown>) => state.status === 'loading' || s
 const last = (events: LogEvent[], predicate: (event: LogEvent) => boolean) => [...events].reverse().find(predicate);
 export const FEATURE_WINDOW_MS = 2000;
 
+export function featureInputLookbackStart(end: number) {
+  return end - FEATURE_WINDOW_MS - (touchPilotPolicy.repeatMs ?? 0);
+}
+
+export function hasFeatureHistory(saved: FeatureLog, end: number) {
+  return saved.discardedThrough === undefined || saved.discardedThrough <= featureInputLookbackStart(end);
+}
+
 /** Existing local pilot policy, with observable interaction counts. No discomfort labels. */
-export function buildTouchFeatureWindow(saved: SavedLog, now: number, sequence: number, observedAt = now): FeatureWindowRequest | null {
-  if (!saved.serverSessionId) return null;
+export function buildTouchFeatureWindow(saved: FeatureLog, now: number, sequence: number, observedAt = now): FeatureWindowRequest | null {
+  if (!saved.serverSessionId || !hasFeatureHistory(saved, now)) return null;
   const pilot = measureTouchPilot(saved, now, FEATURE_WINDOW_MS, undefined, observedAt);
   // The existing five required integer fields cannot represent unobserved values.
   if (!pilot.observed || Object.values(pilot.features).some(value => value === null)) return null;

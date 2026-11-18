@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createTouchLog } from './touchLog.ts';
+import { createTouchLog, logLimit } from './touchLog.ts';
 import { buildTouchFeatureWindow } from './interactionFeatures.ts';
 import { createTouchFeatureTransport } from './touchFeatureTransport.ts';
 import { ApiError } from '../../shared/api/client.ts';
 import { measureTouchPilot } from './touchLogFeatures.ts';
 
-function fixture(session = 'server-1') {
+function fixture(session = 'server-1', collectFeatures = false) {
   let clock = 0, id = 0;
-  const recorder = createTouchLog(null, () => `e-${++id}`, () => clock);
+  const recorder = createTouchLog(null, () => `e-${++id}`, () => clock, collectFeatures);
   recorder.newSession(session);
   const context = { screen: 'menu', visitId: 'visit-1', settings: { largeText: true } };
   const ready = { status: 'ready', completed: false, cart: { version: 0, items: [] } };
@@ -27,6 +27,51 @@ function fixture(session = 'server-1') {
 function voiceAt(f, time, phase) {
   f.record(time, 'voice_state_change', { before: {}, after: { enabled: true, microphoneActive: phase === 'listening', phase } });
 }
+
+test('scrolls can roll out the raw log while feature uploads retain current session state', async () => {
+  const f = fixture('server-1', true);
+  f.record(100, 'selection_state_change', { before: null, after: { productId: 'drink' } });
+  f.press(500);
+  let now = 2001;
+  const sent = [];
+  const transport = createTouchFeatureTransport(async (session, window) => {
+    sent.push(window);
+    return { session_id: session };
+  }, () => f.recorder.readForFeatures(), () => now);
+  transport.setContext('server-1', true);
+
+  await transport.tick();
+  for (let i = 1; i <= logLimit + 200; i++) {
+    f.record(2000 + i * 10, 'scroll');
+    now = 2001 + i * 10;
+    await transport.tick();
+  }
+  const raw = f.recorder.read();
+  assert.equal(raw.events.length, logLimit);
+  assert(raw.events.every(event => event.kind === 'scroll'));
+  assert.equal(sent.length, 7);
+  assert.deepEqual(sent.slice(1).map(w => w.touch.interaction.scroll_event_count), Array(6).fill(200));
+  const latest = sent.at(-1);
+  assert.equal(latest.screen_id, 'menu');
+  assert.equal(latest.touch.interaction.visit_id, 'visit-1');
+  assert.equal(latest.touch.interaction.options_open, true);
+  assert.equal(latest.touch.interaction.order_busy, false);
+  assert.equal(latest.touch.interaction.screen_revisit_count, 0);
+  assert.equal(latest.touch.interaction.since_last_input_ms, 13500);
+  assert.equal(latest.touch.dwell_ms, 14000);
+});
+
+test('a window with lost scroll evidence is skipped and a later full window can be sent', () => {
+  const f = fixture('server-1', true);
+  for (let i = 0; i < logLimit + 1; i++) f.record(2500, 'scroll');
+  assert.equal(buildTouchFeatureWindow(f.recorder.readForFeatures(), 4000, 1), null);
+  const window = buildTouchFeatureWindow(f.recorder.readForFeatures(), 5500, 1);
+  assert.equal(window.touch.interaction.scroll_event_count, 0);
+  f.recorder.newSession('server-2');
+  const next = f.recorder.readForFeatures();
+  assert.deepEqual(next.events, []);
+  assert.equal(next.discardedThrough, undefined);
+});
 
 test('processing → speaking → listening preserves legacy metrics and excludes both waits', () => {
   const f = fixture(); f.press(1000);

@@ -71,7 +71,7 @@ export function useTouchLog(screen: string, category: string, productId: string 
     if (!tracker.current) {
       let storage: Storage | null = null;
       try { storage = sessionStorage; } catch { /* 메모리에만 기록 */ }
-      tracker.current = createTouchLog(storage);
+      tracker.current = createTouchLog(storage, undefined, undefined, uploadEnabled);
       if (tracker.current.resumed) {
         const last = tracker.current.read().events.at(-1);
         tracker.current.record(last ?? { screen, visitId: '', settings }, 'session_end', { reason: 'page_reload' });
@@ -260,7 +260,7 @@ export function useTouchLog(screen: string, category: string, productId: string 
     if (!uploadEnabled || !tracker.current) return;
     const sender = createTouchFeatureTransport(
       (session, window, signal) => backendApi.sendFeatureWindow(session, window, signal),
-      () => tracker.current!.read(),
+      () => tracker.current!.readForFeatures(),
     );
     transport.current = sender;
     let suspended = false;

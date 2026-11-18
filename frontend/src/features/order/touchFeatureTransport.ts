@@ -1,14 +1,15 @@
 import { ApiError } from '../../shared/api/client.ts';
 import type { FeatureWindowRequest, FeatureWindowResponse } from '../../shared/api/types.ts';
-import type { SavedLog } from './touchLog.ts';
-import { buildTouchFeatureWindow, FEATURE_WINDOW_MS } from './interactionFeatures.ts';
-import { measureTouchPilot, touchPilotPolicy } from './touchLogFeatures.ts';
+import type { FeatureLog } from './touchLog.ts';
+import { buildTouchFeatureWindow, FEATURE_WINDOW_MS, featureInputLookbackStart, hasFeatureHistory } from './interactionFeatures.ts';
+import { measureTouchPilot } from './touchLogFeatures.ts';
 
 type Send = (session: string, window: FeatureWindowRequest, signal: AbortSignal) => Promise<FeatureWindowResponse>;
 export type TransmissionState = { state: 'idle' | 'skipped' | 'sending' | 'sent' | 'error' | 'stopped'; sent: number; lastWindowEnd: string | null };
 
-function waitsForInputEnd(saved: SavedLog, end: number, observedAt: number) {
-  const earliest = end - FEATURE_WINDOW_MS - (touchPilotPolicy.repeatMs ?? 0);
+function waitsForInputEnd(saved: FeatureLog, end: number, observedAt: number) {
+  if (!hasFeatureHistory(saved, end)) return false;
+  const earliest = featureInputLookbackStart(end);
   const pending = new Set<string>();
   for (const event of saved.events) {
     if (event.sessionId !== saved.sessionId) continue;
@@ -23,7 +24,7 @@ function waitsForInputEnd(saved: SavedLog, end: number, observedAt: number) {
 }
 
 /** One request at a time. Keep the window boundary while waiting for touches to end. */
-export function createTouchFeatureTransport(send: Send, read: () => SavedLog, now = Date.now) {
+export function createTouchFeatureTransport(send: Send, read: () => FeatureLog, now = Date.now) {
   let session: string | null = null, allowed = false, sequence = 0, generation = 0;
   let active: AbortController | null = null;
   let stoppedSession: string | null = null;
