@@ -2,6 +2,7 @@
 
 import json
 import logging
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Protocol
 
@@ -9,13 +10,13 @@ from pydantic import ValidationError
 
 from app.infrastructure.external.openai_client import OpenAiClient
 from app.modules.voice.schemas import (
-    MenuItem, VoiceInterpretation, VoiceRequestCreate, VoiceTurn,
+    CartLine, MenuItem, VoiceInterpretation, VoiceRequestCreate, VoiceTurn,
 )
 
 logger = logging.getLogger(__name__)
 
 # Record this version with experiment results; add a new file for a new prompt.
-PROMPT_VERSION = "interpret_v3"
+PROMPT_VERSION = "interpret_v4"
 _PROMPT_PATH = Path(__file__).parent / "prompts" / f"{PROMPT_VERSION}.md"
 
 _TEMPERATURE = {"type": ["string", "null"], "enum": ["iced", "hot", None]}
@@ -65,9 +66,11 @@ _UTTERANCE_FIELDS = {"text", "alternatives", "screen_id"}
 
 
 def build_messages(
-    system: str, request: VoiceRequestCreate, menu: list[MenuItem], history: list[VoiceTurn]
+    system: str, request: VoiceRequestCreate, menu: list[MenuItem], history: list[VoiceTurn],
+    cart: Sequence[CartLine] = (),
 ) -> list[dict[str, str]]:
-    """Earlier exchanges become user/assistant messages; the menu goes with the latest one."""
+    """Earlier exchanges become user/assistant messages; the menu and the current cart go
+    with the latest one, so "하나 더" is read against what is actually in the cart."""
     messages = [{"role": "system", "content": system}]
     for turn in history:
         messages.append({"role": "user", "content": json.dumps(
@@ -78,6 +81,7 @@ def build_messages(
         {
             **request.model_dump(include=_UTTERANCE_FIELDS),
             "menu": [item.model_dump() for item in menu],
+            "cart": [line.model_dump() for line in cart],
         },
         ensure_ascii=False,
     )})
@@ -86,7 +90,8 @@ def build_messages(
 
 class VoiceInterpreter(Protocol):
     async def interpret(
-        self, request: VoiceRequestCreate, menu: list[MenuItem], history: list[VoiceTurn]
+        self, request: VoiceRequestCreate, menu: list[MenuItem], history: list[VoiceTurn],
+        cart: Sequence[CartLine] = (),
     ) -> VoiceInterpretation | None:
         """None means the AI is unavailable or returned an unusable result."""
 
@@ -95,7 +100,8 @@ class StubVoiceInterpreter:
     """Development result used while OPENAI_API_KEY is unset. Never calls OpenAI."""
 
     async def interpret(
-        self, request: VoiceRequestCreate, menu: list[MenuItem], history: list[VoiceTurn]
+        self, request: VoiceRequestCreate, menu: list[MenuItem], history: list[VoiceTurn],
+        cart: Sequence[CartLine] = (),
     ) -> VoiceInterpretation | None:
         return VoiceInterpretation(
             status="needs_clarification", tool_calls=[],
@@ -109,10 +115,11 @@ class OpenAiVoiceInterpreter:
         self._system = _PROMPT_PATH.read_text(encoding="utf-8")
 
     async def interpret(
-        self, request: VoiceRequestCreate, menu: list[MenuItem], history: list[VoiceTurn]
+        self, request: VoiceRequestCreate, menu: list[MenuItem], history: list[VoiceTurn],
+        cart: Sequence[CartLine] = (),
     ) -> VoiceInterpretation | None:
         result = await self._client.complete_json(
-            build_messages(self._system, request, menu, history),
+            build_messages(self._system, request, menu, history, cart),
             "voice_interpretation", _OUTPUT_SCHEMA,
         )
         if result is None:
