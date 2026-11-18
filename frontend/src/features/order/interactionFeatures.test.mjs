@@ -193,6 +193,45 @@ test('completed sessions and currently unresolved pointer samples are not transm
   assert.equal(buildTouchFeatureWindow(completed.recorder.read(), 3000, 1), null);
 });
 
+test('a pointer that ends in an older visit cannot replace the screen and visit at window end', () => {
+  const f = fixture();
+  const inputId = f.record(1300, 'pointer_start', { start: { x: 0, y: 0 }, target: null, pointerType: 'touch', isPrimary: true });
+  f.record(1400, 'screen_leave', { to: 'review' });
+  f.context.screen = 'review'; f.context.visitId = 'visit-2';
+  f.record(1400, 'screen_enter', { from: 'menu', visibility: 'visible' });
+  f.context.screen = 'menu'; f.context.visitId = 'visit-1';
+  f.record(2200, 'pointer_end', { inputId, cancelled: false, maxObservedDistance: 0 });
+  const result = buildTouchFeatureWindow(f.recorder.read(), 3000, 1);
+  assert.equal(result.screen_id, 'review');
+  assert.equal(result.touch.interaction.visit_id, 'visit-2');
+  assert.equal(result.touch.interaction.since_last_input_ms, null);
+  assert.equal(result.touch.tap_count, 1);
+});
+
+test('2.6-second press remains in its original window and late ticks neither miss nor duplicate presses', async () => {
+  const f = fixture();
+  let now = 3001;
+  const sent = [];
+  const sender = createTouchFeatureTransport(async (session, body) => { sent.push(body); return { session_id: session }; },
+    () => f.recorder.read(), () => now);
+  sender.setContext('server-1', true);
+  await sender.tick();
+  f.press(3250);
+  const inputId = f.record(4500, 'pointer_start', { start: { x: 0, y: 0 }, target: null, pointerType: 'touch', isPrimary: true });
+  for (now = 5250; now <= 7000; now += 250) await sender.tick();
+  assert.equal(sent.length, 1, 'do not report a newer zero while the held input is still unresolved');
+  f.press(6500);
+  f.record(7100, 'pointer_end', { inputId, cancelled: false, maxObservedDistance: 0 });
+  now = 7250; await sender.tick();
+  now = 7500; await sender.tick();
+  now = 9300; await sender.tick();
+  assert.deepEqual(sent.map(w => [Date.parse(w.window_start), Date.parse(w.window_end), w.touch.tap_count]), [
+    [1000, 3000, 0], [3000, 5000, 2], [5000, 7000, 1], [7000, 9000, 0],
+  ]);
+  assert.deepEqual(sent.map(w => w.touch.interaction.window_sequence), [1, 2, 3, 4]);
+  sender.dispose();
+});
+
 test('transport serializes requests, cancels an old session and ignores its late response', async () => {
   let f = fixture(), resolve;
   const calls = [];
@@ -218,7 +257,8 @@ test('failed transport sends a fresh sample later, while 410 stops this session'
   sender.setContext('server-1', true); await sender.tick(); assert.equal(sender.status().state, 'error');
   error = null; now = 5000; await sender.tick(); assert.equal(sender.status().sent, 1);
   assert.notEqual(calls[0].window_end, calls[1].window_end);
-  error = new ApiError(410, {}); await sender.tick(); await sender.tick(); assert.equal(attempts, 3);
+  error = new ApiError(410, {}); now = 7000; await sender.tick();
+  now = 9000; await sender.tick(); assert.equal(attempts, 3);
   assert.equal(sender.status().state, 'stopped'); sender.dispose();
 });
 

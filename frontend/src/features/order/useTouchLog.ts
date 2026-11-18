@@ -271,7 +271,7 @@ export function useTouchLog(screen: string, category: string, productId: string 
     const resume = () => { suspended = false; sync(); };
     window.addEventListener('pagehide', suspend);
     window.addEventListener('pageshow', resume);
-    const timer = setInterval(() => { sync(); void sender.tick(); }, 2000);
+    const timer = setInterval(() => { sync(); void sender.tick(); }, 250);
     return () => {
       clearInterval(timer); sender.dispose(); transport.current = null;
       document.removeEventListener('visibilitychange', sync);

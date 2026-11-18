@@ -1,18 +1,35 @@
 import { ApiError } from '../../shared/api/client.ts';
 import type { FeatureWindowRequest, FeatureWindowResponse } from '../../shared/api/types.ts';
 import type { SavedLog } from './touchLog.ts';
-import { buildTouchFeatureWindow } from './interactionFeatures.ts';
+import { buildTouchFeatureWindow, FEATURE_WINDOW_MS } from './interactionFeatures.ts';
+import { measureTouchPilot, touchPilotPolicy } from './touchLogFeatures.ts';
 
 type Send = (session: string, window: FeatureWindowRequest, signal: AbortSignal) => Promise<FeatureWindowResponse>;
 export type TransmissionState = { state: 'idle' | 'skipped' | 'sending' | 'sent' | 'error' | 'stopped'; sent: number; lastWindowEnd: string | null };
 
-/** Best-effort live samples: no replay of stale windows and no UI decisions from responses. */
+function waitsForInputEnd(saved: SavedLog, end: number, observedAt: number) {
+  const earliest = end - FEATURE_WINDOW_MS - (touchPilotPolicy.repeatMs ?? 0);
+  const pending = new Set<string>();
+  for (const event of saved.events) {
+    if (event.sessionId !== saved.sessionId) continue;
+    const time = Date.parse(event.occurredAt);
+    if (event.kind === 'pointer_start' && time > earliest && time <= end) pending.add(event.id);
+    if ((event.kind === 'pointer_end' || event.kind === 'pointer_interrupted') && time <= observedAt) {
+      const data = event.data as { inputId?: string } | null;
+      if (data?.inputId) pending.delete(data.inputId);
+    }
+  }
+  return pending.size > 0 && measureTouchPilot(saved, end, FEATURE_WINDOW_MS, undefined, observedAt).observed;
+}
+
+/** One request at a time. Keep the window boundary while waiting for touches to end. */
 export function createTouchFeatureTransport(send: Send, read: () => SavedLog, now = Date.now) {
   let session: string | null = null, allowed = false, sequence = 0, generation = 0;
   let active: AbortController | null = null;
   let stoppedSession: string | null = null;
+  let nextWindowEnd: number | null = null;
   let status: TransmissionState = { state: 'idle', sent: 0, lastWindowEnd: null };
-  function cancel() { generation++; active?.abort(); active = null; }
+  function cancel() { generation++; active?.abort(); active = null; nextWindowEnd = null; }
   return {
     status: () => ({ ...status }),
     setContext(nextSession: string | null, enabled: boolean) {
@@ -25,10 +42,19 @@ export function createTouchFeatureTransport(send: Send, read: () => SavedLog, no
     },
     async tick() {
       if (!allowed || !session || active || stoppedSession === session) return;
+      const observedAt = now();
+      const end = nextWindowEnd ?? observedAt - 1;
+      // A later event can still receive the current millisecond's timestamp.
+      if (end >= observedAt) return;
       const saved = read();
       if (saved.serverSessionId !== session) return;
-      const window = buildTouchFeatureWindow(saved, now(), sequence + 1);
-      if (!window) { status = { ...status, state: 'skipped' }; return; }
+      const window = buildTouchFeatureWindow(saved, end, sequence + 1, observedAt);
+      if (!window) {
+        nextWindowEnd = waitsForInputEnd(saved, end, observedAt) ? end : null;
+        status = { ...status, state: 'skipped' };
+        return;
+      }
+      nextWindowEnd = end + FEATURE_WINDOW_MS;
       sequence++;
       const controller = new AbortController(), token = generation, requestSession = session;
       active = controller; status = { ...status, state: 'sending' };

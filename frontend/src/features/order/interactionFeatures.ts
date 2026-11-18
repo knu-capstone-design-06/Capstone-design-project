@@ -8,15 +8,16 @@ const at = (event: LogEvent) => Date.parse(event.occurredAt);
 const data = (event: LogEvent) => object(event.data);
 const busy = (state: Record<string, unknown>) => state.status === 'loading' || state.status === 'saving';
 const last = (events: LogEvent[], predicate: (event: LogEvent) => boolean) => [...events].reverse().find(predicate);
+export const FEATURE_WINDOW_MS = 2000;
 
 /** Existing local pilot policy, with observable interaction counts. No discomfort labels. */
-export function buildTouchFeatureWindow(saved: SavedLog, now: number, sequence: number): FeatureWindowRequest | null {
+export function buildTouchFeatureWindow(saved: SavedLog, now: number, sequence: number, observedAt = now): FeatureWindowRequest | null {
   if (!saved.serverSessionId) return null;
-  const pilot = measureTouchPilot(saved, now);
+  const pilot = measureTouchPilot(saved, now, FEATURE_WINDOW_MS, undefined, observedAt);
   // The existing five required integer fields cannot represent unobserved values.
   if (!pilot.observed || Object.values(pilot.features).some(value => value === null)) return null;
   const events = saved.events.filter(e => e.sessionId === saved.sessionId && e.serverSessionId === saved.serverSessionId && at(e) <= now);
-  const current = events.at(-1);
+  const current = last(events, e => e.kind === 'screen_enter');
   if (!current || current.screen === 'complete') return null;
   const window = events.filter(e => at(e) > pilot.from);
   const count = (kind: string) => window.filter(e => e.kind === kind).length;
