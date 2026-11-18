@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { bootstrap, installOrderResponses } from './orderApiFixture.mjs';
+import { bootstrap, cartResponse, iced, installOrderResponses } from './orderApiFixture.mjs';
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ?? 'playwright');
 const url = process.env.TOUCH_LOG_BROWSER_URL ?? 'http://127.0.0.1:5173';
 const channel = process.env.PLAYWRIGHT_CHANNEL ?? 'msedge';
@@ -52,6 +52,100 @@ test('page suspension stops samples; a new server session restarts sequence with
     const after = fixture.featureRequests.find(r => r.path.includes('/after/'));
     assert.equal(after.body.touch.interaction.window_sequence, 1);
     assert.equal(after.body.touch.tap_count, 0);
+    fixture.verify();
+  } finally { await page.close(); await browser.close(); }
+});
+
+test('a settings toggle is reflected in consecutive uploads without another touch', async () => {
+  const browser = await launch();
+  const page = await browser.newPage({ viewport: { width: 1080, height: 1920 } });
+  try {
+    const fixture = await installOrderResponses(page, bootstrap('settings-change'));
+    await page.goto(url);
+    await page.waitForFunction(() => window.kioskTouchLogDraft?.transmission()?.sent > 0);
+    assert.equal(fixture.featureRequests[0].body.touch.interaction.ui_settings.large_button, false);
+    await page.locator('[data-log-target="support-toggle"]').click();
+    await page.locator('[data-log-target="support:largeButton"]').click();
+    const changedAt = await page.evaluate(() => Date.parse(window.kioskTouchLogDraft.read().events
+      .findLast(event => event.kind === 'ui_settings_change').occurredAt));
+    await page.waitForFunction(time => Date.parse(window.kioskTouchLogDraft.transmission().lastWindowEnd) >= time + 2000, changedAt);
+    const afterChange = fixture.featureRequests.map(r => r.body).filter(w => Date.parse(w.window_end) >= changedAt);
+    assert.equal(afterChange.length, 2);
+    assert(afterChange.every(w => w.touch.interaction.ui_settings.large_button));
+    assert.equal(afterChange.at(-1).touch.tap_count, 0);
+    fixture.verify();
+  } finally { await page.close(); await browser.close(); }
+});
+
+test('a 2.6-second hold is counted once and its late release does not replace the review visit', async () => {
+  const browser = await launch();
+  const page = await browser.newPage({ viewport: { width: 1080, height: 1920 } });
+  try {
+    const session = 'long-press';
+    const steps = bootstrap(session);
+    steps[2].body = cartResponse(session, 1, [iced()]);
+    const fixture = await installOrderResponses(page, steps);
+    await page.goto(url);
+    await page.waitForFunction(() => window.kioskTouchLogDraft?.transmission()?.sent > 0);
+    const dispatch = type => page.locator('.kiosk').evaluate((element, eventType) => {
+      element.dispatchEvent(new PointerEvent(eventType, {
+        bubbles: true, pointerType: 'touch', pointerId: 101, clientX: 6, clientY: 150, isPrimary: true,
+      }));
+    }, type);
+    await dispatch('pointerdown');
+    await page.waitForTimeout(2100);
+    await page.locator('[data-log-target="review-open"]').click();
+    await page.waitForTimeout(500);
+    await dispatch('pointerup');
+    const records = await page.evaluate(() => window.kioskTouchLogDraft.read().events);
+    const start = records.find(event => event.kind === 'pointer_start' && event.data.pointerId === 101);
+    const end = records.find(event => event.kind === 'pointer_end' && event.data.inputId === start.id);
+    const review = records.find(event => event.kind === 'screen_enter' && event.screen === 'review');
+    assert(end.data.durationMs >= 2600);
+    assert.equal(start.screen, 'menu');
+    assert.equal(end.visitId, start.visitId);
+    assert.notEqual(review.visitId, end.visitId);
+    await page.waitForFunction(time => Date.parse(window.kioskTouchLogDraft.transmission().lastWindowEnd) >= time, Date.parse(end.occurredAt));
+    const windows = fixture.featureRequests.map(r => r.body);
+    const held = windows.filter(w => w.window_start < start.occurredAt && start.occurredAt <= w.window_end);
+    assert.equal(held.length, 1);
+    assert(held[0].window_end < end.occurredAt);
+    assert.equal(held[0].touch.tap_count, 1);
+    assert.equal(windows.reduce((sum, w) => sum + w.touch.tap_count, 0), 2);
+    assert(windows.slice(1).every((w, i) => w.window_start === windows[i].window_end));
+    const latest = windows.at(-1);
+    assert.equal(latest.screen_id, 'review');
+    assert.equal(latest.touch.interaction.visit_id, review.visitId);
+    fixture.verify();
+  } finally { await page.close(); await browser.close(); }
+});
+
+test('uploads recover after more than 1,000 scroll records evict local state events', async () => {
+  const browser = await launch();
+  const page = await browser.newPage({ viewport: { width: 1080, height: 1920 } });
+  try {
+    const fixture = await installOrderResponses(page, bootstrap('scroll-pressure'));
+    await page.goto(url);
+    await page.waitForFunction(() => window.kioskTouchLogDraft?.transmission()?.sent > 0);
+    const raw = await page.locator('[data-log-scroll="order-main"]').evaluate(element => {
+      element.style.maxHeight = '100px';
+      element.style.overflowY = 'auto';
+      for (let i = 0; i < 1050; i++) {
+        element.scrollTop = 1 + i % 2;
+        element.dispatchEvent(new Event('scroll'));
+      }
+      return window.kioskTouchLogDraft.read().events.map(event => event.kind);
+    });
+    assert.equal(raw.length, 1000);
+    assert(raw.every(kind => kind === 'scroll'));
+    const sent = fixture.featureRequests.length;
+    await page.waitForFunction(count => window.kioskTouchLogDraft.transmission().sent >= count + 2, sent);
+    const first = fixture.featureRequests[0].body;
+    const latest = fixture.featureRequests.at(-1).body;
+    assert.equal(latest.screen_id, 'menu');
+    assert.equal(latest.touch.interaction.visit_id, first.touch.interaction.visit_id);
+    assert.equal(latest.touch.interaction.scroll_event_count, 0);
+    assert.equal(latest.touch.interaction.order_busy, false);
     fixture.verify();
   } finally { await page.close(); await browser.close(); }
 });
