@@ -124,7 +124,8 @@ class PilotParams:
         10.0, f"{PILOT} 시작값: 띄운 묻기에 반응이 없으면 무응답으로 거둠(JP §0-6 '무응답은 policy의 시간 [파일럿]')",
         "s")
     delay_notice_on: bool = _p(
-        False, "평가 조건표 스위치(결정 목록 2026-10-10 §14, JP §0-2): 켜면 3-1의 허용 후보는 격려 메시지(`delay_responsibility_notice`) 하나")
+        False, "평가 조건표 스위치(결정 목록 2026-10-10 §14, JP §0-2): 켜면 3-1의 허용 후보는 격려 메시지(`delay_responsibility_notice`) 하나. "
+        "그 결정의 지연 책임 안내를 2026-11-17에 격려 메시지로 변경(#91)")
     defer_option_on: bool = _p(
         True, "평가 조건표 스위치(JP §0-2): 3-1의 허용 후보에 '큰 버튼 질문 미룸'을 넣음(안내가 꺼진 조건)")
 
