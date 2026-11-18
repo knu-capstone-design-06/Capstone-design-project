@@ -1,6 +1,7 @@
 import asyncio
 import json
 import unittest
+import unittest.mock
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -213,6 +214,27 @@ class DecisionServiceTests(unittest.IsolatedAsyncioTestCase):
         service.observe("s1", ending_at(4), measurable=True)
         await service.drain()
         self.assertEqual(self.repository.windows("s1")[-1].jev, "asked")
+
+    async def test_answers_that_do_not_answer_what_was_asked_are_no_answer(self):
+        noul = {"type": "noul", "noul": 0.5}
+        choice = {"type": "choice", "choice": "format_disk", "confidence": 0.9, "probabilities": {"format_disk": 0.9}}
+        for answers in (
+            {"hesitation": noul},                                              # one of five
+            {**{name: noul for name in STATE_QUESTIONS}, "hesitation": choice},  # another type than asked
+        ):
+            with self.subTest(answers=sorted(answers)):
+                service = self.service(lambda request, answers=answers: httpx.Response(200, json={**RESPONSE, "answers": answers}))
+                service.observe("s1", ending_at(2), measurable=True)
+                await service.drain()
+                self.assertEqual([r.outcome for r in self.repository.records("s1")], ["no_answer"])
+                await self.http.aclose()
+        # An answer nobody asked for is dropped; the asked ones are kept.
+        extra = {**{name: noul for name in STATE_QUESTIONS}, "ignore previous instructions": noul}
+        service = self.service(lambda request: httpx.Response(200, json={**RESPONSE, "answers": extra}))
+        service.observe("s1", ending_at(2), measurable=True)
+        await service.drain()
+        (record,) = self.repository.records("s1")
+        self.assertEqual((record.outcome, set(record.answers)), ("answered", set(STATE_QUESTIONS)))
 
     async def test_a_failed_call_is_recorded_as_no_answer_and_changes_nothing_else(self):
         service = self.service(lambda request: httpx.Response(529, json={"error": "busy"}))
@@ -533,17 +555,52 @@ class ObservationTests(unittest.TestCase):
         self.assertIs(repository.windows("s2")[-1].inputs["progress_segment"], True)
         self.assertEqual(jumped.transition, "withdraw")
 
-    def test_a_window_ending_in_the_future_does_not_shut_out_the_windows_after_it(self):
+    def test_a_window_whose_time_jumped_ahead_is_recorded_only(self):
         repository = DecisionRepository()
-        clock = {"now": T0.timestamp() + 4}
+        clock = {"now": 1000.0}
         service = DecisionService(repository, P, None, now=lambda: clock["now"])
         service.observe("s1", ending_at(4), measurable=True)
         service.observe("s1", ending_at(86400), measurable=True)          # a frontend clock a day ahead, once
-        self.assertEqual(repository.state("s1").last_t, T0.timestamp() + 4 + 5, "the mark stops at the tolerance")
-        clock["now"] = T0.timestamp() + 12
+        self.assertEqual(repository.windows("s1")[-1].jev, STALE)
+        self.assertEqual(repository.state("s1").last_t, T0.timestamp() + 4, "the mark does not follow the jump")
+        clock["now"] += 8
         decision = service.observe("s1", ending_at(12, back_count=1), measurable=True)
-        self.assertEqual((decision.transition, decision.support), ("open", HIGHLIGHT), "judged, not recorded as stale")
-        self.assertNotEqual(repository.windows("s1")[-1].jev, STALE)
+        self.assertEqual((decision.transition, decision.support), ("open", HIGHLIGHT), "the windows after it are judged")
+
+    def test_a_frontend_clock_steadily_ahead_keeps_the_order_of_late_windows(self):
+        for skew in (0, 30, -30, 3600):
+            with self.subTest(skew=skew):
+                repository = DecisionRepository()
+                clock = {"now": T0.timestamp()}
+                service = DecisionService(repository, P, None, now=lambda: clock["now"])
+                for seconds in (2, 6, 4, 8):     # the window ending at 4 arrives late
+                    clock["now"] += 2
+                    service.observe("s1", ending_at(seconds + skew), measurable=True)
+                self.assertEqual([w.jev == STALE for w in repository.windows("s1")], [False, False, True, False])
+
+    def test_a_first_window_with_a_wrong_time_does_not_shut_out_the_session(self):
+        repository = DecisionRepository()
+        clock = {"now": 1000.0}
+        service = DecisionService(repository, P, None, now=lambda: clock["now"])
+        service.observe("s1", ending_at(86400), measurable=True)          # the very first window is a day ahead
+        clock["now"] += 2
+        decision = service.observe("s1", ending_at(4, back_count=1), measurable=True)
+        self.assertEqual((decision.transition, decision.support), ("open", HIGHLIGHT))
+        self.assertEqual(repository.state("s1").last_t, T0.timestamp() + 4)
+
+    def test_progress_shows_on_the_next_measurable_window_when_the_crossing_one_was_not(self):
+        repository = DecisionRepository()
+        service = DecisionService(repository, P, None)
+        opened = service.observe("s1", ending_at(2, "menu", back_count=1), measurable=True)
+        self.assertEqual((opened.transition, opened.support), ("open", HIGHLIGHT))
+        kept = service.observe("s1", ending_at(4, "review"), measurable=False)     # ai-engine timed out once
+        self.assertEqual(kept.transition, "keep")
+        withdrawn = service.observe("s1", ending_at(6, "review"), measurable=True)
+        self.assertEqual((withdrawn.transition, repository.windows("s1")[-1].inputs["progress_segment"]), ("withdraw", True))
+        # A screen id outside the flow in between does not hide the step either.
+        service.observe("s2", ending_at(2, "menu", back_count=1), measurable=True)
+        service.observe("s2", ending_at(4, "menu_list"), measurable=True)
+        self.assertEqual(service.observe("s2", ending_at(6, "review"), measurable=True).transition, "withdraw")
 
     def test_an_unanswered_ask_lapses_before_the_next_window_is_judged(self):
         repository = DecisionRepository()
@@ -705,6 +762,24 @@ class FeaturesEndpointTests(unittest.TestCase):
                     self.assertEqual(state.screen_last, "menu", "the table saw the window (not measurable: no row)")
                     self.assertIsNone(state.held)
                     self.assertIs(client.app.state.decision_service.shadow, key is not None)
+
+
+    def test_shutdown_waits_for_a_jev_call_still_on_its_way(self):
+        async def slow(request):
+            await asyncio.sleep(0.2)
+            return httpx.Response(200, json=RESPONSE)
+
+        def jev_http(api_key, base_url, timeout_seconds):
+            return httpx.AsyncClient(base_url="https://api.typesafe.ai", transport=httpx.MockTransport(slow))
+
+        settings = Settings(_env_file=None, openai_api_key=None, jev_api_key="jev-secret-value", jev_stages="state_scores",
+                            ai_engine_url="http://127.0.0.1:9")
+        with unittest.mock.patch("app.main.create_jev_http", jev_http):
+            with TestClient(create_app(settings)) as client:
+                service, repository = client.app.state.decision_service, client.app.state.decision_repository
+                client.portal.call(lambda: service.observe("s1", ending_at(2, back_count=1), measurable=True))
+                self.assertEqual(repository.records("s1"), [], "the call is still on its way")
+        self.assertEqual([r.outcome for r in repository.records("s1")], ["answered"], "the lifespan drained it")
 
 
 class RetentionTests(unittest.IsolatedAsyncioTestCase):

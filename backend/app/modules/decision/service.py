@@ -56,7 +56,12 @@ def window_input(window: FeatureWindowRequest, measurable: bool, situation: dict
     )
 
 
-FUTURE_TOLERANCE_S = 5.0   # how far ahead of the server clock the last-judged mark may run (clock skew)
+# No source: window times come from the frontend clock, which may run ahead of or behind the server's by a
+# constant amount, so they are compared with each other, never with the server clock itself.
+# Wide on purpose: tests and replays of recorded sessions feed windows faster than real time, and only a
+# plainly wrong time (a clock a day off) has to be kept out.
+CLOCK_JUMP_S = 600.0       # a window may end this much later than the server time passed since the last one
+CLOCK_RESET_S = 60.0       # a window this far behind the mark means the mark was wrong (late windows are seconds late)
 
 
 def log_task_failure(task: asyncio.Task) -> None:
@@ -65,9 +70,20 @@ def log_task_failure(task: asyncio.Task) -> None:
         logger.error("jev shadow task failed", exc_info=task.exception())
 
 
+def answers_fit(questions: dict, answers: dict) -> bool:
+    """True when every question asked has an answer of its own type, a choice among the options offered."""
+    for name, question in questions.items():
+        answer = answers.get(name)
+        if answer is None or answer.type != question.get("type"):
+            return False
+        if answer.type == "choice" and answer.choice not in (question.get("criteria") or {}):
+            return False
+    return True
+
+
 def stale_decision() -> Decision:
-    """What judge() returns for a window that ended before the session's last judged window: nothing changes."""
-    return Decision("none", {}, reason="window ended before the last judged window; recorded only")
+    """What judge() returns for a window out of the order of time (late, or jumped ahead): nothing changes."""
+    return Decision("none", {}, reason="window out of time order (late, or its time jumped ahead); recorded only")
 
 
 def recorded_answer(answer):
@@ -115,9 +131,12 @@ class DecisionService:
 
     def _input(self, session_id: str, window: FeatureWindowRequest, measurable: bool, situation, gaze) -> WindowInput:
         # The previous screen is the last judged window that ended no later than this one: for a late window,
-        # the one before it in time, so its comparison row keeps the time order of the screens.
+        # the one before it in time, so its comparison row keeps the time order of the screens. Only windows
+        # the table could act on count (measurable, a screen of the flow): when the window that crossed to the
+        # next screen was not measurable, the next measurable one still shows the step forward and withdraws 4-2.
         t = window.window_end.timestamp()
-        judged = [w for w in self._repository.windows(session_id) if w.jev != STALE and w.t <= t]
+        judged = [w for w in self._repository.windows(session_id) if w.jev != STALE and w.t <= t
+                  and w.inputs.get("measurable") and w.inputs.get("screen") in SCREEN_FLOW]
         return window_input(window, measurable, situation, gaze, judged[-1].inputs.get("screen") if judged else None)
 
     def judge(self, session_id: str, window: FeatureWindowRequest, measurable: bool,
@@ -135,14 +154,22 @@ class DecisionService:
         (reopen a withdrawn support, undo a screen's progress): it changes nothing and the decision is None.
         """
         state = self._repository.state(session_id)
-        if state.last_t is not None and inp.t < state.last_t:
-            return None, state, None
+        now = self._now()
+        if state.last_t is not None:
+            behind = state.last_t - inp.t
+            if 0 < behind <= CLOCK_RESET_S:
+                return None, state, None                 # a late window
+            # A window whose time jumped ahead of what the server saw pass (a bad request, a clock set
+            # mid-session) is recorded only: judged, it would lapse an open ask at once and make every later
+            # window "late". A steady offset between the two clocks never trips this.
+            if behind <= 0 and state.last_now is not None and -behind > (now - state.last_now) + CLOCK_JUMP_S:
+                return None, state, None
+            # behind > CLOCK_RESET_S: the mark itself came from such a jump (the session's first window);
+            # this window starts the order of time again.
         state, timed_out = tick(state, inp.t, self._params)      # an unanswered ask lapses first
         before = copy.deepcopy(state)
         state, decision = apply(state, decide(inp, state, self._params))
-        # A window whose end is ahead of the server clock (a wrong frontend clock, a bad request) must not make
-        # every later window "earlier than the last one": the mark never runs further ahead than the tolerance.
-        state.last_t = min(inp.t, self._now() + FUTURE_TOLERANCE_S)
+        state.last_t, state.last_now = inp.t, now
         self._repository.save_state(session_id, state)
         return decision, before, timed_out
 
@@ -226,6 +253,10 @@ class DecisionService:
                 logger.exception("jev shadow %s crashed", stage.name)
                 response = None
             latency_ms = round((self._clock() - started) * 1000)
+            if response is not None and not answers_fit(questions, response.answers):
+                # Answers that do not answer what was asked would spoil the record and the next stage's state.
+                logger.warning("jev shadow %s answered something else than asked", stage.name)
+                response = None
             if response is None:
                 record = JevRecord(session_id, window.window_end, tuple(questions), self._jev.model, "no_answer",
                                    latency_ms, decision_id=decision.decision_id, stage=stage.name,
@@ -233,15 +264,16 @@ class DecisionService:
                 missing.append(stage.name)
                 mark(stage.name, "no_answer")
             else:
-                answers = {name: recorded_answer(answer) for name, answer in response.answers.items()}
+                asked = {name: response.answers[name] for name in questions}   # an answer nobody asked for is dropped
+                answers = {name: recorded_answer(answer) for name, answer in asked.items()}
                 record = JevRecord(session_id, window.window_end, tuple(questions), self._jev.model, "answered",
                                    latency_ms, response.model, answers, response.usage.model_dump(),
                                    decision.decision_id, stage.name, tuple(missing))
-                previous[stage.name] = {name: passed_answer(answer) for name, answer in response.answers.items()}
+                previous[stage.name] = {name: passed_answer(answer) for name, answer in asked.items()}
                 mark(stage.name, "answered", answers)
             self._repository.add_record(record, window_record)
             records.append(record)
-            logger.info("jev shadow %s %s: %s in %d ms (%d questions)", stage.name, record.outcome,
+            logger.info("jev shadow %s %s: %.40s in %d ms (%d questions)", stage.name, record.outcome,
                         response.model if response else "-", latency_ms, len(questions))
         return records
 

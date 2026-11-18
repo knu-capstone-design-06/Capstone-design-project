@@ -176,6 +176,7 @@ class SessionState:
     screen_since: float | None = None
     next_id: int = 1
     last_t: float | None = None   # end of the last judged window; a window ending before it is recorded only
+    last_now: float | None = None  # the server clock when that window was judged (to spot a jump in window times)
 
     def snapshot(self) -> dict:
         held = None if self.held is None else {

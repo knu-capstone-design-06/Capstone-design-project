@@ -54,6 +54,7 @@ assert set(STATE_QUESTIONS) == set(StateScores.model_fields), "one question per 
 
 
 SHADOW_TOUCH_FIELDS = ("tap_count", "miss_tap_count", "repeat_tap_count", "back_count", "dwell_ms")
+assert set(SHADOW_TOUCH_FIELDS) <= set(TouchFeatures.model_fields), "the touch fields of the contract were renamed"
 
 
 def shadow_state(inp: WindowInput, state: SessionState, touch: TouchFeatures | None) -> dict:
