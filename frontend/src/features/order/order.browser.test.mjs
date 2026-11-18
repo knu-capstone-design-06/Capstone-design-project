@@ -582,6 +582,27 @@ test('변경 요청의 코드 없는 404·410 뒤 새 이용을 시작할 수 �
   } finally { await browser.close(); }
 });
 
+test('장바구니 창에서 세션이 끝난 뒤 처음부터 다시 주문하면 장바구니 창이 닫힌다', async () => {
+  const browser = await chromium.launch(launchOptions);
+  try {
+    const first = 'session-ended-sheet', second = 'session-new-sheet';
+    const steps = bootstrap(first); steps[2].body = cartResponse(first, 2, [iced(), food]);
+    const { page, errors, fixture } = await open(browser, [...steps,
+      mutation(first, '/cart/items/item-iced?expected_version=2', { detail: 'session not found' }, { method: 'DELETE', status: 410 }),
+      ...bootstrap(second)]);
+    await ready(page);
+    await click(page, 'cart-sheet-open');
+    await page.locator('dialog.cart-sheet[open]').waitFor();
+    await click(page, 'cart:americano:아이스:remove');
+    await page.locator('dialog.cart-sheet [data-log-target="order-session-restart"]').waitFor();
+    await click(page, 'order-session-restart');
+    await page.waitForFunction(id => window.kioskTouchLogDraft?.read().serverSessionId === id, second);
+    await ready(page);
+    assert.equal(await page.locator('dialog[open]').count(), 0, '새 주문에서는 장바구니 창이 열려 있지 않음');
+    fixture.verify(); assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
 test('주문 API가 없는 서버에서는 연결 대기를 표시하고 임의의 상품·주문을 만들지 않음', async () => {
   const browser = await chromium.launch(launchOptions);
   try {
