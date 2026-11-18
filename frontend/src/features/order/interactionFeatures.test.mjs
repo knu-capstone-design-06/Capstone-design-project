@@ -137,6 +137,22 @@ test('same feature window carries five pilot metrics and contextual interaction 
   assert(!JSON.stringify(result).includes('"x":'), 'raw pointer coordinates are not uploaded');
 });
 
+test('ui settings use the change after-value without waiting for a new input event', () => {
+  const f = fixture();
+  f.record(1200, 'ui_settings_change', {
+    before: { largeText: true },
+    after: { largeText: true, largeButton: true, highContrast: true },
+  });
+  const saved = f.recorder.read();
+  assert.equal(saved.events.at(-1).settings.largeButton, undefined);
+  for (const end of [3000, 5000]) {
+    const extra = buildTouchFeatureWindow(saved, end, 1).touch.interaction;
+    assert.equal(extra.ui_settings.large_button, true);
+    assert.equal(extra.ui_settings.high_contrast, true);
+    assert.equal(extra.ui_settings_change_count, end === 3000 ? 1 : 0);
+  }
+});
+
 test('no input is distinct from unobserved windows and unobserved historical context', () => {
   const f = fixture();
   const saved = f.recorder.read();

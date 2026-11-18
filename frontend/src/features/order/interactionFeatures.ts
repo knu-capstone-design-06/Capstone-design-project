@@ -35,7 +35,8 @@ export function buildTouchFeatureWindow(saved: SavedLog, now: number, sequence: 
   const lastInput = pilot.sinceLastInputMs;
   const systemWait = lastInput === null ? null : observedWaitMs(events, now - lastInput, now, true);
   const selectionEvent = last(events, e => e.kind === 'selection_state_change');
-  const settings = object(current.settings);
+  const settingsEvent = last(events, e => e.kind === 'ui_settings_change' || e.kind === 'screen_enter');
+  const settings = object(settingsEvent?.kind === 'ui_settings_change' ? data(settingsEvent).after : settingsEvent?.settings);
 
   // Integrate the observed UI busy state, including a request already pending at window start.
   const baseline = last(events, e => e.kind === 'order_state_change' && at(e) <= pilot.from);
