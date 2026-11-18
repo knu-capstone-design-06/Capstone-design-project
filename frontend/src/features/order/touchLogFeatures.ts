@@ -19,13 +19,13 @@ function point(value: unknown) {
   return typeof p.x === 'number' && Number.isFinite(p.x) && typeof p.y === 'number' && Number.isFinite(p.y)
     ? { x: p.x, y: p.y } : null;
 }
-function repeatCount(events: LogEvent[], from: number, policy: TouchPilotPolicy): number | null {
+function repeatCount(events: LogEvent[], inputEvidence: LogEvent[], from: number, policy: TouchPilotPolicy): number | null {
   const { repeatMs, repeatPx } = policy;
   if (repeatMs === null || repeatPx === null || !Number.isFinite(repeatMs) || !Number.isFinite(repeatPx) || repeatMs < 0 || repeatPx < 0) return null;
   const ends = new Map<string, Record<string, unknown>>();
   const scrolled = new Set<string>();
   const interrupted = new Set<string>();
-  for (const e of events) {
+  for (const e of inputEvidence) {
     const d = object(e.data);
     if (e.kind === 'pointer_end' && typeof d.inputId === 'string') ends.set(d.inputId, d);
     if (e.kind === 'pointer_interrupted' && typeof d.inputId === 'string') interrupted.add(d.inputId);
@@ -67,13 +67,14 @@ function repeatCount(events: LogEvent[], from: number, policy: TouchPilotPolicy)
   return count;
 }
 
-export function measureTouchPilot(saved: SavedLog, now = Date.now(), windowMs = 2000, policy = touchPilotPolicy) {
+export function measureTouchPilot(saved: SavedLog, now = Date.now(), windowMs = 2000, policy = touchPilotPolicy, observedAt = now) {
   const missing: TouchPilotFeatures = { tap_count: null, miss_tap_count: null, repeat_tap_count: null, back_count: null, dwell_ms: null };
-  const events = saved.events.filter(e => e.sessionId === saved.sessionId && time(e) <= now);
+  const observed = saved.events.filter(e => e.sessionId === saved.sessionId);
+  const events = observed.filter(e => time(e) <= now);
   const from = now - windowMs;
   const invalid = !Number.isFinite(now) || !Number.isFinite(windowMs) || windowMs <= 0
-    || saved.events.some(e => e.sessionId === saved.sessionId && (!Number.isFinite(time(e)) || time(e) > now))
-    || events.some((e, i) => i > 0 && time(e) < time(events[i - 1]));
+    || !Number.isFinite(observedAt) || observedAt < now
+    || observed.some((e, i) => !Number.isFinite(time(e)) || time(e) > observedAt || (i > 0 && time(e) < time(observed[i - 1])));
   if (invalid) return { features: missing, windowMs, from, to: now, observed: false, reason: '시각 또는 집계 구간을 확인할 수 없습니다.', foregroundVisitMs: null, sinceLastInputMs: null, policy: { ...policy } };
   // 세션 시작/재개부터 전경 관측이 연속한 구간에만 0을 포함한 통계를 냅니다.
   let observedSince: number | null = null;
@@ -101,7 +102,7 @@ export function measureTouchPilot(saved: SavedLog, now = Date.now(), windowMs = 
       else if (visible) observedSince = t;
     }
   }
-  const observed = observedSince !== null && observedSince <= from;
+  const windowObserved = observedSince !== null && observedSince <= from;
   const window = events.filter(e => time(e) > from);
   const presses = window.filter(e => e.kind === 'pointer_start');
   const targetKnown = presses.every(e => {
@@ -112,14 +113,15 @@ export function measureTouchPilot(saved: SavedLog, now = Date.now(), windowMs = 
   const idleMs = lastInput !== null && foreground ? Math.round(now - lastInput) : null;
   return {
     features: {
-      tap_count: observed ? presses.length : null,
-      miss_tap_count: observed && targetKnown ? presses.filter(e => object(e.data).target === null).length : null,
-      repeat_tap_count: observed ? repeatCount(events, from, policy) : null,
-      back_count: observed && window.every(e => e.kind !== 'screen_enter' || typeof object(e.data).from === 'string')
+      tap_count: windowObserved ? presses.length : null,
+      miss_tap_count: windowObserved && targetKnown ? presses.filter(e => object(e.data).target === null).length : null,
+      // 이후에 들어온 종료·중단·스크롤은 이 구간에서 이미 시작한 누름의 분류에만 씁니다.
+      repeat_tap_count: windowObserved ? repeatCount(events, observed, from, policy) : null,
+      back_count: windowObserved && window.every(e => e.kind !== 'screen_enter' || typeof object(e.data).from === 'string')
         ? window.filter(e => e.kind === 'screen_enter' && e.screen === 'menu' && object(e.data).from === 'review').length : null,
       dwell_ms: policy.dwellMode === 'foreground_visit' ? visitMs : policy.dwellMode === 'since_last_input' ? idleMs : null,
     },
-    windowMs, from, to: now, observed, reason: observed ? null : '집계 구간 전체의 전경 관측이 없습니다.',
+    windowMs, from, to: now, observed: windowObserved, reason: windowObserved ? null : '집계 구간 전체의 전경 관측이 없습니다.',
     foregroundVisitMs: visitMs, sinceLastInputMs: idleMs, policy: { ...policy },
   };
 }
