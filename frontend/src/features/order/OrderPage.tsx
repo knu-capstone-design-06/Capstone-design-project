@@ -364,7 +364,7 @@ export function OrderPage() {
     <CartSheet ref={cartDialog} open={cartSheetOpen} lines={cartLines} count={count} total={sum} actions={lineActions}
       status={feedback ?? (notice ? <p className="sheet-status" role="status">{notice}</p> : null)}
       reviewDisabled={!count || writeDisabled} onClose={closeCartSheet} onReview={openReview} />
-    {backendSupport.preset && <SupportConfirmSheet key={backendSupport.preset} preset={backendSupport.preset} onAccept={backendSupport.accept} onDecline={backendSupport.decline} />}
+    {backendSupport.preset && <SupportConfirmSheet key={backendSupport.preset} preset={backendSupport.preset} onAccept={backendSupport.accept} onDecline={backendSupport.decline} onDismiss={backendSupport.dismiss} />}
     <dialog ref={restartDialog} className="options-dialog" aria-labelledby="restart-title" onCancel={event => { event.preventDefault(); closeRestart(); }}>
       <h2 id="restart-title">처음부터 주문할까요?</h2>
       <p>담은 메뉴를 비우고 새 주문을 시작합니다. 화면 도움 설정은 유지합니다.</p>

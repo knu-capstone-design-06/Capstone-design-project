@@ -115,6 +115,36 @@ test('거절한 제안은 반복하지 않고 다른 설정의 제안은 계속 
   } finally { await browser.close(); }
 });
 
+test('배경·Escape는 같은 화면 상태에서만 제안을 숨기고 명시적 거절은 화면 상태가 바뀌어도 유지한다', async () => {
+  const browser = await chromium.launch(options);
+  try {
+    const { page, fixture, errors } = await open(browser, async () => decision('large_text'));
+    async function noOfferAfterNextResponse() {
+      await page.waitForResponse(response => response.url().endsWith('/features') && response.ok());
+      await page.waitForTimeout(100);
+      assert.equal(await dialog(page).count(), 0);
+      assert.equal(await page.locator('.kiosk.large-text').count(), 0);
+    }
+    await dialog(page).waitFor();
+    await page.mouse.click(15, 15);
+    await dialog(page).waitFor({ state: 'hidden' });
+    await noOfferAfterNextResponse();
+
+    await target(page, 'category:커피').click();
+    await dialog(page).waitFor();
+    await page.keyboard.press('Escape');
+    await dialog(page).waitFor({ state: 'hidden' });
+    await noOfferAfterNextResponse();
+
+    await target(page, 'category:전체').click();
+    await dialog(page).waitFor();
+    await answer(page, 'decline');
+    await target(page, 'category:커피').click();
+    await noOfferAfterNextResponse();
+    fixture.verify(); assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
 test('none·AI 불가·다른 세션·음성 제안·잘못된 응답은 적용하지 않고 false 확인 플래그도 사용자에게 묻는다', async () => {
   const browser = await chromium.launch(options);
   try {

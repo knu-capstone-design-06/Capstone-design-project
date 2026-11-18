@@ -374,7 +374,7 @@ node --test src/features/order/voiceMode.browser.test.mjs
 
 - 전송 구간은 약 2초이며, 직전 요청의 종료 시각을 다음 구간의 시작으로 씁니다. 누름 종료나 처리 중인 요청을 기다릴 때는 최대 3초까지 이어서 집계합니다. 간격이 3초를 넘으면 새 2초 구간을 사용합니다. 한 번에 하나만 요청하며 5초 후 취소합니다. 과거 구간은 재전송하지 않고, 400/401/403/404/410/422는 새 세션까지 전송을 중단합니다. 전송 실패는 터치 주문에 영향이 없습니다.
 - 요청은 기존 파일럿 기준의 5개 정수(`tap_count`, `miss_tap_count`, `repeat_tap_count`, `back_count`, `dwell_ms`)와 구간·화면, `vision: null`만 포함합니다. 반복은 800ms·24 CSS px, 체류는 현재 방문의 전경 누적 시간입니다. 전체 구간이 관측되지 않거나 하나라도 미산출이면 보내지 않습니다. `screen_id`는 구간 끝의 `menu` 또는 `review`입니다. #72와 #77이 쓰는 값이며, 화면을 바꾸는 누름과 뒤로가기도 해당 구간의 통계에 포함합니다.
-- `large_text → largeText`, `large_button → largeButton`, `simple_screen → simpleScreen`, `step_guide → stepGuide`를 각각 연결합니다. `requires_confirmation: false`라도 이번 화면 정책은 항상 먼저 묻습니다. 수락한 한 항목만 켜고, 거절·Escape·배경 누름은 설정을 바꾸지 않습니다. 나타난 직후 500ms 동안 버튼 동작을 막아 연속 누름이 수락으로 이어지지 않게 합니다.
+- `large_text → largeText`, `large_button → largeButton`, `simple_screen → simpleScreen`, `step_guide → stepGuide`를 각각 연결합니다. `requires_confirmation: false`라도 이번 화면 정책은 항상 먼저 묻습니다. 수락한 한 항목만 켭니다. [지금 화면 유지]는 세션 내 거절로 기록하고, Escape·배경 누름은 창만 닫습니다. 같은 상태에서 닫은 제안이 반복해서 뜨지 않도록 막고, 화면·분류·쪽·장바구니·설정이 바뀌면 새 제안을 받을 수 있습니다. 이 구분은 프론트 상태에만 기록합니다. 나타난 직후 500ms 동안 버튼 동작을 막아 연속 누름이 수락으로 이어지지 않게 합니다.
 - `none`, AI 불가, 다른 세션, 잘못된 응답, 이미 켠 설정, 범위 밖의 `voice_guide`는 무시합니다. 수락·거절한 프리셋은 같은 세션에서 다시 제안하지 않습니다. 화면 방문·분류·쪽·장바구니 버전·설정 변경이나 제안을 띄울 수 없는 상태를 거친 뒤 도착한 응답은 화면에 사용하지 않습니다.
 - 수동 설정은 기존처럼 저장합니다. 서버 제안으로 켠 설정은 현재 세션의 임시 설정이며 새 주문·새로고침에서 해제됩니다. 화면 도움에서 직접 바꾸는 항목은 수동 설정으로 전환합니다. 기존 개발용 `kioskSupportDraft`의 일괄 크게 보기와 분리했습니다.
 

@@ -5,9 +5,9 @@ import { doubleClickMs } from '../utils/timing.ts';
 import { Sheet } from './Sheet.tsx';
 import './supportConfirm.css';
 
-/** 서버 제안도 사용자가 답하기 전에는 적용하지 않습니다. Escape·배경 누름은 거절입니다. */
-export function SupportConfirmSheet({ preset, onAccept, onDecline }: {
-  preset: SupportPreset; onAccept: () => void; onDecline: () => void;
+/** 서버 제안은 사용자가 답하기 전에는 적용하지 않습니다. Escape·배경 누름은 이번 창만 닫습니다. */
+export function SupportConfirmSheet({ preset, onAccept, onDecline, onDismiss }: {
+  preset: SupportPreset; onAccept: () => void; onDecline: () => void; onDismiss: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [armed, setArmed] = useState(false);
@@ -18,7 +18,7 @@ export function SupportConfirmSheet({ preset, onAccept, onDecline }: {
   }, []);
   useEffect(() => { const timer = setTimeout(() => setArmed(true), doubleClickMs); return () => clearTimeout(timer); }, []);
   const copy = supportSettings[preset];
-  return <Sheet ref={dialog} className="support-confirm-sheet" labelledBy="support-confirm-title" logTarget="support-confirm" onClose={onDecline}>
+  return <Sheet ref={dialog} className="support-confirm-sheet" labelledBy="support-confirm-title" logTarget="support-confirm" onClose={onDismiss}>
     <h2 id="support-confirm-title" className="sheet-name">{copy.question}</h2>
     <p className="sheet-desc">{copy.description}</p>
     <div className="support-confirm-actions" data-armed={armed}>

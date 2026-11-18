@@ -11,13 +11,14 @@ export function useBackendSupport({ sessionId, contextKey, canSend, canOffer, se
 }) {
   const [offer, setOffer] = useState<{ preset: SupportPreset; context: string } | null>(null);
   const answered = useRef(new Set<SupportPreset>());
+  const dismissed = useRef({ context: contextKey, presets: new Set<SupportPreset>() });
   const lastSession = useRef(sessionId);
   const suspended = useRef(false);
   const latest = useRef({ settings, sessionId, contextKey, canSend, canOffer });
   const [transport] = useState(() => createSupportTransport(backendApi.sendFeatureWindow, read, response => {
     const current = latest.current;
     const preset = readBackendSupport(response, current.sessionId ?? '', current.settings);
-    if (preset && !answered.current.has(preset)) {
+    if (preset && !answered.current.has(preset) && !dismissed.current.presets.has(preset)) {
       setOffer(previous => previous ?? { preset, context: current.contextKey });
     }
   }));
@@ -31,6 +32,9 @@ export function useBackendSupport({ sessionId, contextKey, canSend, canOffer, se
 
   useLayoutEffect(() => {
     if (lastSession.current !== sessionId) { answered.current.clear(); lastSession.current = sessionId; }
+    if (dismissed.current.context !== contextKey) {
+      dismissed.current = { context: contextKey, presets: new Set() };
+    }
     latest.current = { settings, sessionId, contextKey, canSend, canOffer: canOffer && current === null };
     syncContext();
     if (offer && !current) setOffer(null);
@@ -59,5 +63,11 @@ export function useBackendSupport({ sessionId, contextKey, canSend, canOffer, se
     if (accept) onApply(supportSettings[current.preset].key);
     setOffer(null);
   }
-  return { preset: current?.preset ?? null, accept: () => answer(true), decline: () => answer(false) };
+  function dismiss() {
+    if (!current) return;
+    // 같은 화면 상태에서 반복해서 뜨는 것만 막습니다. 세션 전체의 거절로 남기지 않습니다.
+    dismissed.current.presets.add(current.preset);
+    setOffer(null);
+  }
+  return { preset: current?.preset ?? null, accept: () => answer(true), decline: () => answer(false), dismiss };
 }
