@@ -14,6 +14,7 @@ from app.main import create_app
 from app.modules.voice.interpreter import OpenAiVoiceInterpreter, StubVoiceInterpreter
 from app.modules.voice.exceptions import VoiceSessionCompleted
 from app.modules.voice.repository import HISTORY_TURNS, VoiceRepository
+from app.modules.voice.service import OFF_MENU_REPLY
 from app.modules.voice.schemas import (
     MenuItem, VoiceErrorResponse, VoiceInterpretation, VoiceRequestCreate, VoiceTurn,
 )
@@ -185,12 +186,14 @@ class VoiceApiTests(VoiceApiCase):
     def test_failed_requests_stay_out_of_history(self):
         self.interpreter.result = None
         self.say("실패할 요청")
+        self.interpreter.result = RuntimeError("boom")
+        self.say("터진 요청")
         self.interpreter.result = interpretation(call("add_cart_item", "mocha", "iced", 1))
-        self.say("메뉴에 없는 요청")
+        self.say("메뉴에 없는 요청")  # a question, not a failure: it stays as context
         self.interpreter.result = interpretation(ADD_AMERICANO)
         self.say("아메리카노")
         self.say("다음")
-        self.assertEqual([t.request.text for t in self.interpreter.histories[-1]], ["아메리카노"])
+        self.assertEqual([t.request.text for t in self.interpreter.histories[-1]], ["메뉴에 없는 요청", "아메리카노"])
 
     def test_ignored_speech_is_reported_without_reply_or_history(self):
         self.interpreter.result = VoiceInterpretation(status="ignored", tool_calls=[], reply_text=None)
@@ -223,8 +226,11 @@ class VoiceApiTests(VoiceApiCase):
             for reply_text in (None, "담을까요?"):  # completed and proposals alike
                 self.interpreter.result = interpretation(ADD_AMERICANO, bad, reply_text=reply_text)
                 body = self.status(self.post().json()["request_id"]).json()
-                self.assertEqual(body["status"], "failed", bad)
+                # Voice still works, so ask again rather than send the customer to the screen.
+                self.assertEqual(body["status"], "needs_clarification", bad)
                 self.assertEqual(body["tool_calls"], [])
+                self.assertEqual(body["reply_text"], OFF_MENU_REPLY)
+                self.assertIsNone(body["error"])
 
     def test_drink_without_temperature_becomes_temperature_question(self):
         for reply_text in (None, "담을까요?"):  # completed and proposals alike
@@ -682,6 +688,30 @@ class ToolExecutionApiTests(VoiceApiCase):
         replay = self.post(body={**BODY, "text": "네", "alternatives": []}, key=key).json()
         self.assertEqual(replay["request_id"], accepted["request_id"])
         self.assertEqual(self.cart()["total_quantity"], 2)
+
+    def test_off_menu_answer_asks_again_and_closes_the_open_proposal(self):
+        self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
+        self.say("아이스 아메리카노 두 개")
+        self.interpreter.result = interpretation(call("add_cart_item", "mocha", "iced", 1))
+        asked = self.status(self.say("모카로 할게요")).json()
+        self.assertEqual((asked["status"], asked["reply_text"], asked["actions"]),
+                         ("needs_clarification", OFF_MENU_REPLY, []))
+        # The proposal is gone, so a later "네" repeats the question instead of adding 2 cups.
+        self.interpreter.result = interpretation(ADD_AMERICANO)
+        body = self.status(self.say("네")).json()
+        self.assertEqual((body["status"], body["reply_text"]), ("needs_clarification", OFF_MENU_REPLY))
+        self.assertEqual(self.cart()["items"], [])
+        # The question stays in the context; the rejected tool inputs do not.
+        self.interpreter.result = interpretation(ADD_AMERICANO)
+        self.say("아이스 아메리카노 두 잔이요")
+        mocha = [t for t in self.interpreter.histories[-1] if t.request.text == "모카로 할게요"]
+        self.assertEqual([(t.result.status, t.result.tool_calls) for t in mocha], [("needs_clarification", [])])
+
+    def test_crash_still_reports_the_outage_reply(self):
+        self.interpreter.result = RuntimeError("boom")
+        body = self.status(self.say("아이스 아메리카노")).json()
+        self.assertEqual((body["status"], body["error"]["code"]), ("failed", "ai_unavailable"))
+        self.assertNotEqual(body["reply_text"], OFF_MENU_REPLY)
 
     def test_yes_runs_the_confirmed_proposal_even_if_the_model_now_says_otherwise(self):
         self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
