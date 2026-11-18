@@ -51,28 +51,34 @@ export function createSupportTransport(send: Send, read: () => SavedLog | null, 
     generation++;
     active?.abort();
     active = null;
-    lastWindowEnd = null;
   }
   return {
     setContext(nextSession: string | null, nextContext: string, enabled: boolean, nextCanOffer: boolean) {
       if (session !== nextSession || (allowed && !enabled)) cancel();
       else if (context !== nextContext || canOffer !== nextCanOffer) generation++;
-      if (session !== nextSession) stopped = null;
+      // 일시 중단이나 요청 취소는 이미 전송한 경계를 지우지 않습니다.
+      if (session !== nextSession) { stopped = null; lastWindowEnd = null; }
       session = nextSession; context = nextContext; allowed = enabled; canOffer = nextCanOffer;
     },
     async tick() {
       if (!allowed || !session || active || stopped === session) return;
-      const end = now();
+      const observedAt = now(), end = observedAt - 1;
       const elapsed = lastWindowEnd === null ? TARGET_WINDOW_MS : end - lastWindowEnd;
-      if (elapsed >= 0 && elapsed < TARGET_WINDOW_MS) return;
+      if (elapsed < TARGET_WINDOW_MS) return;
       const saved = read();
       if (!saved || saved.serverSessionId !== session) return;
+      // 읽은 뒤에도 현재 밀리초로 입력이 기록될 수 있으므로, 끝난 밀리초까지만 집계합니다.
+      // 현재 밀리초의 기록만 다음 구간에 남깁니다. 실제 미래 시각·잘못된 시각은 기존 검증에 넘깁니다.
+      const windowLog = { ...saved, events: saved.events.filter(event => {
+        const time = Date.parse(event.occurredAt);
+        return !(time > end && time <= observedAt);
+      }) };
       // 3초를 넘긴 중단 구간은 재전송하지 않고 최근 관측으로 다시 시작합니다.
-      const windowMs = elapsed < 0 || elapsed > MAX_WINDOW_MS ? TARGET_WINDOW_MS : elapsed;
-      const body = buildSupportWindow(saved, end, windowMs);
+      const windowMs = elapsed > MAX_WINDOW_MS ? TARGET_WINDOW_MS : elapsed;
+      const body = buildSupportWindow(windowLog, end, windowMs);
       if (!body) return;
       const controller = new AbortController(), token = generation, requestSession = session;
-      const visitId = currentVisit(saved)?.visitId;
+      const visitId = currentVisit(windowLog)?.visitId;
       lastWindowEnd = end;
       active = controller;
       const timer = setTimeout(() => controller.abort(), 5000);

@@ -51,7 +51,7 @@ test('전송은 중복 요청을 막고 화면·세션 변경 및 중단 뒤의 
 
 test('변경 중에도 전송 구간의 경계가 이어지고 종료를 기다린 누름을 한 번만 센다', async () => {
   const { saved, emit } = pilotLog(); emit(0, 'screen_enter', { visibility: 'visible' });
-  let now = 2000;
+  let now = 2001;
   const sent = [], received = [];
   const transport = createSupportTransport(async (session, body) => {
     sent.push(body);
@@ -91,6 +91,73 @@ test('네트워크 실패 뒤에는 새 구간을 보내고 종료된 세션은 
   assert.equal(count, 2);
   saved.serverSessionId = 'next'; transport.setContext('next', 'menu', true, true); await transport.tick();
   assert.equal(count, 3); assert.equal(received.length, 1); transport.dispose();
+});
+
+for (const pending of [false, true]) test(`같은 세션의 전송 재개는 직전 경계를 유지한다 (${pending ? '요청 처리 중 취소' : '응답 완료'})`, async () => {
+  const { saved, emit } = pilotLog(); emit(0, 'screen_enter', { visibility: 'visible' });
+  const inputId = emit(3500, 'pointer_start', { target: null, start: { x: 3, y: 4 }, pointerType: 'mouse', isPrimary: true });
+  emit(3510, 'pointer_end', { inputId, cancelled: false, maxObservedDistance: 0 });
+  let now = 4000;
+  const sent = [], received = [];
+  const transport = createSupportTransport((session, body, signal) => {
+    const request = { body, signal };
+    sent.push(request);
+    if (sent.length === 1) return new Promise(resolve => { request.resolve = resolve; });
+    return Promise.resolve({ session_id: session });
+  }, () => saved, response => received.push(response), () => now);
+  transport.setContext('server', 'menu', true, true);
+  const first = transport.tick();
+  if (!pending) { sent[0].resolve({ session_id: 'server' }); await first; }
+  transport.setContext('server', 'menu', false, false);
+  assert.equal(sent[0].signal.aborted, pending);
+  now = 4500; transport.setContext('server', 'menu', true, true);
+  await transport.tick();
+  assert.equal(sent.length, 1, '2초가 차기 전에는 겹치는 최근 구간을 보내지 않음');
+  if (pending) { sent[0].resolve({ session_id: 'server' }); await first; assert.equal(received.length, 0); }
+  now = 6000; const second = transport.tick();
+  assert.equal(sent[1].body.window_start, sent[0].body.window_end);
+  assert.equal(sent.reduce((sum, request) => sum + request.body.touch.tap_count, 0), 1, '3500ms 누름을 한 번만 전송');
+  await second;
+  transport.dispose();
+});
+
+for (const beforeRead of [false, true]) test(`읽기와 같은 밀리초의 누름을 다음 구간에서 한 번 센다 (${beforeRead ? '읽기 직전 기록' : '읽기 직후 기록'})`, async () => {
+  const { saved, emit } = pilotLog(); emit(0, 'screen_enter', { visibility: 'visible' });
+  let now = 4000;
+  const sent = [];
+  const transport = createSupportTransport(async (session, body) => { sent.push(body); return { session_id: session }; }, () => saved, () => {}, () => now);
+  const press = () => emit(4000, 'pointer_start', { target: null, start: { x: 3, y: 4 }, pointerType: 'mouse', isPrimary: true });
+  let inputId;
+  if (beforeRead) inputId = press();
+  transport.setContext('server', 'menu', true, true);
+  await transport.tick();
+  assert.equal(sent.length, 1, '현재 밀리초의 시작 기록 때문에 앞선 완전 관측 구간을 버리지 않음');
+  assert.equal(sent[0].window_end, new Date(3999).toISOString());
+  if (!beforeRead) inputId = press();
+  emit(4010, 'pointer_end', { inputId, cancelled: false, maxObservedDistance: 0 });
+  now = 6000; await transport.tick();
+  assert.equal(sent[1].window_start, sent[0].window_end);
+  assert.deepEqual(sent.map(body => body.touch.tap_count), [0, 1]);
+  now = 8000; await transport.tick();
+  assert.deepEqual(sent.map(body => body.touch.tap_count), [0, 1, 0]);
+  transport.dispose();
+});
+
+test('종료 경계를 지난 새 방문의 응답을 현재 화면 제안으로 사용하지 않고 실제 미래 시각은 미산출로 둔다', async () => {
+  const { saved, emit } = pilotLog(); emit(0, 'screen_enter', { visibility: 'visible' });
+  let now = 4000;
+  const sent = [], received = [];
+  const transport = createSupportTransport(async (session, body) => { sent.push(body); return { session_id: session }; }, () => saved, response => received.push(response), () => now);
+  emit(4000, 'screen_enter', { visibility: 'visible', from: 'menu' }, 'review-visit', 'review');
+  transport.setContext('server', 'review', true, true); await transport.tick();
+  assert.equal(sent[0].screen_id, 'menu', '종료 경계 시점의 화면을 사용');
+  assert.equal(received.length, 0, '새 방문에서 이전 화면 구간의 제안을 쓰지 않음');
+  now = 6000; await transport.tick();
+  assert.equal(sent[1].screen_id, 'review');
+  assert.equal(received.length, 1);
+  now = 8000; emit(8100, 'scroll', {}); await transport.tick();
+  assert.equal(sent.length, 2, '실제 시계 역행·미래 기록을 현재 밀리초 기록처럼 제외하지 않음');
+  transport.dispose();
 });
 
 test('주문·옵션·음성 관측은 필요한 필드만 복사하고 인식문·서버 오류 상세를 보관하지 않는다', () => {
