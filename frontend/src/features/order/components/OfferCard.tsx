@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
+import type { RefObject } from 'react';
 import { supportCopy } from '../copy.ts';
+import { useNextTouch } from '../hook/useNextTouch.ts';
 import type { SupportKind } from '../utils/supportDecision.ts';
 import { doubleClickMs } from '../utils/timing.ts';
 import { Icon } from './icons.tsx';
@@ -11,11 +13,15 @@ const pictogram: Record<SupportKind, IconName> = { enlarge: 'text_increase' };
 /**
  * 키오스크가 먼저 묻는 화면 지원 제안: 한 장뿐인 어두운 층(#1B4975)에 흰 원 안의 지원 아이콘,
  * 흰 질문(M 굵게), 같은 너비의 흰 대답 두 개(88). 모달이 아닙니다. 나타난 뒤 두 번 클릭 간격 동안은 대답이 누름을 받지 않습니다.
+ * 주문 화면(scope)의 다른 곳을 누르면 거절과 같이 닫히는데, 이것도 같은 두 번 클릭 간격이 지난 뒤의 터치부터 셉니다.
  */
-export function OfferCard({ support, onAccept, onDecline }: { support: SupportKind; onAccept: () => void; onDecline: () => void }) {
+export function OfferCard({ support, scope, onAccept, onDecline }: {
+  support: SupportKind; scope: RefObject<HTMLElement | null>; onAccept: () => void; onDecline: () => void;
+}) {
   const [armed, setArmed] = useState(false);
   useEffect(() => { const timer = setTimeout(() => setArmed(true), doubleClickMs); return () => clearTimeout(timer); }, []);
   const answer = (action: () => void) => () => { if (armed) action(); };
+  useNextTouch(armed, scope, onDecline, '.offer-card');
   return <section className="offer-card" aria-label="화면 도움 제안" aria-live="polite" data-armed={armed}>
     <div className="o-head">
       <span className="o-pic" aria-hidden="true"><Icon name={pictogram[support]} /></span>

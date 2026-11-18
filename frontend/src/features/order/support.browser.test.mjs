@@ -67,6 +67,11 @@ test('거절하거나 다른 곳을 누르면 제안이 닫히고 화면은 그�
     await page.evaluate(() => window.kioskSupportDraft.receive({ session_id: window.kioskTouchLogDraft.read().serverSessionId, ai_available: true,
       support: { preset: 'large_button', requires_confirmation: true, decided_by: 'rule_placeholder' } }));
     await page.locator('.offer-card').waitFor();
+    // 카드가 뜬 뒤 두 번 클릭 간격 안의 다른 곳 누름으로는 닫히지 않습니다(PR #87 리뷰: 뜨고 500 ms 안에 분류 탭을 누르면 바로 닫혔음).
+    await target(page, 'category:커피').click();
+    assert.equal(await page.locator('.offer-card').count(), 1, '뜬 직후(두 번 클릭 간격 안)의 다른 곳 누름은 카드를 닫지 않음');
+    await page.locator('.offer-card[data-armed="true"]').waitFor();
+    assert.equal(await page.locator('.offer-card').count(), 1);
     await target(page, 'category:커피').click();
     await page.locator('.offer-card').waitFor({ state: 'detached' });
     assert.equal(await page.locator('.kiosk.large-button').count(), 0, '다른 곳을 누르면 제안만 닫힘');
