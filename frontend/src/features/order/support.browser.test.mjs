@@ -78,7 +78,7 @@ test('개발용 서버 응답도 네 가지 개별 설정을 확인 후 적용�
   try {
     const session = 'apply-first';
     const { page, errors, fixture } = await open(browser, [...bootstrap(session), ...bootstrap('apply-second')], '?support=large_button&confirm=0');
-    const dialog = page.locator('dialog.support-confirm-sheet[open]');
+    const dialog = page.locator('section.support-confirm-sheet');
     const receive = (response, sentFor) => page.evaluate(
       ({ response, sentFor }) => window.kioskSupportDraft.receive(response, sentFor), { response, sentFor });
     async function accept(question) {
@@ -185,19 +185,19 @@ test('알림은 잠깐 떴다가 스스로 닫히거나 다음 터치에 닫히�
     const session = 'short-notice';
     const { page, errors, fixture } = await open(browser, [...bootstrap(session),
       mutation(session, '/cart/items', cartResponse(session, 1, [iced()])), mutation(session, '/cart/items', cartResponse(session, 2, [iced(2)]))]);
-    // 큰 글씨: 한 쪽에 사진 카드 2 × 2라 알림이 마지막 줄(레몬 티, 초콜릿 라떼) 위에 뜹니다.
+    // 안내 바 자리를 확보한 큰 글씨 화면은 사진 한 줄이며 알림이 그 줄 위에 뜹니다.
     await target(page, 'support-toggle').click(); await target(page, 'support:largeText').click(); await target(page, 'support-close').click();
     const notice = page.locator('.popup-place .cart-notice');
     await target(page, 'product:americano').click(); await target(page, 'cart-add').click();
     await notice.getByText('메뉴를 담았어요.').waitFor();
     const box = await notice.boundingBox();
-    const card = await target(page, 'product:chocolate').boundingBox();
+    const card = await target(page, 'product:latte').boundingBox();
     const point = [card.x + card.width / 2, box.y + box.height / 2];
     const under = await page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest('[data-log-target]')?.dataset.logTarget ?? null, point);
-    assert.equal(under, 'product:chocolate', '알림 아래의 상품 줄이 누름을 받음');
+    assert.equal(under, 'product:latte', '알림 아래의 상품 줄이 누름을 받음');
     await page.mouse.click(...point);
     await page.locator('dialog[open]').waitFor();
-    assert.match(await page.locator('dialog[open]').innerText(), /초콜릿 라떼/, '알림이 떠 있어도 그 아래 상품이 눌림');
+    assert.match(await page.locator('dialog[open]').innerText(), /카페 라떼/, '알림이 떠 있어도 그 아래 상품이 눌림');
     await notice.waitFor({ state: 'hidden', timeout: 1000 });
     await target(page, 'cart-add').click();
     await notice.getByText('메뉴를 담았어요.').waitFor();

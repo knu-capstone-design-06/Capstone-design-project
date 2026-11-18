@@ -2,13 +2,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mkdir } from 'node:fs/promises';
-import { bootstrap, cartResponse, iced, installOrderResponses } from './orderApiFixture.mjs';
+import { bootstrap, cartResponse, iced, installOrderResponses, mutation } from './orderApiFixture.mjs';
 
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ?? 'playwright');
 const url = process.env.ORDER_BROWSER_URL ?? 'http://127.0.0.1:5173';
 const channel = process.env.PLAYWRIGHT_CHANNEL ?? 'msedge';
 const options = { headless: true, ...(channel === 'default' ? {} : { channel }) };
-const dialog = page => page.locator('dialog.support-confirm-sheet[open]');
+const dialog = page => page.locator('section.support-confirm-sheet');
 const target = (page, name) => page.locator(`[data-log-target="${name}"]`);
 const decision = (preset, extra = {}) => ({ session_id: 'support-session', ai_available: true,
   support: { preset, requires_confirmation: true, decided_by: 'jev' }, ...extra });
@@ -36,6 +36,91 @@ async function answer(page, action) {
   await dialog(page).waitFor({ state: 'hidden' });
 }
 
+for (const [name, settings] of [
+  ['기본', {}], ['큰 버튼', { largeButton: true }], ['큰 글씨·큰 버튼', { largeText: true, largeButton: true }],
+  ['낮은 화면·확대·고대비', { lowScreen: true, largeText: true, largeButton: true, highContrast: true }],
+]) test(`${name}: 제안은 메뉴 밖의 전용 자리에 보이고 도착 전후 메뉴 위치를 유지한다`, async () => {
+  const browser = await chromium.launch(options);
+  try {
+    const { page, fixture, errors } = await open(browser, async () => decision('none'), settings);
+    await page.waitForTimeout(100);
+    const positions = () => page.locator('.product').evaluateAll(elements => elements.map(element => {
+      const { x, y, width, height } = element.getBoundingClientRect(); return { x, y, width, height };
+    }));
+    const before = await positions();
+    const preset = settings.largeText ? 'step_guide' : 'large_text';
+    await page.evaluate(response => window.kioskSupportDraft.receive(response), decision(preset));
+    await page.locator('.support-confirm-actions[data-armed="true"]').waitFor();
+    assert.deepEqual(await positions(), before, '제안이 나타나도 상품이 움직이지 않음');
+    const card = await dialog(page).boundingBox(), main = await page.locator('main').boundingBox();
+    assert(card.y >= main.y + main.height, '안내 바가 상품 목록·분류·쪽 넘김·장바구니 영역 밖에 있음');
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight), true);
+    assert.equal(await page.locator(':modal').count(), 0);
+    await answer(page, 'decline'); fixture.verify(); assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
+for (const action of ['product', 'category', 'cart', 'review']) test(`제안 중 ${action}: 바깥 조작을 첫 누름에 실행하고 설정은 유지한다`, async () => {
+  const browser = await chromium.launch(options);
+  try {
+    const steps = bootstrap('support-session');
+    steps[2].body = cartResponse('support-session', 1, [iced()]);
+    if (action === 'cart') steps.push(mutation('support-session', '/cart/items/item-iced', cartResponse('support-session', 2, [iced(2)]), { method: 'PATCH' }));
+    const { page, fixture, errors } = await open(browser, async () => decision('large_text'), {}, steps);
+    await target(page, 'product:americano').focus();
+    await dialog(page).waitFor();
+    assert.equal(await target(page, 'product:americano').evaluate(element => element === document.activeElement), true, '제안 도착 전의 초점 유지');
+    assert.equal(await page.locator(':modal').count(), 0);
+    await page.locator('.support-confirm-actions[data-armed="true"]').waitFor();
+    if (action === 'product') {
+      await target(page, 'product:americano').click();
+      await page.locator('dialog.option-sheet[open]').waitFor();
+    } else if (action === 'category') {
+      await target(page, 'category:커피').click();
+      assert.equal(await target(page, 'category:커피').getAttribute('aria-pressed'), 'true');
+    } else if (action === 'cart') {
+      await target(page, 'cart:americano:아이스:increase').click();
+      await page.waitForFunction(() => document.querySelector('.total')?.textContent.includes('7,000원'));
+      assert.equal(fixture.requests.filter(request => request.method === 'PATCH').length, 1);
+    } else {
+      await target(page, 'review-open').click();
+      await target(page, 'review-back').waitFor();
+    }
+    assert.equal(await dialog(page).count(), 0);
+    assert.equal(await page.locator('.kiosk.large-text').count(), 0, '바깥 조작을 제안 수락으로 취급하지 않음');
+    fixture.verify(); assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
+test('제안 직후의 수락·Escape·바깥 누름은 제안에 답하지 않고 기존 화면의 조작은 가능하다', async () => {
+  const browser = await chromium.launch(options);
+  try {
+    const { page, fixture, errors } = await open(browser, async () => decision('none'));
+    await page.evaluate(() => {
+      window.kioskSupportDraft.receive({ session_id: 'support-session', ai_available: true,
+        support: { preset: 'large_text', requires_confirmation: true, decided_by: 'jev' } });
+      return new Promise(resolve => {
+        const observer = new MutationObserver(() => {
+          if (!document.querySelector('.support-confirm-sheet')) return;
+          observer.disconnect();
+          document.querySelector('[data-log-target="support-confirm:accept"]').click();
+          document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+          document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+          resolve();
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+      });
+    });
+    await dialog(page).waitFor();
+    assert.equal(await page.locator('.kiosk.large-text').count(), 0);
+    await page.locator('.support-confirm-actions[data-armed="true"]').waitFor();
+    await page.keyboard.press('Escape');
+    await dialog(page).waitFor({ state: 'hidden' });
+    fixture.verify(); assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
 for (const [preset, css, key] of [
   ['large_text', 'large-text', 'largeText'], ['large_button', 'large-button', 'largeButton'],
   ['simple_screen', 'simple-screen', 'simpleScreen'], ['step_guide', '', 'stepGuide'],
@@ -46,7 +131,8 @@ for (const [preset, css, key] of [
     const { page, requests, fixture, errors } = await open(browser, async () => decision(preset), {}, steps);
     await dialog(page).waitFor();
     assert.equal(await dialog(page).getAttribute('aria-labelledby'), 'support-confirm-title');
-    assert.equal(await target(page, 'support-confirm:decline').evaluate(element => element === document.activeElement), true);
+    assert.equal(await dialog(page).evaluate(element => element.contains(document.activeElement)), false, '제안이 주문 조작의 초점을 가져가지 않음');
+    assert.equal(await page.locator(':modal').count(), 0, '제안 뒤의 화면을 비활성화하지 않음');
     assert.deepEqual(Object.keys(requests[0]).sort(), ['screen_id', 'touch', 'vision', 'window_end', 'window_start']);
     assert.equal(requests[0].screen_id, 'menu'); assert.equal(requests[0].vision, null);
     assert.equal(Date.parse(requests[0].window_end) - Date.parse(requests[0].window_start), 2000);
@@ -126,12 +212,14 @@ test('배경·Escape는 같은 화면 상태에서만 제안을 숨기고 명시
       assert.equal(await page.locator('.kiosk.large-text').count(), 0);
     }
     await dialog(page).waitFor();
+    await page.locator('.support-confirm-actions[data-armed="true"]').waitFor();
     await page.mouse.click(15, 15);
     await dialog(page).waitFor({ state: 'hidden' });
     await noOfferAfterNextResponse();
 
     await target(page, 'category:커피').click();
     await dialog(page).waitFor();
+    await page.locator('.support-confirm-actions[data-armed="true"]').waitFor();
     await page.keyboard.press('Escape');
     await dialog(page).waitFor({ state: 'hidden' });
     await noOfferAfterNextResponse();
@@ -155,6 +243,7 @@ test('none·AI 불가·다른 세션·음성 제안·잘못된 응답은 적용�
     await dialog(page).waitFor({ timeout: 25000 });
     assert.equal(requests.length, 6); assert.match(await dialog(page).innerText(), /주문 순서/);
     assert.equal(await page.locator('.guide').count(), 0);
+    await page.locator('.support-confirm-actions[data-armed="true"]').waitFor();
     await page.keyboard.press('Escape'); await dialog(page).waitFor({ state: 'hidden' });
     assert.equal(await page.locator('.guide').count(), 0); fixture.verify(); assert.deepEqual(errors, []);
   } finally { await browser.close(); }
@@ -186,12 +275,18 @@ test('큰 글씨·큰 버튼·낮은 화면에서도 확인 팝업과 두 대답
   try {
     const { page, fixture, errors } = await open(browser, async () => decision('step_guide'), { largeText: true, largeButton: true, lowScreen: true });
     await dialog(page).waitFor();
+    await page.locator('.support-confirm-actions[data-armed="true"]').waitFor();
     const bounds = await dialog(page).boundingBox();
     assert(bounds.y >= 768 && bounds.y + bounds.height <= 1920);
     for (const action of ['accept', 'decline']) {
       const box = await target(page, `support-confirm:${action}`).boundingBox();
       assert(box.x >= 0 && box.x + box.width <= 1080 && box.y >= 768 && box.y + box.height <= 1920);
       assert(box.height >= 96);
+      assert(box.y >= bounds.y && box.y + box.height <= bounds.y + bounds.height, '두 대답이 카드 안에서 잘리지 않음');
+      assert.equal(await target(page, `support-confirm:${action}`).evaluate(element => {
+        const box = element.getBoundingClientRect();
+        return element.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
+      }), true, '카드를 스크롤하지 않아도 대답을 누를 수 있음');
     }
     if (process.env.SUPPORT_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.SUPPORT_SCREENSHOT_DIR}/backend-support-low-large.png`, fullPage: true });
     await answer(page, 'accept'); fixture.verify(); assert.deepEqual(errors, []);

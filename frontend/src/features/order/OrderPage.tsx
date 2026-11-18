@@ -173,7 +173,7 @@ export function OrderPage() {
   const combinedEnlargement = settings.largeText && settings.largeButton;
   // 분류나 쪽 크기가 바뀌면 첫 쪽부터 보여 줍니다.
   const menuProducts = state.products.filter(product => category === 'all' || product.category === category);
-  const menuSize = menuPageSize({ ...settings, largeView, voiceOn: screen === 'menu' && voice.enabled });
+  const menuSize = menuPageSize({ ...settings, largeView, voiceOn: screen === 'menu' && voice.enabled, supportBar: true });
   const menuKey = `${category}:${menuSize}`;
   const menuPage = menuPaging.key === menuKey ? clampPage(menuPaging.page, menuProducts.length, menuSize) : 0;
   const menuPages = pageCount(menuProducts.length, menuSize);
@@ -307,10 +307,11 @@ export function OrderPage() {
   // 키오스크의 제안은 시트가 열려 있거나 오류·처리 중 안내가 있는 동안 기다리고, 그 밖의 다음 터치에 닫힙니다.
   const offerCard = enlargementPreview.offer && !sheetOpen && !supportOpen && !restartOpen && !feedback ? <OfferCard onAccept={enlargementPreview.accept} onDecline={enlargementPreview.decline} /> : null;
   useNextTouch(offerCard !== null, touchLog.root, enlargementPreview.decline, '.offer-card');
-  const messagePlace = <MessagePlace feedback={sheetOpen ? null : feedback} offer={offerCard} notice={notice} kiosk={noticeIcon} standing={standingTop ? null : standing} />;
+  const supportCard = backendSupport.preset ? <SupportConfirmSheet key={backendSupport.preset} preset={backendSupport.preset} onAccept={backendSupport.accept} onDecline={backendSupport.decline} onDismiss={backendSupport.dismiss} /> : null;
+  const messagePlace = <MessagePlace feedback={sheetOpen ? null : feedback} offer={null} notice={notice} kiosk={noticeIcon} standing={standingTop ? null : standing} />;
   const pageProducts = pageItems(menuProducts, menuPage, menuSize);
   // 메뉴 화면에는 비워 두는 안내 영역이 없습니다. 안내와 버튼이 있는 카드는 상품 목록 위에 뜨는 자리(쪽 넘김 줄 18 px 위)에 섭니다.
-  const popup = <MessagePlace variant="popup" feedback={sheetOpen ? null : feedback} offer={offerCard} notice={notice} kiosk={noticeIcon} standing={null} />;
+  const popup = <MessagePlace variant="popup" feedback={sheetOpen ? null : feedback} offer={null} notice={notice} kiosk={noticeIcon} standing={null} />;
   // 단계별 안내(기본 글자 크기): 담은 메뉴 바로 위 한 줄 자리. 큰 글씨에서는 단계 표시 아래, 말로 주문 중에는 보이지 않습니다.
   const guideRow = screen === 'menu' && !standingTop && !voiceOn && standing;
   // 큰 글씨와 낮은 화면의 메뉴에서는 장바구니가 [담은 메뉴 보기] 뒤에 있습니다. 낮은 화면에서는 그 버튼이 금액을 담습니다.
@@ -346,6 +347,7 @@ export function OrderPage() {
           {voiceOn && <VoicePanel controller={voiceController} sampleMode={sampleMode} />}</div>}
     </main>
     <section ref={actionsRef} className="order-actions" aria-label="주문 진행">
+      {screen !== 'complete' && <div className="support-confirm-slot">{supportCard ?? offerCard}</div>}
       <ActionBar total={screen === 'complete' || lowMenu ? null : sum}
         cartButton={cartInBar ? { ref: cartOpener, amount: lowMenu ? sum : null, onClick: () => setCartSheetOpen(true) } : null}
         restart={screen === 'complete' ? null : { ref: restartTrigger, disabled: busy || state.status === 'uncertain', onClick: () => { voiceController.setEnabled(false); setRestartOpen(true); } }}
@@ -367,7 +369,6 @@ export function OrderPage() {
     <CartSheet ref={cartDialog} open={cartSheetOpen} lines={cartLines} count={count} total={sum} actions={lineActions}
       status={feedback ?? (notice ? <p className="sheet-status" role="status">{notice}</p> : null)}
       reviewDisabled={!count || writeDisabled} onClose={closeCartSheet} onReview={openReview} />
-    {backendSupport.preset && <SupportConfirmSheet key={backendSupport.preset} preset={backendSupport.preset} onAccept={backendSupport.accept} onDecline={backendSupport.decline} onDismiss={backendSupport.dismiss} />}
     <dialog ref={restartDialog} className="options-dialog" aria-labelledby="restart-title" onCancel={event => { event.preventDefault(); closeRestart(); }}>
       <h2 id="restart-title">처음부터 주문할까요?</h2>
       <p>담은 메뉴를 비우고 새 주문을 시작합니다. 화면 도움 설정은 유지합니다.</p>
