@@ -29,7 +29,8 @@ test('선택·수량 정정·저장 전후 장바구니를 구분하고 새 세�
           const heldAdd = new Promise(resolve => { releaseAdd = resolve; });
           await page.route('**/cart/items', async route => { await heldAdd; await route.fallback(); });
           await page.goto(url);
-          const click = id => page.locator(`[data-log-target="${id}"]`).click();
+          // 창이 닫히거나 화면이 바뀐 직후의 하단 바(data-armed="false")는 두 번 클릭 간격이 지난 뒤 누릅니다.
+          const click = id => page.locator(`[data-log-target="${id}"]:not([data-armed="false"])`).click();
           await page.locator('[data-log-target="product:americano"]:not([disabled])').waitFor();
           await click('product:americano');
           await click('options-increase');
@@ -216,7 +217,7 @@ test('로컬 로그: 중복 방지, 화면·옵션·설정, 서버 세션 연결
     await page.waitForFunction(() => window.kioskTouchLogDraft);
     await page.waitForFunction(id => window.kioskTouchLogDraft.read().serverSessionId === id, first);
     const read = () => page.evaluate(() => window.kioskTouchLogDraft.read());
-    const click = id => page.locator(`[data-log-target="${id}"]`).click();
+    const click = id => page.locator(`[data-log-target="${id}"]:not([data-armed="false"])`).click();
     let log = await read();
     assert.equal(log.events.filter(event => event.kind === 'session_start' && event.serverSessionId === first).length, 1);
     assert.equal(log.events.filter(event => event.kind === 'screen_enter' && event.sessionId === log.sessionId).length, 1);
@@ -422,7 +423,7 @@ test('하단 주문 바의 완전·부분 가림을 제외하고 주문 버튼�
           const responses = await installOrderResponses(page, steps);
           await page.goto(url);
           await page.waitForFunction(() => document.querySelector('[data-log-target="product:americano"]')?.disabled === false);
-          const click = id => page.locator(`[data-log-target="${id}"]`).click();
+          const click = id => page.locator(`[data-log-target="${id}"]:not([data-armed="false"])`).click();
           if (settings.length) {
             await click('support-toggle');
             for (const setting of settings) await click(`support:${setting}`);

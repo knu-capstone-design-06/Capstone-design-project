@@ -125,6 +125,8 @@ test('처음으로의 취소는 장바구니를 보존하고 확인하면 새 �
     await target(page, 'order-restart-cancel').click();
     assert.equal(await page.evaluate(() => window.kioskTouchLogDraft.read().sessionId), before);
     assert(await target(page, 'review-open').isEnabled());
+    // 창이 닫힌 뒤 두 번 클릭 간격 동안 하단 바는 누름을 받지 않습니다.
+    await page.locator('[data-log-target="order-restart"][data-armed="true"]').waitFor();
     await target(page, 'order-restart').click();
     await target(page, 'order-restart-confirm').click();
     await page.waitForFunction(() => window.kioskTouchLogDraft.read().serverSessionId === 'reset-after');
@@ -160,6 +162,7 @@ test('화면 읽기를 중단·다시 재생하고 화면 이동 때 이전 안�
     await target(page, 'read-aloud-replay').click();
     assert.equal(await page.evaluate(() => window.__speechReview.texts.length), 2);
     await target(page, 'support-close').click();
+    await page.locator('[data-log-target="review-open"][data-armed="true"]').waitFor();
     await target(page, 'review-open').click();
     await page.waitForFunction(() => window.__speechReview.texts.length === 3);
     assert.match(await page.evaluate(() => window.__speechReview.texts.at(-1)), /메뉴 더 고르기/);
@@ -295,6 +298,7 @@ test('화면 읽기는 열린 옵션·처음으로 확인 창만 읽고 닫으�
     assert.doesNotMatch(optionText, /메뉴 선택/);
     await target(page, 'options-close').click();
     await page.waitForFunction(() => window.__dialogTexts.length === 3);
+    await page.locator('[data-log-target="order-restart"][data-armed="true"]').waitFor();
     await target(page, 'order-restart').click();
     await page.waitForFunction(() => window.__dialogTexts.length === 4);
     const restartText = await page.evaluate(() => window.__dialogTexts.at(-1));
