@@ -348,7 +348,7 @@ export function OrderPage() {
           disabled: screen === 'complete' ? busy : !count || writeDisabled,
           onClick: () => { if (screen === 'complete') { support.endUse(); void startNewOrder(); } else if (screen === 'menu') openReview(); else void controller.checkout(); } }}
         armed={barArmed} />
-      <EntryRow supportOpen={supportOpen} onToggleSupport={() => setSupportOpen(!supportOpen)} onUndo={support.largeView ? support.undo : null} />
+      <EntryRow supportOpen={supportOpen} onToggleSupport={() => setSupportOpen(!supportOpen)} onUndo={largeView ? support.undo : null} />
     </section>
     <HelpSheet ref={helpDialog} settings={settings} combined={combinedEnlargement}
       onToggle={key => setSettings(current => ({ ...current, [key]: !current[key] }))}

@@ -47,6 +47,11 @@ test('제안을 받아들이면 크게 보기로 바꾸고 적용 안내와 [원
     assert.equal(await page.locator('.kiosk.large-text, .kiosk.large-button').count(), 0, '크게 보기는 화면 도움의 큰 글씨·큰 버튼 설정을 켜지 않음');
     assert.equal(await card.count(), 0);
     assert.match(await page.locator('.cart-notice.is-kiosk').innerText(), /글자와 버튼을 크게 했어요/);
+    // 고객이 큰 글씨를 켜면 큰 글씨가 앞서 크게 보기가 적용되지 않으므로 [원래대로]도 없고, 끄면 다시 섭니다.
+    await target(page, 'support-toggle').click(); await target(page, 'support:largeText').click(); await target(page, 'support-close').click();
+    assert.equal(await target(page, 'support-undo').count(), 0, '큰 글씨가 켜져 있으면 [원래대로]가 없음');
+    await target(page, 'support-toggle').click(); await target(page, 'support:largeText').click(); await target(page, 'support-close').click();
+    await target(page, 'support-undo').waitFor();
     await target(page, 'support-undo').click();
     assert.equal(await page.locator('.kiosk.large-view').count(), 0, '[원래대로]는 크게 보기를 끔');
     assert.equal(await target(page, 'support-undo').count(), 0);
