@@ -54,6 +54,29 @@ test('제안을 받아들이면 크게 보기로 바꾸고 적용 안내와 [원
   } finally { await browser.close(); }
 });
 
+test('[크게 하기]를 250 ms 간격으로 두 번 눌러도 카드가 사라진 자리의 상품은 두 번 클릭 간격 동안 누름을 받지 않는다', async () => {
+  const browser = await chromium.launch(launchOptions);
+  try {
+    const { page, errors, fixture } = await open(browser, bootstrap('offer-repeat'));
+    await page.evaluate(response => window.kioskSupportDraft.receive(response), decision('offer-repeat', 'large_text'));
+    await page.locator('.offer-card[data-armed="true"]').waitFor();
+    const box = await target(page, 'support-offer:accept').boundingBox();
+    const point = [box.x + box.width / 2, box.y + box.height / 2];
+    await page.mouse.click(...point);
+    await page.waitForTimeout(250);
+    await page.mouse.click(...point);
+    await page.locator('.kiosk.large-view').waitFor();
+    assert.equal(await page.locator('dialog[open]').count(), 0, '두 번 클릭 간격 안의 둘째 누름은 상품 옵션 창을 열지 않음');
+    const under = await page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest('[data-log-target]')?.dataset.logTarget ?? null, point);
+    assert.match(under ?? '', /^product:/, '카드가 사라진 자리에는 상품이 섬');
+    await page.locator(`[data-log-target="${under}"][data-armed="true"]`).waitFor();
+    assert.equal(await page.locator('dialog[open]').count(), 0);
+    await page.mouse.click(...point);
+    await page.locator('dialog[open]').waitFor();
+    fixture.verify(); assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
 test('거절하거나 다른 곳을 누르면 제안이 닫히고 화면은 그대로다', async () => {
   const browser = await chromium.launch(launchOptions);
   try {

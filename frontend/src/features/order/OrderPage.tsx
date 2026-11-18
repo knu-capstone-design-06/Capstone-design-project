@@ -284,8 +284,11 @@ export function OrderPage() {
   const standingTop = standing !== null && settings.largeText;
   // 키오스크의 제안은 시트가 열려 있거나 오류·처리 중 안내가 있는 동안 기다리고, 그 밖의 다음 터치에 닫힙니다.
   // 다음 터치로 닫기는 카드 안(OfferCard)에서 대답 버튼과 같은 보호를 받습니다: 카드가 뜬 뒤 두 번 클릭 간격 동안의 터치는 세지 않습니다.
+  // [크게 하기]를 누르면 카드가 사라진 자리에 상품이 서므로, 그 뒤 두 번 클릭 간격 동안 상품 버튼은 누름을 받지 않습니다(하단 바와 같은 보호).
+  const [acceptChange, setAcceptChange] = useState(0);
+  const productsArmed = useArmedAfter(acceptChange);
   const offerCard = support.offer && !sheetOpen && !supportOpen && !restartOpen && !feedback
-    ? <OfferCard support={support.offer.support} scope={touchLog.root} onAccept={support.accept} onDecline={support.decline} /> : null;
+    ? <OfferCard support={support.offer.support} scope={touchLog.root} onAccept={() => { setAcceptChange(count => count + 1); support.accept(); }} onDecline={support.decline} /> : null;
   const messagePlace = <MessagePlace feedback={sheetOpen ? null : feedback} offer={offerCard} notice={notice} kiosk={noticeIcon} standing={standingTop ? null : standing} />;
   const pageProducts = pageItems(menuProducts, menuPage, menuSize);
   // 메뉴 화면에는 비워 두는 안내 영역이 없습니다. 안내와 버튼이 있는 카드는 상품 목록 위에 뜨는 자리(쪽 넘김 줄 18 px 위)에 섭니다.
@@ -328,7 +331,7 @@ export function OrderPage() {
           <div className="tabs-row"><CategoryTabs category={category} onChange={setCategory} />
             <VoiceButton controller={voiceController} ready={(state.status === 'ready' || state.status === 'saving') && state.session !== null && state.order === null} sampleMode={sampleMode} /></div>
           <ProductGrid products={pageProducts} page={menuPage} pages={menuPages} rows={Math.ceil(menuSize / menuColumns(settings))} disabled={writeDisabled} asRows={settings.simpleScreen}
-            popup={popup}
+            popup={popup} armed={productsArmed}
             onSelect={(product, button) => { opener.current = button; setSelected(product); setTemperature(product.temperatures[0] ?? null); setQuantity(1); }}
             onPage={page => setMenuPaging({ key: menuKey, page })} />
         </section>
