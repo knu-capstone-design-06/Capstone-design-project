@@ -250,6 +250,8 @@ test('제안은 처음으로 확인 창이 열린 동안 기다리고, 그사이
     const { page, errors, fixture } = await open(browser, [...bootstrap(session), mutation(session, '/cart/items', cartResponse(session, 1, [iced()]))]);
     await target(page, 'product:americano').click(); await target(page, 'cart-add').click();
     await page.locator('dialog[open]').waitFor({ state: 'hidden' });
+    // 창이 닫힌 뒤 두 번 클릭 간격 동안 하단 바는 누름을 받지 않습니다.
+    await page.locator('[data-log-target="order-restart"][data-armed="true"]').waitFor();
     await target(page, 'order-restart').click(); await page.locator('dialog[open]').waitFor();
     await page.evaluate(() => window.kioskSupportDraft.previewEnlargement());
     await page.waitForTimeout(300);

@@ -33,6 +33,7 @@ import { DoneBlock } from './components/DoneBlock.tsx';
 import { HelpSheet } from './components/HelpSheet.tsx';
 import type { CartDisplayLine, CartLineActions } from './components/CartLine.tsx';
 import { useNextTouch } from './hook/useNextTouch.ts';
+import { useArmedAfter } from './hook/useArmedAfter.ts';
 import { briefNoticeMs } from './utils/timing.ts';
 import { useEnlargementPreview, useSupportDraft } from './hook/useSupportOffer.ts';
 import { OfferCard } from './components/OfferCard.tsx';
@@ -317,6 +318,18 @@ export function OrderPage() {
   // 큰 글씨와 낮은 화면의 메뉴에서는 장바구니가 [담은 메뉴 보기] 뒤에 있습니다. 낮은 화면에서는 그 버튼이 금액을 담습니다.
   const cartInBar = cartInBarFor(screen, settings);
   const lowMenu = screen === 'menu' && settings.lowScreen;
+  // 하단 바의 보호: 바를 덮던 창(옵션·장바구니·화면 도움·처음으로 확인)이나 오류 안내가 닫히거나 화면이 바뀌면, 두 번 클릭 간격 동안
+  // [처음으로]와 주요 버튼이 누름을 받지 않습니다. 옵션 창의 [취소]·[담기]가 그 두 버튼과 같은 자리라, 같은 자리를 연달아 누르던
+  // 손가락이 담기 → 주문 확인 → 주문하기로 이어지지 않게 합니다.
+  const barCovered = sheetOpen || supportOpen || restartOpen || state.message !== '';
+  const barBefore = useRef({ screen, covered: barCovered });
+  const [barChange, setBarChange] = useState(0);
+  useLayoutEffect(() => {
+    const before = barBefore.current;
+    barBefore.current = { screen, covered: barCovered };
+    if (before.screen !== screen || (before.covered && !barCovered)) setBarChange(count => count + 1);
+  }, [screen, barCovered]);
+  const barArmed = useArmedAfter(barChange);
 
   return <><div ref={touchLog.root} data-order-mode={sampleMode ? 'sample' : 'api'} data-listening={voiceOn && voice.phase === 'listening' ? 'on' : undefined} className={`kiosk ${settings.largeText ? 'large-text' : ''} ${settings.largeButton ? 'large-button' : ''} ${settings.simpleScreen ? 'simple-screen' : ''} ${settings.lowScreen ? 'low-screen' : ''} ${settings.highContrast ? 'high-contrast' : ''}${largeView ? ' large-view' : ''}${voiceOn ? ' voice-on' : ''}`}>
     {settings.lowScreen && <div className="low-screen-banner">
@@ -354,7 +367,8 @@ export function OrderPage() {
         primary={{ target: screen === 'complete' ? 'new-order' : screen === 'menu' ? 'review-open' : 'simulate-payment',
           label: screen === 'complete' ? '새 주문 시작' : screen === 'menu' ? '주문 확인' : '주문하기',
           disabled: screen === 'complete' ? busy : !count || writeDisabled,
-          onClick: () => { if (screen === 'complete') { enlargementPreview.reset(); void startNewOrder(); } else if (screen === 'menu') openReview(); else void controller.checkout(); } }} />
+          onClick: () => { if (screen === 'complete') { enlargementPreview.reset(); void startNewOrder(); } else if (screen === 'menu') openReview(); else void controller.checkout(); } }}
+        armed={barArmed} />
       <EntryRow supportOpen={supportOpen} onToggleSupport={() => setSupportOpen(!supportOpen)} onUndo={enlargementPreview.largeView ? enlargementPreview.reset : null} />
     </section>
     <HelpSheet ref={helpDialog} settings={settings} combined={combinedEnlargement}

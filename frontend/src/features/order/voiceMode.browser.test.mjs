@@ -66,6 +66,8 @@ test('개발 샘플에서 짧은 말도 인식하고 다시 듣기·오류·화�
     await page.locator('[data-log-target="product:americano"]').click();
     await page.locator('[data-log-target="cart-add"]').click();
     await page.locator('dialog[open]').waitFor({ state: 'hidden' });
+    // 창이 닫힌 뒤 두 번 클릭 간격 동안 하단 바는 누름을 받지 않습니다.
+    await page.locator('[data-log-target="review-open"][data-armed="true"]').waitFor();
     await page.locator('[data-log-target="voice-listen"]').click();
     await page.locator('[data-log-target="review-open"]').click();
     assert.equal(await page.evaluate(() => window.voiceFakes.at(-1).aborted), true);
@@ -124,6 +126,7 @@ test('메뉴에서 마이크·질문·해석 결과를 표시하고 주문 확�
     await page.locator('[data-log-target="product:americano"]').click();
     await page.locator('[data-log-target="cart-add"]').click();
     await page.locator('dialog[open]').waitFor({ state: 'hidden' });
+    await page.locator('[data-log-target="review-open"][data-armed="true"]').waitFor();
     await page.locator('[data-log-target="review-open"]').click();
     assert.equal(await page.locator('.voice-mode-control').count(), 0);
     assert.equal(await page.evaluate(() => window.voiceFakes.at(-1).aborted), true);
