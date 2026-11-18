@@ -149,7 +149,7 @@ AI 담당의 결과 표에 있는 모델 모두가 세 세트에서 값을 갖�
 | 평가 키트 `llm_eval_kit_2026-11-08`(창별 입력 `data/`, 질문 `questions.json`, 라벨 `labels/`, Jev 기준 답 `reference_answers/`) | `--kit`(`score.py`, `run_gpt.py`, `run_claude.py`), 첫째 인자(`cell_windows.py`), 둘째 인자(`one_second.py`) | 비전 담당 작업 폴더. `eval_llm_2026-11-12_rA/tools/build_kit_2026-11-08.py`로 만들었음 |
 | 모델 답(`answers.jsonl`) | `--answers`(`score.py`) | `run_gpt.py` · `run_claude.py`가 `--out` 폴더에 씀 |
 | 앞선 Jev 실험의 기록 실행(`stage2_3_J_b0_r0`, `stage2_1_swap_C_C0`가 든 폴더) | 셋째 인자(`one_second.py`) | 비전 담당 작업 폴더. Jev의 응답 시간을 이 기록에서 읽음 |
-| AI 담당의 시나리오 재현 자료 | `--repro`(`score_scen_f1.py`, `score_scen_f1_macro.py`: zip이나 푼 `jev_touch_experiment_repro` 폴더), 첫째 인자(`scen_prep.py`: 푼 폴더) | AI 담당이 보낸 자료. 비전 담당 작업 폴더에 있음 |
+| AI 담당의 시나리오 재현 자료 | `--repro`(`score_scen_f1.py`, `score_scen_f1_macro.py`: zip이나 푼 `jev_touch_experiment_repro` 폴더), 첫째 인자(`scen_prep.py`: 푼 `jev_touch_experiment_repro` 폴더) | AI 담당이 보낸 자료. 비전 담당 작업 폴더에 있음 |
 | 시나리오 세트 폴더 `runs/scenarios`(입력 `inputs/`와 실행 폴더) | `--runs`(`score_scen_f1.py`, `score_scen_f1_macro.py`), `--root`(`run_scenarios.py`), 경로 인자(`score_scen.py runs`, `score_scen_1s.py`) | `scen_prep.py`가 `inputs/`를, `run_scenarios.py`가 실행 폴더를 만듦 |
 
 GPT 실행기는 `--env`로 준 파일(`backend/.env`)의 `OPENAI_API_KEY`를, Claude 실행기는 `--env`로 준 파일의 `ANTHROPIC_API_KEY`를 읽습니다. 아래 명령은 실험 때 돌린 순서대로 적었습니다.
