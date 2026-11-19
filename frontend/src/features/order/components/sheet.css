@@ -42,7 +42,8 @@
 }
 .kiosk .sheet .cols button[aria-pressed=true] { font-weight: 700; }
 .kiosk .stepper { display: flex; flex-wrap: nowrap; align-items: center; gap: 0; }
-.kiosk .stepper button { width: var(--h-control); min-width: var(--h-control); padding: 0; }
+/* [−]·[+]의 아이콘은 버튼 가운데에 섭니다(창 밖의 장바구니·주문 확인 줄도 창 안의 버튼과 같이). */
+.kiosk .stepper button { display: inline-flex; align-items: center; justify-content: center; width: var(--h-control); min-width: var(--h-control); padding: 0; }
 .kiosk .stepper > span { width: var(--w-count); text-align: center; font-size: var(--fs-m); font-variant-numeric: tabular-nums; }
 
 /* 아래 줄: [취소]는 [처음으로] 자리, 주요 버튼은 주요 버튼 자리 */
