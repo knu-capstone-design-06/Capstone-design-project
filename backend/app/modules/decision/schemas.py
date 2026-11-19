@@ -213,7 +213,7 @@ class WindowRecord:
     """One judged window, kept for the whole session: the comparison row of the experiment (docs 7.1).
 
     inputs is the rule table's input line, decision the rule table's result, jev why Jev was or was not asked
-    ("off", "no_client", "not_measurable", "skipped_in_flight", "asked", or STALE for a window recorded only: one that arrived after
+    ("off", "no_client", "not_measurable", "skipped_in_flight", "asked", or STALE for a window recorded only: one whose time was off the session's timeline, or that arrived after
     a later one and was recorded without being judged), answers the stage answers as they arrive (the validated
     answer as Jev gave it). Windows the rule table alone judged are rows too, so the rule-only arm has the same
     denominator.

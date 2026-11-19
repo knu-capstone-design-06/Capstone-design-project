@@ -701,7 +701,9 @@ class ObservationTests(unittest.TestCase):
 
         self.assertEqual(judge(2, fixes_recent=2)[0].support, BIG)
         self.assertIsNone(judge(1804, fixes_recent=2)[0], "the clock moved 30 min ahead: recorded only")
-        self.assertEqual(judge(1806, fixes_recent=2)[0].transition, "keep", "shown for 6 s: not lapsed by the move")
+        kept = judge(1806, fixes_recent=2)[0]
+        self.assertEqual(kept.transition, "keep", "shown for 6 s: not lapsed by the move")
+        self.assertEqual(kept.scope, repository.state("s1").held.scope, "the kept decision names the scope on the new timeline")
         decision, _, lapsed = judge(1812, passed=6.0, fixes_recent=2)
         self.assertEqual((lapsed, decision.transition), ("d0001", "none"), "lapsed at 12 s; the same visit: not asked again")
 
@@ -717,6 +719,65 @@ class ObservationTests(unittest.TestCase):
         self.assertEqual(judge(4, progress_segment=True).transition, "withdraw")
         self.assertIsNone(judge(1806))
         self.assertEqual(judge(1808).transition, "none", "the same tag on the same screen: the withdrawn notice stays withdrawn")
+
+    def test_the_same_window_sent_twice_is_not_a_clock_move(self):
+        repository, send = self.timed()
+        send(2), send(4), send(86406), send(86406)                    # one wrong time, sent again
+        self.assertEqual((self.stale(repository), repository.state("s1").epoch), ([False, False, True, True], 0))
+        send(8)
+        self.assertEqual((self.stale(repository)[-1], repository.state("s1").last_t), (False, T0.timestamp() + 8))
+
+    def test_the_screen_of_a_late_or_wrong_time_window_is_not_read(self):
+        # Only the window a confirmed clock move was first seen on lends its screen; any other recorded-only window does not.
+        for odd in (4, 86404):                                        # late; a day ahead
+            with self.subTest(odd=odd):
+                repository, send = self.timed()
+                send(2), send(6, "review", back_count=1)              # 4-2 opens on the review screen
+                send(odd, "menu")                                     # recorded only: not "back to the menu"
+                kept = send(8, "review")
+                self.assertEqual((kept.transition, repository.windows("s1")[-1].inputs["progress_segment"]), ("keep", False))
+
+    def test_the_band_is_ten_minutes_either_side(self):
+        repository, send = self.timed()
+        send(2), send(590, passed=0.0), send(1192, passed=0.0)        # 588 s ahead of the server time passed, then 602 s
+        self.assertEqual(self.stale(repository), [False, False, True])
+
+    def test_judge_leaves_a_late_window_unjudged(self):
+        repository = DecisionRepository()
+        service = DecisionService(repository, P, None)
+        service.judge("s1", ending_at(10), measurable=True)
+        late = service.judge("s1", ending_at(4, back_count=1), measurable=True)
+        self.assertEqual((late.transition, repository.state("s1").held, repository.state("s1").last_t),
+                         ("none", None, T0.timestamp() + 10))
+
+    def test_the_clock_candidate_is_stored_not_only_changed_in_place(self):
+        import copy
+
+        class CopyingRepository(DecisionRepository):                  # as a database-backed store would hand out the state
+            def state(self, session_id):
+                return copy.deepcopy(super().state(session_id))
+
+        repository, clock = CopyingRepository(), {"now": 1000.0}
+        service = DecisionService(repository, P, None, now=lambda: clock["now"])
+        for seconds in (2, 4, 1806, 1808, 90000, 1812, 90004):        # a clock move; then two wrong times apart
+            clock["now"] += 2.0
+            service.observe("s1", ending_at(seconds), measurable=True)
+        self.assertEqual((self.stale(repository), repository.state("s1").epoch),
+                         ([False, False, True, False, True, False, True], 1))
+
+    def test_only_the_window_the_move_was_seen_on_lends_its_screen_to_the_state(self):
+        repository, clock = DecisionRepository(), {"now": 1000.0}
+        service = DecisionService(repository, P, None, now=lambda: clock["now"])
+
+        def step(call, seconds, screen="menu"):
+            clock["now"] += 2.0
+            return call("s1", ending_at(seconds, screen), measurable=True)
+
+        step(service.observe, 2), step(service.observe, 6), step(service.observe, 4, "review")   # the last record: a late window
+        step(service.judge, 5000), step(service.judge, 5002)          # the clock moves, seen through judge(): no record of it
+        state = repository.state("s1")
+        self.assertEqual((state.epoch, state.screen_last), (1, "menu"))
+        self.assertLess(state.screen_since, T0.timestamp() + 5000, "the menu visit goes on: the late review window is not the crossed one")
 
     def test_a_support_withdrawn_before_the_clock_moved_is_not_reopened_in_the_same_visit(self):
         repository, clock = DecisionRepository(), {"now": 1000.0}

@@ -207,18 +207,19 @@ class DecisionService:
         When the session's very first window is the wrong one it is judged (there is nothing to compare it
         with), the next window is the one recorded only, and the one after it starts a new epoch.
 
-        A window recorded only leaves the state as it is and its screen is not read, with one exception: the
-        window a clock move was first seen on did come in order, so once the move is confirmed its screen is
-        taken as that of a window that was not measurable (a screen change that fell on it still counts).
+        A window recorded only leaves the session's supports and screens as they are and its screen is not
+        read, with one exception: the window a clock move was first seen on did come in order, so once the
+        move is confirmed its screen and situation tag are taken as those of a window that was not measurable
+        (a screen change that fell on it still counts; nothing is opened or withdrawn by it).
 
         What this cannot tell apart, by choice of a wide band:
           - a wrong time inside the band is judged as it stands: one window 5 min ahead makes the next ones late
-            until the clock passes it, and a clock corrected by less than the band does the same for good (set
-            back 2 min: about 2 min of windows recorded only; set ahead 5 min: an ask shown 2 s ago lapses);
+            until the clock passes it, and a clock corrected by less than the band does the same (set back
+            2 min: about 2 min of windows recorded only; set ahead 5 min: an ask shown 2 s ago lapses);
           - two windows in a row each more than CLOCK_JUMP_S late read as a clock that moved back;
           - a late window more than CLOCK_JUMP_S late and one wrong time look the same, so neither's screen is read.
-        The window order by the server's arrival count would need none of this; it waits for a sequence
-        number in the contract (docs/Jev-Integration.md 7.1).
+        A sequence number in the contract would need no timeline, band or epoch for the order of windows
+        (docs/Jev-Integration.md 7.1); how long things have been shown would still be read from window times.
         """
         state = self._repository.state(session_id)
         now = self._now()
@@ -271,7 +272,7 @@ class DecisionService:
 
         One call chain per session at a time: while an answer is still on its way, the next window is recorded
         as skipped rather than asked; the window after it asks again. A window that is late or off the
-        session's timeline (_place) is recorded as STALE: no state change, no Jev call.
+        session's timeline (_place) is recorded as STALE: no support or screen changes, no Jev call.
         """
         placed = self._place(session_id, window.window_end.timestamp())
         inp = self._input(session_id, window, measurable, situation, gaze)
