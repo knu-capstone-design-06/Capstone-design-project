@@ -160,7 +160,7 @@ class NextDifficultyStage:
 
     The state carries the last windows (tag, screen, decision, touch counts and, when stage 1 ran, its
     scores) oldest first, with their time offsets, beside the current window. Skipped on a session's first
-    window: there is no trajectory yet. The answer is a forecast to be scored against the windows that
+    window, and on the first judged window after the frontend clock moved: there is no trajectory yet. The answer is a forecast to be scored against the windows that
     follow, which the records already hold.
     """
 

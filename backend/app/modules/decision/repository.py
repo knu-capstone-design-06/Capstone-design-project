@@ -97,7 +97,8 @@ class DecisionRepository:
 
     def windows(self, session_id: str) -> list[WindowRecord]:
         """Every window of the session in the order it was recorded. Judged windows are in time order; a window
-        recorded as STALE arrived after a later one and may end before the record ahead of it."""
+        recorded as STALE was recorded only (it arrived after a later one, or its time was off the session's
+        timeline) and may end before the record ahead of it."""
         with self._lock:
             self._expire()
             return list(self._windows.get(session_id, []))

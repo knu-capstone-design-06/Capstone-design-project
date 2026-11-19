@@ -169,11 +169,17 @@ class DecisionService:
         # times say, so they stay ahead in the order they arrived: a screen change that falls on the clock move is
         # still seen (menu, clock moved, review), and the screen is not read from an earlier time of the old
         # timeline (review at 3000, clock set back, review at 1006: compared with that review, not with a menu at 1000).
+        # The window the clock move was first seen on (the record just before an epoch's first one) was recorded
+        # only, but it did come in order: its screen goes along like that of a window that was not measurable, so
+        # a step back or forward that fell on it is not lost (review, clock moved on a menu window, review again).
         t = window.window_end.timestamp()
         epoch = self._repository.state(session_id).epoch
-        windows = [w for w in self._repository.windows(session_id) if w.jev != STALE]
+        recorded = self._repository.windows(session_id)
+        crossed = {id(w) for w, after in zip(recorded, [w.epoch for w in recorded[1:]] + [epoch]) if after > w.epoch}
+        windows = [w for w in recorded if w.jev != STALE or id(w) in crossed]
         judged = [w for w in windows if w.epoch < epoch] + [w for w in windows if w.epoch == epoch and w.t <= t]
-        seen = [i for i, w in enumerate(judged) if w.inputs.get("measurable") and w.inputs.get("screen") in SCREEN_FLOW]
+        seen = [i for i, w in enumerate(judged) if w.jev != STALE and w.inputs.get("measurable")
+                and w.inputs.get("screen") in SCREEN_FLOW]
         if not seen:
             return window_input(window, measurable, situation, gaze)
         return window_input(window, measurable, situation, gaze, judged[seen[-1]].inputs.get("screen"),
@@ -197,11 +203,22 @@ class DecisionService:
         off) is recorded only as well: judged, it would lapse an open ask at once or send the session back.
         Only when the next window follows that one, two in a row on another timeline, has the frontend clock
         really moved: a new epoch starts, the times the session holds move with the clock, and that window is
-        judged. A wrong time beyond CLOCK_JUMP_S costs that window and no other.
+        judged. One wrong time beyond CLOCK_JUMP_S in the middle of a session costs that window and no other.
+        When the session's very first window is the wrong one it is judged (there is nothing to compare it
+        with), the next window is the one recorded only, and the one after it starts a new epoch.
 
-        What this cannot tell apart, by choice of a wide band: a wrong time inside the band is judged as it
-        stands (a window 5 min ahead makes the next ones late until the clock passes it), and two windows in a
-        row each more than CLOCK_JUMP_S late read as a clock that moved back.
+        A window recorded only leaves the state as it is and its screen is not read, with one exception: the
+        window a clock move was first seen on did come in order, so once the move is confirmed its screen is
+        taken as that of a window that was not measurable (a screen change that fell on it still counts).
+
+        What this cannot tell apart, by choice of a wide band:
+          - a wrong time inside the band is judged as it stands: one window 5 min ahead makes the next ones late
+            until the clock passes it, and a clock corrected by less than the band does the same for good (set
+            back 2 min: about 2 min of windows recorded only; set ahead 5 min: an ask shown 2 s ago lapses);
+          - two windows in a row each more than CLOCK_JUMP_S late read as a clock that moved back;
+          - a late window more than CLOCK_JUMP_S late and one wrong time look the same, so neither's screen is read.
+        The window order by the server's arrival count would need none of this; it waits for a sequence
+        number in the contract (docs/Jev-Integration.md 7.1).
         """
         state = self._repository.state(session_id)
         now = self._now()
@@ -210,15 +227,25 @@ class DecisionService:
         drift = (t - state.last_t) - (now - state.last_now)
         if abs(drift) <= CLOCK_JUMP_S:
             state.alt_t = state.alt_now = None
+            self._repository.save_state(session_id, state)
             return t >= state.last_t                     # False: a late window
-        follows = (state.alt_t is not None and t >= state.alt_t
+        # A later window that continues the one before it. The same window sent twice is not a second one.
+        follows = (state.alt_t is not None and t > state.alt_t
                    and abs((t - state.alt_t) - (now - state.alt_now)) <= CLOCK_JUMP_S)
         if not follows:
             state.alt_t, state.alt_now = t, now
+            self._repository.save_state(session_id, state)
             return False                                 # off the timeline: wait for the next window
+        crossed_t = state.alt_t
         state = moved(state, drift)                      # how long things have been shown stays the same
         state.epoch, state.alt_t, state.alt_now = state.epoch + 1, None, None
-        state.last_t, state.last_now = state.last_t + drift, state.last_now
+        # The window the move was first seen on came in order after all. Its cues stay unjudged, but the screen
+        # it was on is where the session was: taken as a window that was not measurable, so a screen visit that
+        # began or ended on it is not merged with the visit before the move.
+        recorded = self._repository.windows(session_id)
+        if recorded and recorded[-1].jev == STALE and recorded[-1].t == crossed_t:
+            crossed = WindowInput(**{**recorded[-1].inputs, "measurable": False})
+            state, _ = apply(state, decide(crossed, state, self._params))
         self._repository.save_state(session_id, state)
         return True
 

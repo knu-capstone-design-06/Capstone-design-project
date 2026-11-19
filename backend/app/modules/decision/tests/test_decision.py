@@ -506,6 +506,31 @@ class TrajectoryStageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(repository.windows("s1")), HISTORY_WINDOWS + 6)
 
 
+    async def test_the_forecast_after_a_clock_set_back_carries_this_timelines_windows_only(self):
+        from app.modules.decision.jev_questions import NextDifficultyStage
+
+        states = []
+
+        def handler(request):
+            states.append(json.loads(request.content)["state"])
+            return httpx.Response(200, json={"model": "jev-1.13.0", "usage": {"input_tokens": 1, "output_tokens": 0},
+                                             "answers": {"next_difficulty": {"type": "choice", "choice": "none", "confidence": 0.7,
+                                                                             "probabilities": {"none": 1.0}}}})
+
+        http = httpx.AsyncClient(base_url="https://api.typesafe.ai", transport=httpx.MockTransport(handler))
+        clock = {"now": 1000.0}
+        service = DecisionService(DecisionRepository(), P, JevClient(http, "jev-1.13.0", 3.0), stages=(NextDifficultyStage(),),
+                                  now=lambda: clock["now"])
+        for seconds in (1000, 1002, 3000, 1008, 1010, 1012):       # 3000: 2,000 s pass; then the clock is set back
+            clock["now"] += 1998.0 if seconds == 3000 else 2.0
+            service.observe("s1", ending_at(seconds), measurable=True)
+            await service.drain()
+        await http.aclose()
+        self.assertEqual([[h["t_offset_s"] for h in state["history"]] for state in states],
+                         [[-2.0], [-1998.0, -2000.0][::-1], [-2.0]],
+                         "1010 has no window of its timeline before it and is not asked; 1012 sees 1010 only")
+
+
 class ObservationTests(unittest.TestCase):
     """What the Jev state asserts, and what the backend fills from the screen id (vision review of #77)."""
 
@@ -634,6 +659,64 @@ class ObservationTests(unittest.TestCase):
         crossed = repository.windows("s1")[-2]
         self.assertIs(crossed.inputs["progress_segment"], True, "menu before the move, review after it")
         self.assertEqual(crossed.decision["transition"], "withdraw", "progress withdraws 4-2 as it does without a clock move")
+
+    def test_a_step_back_on_the_window_the_clock_move_was_seen_on_is_still_seen(self):
+        # The window the move is first seen on is recorded only, but it came in order: its screen counts on the way.
+        for start, moved_to in ((2, 1804), (3000, 1002)):          # the clock set ahead, the clock set back
+            with self.subTest(moved_to=moved_to):
+                repository, send = self.timed()
+                send(start, "review", back_count=1)                                  # 4-2 opens on the review screen
+                send(moved_to, "menu"), send(moved_to + 2, "review"), send(moved_to + 4, "review")
+                self.assertEqual(self.stale(repository), [False, True, False, False])
+                again = repository.windows("s1")[-2]
+                self.assertIs(again.inputs["progress_segment"], True, "review, back to the menu on the recorded window, review")
+                self.assertEqual(again.decision["transition"], "withdraw", "as without a clock move")
+
+    def test_a_visit_that_fell_on_the_window_the_clock_move_was_seen_on_ends_the_visit_before_it(self):
+        repository, send = self.timed()
+        send(2), send(4, back_count=1)                                # 4-2 opens on the menu
+        send(1806, "review")                                          # the clock moved ahead; recorded only
+        back = send(1808, "menu")                                     # menu, review (recorded only), menu again
+        self.assertEqual((back.transition, repository.windows("s1")[-1].inputs["progress_segment"]), ("withdraw", True))
+        again = send(1810, "menu", back_count=1)
+        self.assertEqual((again.transition, again.support), ("open", HIGHLIGHT),
+                         "a new visit of the menu: what was withdrawn in the visit before the move can open again")
+
+    def test_two_wrong_times_apart_or_unrelated_are_not_a_clock_move(self):
+        repository, send = self.timed()
+        send(2), send(4), send(86406), send(8), send(10), send(86412)       # two wrong times, on-timeline windows between
+        self.assertEqual(self.stale(repository), [False, False, True, False, False, True])
+        send(14), send(-86400 + 16), send(86418), send(20)                   # a day behind, then a day ahead: unrelated
+        send(90022), send(90010), send(26)                                   # two off the timeline, the second before the first
+        self.assertEqual(self.stale(repository)[6:], [False, True, True, False, True, True, False])
+        self.assertEqual((repository.state("s1").epoch, repository.state("s1").last_t), (0, T0.timestamp() + 26))
+
+    def test_an_ask_shown_before_the_clock_moved_lapses_after_it_and_stays_withdrawn_in_the_same_visit(self):
+        repository, clock = DecisionRepository(), {"now": 1000.0}
+        service = DecisionService(repository, P, None, now=lambda: clock["now"])
+
+        def judge(t, passed=2.0, **cues):
+            clock["now"] += passed
+            return service._judge("s1", window(float(t), gaze=True, **cues))
+
+        self.assertEqual(judge(2, fixes_recent=2)[0].support, BIG)
+        self.assertIsNone(judge(1804, fixes_recent=2)[0], "the clock moved 30 min ahead: recorded only")
+        self.assertEqual(judge(1806, fixes_recent=2)[0].transition, "keep", "shown for 6 s: not lapsed by the move")
+        decision, _, lapsed = judge(1812, passed=6.0, fixes_recent=2)
+        self.assertEqual((lapsed, decision.transition), ("d0001", "none"), "lapsed at 12 s; the same visit: not asked again")
+
+    def test_a_tag_scope_moves_with_the_clock(self):
+        repository, clock = DecisionRepository(), {"now": 1000.0}
+        service = DecisionService(repository, P, None, now=lambda: clock["now"])
+
+        def judge(t, **cues):
+            clock["now"] += 2.0
+            return service._judge("s1", window(float(t), situation=situation(QUEUE), **cues))[0]
+
+        self.assertEqual(judge(2).support, NOTICE)
+        self.assertEqual(judge(4, progress_segment=True).transition, "withdraw")
+        self.assertIsNone(judge(1806))
+        self.assertEqual(judge(1808).transition, "none", "the same tag on the same screen: the withdrawn notice stays withdrawn")
 
     def test_a_support_withdrawn_before_the_clock_moved_is_not_reopened_in_the_same_visit(self):
         repository, clock = DecisionRepository(), {"now": 1000.0}
