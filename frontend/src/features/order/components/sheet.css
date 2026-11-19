@@ -25,6 +25,8 @@
 .kiosk .sheet .field { display: flex; flex-direction: column; gap: var(--in); margin: 0; padding: 0; border: 0; min-width: 0; }
 .kiosk .sheet .field-label { padding: 0; margin: 0; font-size: var(--fs-m); font-weight: 700; color: var(--ui-ink); }
 .kiosk .sheet .field-note { margin-left: var(--pad-1); font-size: var(--fs-s); font-weight: 400; color: var(--ui-muted); }
+/* 큰 글씨: "(최대 20개)"가 괄호 안에서 줄이 바뀌지 않게 한 덩어리로 둡니다(줄이 바뀌면 "수량" 다음에서 바뀜). */
+.kiosk.large-text .sheet .field-note { white-space: nowrap; }
 .kiosk .sheet .cols { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--col)), 1fr)); gap: var(--gap-btn); align-items: center; }
 .kiosk .sheet .qty-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap-btn); }
 .kiosk .sheet .qty-row .field-label { flex: 0 1 var(--col); }
