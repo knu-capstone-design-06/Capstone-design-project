@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createTouchLog, distanceToRect } from './touchLog.ts';
 import type { LogContext, Point, Rect, SavedLog } from './touchLog.ts';
 import { summarizeTouchLog } from './touchLogSummary.ts';
@@ -7,8 +7,11 @@ import type { Settings } from './model.ts';
 import { measureTouchPilot } from './touchLogFeatures.ts';
 import type { TouchPilotPolicy } from './touchLogFeatures.ts';
 import type { TouchLogObservation } from './touchLogObservation.ts';
+import { backendApi } from '../../shared/api/index.ts';
+import { createTouchFeatureTransport } from './touchFeatureTransport.ts';
+import type { TransmissionState } from './touchFeatureTransport.ts';
 
-type DraftInspector = { read: () => SavedLog; summarize: () => RawTouchSummary; features: (policy?: TouchPilotPolicy) => ReturnType<typeof measureTouchPilot>; exportJson: () => void; status: () => string | null };
+type DraftInspector = { read: () => SavedLog; summarize: () => RawTouchSummary; features: (policy?: TouchPilotPolicy) => ReturnType<typeof measureTouchPilot>; exportJson: () => void; status: () => string | null; transmission: () => TransmissionState | null };
 declare global { interface Window { kioskTouchLogDraft?: DraftInspector } }
 type Gesture = {
   id: string; context: LogContext; start: Point; last: Point; maxDistance: number;
@@ -53,20 +56,23 @@ function targetInfo(element: HTMLElement) {
   };
 }
 
-export function useTouchLog(screen: string, category: string, productId: string | null, settings: Settings, serverSessionId: string | null, observation: TouchLogObservation) {
+export function useTouchLog(screen: string, category: string, productId: string | null, settings: Settings, serverSessionId: string | null, observation: TouchLogObservation, trackFeatures: boolean) {
   const root = useRef<HTMLDivElement>(null);
   const tracker = useRef<ReturnType<typeof createTouchLog> | null>(null);
   const context = useRef<LogContext>({ screen, visitId: '', settings, voiceMode: observation.voice.enabled });
   const previous = useRef<{ screen: string; category: string; productId: string | null; settings: Settings } | null>(null);
   const previousObservation = useRef<TouchLogObservation | null>(null);
   const interruptGestures = useRef<() => void>(() => {});
+  const [transport] = useState(() => createTouchFeatureTransport(
+    backendApi.sendFeatureWindow, () => tracker.current?.readForFeatures() ?? null,
+  ));
 
   // effect에서 초기화하고 StrictMode 재설정에서도 세션·방문을 유지합니다.
   useEffect(() => {
     if (!tracker.current) {
       let storage: Storage | null = null;
       try { storage = sessionStorage; } catch { /* 메모리에만 기록 */ }
-      tracker.current = createTouchLog(storage);
+      tracker.current = createTouchLog(storage, undefined, undefined, trackFeatures);
       if (tracker.current.resumed) {
         const last = tracker.current.read().events.at(-1);
         tracker.current.record(last ?? { screen, visitId: '', settings }, 'session_end', { reason: 'page_reload' });
@@ -152,7 +158,7 @@ export function useTouchLog(screen: string, category: string, productId: string 
       if (before && before.x === position.x && before.y === position.y) return;
       positions.set(element, position);
       record('scroll', {
-        container: element === document.scrollingElement ? 'document' : (element as HTMLElement).dataset.logTarget ?? null,
+        container: element === document.scrollingElement ? 'document' : (element as HTMLElement).dataset.logScroll ?? (element as HTMLElement).dataset.logTarget ?? null,
         before: before ?? null, after: position,
         // 시간상 겹치는 후보일 뿐, 프로그램 스크롤이나 입력 의도를 확정하지 않습니다.
         inputCandidates: [...gestures.values(), ...cancelled.values()].map(gesture => gesture.id),
@@ -178,6 +184,7 @@ export function useTouchLog(screen: string, category: string, productId: string 
     }
     const inspector: DraftInspector = {
       read: () => recorder.read(), status: () => recorder.getWarning(),
+      transmission: () => trackFeatures ? transport.status() : null,
       summarize: () => summarizeTouchLog(recorder.read()),
       features: policy => measureTouchPilot(recorder.read(), Date.now(), 2000, policy),
       exportJson() {
@@ -250,6 +257,5 @@ export function useTouchLog(screen: string, category: string, productId: string 
     previous.current = { screen, category, productId, settings: { ...settings } };
   }, [screen, category, productId, settings, serverSessionId, observation]);
 
-  const read = useCallback(() => tracker.current?.read() ?? null, []);
-  return { root, read };
+  return { root, transport };
 }

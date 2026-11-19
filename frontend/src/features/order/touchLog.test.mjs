@@ -4,30 +4,49 @@ import { createTouchLog, distanceToRect, logLimit, touchLogKey } from './touchLo
 import { summarizeTouchLog } from './touchLogSummary.ts';
 import { measureTouchPilot } from './touchLogFeatures.ts';
 import { captureTouchLogObservation } from './touchLogObservation.ts';
-import { buildSupportWindow, createSupportTransport } from './backendSupport.ts';
+import { createTouchFeatureTransport } from './touchFeatureTransport.ts';
 import { ApiError } from '../../shared/api/client.ts';
 
-test('기본 특징 요청은 기존 파일럿 기준의 다섯 정수만 보내며 미관측·미산출을 0으로 바꾸지 않는다', () => {
-  const { saved, emit } = pilotLog();
+function supportTransport(send, read, receive, now) {
+  const transport = createTouchFeatureTransport(send, read, now);
+  return {
+    ...transport,
+    setContext(session, key, enabled, canOffer, includeInteraction = false) {
+      transport.setContext(session, enabled, { key, canOffer, includeInteraction, receive });
+    },
+  };
+}
+
+test('같은 전송기가 기본 통계와 선택적 확장 통계를 보내며 미관측 구간은 건너뛴다', async () => {
+  const { saved, emit } = pilotLog(true);
   emit(1000, 'screen_enter', { visibility: 'visible' });
-  assert.equal(buildSupportWindow(saved, 2000), null);
-  assert.deepEqual(buildSupportWindow(saved, 4000), {
+  const sent = [];
+  let now = 2001;
+  const transport = supportTransport(async (session, body) => { sent.push(body); return { session_id: session }; }, () => saved, () => {}, () => now);
+  transport.setContext('server', 'menu', true, false);
+  await transport.tick();
+  assert.deepEqual(sent, []);
+  now = 4001;
+  await transport.tick();
+  assert.deepEqual(sent[0], {
     screen_id: 'menu', window_start: new Date(2000).toISOString(), window_end: new Date(4000).toISOString(),
     touch: { tap_count: 0, miss_tap_count: 0, repeat_tap_count: 0, back_count: 0, dwell_ms: 3000 }, vision: null,
   });
-  emit(4100, 'pointer_start', {});
-  assert.equal(buildSupportWindow(saved, 5000), null);
-  emit(5100, 'screen_enter', { visibility: 'visible', from: 'menu' }, 'visit-2', 'review');
-  assert.equal(buildSupportWindow(saved, 8000).screen_id, 'review');
-  emit(8100, 'screen_enter', { visibility: 'visible', from: 'review' }, 'visit-3', 'complete');
-  assert.equal(buildSupportWindow(saved, 11000), null);
+  transport.setContext('server', 'menu', true, false, true);
+  now = 6001;
+  await transport.tick();
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1].window_start, sent[0].window_end);
+  assert.equal(sent[1].touch.interaction.schema_version, 'touch-interaction-pilot-v1');
+  assert.equal(sent[1].touch.interaction.window_sequence, 2);
+  transport.dispose();
 });
 
 test('전송은 중복 요청을 막고 화면·세션 변경 및 중단 뒤의 늦은 응답을 버린다', async () => {
-  const { saved, emit } = pilotLog(); emit(1000, 'screen_enter', { visibility: 'visible' });
+  const { saved, emit } = pilotLog(true); emit(1000, 'screen_enter', { visibility: 'visible' });
   const calls = [], received = [];
   let now = 4000;
-  const transport = createSupportTransport((session, body, signal) => new Promise(resolve => calls.push({ session, body, signal, resolve })), () => saved, response => received.push(response), () => now);
+  const transport = supportTransport((session, body, signal) => new Promise(resolve => calls.push({ session, body, signal, resolve })), () => saved, response => received.push(response), () => now);
   transport.setContext('server', 'menu', true, true);
   const first = transport.tick(); await transport.tick();
   assert.equal(calls.length, 1);
@@ -50,10 +69,10 @@ test('전송은 중복 요청을 막고 화면·세션 변경 및 중단 뒤의 
 });
 
 test('변경 중에도 전송 구간의 경계가 이어지고 종료를 기다린 누름을 한 번만 센다', async () => {
-  const { saved, emit } = pilotLog(); emit(0, 'screen_enter', { visibility: 'visible' });
+  const { saved, emit } = pilotLog(true); emit(0, 'screen_enter', { visibility: 'visible' });
   let now = 2001;
   const sent = [], received = [];
-  const transport = createSupportTransport(async (session, body) => {
+  const transport = supportTransport(async (session, body) => {
     sent.push(body);
     return { session_id: session };
   }, () => saved, response => received.push(response), () => now);
@@ -74,11 +93,45 @@ test('변경 중에도 전송 구간의 경계가 이어지고 종료를 기다�
   transport.dispose();
 });
 
+test('지연된 요청 뒤에도 구간을 이어 보내고 화면 상태 변경 전의 응답은 제안에 사용하지 않는다', async () => {
+  const { saved, emit } = pilotLog(true);
+  emit(0, 'screen_enter', { visibility: 'visible' });
+  const inputId = emit(5000, 'pointer_start', { target: null, start: { x: 3, y: 4 }, pointerType: 'mouse', isPrimary: true });
+  emit(5010, 'pointer_end', { inputId, cancelled: false, maxObservedDistance: 0 });
+  let now = 4001;
+  const requests = [], received = [];
+  const transport = supportTransport((session, body) => new Promise(resolve => requests.push({ body, resolve })),
+    () => ({ ...saved, events: saved.events.filter(event => Date.parse(event.occurredAt) <= now) }),
+    response => received.push(response), () => now);
+  transport.setContext('server', 'menu:coffee', true, true, true);
+  const first = transport.tick();
+  now = 7200;
+  transport.setContext('server', 'menu:dessert', true, true, true);
+  await transport.tick();
+  assert.equal(requests.length, 1);
+  requests[0].resolve({ session_id: 'server' });
+  await first;
+  const second = transport.tick();
+  requests[1].resolve({ session_id: 'server' });
+  await second;
+  assert.equal(requests[1].body.window_start, requests[0].body.window_end);
+  assert.equal(requests[1].body.touch.tap_count, 1);
+  assert.equal(requests[1].body.touch.interaction.window_sequence, 2);
+  assert.deepEqual(received, []);
+  now = 8001;
+  const third = transport.tick();
+  requests[2].resolve({ session_id: 'server' });
+  await third;
+  assert.equal(requests[2].body.window_start, requests[1].body.window_end);
+  assert.equal(received.length, 1);
+  transport.dispose();
+});
+
 test('네트워크 실패 뒤에는 새 구간을 보내고 종료된 세션은 다음 세션까지 중단한다', async () => {
-  const { saved, emit } = pilotLog(); emit(1000, 'screen_enter', { visibility: 'visible' });
+  const { saved, emit } = pilotLog(true); emit(1000, 'screen_enter', { visibility: 'visible' });
   let count = 0, now = 4000;
   const received = [];
-  const transport = createSupportTransport(async session => {
+  const transport = supportTransport(async session => {
     count++;
     if (count === 1) throw new TypeError('offline');
     if (count === 2) throw new ApiError(410, {});
@@ -89,17 +142,19 @@ test('네트워크 실패 뒤에는 새 구간을 보내고 종료된 세션은 
   now = 6000; await transport.tick();
   now = 8000; await transport.tick();
   assert.equal(count, 2);
-  saved.serverSessionId = 'next'; transport.setContext('next', 'menu', true, true); await transport.tick();
+  saved.serverSessionId = 'next';
+  for (const event of saved.events) event.serverSessionId = 'next';
+  transport.setContext('next', 'menu', true, true); await transport.tick();
   assert.equal(count, 3); assert.equal(received.length, 1); transport.dispose();
 });
 
 for (const pending of [false, true]) test(`같은 세션의 전송 재개는 직전 경계를 유지한다 (${pending ? '요청 처리 중 취소' : '응답 완료'})`, async () => {
-  const { saved, emit } = pilotLog(); emit(0, 'screen_enter', { visibility: 'visible' });
+  const { saved, emit } = pilotLog(true); emit(0, 'screen_enter', { visibility: 'visible' });
   const inputId = emit(3500, 'pointer_start', { target: null, start: { x: 3, y: 4 }, pointerType: 'mouse', isPrimary: true });
   emit(3510, 'pointer_end', { inputId, cancelled: false, maxObservedDistance: 0 });
   let now = 4000;
   const sent = [], received = [];
-  const transport = createSupportTransport((session, body, signal) => {
+  const transport = supportTransport((session, body, signal) => {
     const request = { body, signal };
     sent.push(request);
     if (sent.length === 1) return new Promise(resolve => { request.resolve = resolve; });
@@ -122,10 +177,10 @@ for (const pending of [false, true]) test(`같은 세션의 전송 재개는 직
 });
 
 for (const beforeRead of [false, true]) test(`읽기와 같은 밀리초의 누름을 다음 구간에서 한 번 센다 (${beforeRead ? '읽기 직전 기록' : '읽기 직후 기록'})`, async () => {
-  const { saved, emit } = pilotLog(); emit(0, 'screen_enter', { visibility: 'visible' });
+  const { saved, emit } = pilotLog(true); emit(0, 'screen_enter', { visibility: 'visible' });
   let now = 4000;
   const sent = [];
-  const transport = createSupportTransport(async (session, body) => { sent.push(body); return { session_id: session }; }, () => saved, () => {}, () => now);
+  const transport = supportTransport(async (session, body) => { sent.push(body); return { session_id: session }; }, () => saved, () => {}, () => now);
   const press = () => emit(4000, 'pointer_start', { target: null, start: { x: 3, y: 4 }, pointerType: 'mouse', isPrimary: true });
   let inputId;
   if (beforeRead) inputId = press();
@@ -144,10 +199,10 @@ for (const beforeRead of [false, true]) test(`읽기와 같은 밀리초의 누�
 });
 
 test('종료 경계를 지난 새 방문의 응답을 현재 화면 제안으로 사용하지 않고 실제 미래 시각은 미산출로 둔다', async () => {
-  const { saved, emit } = pilotLog(); emit(0, 'screen_enter', { visibility: 'visible' });
+  const { saved, emit } = pilotLog(true); emit(0, 'screen_enter', { visibility: 'visible' });
   let now = 4000;
   const sent = [], received = [];
-  const transport = createSupportTransport(async (session, body) => { sent.push(body); return { session_id: session }; }, () => saved, response => received.push(response), () => now);
+  const transport = supportTransport(async (session, body) => { sent.push(body); return { session_id: session }; }, () => saved, response => received.push(response), () => now);
   emit(4000, 'screen_enter', { visibility: 'visible', from: 'menu' }, 'review-visit', 'review');
   transport.setContext('server', 'review', true, true); await transport.tick();
   assert.equal(sent[0].screen_id, 'menu', '종료 경계 시점의 화면을 사용');
@@ -165,12 +220,12 @@ test('주문·옵션·음성 관측은 필요한 필드만 복사하고 인식�
     version: 2, total_quantity: 3, items: [{ item_id: 'item', product_id: 'coffee', temperature: 'hot', quantity: 3, name: '상품명', unit_price: 3500 }],
   } };
   const selection = { productId: 'coffee', temperature: 'iced', quantity: 2 };
-  const voice = { enabled: true, microphoneActive: true, phase: 'listening', partialText: '개인적인 발화', lastTranscript: '마지막 인식문', lastResult: { reply_text: '서버 응답' } };
+  const voice = { enabled: true, microphoneActive: true, phase: 'listening', autoOff: null, partialText: '개인적인 발화', lastTranscript: '마지막 인식문', lastResult: { reply_text: '서버 응답' } };
   const observed = captureTouchLogObservation(order, selection, voice);
   assert.deepEqual(observed, {
     order: { status: 'ready', completed: false, feedbackVisible: true,
       cart: { version: 2, totalQuantity: 3, items: [{ itemId: 'item', productId: 'coffee', temperature: 'hot', quantity: 3 }] } },
-    selection, voice: { enabled: true, microphoneActive: true, phase: 'listening' },
+    selection, voice: { enabled: true, microphoneActive: true, phase: 'listening', autoOff: null },
   });
   observed.order.cart.items[0].quantity = 9;
   observed.selection.quantity = 9;
@@ -179,15 +234,18 @@ test('주문·옵션·음성 관측은 필요한 필드만 복사하고 인식�
   assert.equal(selection.quantity, 2);
   assert.equal(voice.enabled, true);
   assert.equal(captureTouchLogObservation({ ...order, order: {}, cart: null, message: '' }, null, voice).order.completed, true);
+  assert.deepEqual(captureTouchLogObservation(order, null, { ...voice, enabled: false, autoOff: 'silence' }).voice,
+    { enabled: false, microphoneActive: true, phase: 'listening', autoOff: 'silence' });
 });
 
-function pilotLog() {
+function pilotLog(withOrder = false) {
   const saved = { version: 1, sessionId: 'current', serverSessionId: 'server', startedAt: 0, events: [] };
   const emit = (ms, kind, data = null, visitId = 'visit-1', screen = 'menu', sessionId = 'current') => {
     const id = `pilot-${saved.events.length}`;
     saved.events.push({ ...context(), id, sessionId, serverSessionId: 'server', occurredAt: new Date(ms).toISOString(), elapsedMs: ms, visitId, screen, kind, data });
     return id;
   };
+  if (withOrder) emit(0, 'order_state_change', { before: null, after: { status: 'ready', completed: false } });
   return { saved, emit };
 }
 

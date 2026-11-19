@@ -43,11 +43,12 @@ export async function installOrderResponses(page, steps) {
     const parsed = new URL(request.url());
     const actual = { method: request.method(), path: parsed.pathname.replace(/^\/backend/, '') + parsed.search,
       key: request.headers()['idempotency-key'], body: request.postData() ? request.postDataJSON() : null };
-    // 기본 통계 전송은 주문 변경 요청 큐와 별도로 확인합니다.
+    // Telemetry is periodic and independent of the ordered product/cart fixtures.
     if (actual.method === 'POST' && /^\/api\/v1\/sessions\/[^/]+\/features$/.test(actual.path)) {
       featureRequests.push(actual);
       return await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
-        session_id: decodeURIComponent(actual.path.split('/')[4]), ai_available: true,
+        session_id: decodeURIComponent(actual.path.split('/')[4]), ai_available: false,
+        states: null, model_version: null,
         support: { preset: 'none', requires_confirmation: false, decided_by: 'rule_placeholder' },
       }) });
     }
