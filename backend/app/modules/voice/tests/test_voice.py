@@ -14,6 +14,7 @@ from app.infrastructure.external.openai_client import OpenAiClient
 from app.main import create_app
 from app.modules.voice.interpreter import OpenAiVoiceInterpreter, StubVoiceInterpreter
 from app.modules.voice.exceptions import VoiceSessionCompleted
+from app.modules.voice.executor import ToolExecutionFailed
 from app.modules.voice.repository import HISTORY_TURNS, VoiceRepository
 from app.modules.voice.service import ASK_MENU_REPLY, OFF_MENU_REPLY, REPLY_MAX, SOLD_OUT_REPLY
 from app.modules.voice.schemas import (
@@ -1826,6 +1827,164 @@ class CancellationTests(VoiceApiCase):
     def test_cancellation_is_raised_again_when_the_execution_failed(self):
         body = self.cancel_during_execution(1, outcome=RuntimeError("db gone"))
         self.assertEqual((body["status"], body["error"]["code"]), ("failed", "cart_update_failed"))
+
+
+class LoopTeardownTests(VoiceApiCase):
+    SETTINGS = {"voice_execute_tools": True}
+
+    def test_a_closing_loop_that_cancels_every_task_still_ends_the_request(self):
+        # asyncio.run (and a forced server exit) cancels every task still pending, the worker's included.
+        service = self.client.app.state.voice_service
+        executor, entered, hold = service._executor, threading.Event(), threading.Event()
+        real = executor.execute
+
+        def slow(*args, **kwargs):
+            entered.set()
+            hold.wait(5)
+            return real(*args, **kwargs)
+
+        executor.execute = slow
+        self.addCleanup(lambda: executor.__dict__.pop("execute", None))
+        request = VoiceRequestCreate(text="아이스 아메리카노 두 잔 주세요", alternatives=[], screen_id="menu_list")
+        accepted, _ = service.accept(self.session_id, uuid4(), request)
+
+        async def leave_while_the_tools_run():
+            asyncio.create_task(service.process(self.session_id, accepted.request_id, request))
+            await asyncio.get_running_loop().run_in_executor(None, entered.wait, 5)
+            threading.Timer(0.3, hold.set).start()   # the worker ends a little after the loop starts closing
+
+        closing = threading.Thread(target=asyncio.run, args=(leave_while_the_tools_run(),), daemon=True)
+        closing.start()
+        closing.join(10)
+        self.assertFalse(closing.is_alive(), "the loop closed instead of spinning on a cancelled worker task")
+        body = self.status(accepted.request_id).json()
+        self.assertEqual(self.cart()["total_quantity"], 2)
+        self.assertEqual((body["status"], body["actions"]), ("completed", ["cart_updated"]))
+
+
+class ReviewerCaseTests(VoiceApiCase):
+    SETTINGS = {"voice_execute_tools": True}
+
+    def crash_in(self, method, at=1):
+        repository = self.client.app.state.voice_service._repository
+        real, seen, reached = getattr(repository, method), [0], []
+
+        def boom(*args, **kwargs):
+            seen[0] += 1
+            if seen[0] == at:
+                reached.append(seen[0])
+                raise RuntimeError("boom")
+            return real(*args, **kwargs)
+
+        setattr(repository, method, boom)
+        self.addCleanup(lambda: repository.__dict__.pop(method, None))
+        return reached
+
+    def test_a_rolled_back_execution_reads_failed_even_when_writing_the_result_fails(self):
+        # Review of #92 (bb): committed changes read completed/cart_updated, rolled-back ones read failed,
+        # also when the bookkeeping after the execution fails.
+        ordering = self.client.app.state.voice_service._executor.service
+        real = ordering.add_item
+
+        def add_then_crash(*args, **kwargs):
+            real(*args, **kwargs)              # the line is added inside the transaction...
+            raise RuntimeError("db gone")      # ...and the transaction takes it back
+
+        for name, quantity, crash in (("refused by the ordering service", 19, None),
+                                      ("crash inside the transaction", 1, add_then_crash)):
+            with self.subTest(name):
+                self.session_id = self.client.post("/api/v1/sessions").json()["session_id"]
+                self.add_by_touch("americano", "iced", 2)
+                self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", quantity))
+                reached = self.crash_in("update", at=2)   # 1: "processing", 2: the failed result
+                ran = []
+                execute = self.client.app.state.voice_service._executor.execute
+                with patch.object(ordering, "add_item", crash or real),                         patch.object(self.client.app.state.voice_service._executor, "execute",
+                                     lambda *a, **k: (ran.append(True), execute(*a, **k))[1]):
+                    text = "아이스 아메리카노 열아홉 잔 주세요" if quantity == 19 else "아이스 아메리카노 한 잔 주세요"
+                    body = self.status(self.say(text)).json()
+                self.client.app.state.voice_service._repository.__dict__.pop("update", None)
+                self.assertEqual((ran, reached), ([True], [2]), "the execution ran and the write of its result failed")
+                self.assertEqual((body["status"], body["actions"], body["tool_calls"]), ("failed", [], []))
+                self.assertEqual(self.cart()["total_quantity"], 2, "rolled back")
+                self.assertEqual(self.post().status_code, 202)
+
+    def test_the_reviewers_sequence_after_a_lost_turn_runs_once(self):
+        # Review of #92 (wdragon): offer -> "네" (append_turn fails once) -> "그걸로 주세요" (model: one more cup).
+        self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
+        self.say("아이스 아메리카노 두 개")
+        reached = self.crash_in("append_turn")
+        self.assertEqual(self.status(self.say("네")).json()["actions"], ["cart_updated"])
+        self.assertEqual(reached, [1])
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 1))
+        third = self.status(self.say("그걸로 주세요")).json()
+        self.assertEqual((third["status"], third["actions"]), ("needs_clarification", []))
+        self.assertEqual(self.cart()["total_quantity"], 2, "ran once")
+        self.say("에그 샌드위치 하나 주세요")
+        self.assertNotIn("needs_confirmation", [t.result.status for t in self.interpreter.histories[-1]])
+
+
+class StoreFailureMoreTests(VoiceApiCase):
+    SETTINGS = {"voice_execute_tools": True}
+
+    def crash_once(self, method, at=1):
+        repository = self.client.app.state.voice_service._repository
+        real, seen = getattr(repository, method), [0]
+
+        def boom(*args, **kwargs):
+            seen[0] += 1
+            if seen[0] == at:
+                raise RuntimeError("boom")
+            return real(*args, **kwargs)
+
+        setattr(repository, method, boom)
+        self.addCleanup(lambda: repository.__dict__.pop(method, None))
+
+    def test_a_request_that_crashed_before_taking_the_offer_still_closes_it(self):
+        # Kills: handler offers never closed / offer not taken / offer's turn not discarded.
+        self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
+        self.say("아이스 아메리카노 두 개")
+        self.crash_once("update")                 # the very first write ("processing") fails
+        failed = self.status(self.say("아니요 그거 말고요")).json()
+        self.assertEqual(failed["status"], "failed")
+        self.interpreter.result = interpretation(ADD_AMERICANO)
+        self.assertNotEqual(self.status(self.say("네")).json()["status"], "completed")
+        self.assertEqual(self.cart()["items"], [])
+        self.interpreter.result = interpretation(call("add_cart_item", "sandwich", None, 1))
+        self.say("에그 샌드위치 하나 주세요")
+        self.assertNotIn("needs_confirmation", [t.result.status for t in self.interpreter.histories[-1]])
+
+    def test_a_crash_in_the_last_update_reports_the_tool_calls_that_ran(self):
+        # Kills: handler completed without tool_calls.
+        self.crash_once("update", at=2)
+        body = self.status(self.say("아이스 아메리카노 두 잔 주세요")).json()
+        self.assertEqual((body["status"], body["tool_calls"], body["actions"]), ("completed", [ADD_AMERICANO], ["cart_updated"]))
+
+    def test_a_touch_between_offer_and_yes_reoffers_with_one_question_in_the_context(self):
+        # Kills: CartChanged old turn not discarded.
+        self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
+        self.say("아이스 아메리카노 두 개")
+        executor = self.client.app.state.voice_service._executor
+        real = executor.execute
+
+        def touch_first(*args, **kwargs):
+            executor.__dict__.pop("execute", None)
+            self.client.app.state.voice_service._executor.service.add_item  # noqa: B018
+            from uuid import uuid4
+            from app.modules.ordering.schemas import AddItemRequest
+            cart = executor.service.cart(self.session_id)
+            executor.service.add_item(self.session_id, str(uuid4()), AddItemRequest(
+                expected_version=cart.version, product_id="sandwich", temperature=None, quantity=1))
+            return real(*args, **kwargs)
+
+        executor.execute = touch_first
+        self.addCleanup(lambda: executor.__dict__.pop("execute", None))
+        again = self.status(self.say("네")).json()
+        self.assertEqual(again["status"], "needs_confirmation")
+        self.interpreter.result = interpretation(call("add_cart_item", "sandwich", None, 1))
+        self.say("음 잠깐만요")
+        statuses = [t.result.status for t in self.interpreter.histories[-1]]
+        self.assertEqual(statuses.count("needs_confirmation"), 1, statuses)
 
 
 class RetentionTests(unittest.TestCase):

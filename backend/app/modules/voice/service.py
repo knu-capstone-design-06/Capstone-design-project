@@ -1,4 +1,6 @@
 import asyncio
+import contextvars
+import functools
 import hashlib
 import logging
 import re
@@ -899,8 +901,9 @@ class VoiceService:
     async def process(
         self, session_id: str, request_id: str, request: VoiceRequestCreate
     ) -> None:
-        """Interpret and (when set up) run one accepted request, and leave it finished whatever fails: one
-        left "processing" would answer every later request of its session with 409. Once the tools have run
+        """Interpret and (when set up) run one accepted request, and leave it finished whatever fails short of
+        the store refusing to record the end itself: one left "processing" would answer every later request of
+        its session with 409. Once the tools have run
         the request ends as that (completed, cart_updated), also when the task is cancelled meanwhile."""
         ran: list[VoiceInterpretation] = []  # filled once the tools have run: the request then ends as that
         try:
@@ -1059,13 +1062,18 @@ class VoiceService:
             try:
                 # The worker thread cannot be stopped once it runs, so its outcome decides how the request
                 # ends even when this task is cancelled meanwhile (shutdown): the cancellation waits.
-                run = asyncio.ensure_future(
-                    asyncio.to_thread(self._executor.execute, session_id, request_id, result.tool_calls, expected))
+                # An executor future, not a task: a loop that is shutting down cancels every task, and a
+                # cancelled worker task could not be waited for (the thread would still change the cart).
+                run = asyncio.get_running_loop().run_in_executor(None, functools.partial(
+                    contextvars.copy_context().run, self._executor.execute,
+                    session_id, request_id, result.tool_calls, expected))
                 while True:
                     try:
                         await asyncio.shield(run)
                         break
                     except asyncio.CancelledError:
+                        if run.cancelled():
+                            raise  # nothing left to wait for; never loop on a cancelled future
                         cancelled = True  # also a second time: keep waiting for the worker's outcome
             except CartChanged as changed:
                 # A touch changed the cart after the inputs were checked ("3잔으로" was
