@@ -26,7 +26,7 @@ from app.modules.voice.executor import OrderingCartExecutor
 from app.modules.voice.interpreter import build_voice_interpreter
 from app.modules.voice.repository import VoiceRepository
 from app.modules.voice.router import router as voice_router
-from app.modules.voice.service import VoiceService, menu_from_products
+from app.modules.voice.service import VoiceService, cart_from_items, menu_from_products
 
 
 class HealthResponse(BaseModel):
@@ -91,13 +91,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 app.state.jev_client = JevClient(
                     jev_http, settings.jev_model, settings.jev_timeout_seconds
                 )
+            ordering_service = OrderingService(
+                session_repository.exists, app.state.ordering_repository
+            )
             executor = None
             if settings.voice_execute_tools:
                 # Voice changes the cart through the same service as touch ordering.
-                executor = OrderingCartExecutor(
-                    OrderingService(session_repository.exists, app.state.ordering_repository),
-                    app.state.ordering_repository,
-                )
+                executor = OrderingCartExecutor(ordering_service, app.state.ordering_repository)
             app.state.voice_service = VoiceService(
                 session_repository.exists, VoiceRepository(),
                 build_voice_interpreter(openai),
@@ -108,6 +108,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 ),
                 ordering=app.state.ordering_repository,
                 executor=executor,
+                # The interpreter reads "하나 더" against the cart touch ordering built.
+                cart_provider=lambda session_id: cart_from_items(ordering_service.cart(session_id).items),
             )
             try:
                 yield

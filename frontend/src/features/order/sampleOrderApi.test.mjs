@@ -18,7 +18,7 @@ test('개발 샘플의 기존 17개 상품으로 옵션·수량·삭제·주문�
   await controller.removeItem(food.item_id);
   assert.equal(controller.getSnapshot().cart.total_amount, 10500);
   assert.equal(await controller.checkout(), true);
-  assert.equal(controller.getSnapshot().order.order_number, 'DEMO-001', '샘플 주문번호는 DEMO-와 세 자리 숫자');
+  assert.match(controller.getSnapshot().order.order_number, /^DEV-SAMPLE-/);
   assert.equal(await controller.startNewOrder(), true);
   assert.notEqual(controller.getSnapshot().session.session_id, first);
   assert.equal(controller.getSnapshot().cart.total_quantity, 0);

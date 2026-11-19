@@ -1,7 +1,7 @@
 import type { Settings } from '../model.ts';
 
 // 목록을 쪽으로 나눕니다. 한 쪽의 줄 수는 1080 × 1920에서 잰 높이로 정한 값입니다(아래 설명). 다른 화면 크기에서는 같은 수를 쓰고 넘치는 부분은 문서 스크롤로 봅니다.
-export type PagingMode = Pick<Settings, 'largeText' | 'largeButton' | 'lowScreen' | 'simpleScreen'> & Partial<Pick<Settings, 'stepGuide' | 'highContrast'>> & { voiceOn?: boolean; largeView?: boolean };
+export type PagingMode = Pick<Settings, 'largeText' | 'largeButton' | 'lowScreen' | 'simpleScreen'> & Partial<Pick<Settings, 'stepGuide' | 'highContrast'>> & { voiceOn?: boolean; largeView?: boolean; supportBar?: boolean };
 
 /*
  * 메뉴 한 쪽의 줄 수(큰 글씨 밖). 메뉴 화면에는 비워 두는 안내 영역이 없고, 탭 줄과 쪽 넘김 줄 사이를 상품 목록이 채웁니다.
@@ -22,13 +22,15 @@ export function menuColumns({ largeText, simpleScreen }: Pick<PagingMode, 'large
 }
 
 /** 메뉴 한 쪽의 상품 수입니다. */
-export function menuPageSize({ largeText, largeButton, lowScreen, simpleScreen, stepGuide = false, voiceOn = false, largeView = false }: PagingMode): number {
+export function menuPageSize({ largeText, largeButton, lowScreen, simpleScreen, stepGuide = false, voiceOn = false, largeView = false, supportBar = false }: PagingMode): number {
   // 큰 글씨: 사진 카드 두 열. 사진 칸이 기본 크기의 사진(225.8) 이상인 줄 수라서 두 줄(4개), 낮은 화면·말로 주문·단계별 안내에서는 한 줄(2개)입니다.
   // 간편 화면에 큰 글씨를 더하면 작은 사진이 붙은 글자 줄 4개(낮은 화면 2개)입니다.
-  if (largeText) return simpleScreen ? (lowScreen ? 2 : 4) : 2 * (lowScreen || voiceOn || stepGuide ? 1 : 2);
+  // 제안 전용 자리를 확보한 큰 글씨 화면은 사진 한 줄을 둬 하단 바와 겹치지 않게 합니다.
+  if (largeText) return simpleScreen ? (lowScreen ? 2 : 4) : 2 * (lowScreen || voiceOn || stepGuide || supportBar ? 1 : 2);
   const place = voiceOn ? (lowScreen ? 'lowVoice' : 'voice') : lowScreen ? 'low' : 'normal';
   const size = largeView ? 2 : largeButton ? 1 : 0;
-  const rows = Math.max(1, (simpleScreen ? textRows : cardRows)[place][size] - (stepGuide && !voiceOn ? 1 : 0));
+  const reservedRows = !supportBar ? 0 : simpleScreen ? (largeView ? 3 : 2) : lowScreen || largeButton || largeView || voiceOn ? 1 : 0;
+  const rows = Math.max(1, (simpleScreen ? textRows : cardRows)[place][size] - (stepGuide && !voiceOn ? 1 : 0) - reservedRows);
   return simpleScreen ? rows : 3 * rows;
 }
 

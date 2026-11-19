@@ -28,16 +28,6 @@
 .kiosk .sheet .cols { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--col)), 1fr)); gap: var(--gap-btn); align-items: center; }
 .kiosk .sheet .qty-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap-btn); }
 .kiosk .sheet .qty-row .field-label { flex: 0 1 var(--col); }
-/* 옵션 시트의 온도·수량 두 열(키오스크 기준 폭 1080px 이상, 큰 글씨 제외): 폭은 (내용 폭 − [담기] 폭 − 버튼 간격 2개) ÷ 2로,
-   1080px 폭에서 둘째 열 오른쪽 끝이 아래 줄 [취소] 오른쪽 끝에 맞음. 열 간격은 그대로이고 왼쪽부터 채우며, 카드 열 폭을 넘지 않음(더 넓은 화면에서는 카드 열 폭에서 멈춤).
-   큰 글씨에서는 [담기]가 글자만큼 넓어지고 1080px보다 좁은 화면에서는 아래 줄의 열 구성이 달라 이 식이 맞지 않으므로 기존 배치 그대로 */
-@media (min-width: 1080px) {
-  .kiosk:not(.large-text) .option-sheet { --option-col: min(var(--col), calc((100% - var(--w-action) - 2 * var(--gap-btn)) / 2)); }
-  .kiosk:not(.large-text) .option-sheet .cols { grid-template-columns: repeat(auto-fill, var(--option-col)); }
-  .kiosk:not(.large-text) .option-sheet .qty-row .field-label { flex: 0 1 var(--option-col); }
-  /* 수량 [−] n [+]: 같은 폭의 둘째 열에 [−]와 [+]는 양 끝, 수는 그 가운데 */
-  .kiosk:not(.large-text) .option-sheet .qty-row .stepper { flex: 0 1 var(--option-col); justify-content: space-between; }
-}
 .kiosk .sheet .cols button[aria-pressed=true] { font-weight: 700; }
 .kiosk .stepper { display: flex; flex-wrap: nowrap; align-items: center; gap: 0; }
 .kiosk .stepper button { width: var(--h-control); min-width: var(--h-control); padding: 0; }
@@ -87,14 +77,9 @@
 @media (max-width: 760px) {
   .kiosk .help-sheet { padding: var(--in); }
 }
-/* 화면 도움 안의 직원 호출 한 줄: 전체 너비의 외곽선 버튼 */
+/* 화면 도움 안의 직원 호출 한 줄: 전체 너비의 외곽선 버튼, 호출 중에는 고른 모습(행동색 채움, 굵게)의 [호출 취소] */
 .kiosk .help-sheet .staff-row { justify-content: flex-start; width: 100%; padding: 0 var(--pad-3); }
-/* 직원 호출 팝업: 시트와 같은 덮개·안쪽 여백(32·48)·제목(M 굵게)·주요 버튼(360)으로 화면 가운데에 뜨는 층(모서리 24, 그림자 하나).
-   낮은 화면에서는 아래 조작 영역의 가운데에 섭니다. */
-.kiosk dialog.sheet.staff-popup { inset: 0; width: fit-content; max-width: calc(100% - 2 * var(--side)); height: fit-content; margin: auto;
-  align-items: center; text-align: center; border-radius: var(--r-float); box-shadow: var(--shadow-float); }
-.kiosk.low-screen dialog.sheet.staff-popup { inset: calc(100dvh - var(--low-screen-height)) 0 0; }
-.kiosk .staff-popup .sheet-name { text-wrap: balance; }
-.kiosk .staff-popup .primary { width: auto; min-width: var(--w-action); font-weight: 700; }
+.kiosk .help-sheet .staff-row.is-call { color: var(--ui-on-selected); background: var(--ui-selected); border-color: var(--ui-selected); font-weight: 700; }
 /* 장바구니 시트의 제목 줄은 메뉴 화면 장바구니의 제목 줄과 같습니다(같은 높이와 그 아래 선). */
 .kiosk .cart-sheet-head .sheet-support { margin-top: var(--pad-1); }
+@media (hover: hover) { .kiosk .help-sheet .staff-row.is-call:hover { color: var(--ui-on-selected); background: var(--ui-selected); border-color: var(--ui-selected); } }

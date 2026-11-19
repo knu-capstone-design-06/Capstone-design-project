@@ -4,6 +4,12 @@ export type Settings = { largeText: boolean; largeButton: boolean; simpleScreen:
 export const initialSettings: Settings = { largeText: false, largeButton: false, simpleScreen: false, stepGuide: false, lowScreen: false, highContrast: false };
 export const settingsStorageKey = 'kiosk-ui-settings-v1';
 export const MAX_QUANTITY = 20;
+/**
+ * 개발 샘플을 포함해 주문번호의 접두사를 보존합니다. 실제 주문번호로 오인하지 않도록 원래 값을 그대로 보입니다.
+ */
+export function orderNumberText(value: string): string {
+  return value;
+}
 
 export const money = (amount: number) => `${amount.toLocaleString('ko-KR')}원`;
 export const categoryLabels: Record<ProductCategory, string> = { coffee: '커피', drink: '음료', food: '푸드' };

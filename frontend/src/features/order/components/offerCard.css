@@ -38,13 +38,6 @@
 .kiosk .hint-callout { position: absolute; right: 0; bottom: calc(100% + var(--halo) + var(--pointer)); z-index: 1; display: flex; align-items: center; gap: var(--pad-1);
   max-width: var(--col); margin: 0; padding: var(--between); border-radius: var(--r-float); box-shadow: var(--shadow-float);
   background: var(--ui-support); color: var(--ui-on-support); font-size: var(--fs-m); line-height: var(--lh); text-wrap: balance; }
-/* 옵션 시트의 말풍선(키오스크 기준 폭 1080px 이상, 기본 글자 크기): 폭만 [담기]와 같게(높이·위치·꼬리는 그대로). 픽토그램과 글 사이는 말풍선 안쪽 여백만큼 띄우고,
-   글은 문구(copy.ts)의 줄바꿈에서만 두 줄로 나눠 긴 줄의 폭이 되게 하고, 둘을 한 묶음으로 가운데에 둠.
-   오른쪽 안쪽 여백은 (안쪽 여백 − 버튼 간격)만큼 더 넓혀 묶음을 조금 왼쪽에 둠. 크게 보기와 큰 글씨에서는 글자가 커져 이 폭에 두 줄로 들어가지 않고,
-   1080px보다 좁은 화면에서는 [담기]의 폭이 달라지므로 기존 말풍선 그대로 */
-@media (min-width: 1080px) {
-  .kiosk:not(.large-text, .large-view) .option-sheet .hint-callout { width: var(--w-action); max-width: none; justify-content: center; gap: var(--between); padding-inline-end: calc(2 * var(--between) - var(--gap-btn)); white-space: pre; }
-}
 .kiosk .hint-callout .pic { flex: none; width: var(--pic-m); height: var(--pic-m); fill: currentColor; }
 .kiosk .hint-callout::after { content: ''; position: absolute; top: 100%; right: var(--between); border: var(--pointer) solid transparent; border-top-color: var(--ui-support); }
 @media (hover: hover) {

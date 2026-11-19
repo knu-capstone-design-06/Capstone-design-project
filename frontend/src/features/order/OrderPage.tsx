@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { backendApi } from '../../shared/api/index.ts';
 import type { CartItem, Product, Temperature } from '../../shared/api/index.ts';
 import { categoryLabels, initialSettings, MAX_QUANTITY, readSettings, settingsStorageKey, temperatureLabel } from './model.ts';
@@ -35,8 +35,10 @@ import type { CartDisplayLine, CartLineActions } from './components/CartLine.tsx
 import { useNextTouch } from './hook/useNextTouch.ts';
 import { useArmedAfter } from './hook/useArmedAfter.ts';
 import { briefNoticeMs } from './utils/timing.ts';
-import { useSupportDraft, useSupportOffer } from './hook/useSupportOffer.ts';
+import { useEnlargementPreview, useSupportDraft } from './hook/useSupportOffer.ts';
 import { OfferCard } from './components/OfferCard.tsx';
+import { SupportConfirmSheet } from './components/SupportConfirmSheet.tsx';
+import { useBackendSupport } from './hook/useBackendSupport.ts';
 import { clampPage, menuColumns, menuPageSize, pageCount, pageItems, reviewPageSize } from './utils/paging.ts';
 
 const sampleMode = import.meta.env.DEV && import.meta.env.VITE_ORDER_SAMPLE === 'true';
@@ -61,10 +63,14 @@ export function OrderPage() {
     onResult: result => { if (result.actions.includes('cart_updated')) void controller.refreshCartAfterVoice(); },
   }));
   const voice = useSyncExternalStore(voiceController.subscribe, voiceController.getSnapshot);
-  const [settings, setSettings] = useState(() => {
+  const [manualSettings, setManualSettings] = useState(() => {
     try { return readSettings(localStorage.getItem(settingsStorageKey) ?? localStorage.getItem('kiosk-sample-order-v1')); }
     catch { return { ...initialSettings }; }
   });
+  const [automaticSettings, setAutomaticSettings] = useState<{ sessionId: string; values: Partial<Settings> }>({ sessionId: '', values: {} });
+  const sessionId = state.session?.session_id ?? null;
+  // 고객 설정만 저장합니다. 서버 제안으로 켠 설정은 새 세션·새로고침에서 끝납니다.
+  const settings = useMemo(() => ({ ...manualSettings, ...(automaticSettings.sessionId === sessionId ? automaticSettings.values : {}) }), [manualSettings, automaticSettings, sessionId]);
   const [screen, setScreen] = useState<'menu' | 'review' | 'complete'>('menu');
   const [category, setCategory] = useState<CategoryFilter>('all');
   const [menuPaging, setMenuPaging] = useState({ key: '', page: 0 });
@@ -105,10 +111,10 @@ export function OrderPage() {
   useEffect(() => () => voiceController.dispose(), [voiceController]);
   useEffect(() => { if (voice.enabled) setAutoOffClosed(false); }, [voice.enabled]);
   // 키오스크가 켜는 크게 보기는 화면 설정 밖의 상태라 저장하지 않고, 새로고침·새 이용에서 끝납니다.
-  const support = useSupportOffer({ settings, screen, sessionId: state.session?.session_id ?? null, orderDone: state.order !== null });
+  const enlargementPreview = useEnlargementPreview({ settings, screen, sessionId: state.session?.session_id ?? null, orderDone: state.order !== null });
   // 크게 보기: 고객이 큰 글씨(200 %)를 켜면 그쪽이 앞섭니다.
-  const largeView = support.largeView && !settings.largeText;
-  useEffect(() => { try { localStorage.setItem(settingsStorageKey, JSON.stringify(settings)); } catch { setStorageWarning(true); } }, [settings]);
+  const largeView = enlargementPreview.largeView && !settings.largeText;
+  useEffect(() => { try { localStorage.setItem(settingsStorageKey, JSON.stringify(manualSettings)); } catch { setStorageWarning(true); } }, [manualSettings]);
   useEffect(() => { heading.current?.focus(); }, [screen]);
   useLayoutEffect(() => { if (selected) dialog.current?.showModal(); else if (dialog.current?.open) dialog.current.close(); }, [selected]);
   useLayoutEffect(() => {
@@ -153,20 +159,35 @@ export function OrderPage() {
 
   const busy = state.status === 'loading' || state.status === 'saving';
   const writeDisabled = state.status !== 'ready' || state.order !== null;
+  const canOfferSupport = !writeDisabled && !selected && !supportOpen && !restartOpen && !cartSheetOpen
+    && !voice.enabled && state.message === '' && !enlargementPreview.offer;
+  const backendSupport = useBackendSupport({
+    sessionId, settings, read: touchLog.read,
+    contextKey: JSON.stringify([sessionId, screen, category, menuPaging, reviewPage, state.cart?.version, settings]),
+    canSend: !sampleMode && screen !== 'complete' && !state.order && (state.status === 'ready' || state.status === 'saving'),
+    canOffer: canOfferSupport,
+    onApply: key => { if (sessionId) setAutomaticSettings(current => ({ sessionId, values: { ...(current.sessionId === sessionId ? current.values : {}), [key]: true } })); },
+  });
   const count = state.cart?.total_quantity ?? 0;
   const sum = state.cart?.total_amount ?? 0;
   const remaining = MAX_QUANTITY - (state.cart?.items.find(item => item.product_id === selected?.product_id && item.temperature === temperature)?.quantity ?? 0);
   const combinedEnlargement = settings.largeText && settings.largeButton;
   // 분류나 쪽 크기가 바뀌면 첫 쪽부터 보여 줍니다.
   const menuProducts = state.products.filter(product => category === 'all' || product.category === category);
-  const menuSize = menuPageSize({ ...settings, largeView, voiceOn: screen === 'menu' && voice.enabled });
+  const menuSize = menuPageSize({ ...settings, largeView, voiceOn: screen === 'menu' && voice.enabled, supportBar: true });
   const menuKey = `${category}:${menuSize}`;
   const menuPage = menuPaging.key === menuKey ? clampPage(menuPaging.page, menuProducts.length, menuSize) : 0;
   const menuPages = pageCount(menuProducts.length, menuSize);
   function toggleCombinedEnlargement() {
-    setSettings(current => {
-      const enabled = !(current.largeText && current.largeButton);
-      return { ...current, largeText: enabled, largeButton: enabled };
+    const enabled = !(settings.largeText && settings.largeButton);
+    setManualSettings(current => ({ ...current, largeText: enabled, largeButton: enabled }));
+    clearAutomaticSettings(['largeText', 'largeButton']);
+  }
+  function clearAutomaticSettings(keys: (keyof Settings)[]) {
+    setAutomaticSettings(current => {
+      const values = { ...current.values };
+      for (const key of keys) delete values[key];
+      return { ...current, values };
     });
   }
   function closeOptions() { setSelected(null); opener.current?.focus(); }
@@ -239,12 +260,12 @@ export function OrderPage() {
   // 고객이 한 일의 알림(담았어요·수량을 바꿨어요·뺐어요·적용)은 잠깐 떴다가 briefNoticeMs가 지나거나 다음 터치에 닫힙니다.
   // 말로 주문이 오래 말이 없어 꺼지면 그 사실도 알림으로 보입니다.
   const autoOffShown = !voice.enabled && voice.autoOff !== null && !autoOffClosed;
-  const appliedNotice = support.applied ? supportCopy[support.applied].applied : '';
+  const appliedNotice = enlargementPreview.applied ? supportCopy.enlarge.applied : '';
   const hintLine = hint && !(hint === 'option-add' && selected) ? hintCopy[hint] : '';
   const notice = screen === 'complete' ? '' : appliedNotice || hintLine || state.notice || (autoOffShown ? voiceAutoOffNotice : '');
   const noticeIcon = appliedNotice ? 'check_circle' : hintLine ? 'pan_tool_alt' : null;
   useNextTouch((appliedNotice !== '' || state.notice !== '' || autoOffShown) && !feedback, touchLog.root, () => {
-    controller.clearNotice(); setAutoOffClosed(true); support.closeApplied();
+    controller.clearNotice(); setAutoOffClosed(true); enlargementPreview.closeApplied();
   });
   // 고리를 둘 조작: 담기 힌트는 옵션 시트의 [담기], 빼기 힌트는 가장 최근 줄의 [삭제](장바구니가 버튼 뒤에 있으면 [담은 메뉴 보기])
   const newestLine = cartLines.find(line => !line.removed)?.item;
@@ -265,8 +286,10 @@ export function OrderPage() {
     return () => document.removeEventListener('click', used, true);
   }, [ringTarget]);
   useEffect(() => { setHint(null); }, [screen]);
-  useSupportDraft({ receive: support.receive, hint: kind => setHint(kind), clear: () => { support.decline(); support.closeApplied(); setHint(null); } },
-    { sessionId: state.session?.session_id ?? null, screen });
+  useSupportDraft({
+    receive: backendSupport.receive, previewEnlargement: enlargementPreview.open, hint: setHint,
+    clear: () => { backendSupport.dismiss(); enlargementPreview.decline(); enlargementPreview.closeApplied(); setHint(null); },
+  }, { sessionId, screen, ready: canOfferSupport });
   // 큰 글씨에는 안내 영역이 없습니다(목록이 그 높이를 씁니다): 늘 서 있는 줄은 단계 표시 아래, 메뉴의 한 줄 안내는 상품 줄 위,
   // 버튼이 있는 오류 안내는 목록 자리 맨 위에 섭니다.
   const sheetOpen = selected !== null || cartSheetOpen;
@@ -278,21 +301,18 @@ export function OrderPage() {
   const briefShown = !feedback && !hintLine && (appliedNotice !== '' || state.notice !== '');
   useEffect(() => {
     if (!briefShown) return;
-    const timer = setTimeout(() => { controller.clearNotice(); support.closeApplied(); }, briefNoticeMs);
+    const timer = setTimeout(() => { controller.clearNotice(); enlargementPreview.closeApplied(); }, briefNoticeMs);
     return () => clearTimeout(timer);
   }, [briefShown, appliedNotice, state.notice]);
   const standingTop = standing !== null && settings.largeText;
   // 키오스크의 제안은 시트가 열려 있거나 오류·처리 중 안내가 있는 동안 기다리고, 그 밖의 다음 터치에 닫힙니다.
-  // 다음 터치로 닫기는 카드 안(OfferCard)에서 대답 버튼과 같은 보호를 받습니다: 카드가 뜬 뒤 두 번 클릭 간격 동안의 터치는 세지 않습니다.
-  // [크게 하기]를 누르면 카드가 사라진 자리에 상품이 서므로, 그 뒤 두 번 클릭 간격 동안 상품 버튼은 누름을 받지 않습니다(하단 바와 같은 보호).
-  const [acceptChange, setAcceptChange] = useState(0);
-  const productsArmed = useArmedAfter(acceptChange);
-  const offerCard = support.offer && !sheetOpen && !supportOpen && !restartOpen && !feedback
-    ? <OfferCard support={support.offer.support} scope={touchLog.root} onAccept={() => { setAcceptChange(count => count + 1); support.accept(); }} onDecline={support.decline} /> : null;
-  const messagePlace = <MessagePlace feedback={sheetOpen ? null : feedback} offer={offerCard} notice={notice} kiosk={noticeIcon} standing={standingTop ? null : standing} />;
+  const offerCard = enlargementPreview.offer && !sheetOpen && !supportOpen && !restartOpen && !feedback ? <OfferCard onAccept={enlargementPreview.accept} onDecline={enlargementPreview.decline} /> : null;
+  useNextTouch(offerCard !== null, touchLog.root, enlargementPreview.decline, '.offer-card');
+  const supportCard = backendSupport.preset ? <SupportConfirmSheet key={backendSupport.preset} preset={backendSupport.preset} onAccept={backendSupport.accept} onDecline={backendSupport.decline} onDismiss={backendSupport.dismiss} /> : null;
+  const messagePlace = <MessagePlace feedback={sheetOpen ? null : feedback} offer={null} notice={notice} kiosk={noticeIcon} standing={standingTop ? null : standing} />;
   const pageProducts = pageItems(menuProducts, menuPage, menuSize);
   // 메뉴 화면에는 비워 두는 안내 영역이 없습니다. 안내와 버튼이 있는 카드는 상품 목록 위에 뜨는 자리(쪽 넘김 줄 18 px 위)에 섭니다.
-  const popup = <MessagePlace variant="popup" feedback={sheetOpen ? null : feedback} offer={offerCard} notice={notice} kiosk={noticeIcon} standing={null} />;
+  const popup = <MessagePlace variant="popup" feedback={sheetOpen ? null : feedback} offer={null} notice={notice} kiosk={noticeIcon} standing={null} />;
   // 단계별 안내(기본 글자 크기): 담은 메뉴 바로 위 한 줄 자리. 큰 글씨에서는 단계 표시 아래, 말로 주문 중에는 보이지 않습니다.
   const guideRow = screen === 'menu' && !standingTop && !voiceOn && standing;
   // 큰 글씨와 낮은 화면의 메뉴에서는 장바구니가 [담은 메뉴 보기] 뒤에 있습니다. 낮은 화면에서는 그 버튼이 금액을 담습니다.
@@ -300,7 +320,7 @@ export function OrderPage() {
   const lowMenu = screen === 'menu' && settings.lowScreen;
   // 하단 바의 보호: 바를 덮던 창(옵션·장바구니·화면 도움·처음으로 확인)이나 오류 안내가 닫히거나 화면이 바뀌면, 두 번 클릭 간격 동안
   // [처음으로]와 주요 버튼이 누름을 받지 않습니다. 옵션 창의 [취소]·[담기]가 그 두 버튼과 같은 자리라, 같은 자리를 연달아 누르던
-  // 손가락이 담기 → 주문 확인 → 주문하기로 이어지지 않게 합니다. 직원 호출 팝업은 화면 도움 안에서만 뜨고 함께 닫히므로 화면 도움으로 셉니다.
+  // 손가락이 담기 → 주문 확인 → 주문하기로 이어지지 않게 합니다.
   const barCovered = sheetOpen || supportOpen || restartOpen || state.message !== '';
   const barBefore = useRef({ screen, covered: barCovered });
   const [barChange, setBarChange] = useState(0);
@@ -314,12 +334,12 @@ export function OrderPage() {
   return <><div ref={touchLog.root} data-order-mode={sampleMode ? 'sample' : 'api'} data-listening={voiceOn && voice.phase === 'listening' ? 'on' : undefined} className={`kiosk ${settings.largeText ? 'large-text' : ''} ${settings.largeButton ? 'large-button' : ''} ${settings.simpleScreen ? 'simple-screen' : ''} ${settings.lowScreen ? 'low-screen' : ''} ${settings.highContrast ? 'high-contrast' : ''}${largeView ? ' large-view' : ''}${voiceOn ? ' voice-on' : ''}`}>
     {settings.lowScreen && <div className="low-screen-banner">
       {/* 낮은 화면의 비어 있는 위쪽 전체가 하나의 누름 자리입니다(화면 위로 올리기). 터치 기록에 남도록 주문 화면 안에 둡니다. */}
-      <button type="button" className="raise-area" data-log-target="screen-position-pad" onClick={() => setSettings(current => ({ ...current, lowScreen: false }))}>
+      <button type="button" className="raise-area" data-log-target="screen-position-pad" onClick={() => setManualSettings(current => ({ ...current, lowScreen: false }))}>
         <Icon name="arrow_upward" />화면 위로 올리기</button>
       <div className="banner-copy" aria-hidden="true"><p className="store-name">온기 카페</p><StepsBar screen={screen} /></div>
     </div>}
     <StoreRow />
-    <main>
+    <main data-log-target="order-content">
       <StepsBar screen={screen} headingRef={heading} />
       {standingTop && standing && <div className="guide guide-lines" role="status">{standing.map(line => <p key={line}>{line}</p>)}</div>}
       {storageWarning && <p role="alert">화면 설정을 기억하지 못했어요. 새로고침하면 기본 화면으로 돌아갈 수 있어요.</p>}
@@ -331,7 +351,7 @@ export function OrderPage() {
           <div className="tabs-row"><CategoryTabs category={category} onChange={setCategory} />
             <VoiceButton controller={voiceController} ready={(state.status === 'ready' || state.status === 'saving') && state.session !== null && state.order === null} sampleMode={sampleMode} /></div>
           <ProductGrid products={pageProducts} page={menuPage} pages={menuPages} rows={Math.ceil(menuSize / menuColumns(settings))} disabled={writeDisabled} asRows={settings.simpleScreen}
-            popup={popup} armed={productsArmed}
+            popup={popup}
             onSelect={(product, button) => { opener.current = button; setSelected(product); setTemperature(product.temperatures[0] ?? null); setQuantity(1); }}
             onPage={page => setMenuPaging({ key: menuKey, page })} />
         </section>
@@ -340,20 +360,21 @@ export function OrderPage() {
           {voiceOn && <VoicePanel controller={voiceController} sampleMode={sampleMode} />}</div>}
     </main>
     <section ref={actionsRef} className="order-actions" aria-label="주문 진행">
+      {screen !== 'complete' && <div className="support-confirm-slot">{supportCard ?? offerCard}</div>}
       <ActionBar total={screen === 'complete' || lowMenu ? null : sum}
         cartButton={cartInBar ? { ref: cartOpener, amount: lowMenu ? sum : null, onClick: () => setCartSheetOpen(true) } : null}
         restart={screen === 'complete' ? null : { ref: restartTrigger, disabled: busy || state.status === 'uncertain', onClick: () => { voiceController.setEnabled(false); setRestartOpen(true); } }}
         primary={{ target: screen === 'complete' ? 'new-order' : screen === 'menu' ? 'review-open' : 'simulate-payment',
           label: screen === 'complete' ? '새 주문 시작' : screen === 'menu' ? '주문 확인' : '주문하기',
           disabled: screen === 'complete' ? busy : !count || writeDisabled,
-          onClick: () => { if (screen === 'complete') { support.endUse(); void startNewOrder(); } else if (screen === 'menu') openReview(); else void controller.checkout(); } }}
+          onClick: () => { if (screen === 'complete') { enlargementPreview.reset(); void startNewOrder(); } else if (screen === 'menu') openReview(); else void controller.checkout(); } }}
         armed={barArmed} onBlockedPress={() => setBarChange(count => count + 1)} />
-      <EntryRow supportOpen={supportOpen} onToggleSupport={() => setSupportOpen(!supportOpen)} onUndo={largeView ? support.undo : null} />
+      <EntryRow supportOpen={supportOpen} onToggleSupport={() => setSupportOpen(!supportOpen)} onUndo={enlargementPreview.largeView ? enlargementPreview.reset : null} />
     </section>
     <HelpSheet ref={helpDialog} settings={settings} combined={combinedEnlargement}
-      onToggle={key => setSettings(current => ({ ...current, [key]: !current[key] }))}
+      onToggle={key => { setManualSettings(current => ({ ...current, [key]: !settings[key] })); clearAutomaticSettings([key]); }}
       onCombined={toggleCombinedEnlargement}
-      onReset={() => { support.resetView(); setSettings({ ...initialSettings }); }} onClose={() => setSupportOpen(false)}
+      onReset={() => { enlargementPreview.reset(); setAutomaticSettings({ sessionId: '', values: {} }); setManualSettings({ ...initialSettings }); }} onClose={() => setSupportOpen(false)}
       readAloud={<ReadAloudControls root={touchLog.root} voiceController={voiceController} screenKey={`${state.session?.session_id}:${screen}:${selected?.product_id ?? ''}:${restartOpen}:${cartSheetOpen}`} />} />
     <OptionSheet ref={dialog} product={selected} temperature={temperature} quantity={quantity} remaining={remaining} writeDisabled={writeDisabled}
       status={feedback} hint={hint === 'option-add' ? hintCopy['option-add'] : null}

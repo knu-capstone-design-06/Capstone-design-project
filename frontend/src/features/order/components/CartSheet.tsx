@@ -13,7 +13,7 @@ export function CartSheet({ ref, open, lines, count, total, status, actions, rev
   ref: Ref<HTMLDialogElement>; open: boolean; lines: CartDisplayLine[]; count: number; total: number; status: ReactNode | null;
   actions: CartLineActions; reviewDisabled: boolean; onClose: () => void; onReview: () => void;
 }) {
-  return <Sheet ref={ref} className="cart-sheet" labelledBy="cart-sheet-title" onClose={onClose}>
+  return <Sheet ref={ref} className="cart-sheet" labelledBy="cart-sheet-title" logTarget="cart-content" onClose={onClose}>
     {open && <>
       <div className="cart-sheet-head">
         <div className="cart-head"><h2 id="cart-sheet-title" className="cart-title">담은 메뉴 {count}개</h2></div>
