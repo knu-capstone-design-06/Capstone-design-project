@@ -21,10 +21,16 @@ class Proposal:
 
     tool_calls: list[ToolCall]
     cart: list[CartLine] = field(default_factory=list)
+    made_at: datetime | None = None
+
+
 # Proposed value: recent exchanges per session passed to the interpreter as context.
 HISTORY_TURNS = 10
 # Proposed value: requests, idempotency keys and idle session context are dropped after this.
 RETENTION = timedelta(hours=1)
+# Proposed value: an offer nobody answered lapses after this. Nothing ends a session when a customer
+# walks away, so without it the next person's "좋아요" would add the last customer's offer.
+PROPOSAL_TTL = timedelta(minutes=2)
 
 
 def utc_now() -> datetime:
@@ -137,6 +143,16 @@ class VoiceRepository:
             record.actions = list(actions or [])
             record.error = error
 
+    def fail_unfinished(self, request_id: str, reply_text: str, error: VoiceErrorResponse) -> bool:
+        """Close a request still accepted or processing as failed; True when it was. Finished ones are kept."""
+        with self._lock:
+            record = self._records.get(request_id)
+            if record is None or record.status not in ACTIVE_STATUSES:
+                return False
+            record.status, record.reply_text, record.error = "failed", reply_text, error
+            record.tool_calls, record.actions = [], []
+            return True
+
     def history(self, session_id: str) -> list[VoiceTurn]:
         with self._lock:
             return list(self._history.get(session_id, ()))
@@ -147,14 +163,24 @@ class VoiceRepository:
             self._last_turn_at[session_id] = self._clock()
 
     def take_proposal(self, session_id: str) -> Proposal | None:
-        """Return and clear the pending proposal: it answers one utterance only."""
+        """Return and clear the pending proposal: it answers one utterance only.
+
+        An offer older than PROPOSAL_TTL has lapsed: it is dropped with its question, as a refused one is
+        (the reconfirm mark stays), and None is returned.
+        """
         with self._lock:
-            return self._proposals.pop(session_id, None)
+            proposal = self._proposals.pop(session_id, None)
+            if proposal is None or proposal.made_at is None or self._clock() - proposal.made_at <= PROPOSAL_TTL:
+                return proposal
+            history = self._history.get(session_id)
+            if history and history[-1].result.status == "needs_confirmation":
+                history.pop()
+            return None
 
     def set_proposal(self, session_id: str, tool_calls: list[ToolCall], cart: Iterable[CartLine] = ()) -> None:
         """Keep the offer with the cart it was checked against, so "네" runs it on that cart only."""
         with self._lock:
-            self._proposals[session_id] = Proposal(list(tool_calls), list(cart))
+            self._proposals[session_id] = Proposal(list(tool_calls), list(cart), self._clock())
             self._reconfirm.add(session_id)
 
     def mark_reconfirm(self, session_id: str) -> None:

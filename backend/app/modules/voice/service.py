@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import logging
 import re
@@ -10,7 +11,7 @@ from app.modules.voice.exceptions import VoiceRequestNotFound, VoiceSessionNotFo
 from app.modules.voice.executor import (
     FALLBACK_EXECUTION_REPLY, CartChanged, CartExecutor, ToolExecutionFailed,
 )
-from app.modules.voice.interpreter import VoiceInterpreter
+from app.modules.voice.interpreter import ASK_MENU_REPLY, VoiceInterpreter
 from app.modules.voice.repository import VoiceRepository
 from app.modules.voice.schemas import (
     AddCartItemCall, CartItemQuantity, CartItemTarget, CartLine, MenuItem, RemoveCartItemCall,
@@ -93,12 +94,14 @@ def confirmation_text(tool_calls: list, menu: list[MenuItem]) -> str | None:
         if isinstance(call, AddCartItemCall):
             clauses.append((f"{name} {arguments.quantity}{unit}", "담을까요?", "담기"))
         elif isinstance(call, UpdateCartItemCall):
-            clauses.append((f"{name} {arguments.quantity}{unit}으로", "바꿀까요?", "바꾸기"))
+            # "2잔으로" but "3개로": 으로 follows a final consonant only.
+            clauses.append((f"{name} {arguments.quantity}{unit}{'으로' if unit == '잔' else '로'}", "바꿀까요?", "바꾸기"))
         else:
             clauses.append((name, "뺄까요?", "빼기"))
     if len(clauses) == 1:
         subject, verb, _ = clauses[0]
-        return f"{subject} {verb}"
+        text = f"{subject} {verb}"
+        return text if len(text) <= REPLY_MAX else None   # a very long product name (the database sets no limit)
     text = ", ".join(f"{subject} {short}" for subject, _, short in clauses) + ", 이대로 할까요?"
     return text if len(text) <= REPLY_MAX else None
 
@@ -625,7 +628,6 @@ def _asked_utterance(history: Sequence[VoiceTurn], menu: list[MenuItem]) -> tupl
     return history[index].request.text, passed_count
 
 
-ASK_MENU_REPLY = "어떤 메뉴를 주문할까요?"
 PENDING = {"needs_confirmation", "needs_clarification"}
 # Everything a bare instruction about the one thing in the cart may be made of: a count,
 # the words for more/less/change, a pointer such as "그거", particles and a polite ending.
@@ -897,14 +899,39 @@ class VoiceService:
     async def process(
         self, session_id: str, request_id: str, request: VoiceRequestCreate
     ) -> None:
+        """Interpret and (when set up) run one accepted request. It always leaves the request finished:
+        one left "processing" would answer every later request of its session with 409."""
+        try:
+            await self._process(session_id, request_id, request)
+        except BaseException as exc:
+            # Anything the handling inside did not expect, and cancellation (shutdown). No offer
+            # stays open behind a request that ended this way.
+            self._repository.take_proposal(session_id)
+            self._repository.discard_proposal_turn(session_id)
+            if self._repository.fail_unfinished(request_id, FALLBACK_REPLY, VoiceErrorResponse(
+                    code="ai_unavailable", detail="음성 요청을 끝까지 처리하지 못했습니다.")):
+                logger.error("voice request closed as failed after %s", type(exc).__name__)
+            if not isinstance(exc, Exception):
+                raise
+            logger.exception("voice request crashed outside its handling")
+
+    async def _process(
+        self, session_id: str, request_id: str, request: VoiceRequestCreate
+    ) -> None:
         self._repository.update(request_id, "processing")
         off_menu: str | None = None
-        # Set before anything can raise: the handling below reads it after a crash too.
-        proposal = None
+        # A proposal answers this one utterance, whatever becomes of it: it is taken before anything
+        # can fail (a menu that cannot be read, an empty menu, an ignored or failed exchange), so it
+        # never waits for a later "네" behind a request that did not get as far as reading it.
+        proposal = self._repository.take_proposal(session_id)
         try:
-            menu = self._menu_provider()
+            # The menu, the cart and the execution may each go to the database. They run in a worker
+            # thread so a slow store cannot freeze the event loop: touch ordering and status polls go on.
+            menu = await asyncio.to_thread(self._menu_provider)
             if not menu:
                 # Nothing can be ordered, so do not spend an OpenAI call on it.
+                if proposal is not None:
+                    self._repository.discard_proposal_turn(session_id)
                 self._repository.update(
                     request_id, "failed", FALLBACK_REPLY,
                     error=VoiceErrorResponse(
@@ -914,9 +941,6 @@ class VoiceService:
                 return
             history = self._repository.history(session_id)
             last = history[-1].result if history else None
-            # A proposal answers this one utterance, whatever it turns out to be: an
-            # ignored or failed exchange in between must not leave it waiting for a later "네".
-            proposal = self._repository.take_proposal(session_id)
             # The cart the tool inputs are checked against; execution runs only on that cart.
             expected: list[CartLine] | None = None
             if proposal is not None and is_bare_yes(request.text):
@@ -932,14 +956,14 @@ class VoiceService:
                 # Nothing is proposed (or the proposal has lapsed), so "네" must not invent an order.
                 result = VoiceInterpretation(status="needs_clarification", tool_calls=[], reply_text=ASK_MENU_REPLY)
             else:
-                cart = self._cart(session_id)
+                cart = await asyncio.to_thread(self._cart, session_id)
                 result = await self._interpreter.interpret(request, menu, history, cart)
             if result is not None and not matches_menu(result, menu, allow_missing_temperature=True):
                 logger.warning("voice interpretation rejected (not on menu)")
                 off_menu = off_menu_reply(result, menu)
                 result = None
             if result is not None:
-                cart = list(self._cart(session_id))
+                cart = list(await asyncio.to_thread(self._cart, session_id))
                 if expected is None:
                     expected = cart
                 # Check named products before asking about a temperature, so the kiosk
@@ -1015,7 +1039,7 @@ class VoiceService:
             # A proposal (needs_confirmation) is not run; the customer's "네" comes back
             # as a completed result and is run then.
             try:
-                self._executor.execute(session_id, request_id, result.tool_calls, expected)
+                await asyncio.to_thread(self._executor.execute, session_id, request_id, result.tool_calls, expected)
             except CartChanged as changed:
                 # A touch changed the cart after the inputs were checked ("3잔으로" was
                 # "하나 더" over two cups; now there are five). Nothing ran: read the same
@@ -1031,12 +1055,18 @@ class VoiceService:
                     result = VoiceInterpretation(status="needs_confirmation", tool_calls=result.tool_calls, reply_text=text)
                     self._repository.set_proposal(session_id, result.tool_calls, changed.cart)
             except ToolExecutionFailed as failed:
+                # The offer the customer accepted did not run and is closed: its question leaves
+                # the context, as a refused one does, so a later "그걸로 주세요" is not read against it.
+                if proposal is not None:
+                    self._repository.discard_proposal_turn(session_id)
                 self._repository.update(request_id, "failed", failed.reply_text, error=failed.error)
                 return
             except Exception:
                 # The interpretation succeeded; only the cart change failed, so the code
                 # must not blame the AI (the transaction already rolled the cart back).
                 logger.exception("voice tool execution crashed")
+                if proposal is not None:
+                    self._repository.discard_proposal_turn(session_id)
                 self._repository.update(
                     request_id, "failed", FALLBACK_EXECUTION_REPLY,
                     error=VoiceErrorResponse(code="cart_update_failed", detail="장바구니에 반영하지 못했습니다."),

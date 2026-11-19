@@ -138,6 +138,12 @@ class Ask(unittest.TestCase):
             r = self.client.ask({"touch": {}}, CHOICE)
         self.assertEqual((r["error"], r["retries"], len(r["http_attempts"])), ("http 503", 3, 4))
 
+    def test_a_null_usage_does_not_stop_the_run(self):
+        body = json.dumps({"model": "m", "choices": [{"message": {"content": json.dumps({"support_choice": "none"})}}],
+                           "usage": None}).encode()
+        r = self.ask([(200, body)])
+        self.assertEqual((r["answers"], r["prompt_tokens"], r["request_ms"]), ({"support_choice": "none"}, None, 200.0))
+
     def test_the_two_retry_rules_share_one_count(self):
         # as in the bundle's runner: a timeout after an HTTP retry is not sent again
         r = self.ask([(100, (503, "busy")), (30000, TimeoutError())])

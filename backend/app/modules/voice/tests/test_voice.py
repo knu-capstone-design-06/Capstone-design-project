@@ -14,7 +14,7 @@ from app.main import create_app
 from app.modules.voice.interpreter import OpenAiVoiceInterpreter, StubVoiceInterpreter
 from app.modules.voice.exceptions import VoiceSessionCompleted
 from app.modules.voice.repository import HISTORY_TURNS, VoiceRepository
-from app.modules.voice.service import OFF_MENU_REPLY, REPLY_MAX, SOLD_OUT_REPLY
+from app.modules.voice.service import ASK_MENU_REPLY, OFF_MENU_REPLY, REPLY_MAX, SOLD_OUT_REPLY
 from app.modules.voice.schemas import (
     MenuItem, VoiceErrorResponse, VoiceInterpretation, VoiceRequestCreate, VoiceTurn,
 )
@@ -751,6 +751,48 @@ class ToolExecutionApiTests(VoiceApiCase):
         body = self.status(self.say("아이스 아메리카노")).json()
         self.assertEqual((body["status"], body["error"]["code"]), ("failed", "ai_unavailable"))
         self.assertNotEqual(body["reply_text"], OFF_MENU_REPLY)
+
+    def test_accepted_offer_that_cannot_run_leaves_no_question_in_the_context(self):
+        self.add_by_touch("americano", "iced", 2)
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 19))
+        offered = self.status(self.say("아이스 아메리카노 주세요")).json()
+        self.assertEqual(offered["status"], "needs_confirmation")
+        failed = self.status(self.say("네")).json()
+        self.assertEqual((failed["status"], failed["error"]["code"]), ("failed", "quantity_limit_exceeded"))
+        self.assertEqual(self.cart()["total_quantity"], 2)
+        # The closed offer is gone: the model no longer sees its question on the next turn.
+        self.interpreter.result = interpretation(call("add_cart_item", "sandwich", None, 1))
+        self.say("에그 샌드위치 하나 주세요")
+        self.assertEqual([t.result.status for t in self.interpreter.histories[-1]], [])
+
+    def test_offer_is_closed_when_the_request_after_it_fails_before_reading_it(self):
+        # Review of #92: the customer turns the offer down while the menu cannot be read (or is empty);
+        # the request fails, and a later "네" must not add what was turned down.
+        for menu in ({"side_effect": RuntimeError("store down")}, {"return_value": []}):
+            with self.subTest(menu=sorted(menu)):
+                session_id = self.client.post("/api/v1/sessions").json()["session_id"]
+                self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
+                offered = self.status(self.say("아이스 아메리카노 두 개", session_id), session_id).json()
+                self.assertEqual(offered["status"], "needs_confirmation")
+                with patch("app.main.menu_from_products", **menu):
+                    failed = self.status(self.say("아니요 그거 말고요", session_id), session_id).json()
+                self.assertEqual((failed["status"], failed["error"]["code"]), ("failed", "ai_unavailable"))
+                self.interpreter.result = interpretation(ADD_AMERICANO)
+                body = self.status(self.say("네", session_id), session_id).json()
+                self.assertNotEqual(body["status"], "completed")
+                cart = self.client.get(f"/api/v1/sessions/{session_id}/cart").json()
+                self.assertEqual(cart["items"], [])
+                # The closed offer's question is gone from the context too.
+                self.say("에그 샌드위치 하나 주세요", session_id)
+                self.assertNotIn("needs_confirmation", [t.result.status for t in self.interpreter.histories[-1]])
+
+    def test_a_crash_after_the_checks_still_finishes_the_request(self):
+        repository = self.client.app.state.voice_service._repository
+        append, repository.append_turn = repository.append_turn, lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+        body = self.status(self.say("아이스 아메리카노 두 잔 주세요")).json()
+        self.assertEqual((body["status"], body["error"]["code"]), ("failed", "ai_unavailable"))
+        repository.append_turn = append
+        self.assertEqual(self.post().status_code, 202, "the session is not left answering 409")
 
     def test_yes_runs_the_confirmed_proposal_even_if_the_model_now_says_otherwise(self):
         self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
@@ -1646,6 +1688,29 @@ class RetentionTests(unittest.TestCase):
     def accept(self, session_id="s1", key=None):
         return self.repository.accept(session_id, key or uuid4(), "fingerprint")
 
+    def test_an_offer_nobody_answered_lapses_with_its_question(self):
+        offer = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
+        turn = VoiceTurn(request=VoiceRequestCreate.model_validate(BODY), result=offer)
+        self.repository.append_turn("s1", turn)
+        self.repository.set_proposal("s1", offer.tool_calls)
+        self.now += timedelta(minutes=1)
+        self.assertEqual(self.repository.take_proposal("s1").tool_calls, offer.tool_calls, "answered in time")
+        self.repository.set_proposal("s1", offer.tool_calls)
+        self.now += timedelta(minutes=3)   # the customer left; the next person says "좋아요"
+        self.assertIsNone(self.repository.take_proposal("s1"))
+        self.assertEqual(self.repository.history("s1"), [], "the lapsed question leaves the context")
+        self.assertTrue(self.repository.needs_reconfirm("s1"), "a reading against it is still not an order")
+
+    def test_only_an_unfinished_request_is_closed_as_failed(self):
+        error = VoiceErrorResponse(code="ai_unavailable", detail="x")
+        record, _ = self.accept()
+        self.assertTrue(self.repository.fail_unfinished(record.request_id, "안내", error))
+        self.assertEqual(self.repository.get("s1", record.request_id).status, "failed")
+        done, _ = self.accept(session_id="s2")
+        self.repository.update(done.request_id, "completed", tool_calls=interpretation(ADD_AMERICANO).tool_calls)
+        self.assertFalse(self.repository.fail_unfinished(done.request_id, "안내", error))
+        self.assertEqual(self.repository.get("s2", done.request_id).status, "completed")
+
     def test_old_requests_keys_and_idle_context_are_dropped(self):
         key = uuid4()
         record, _ = self.accept(key=key)
@@ -1691,6 +1756,14 @@ class ConfirmationTextTests(unittest.TestCase):
         self.assertEqual(self.text(call("add_cart_item", "sandwich", None, 1)), "에그 샌드위치 1개 담을까요?")
         self.assertEqual(self.text(call("update_cart_item", "americano", "hot", 3)), "따뜻한 아메리카노 3잔으로 바꿀까요?")
         self.assertEqual(self.text(call("remove_cart_item", "americano", "iced")), "아이스 아메리카노 뺄까요?")
+
+    def test_counted_by_piece_takes_ro_and_a_name_too_long_to_show_is_not_confirmed(self):
+        from app.modules.voice.service import confirmation_text
+
+        self.assertEqual(self.text(call("update_cart_item", "sandwich", None, 3)), "에그 샌드위치 3개로 바꿀까요?")
+        long_menu = [MenuItem(product_id="long", name="가" * 55, available=True, temperatures=[])]
+        calls = interpretation(call("add_cart_item", "long", None, 1), reply_text="?").tool_calls
+        self.assertIsNone(confirmation_text(calls, long_menu))
 
     def test_several_tool_inputs_are_listed_and_stay_short(self):
         self.assertEqual(
@@ -2078,6 +2151,41 @@ class DefaultWiringTests(unittest.TestCase):
         self.assertEqual(body["tool_calls"], [])
 
 
+    def test_no_key_on_a_server_set_up_for_real_use_fails_instead_of_the_development_sentence(self):
+        app = create_app(Settings(_env_file=None, openai_api_key=None, voice_execute_tools=True))
+        with TestClient(app) as client:
+            body = self.request_status(client)
+        self.assertEqual((body["status"], body["error"]["code"]), ("failed", "ai_unavailable"))
+        self.assertNotIn("개발용", body["reply_text"])
+
+    def test_the_store_is_read_off_the_event_loop(self):
+        seen = []
+
+        def menu(products):
+            try:
+                asyncio.get_running_loop()
+                seen.append("event loop")
+            except RuntimeError:
+                seen.append("worker thread")
+            return MENU
+
+        interpreter = FakeInterpreter()
+        with patch("app.main.build_voice_interpreter", return_value=interpreter), patch("app.main.menu_from_products", menu):
+            app = create_app(Settings(_env_file=None, openai_api_key=None))
+            with TestClient(app) as client:
+                self.assertEqual(self.request_status(client)["status"], "completed")
+        self.assertEqual(seen, ["worker thread"])
+
+    def test_screen_id_is_bounded(self):
+        app = create_app(Settings(_env_file=None, openai_api_key=None))
+        with TestClient(app) as client:
+            session_id = client.post("/api/v1/sessions").json()["session_id"]
+            for screen_id in ("", "m" * 65):
+                response = client.post(f"/api/v1/sessions/{session_id}/voice/requests",
+                                       json={**BODY, "screen_id": screen_id}, headers={"Idempotency-Key": str(uuid4())})
+                self.assertEqual(response.status_code, 422, len(screen_id))
+
+
 def openai_response(content):
     return httpx.Response(200, json={"choices": [{"message": {"content": content}}]})
 
@@ -2117,6 +2225,24 @@ class OpenAiInterpreterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(user["cart"], [])
         self.assertEqual([item["product_id"] for item in user["menu"]],
                          ["americano", "sandwich", "latte"])
+
+    async def test_reply_text_slips_that_do_not_touch_the_order_are_mended(self):
+        long = "가" * 61
+        for fields, expected in (
+            ({"reply_text": "담았어요"}, ("needs_confirmation", "?")),                            # says and runs at once: confirm
+            ({"status": "needs_confirmation", "reply_text": long}, ("needs_confirmation", "?")),   # rebuilt by the service
+            ({"status": "needs_confirmation", "reply_text": ""}, ("needs_confirmation", "?")),
+            ({"status": "needs_clarification", "tool_calls": [], "reply_text": long}, ("needs_clarification", ASK_MENU_REPLY)),
+            ({"status": "needs_clarification", "tool_calls": [], "reply_text": None}, ("needs_clarification", ASK_MENU_REPLY)),
+        ):
+            with self.subTest(fields=fields):
+                result = await self.interpret(openai_output(**fields))
+                self.assertEqual((result.status, result.reply_text), expected)
+        # What would run is still checked: these stay unusable.
+        for fields in ({"tool_calls": []}, {"status": "needs_clarification", "reply_text": "어떤 걸로 할까요?"},
+                       {"tool_calls": [ADD_AMERICANO] * 11}, {"tool_calls": [call("add_cart_item", "americano", "iced", 0)]}):
+            with self.subTest(fields=fields):
+                self.assertIsNone(await self.interpret(openai_output(**fields)))
 
     async def test_previous_turns_are_sent_in_order(self):
         seen = {}
@@ -2166,12 +2292,8 @@ class OpenAiInterpreterTests(unittest.IsolatedAsyncioTestCase):
             lambda r: httpx.Response(200, json={"choices": []}),
             openai_output(status="ready"),
             openai_output(tool_calls=[]),                       # completed without calls
-            openai_output(reply_text="질문"),                    # completed with a question
-            openai_output(status="needs_clarification"),        # question missing
-            openai_output(status="needs_confirmation"),         # confirmation text missing
+            openai_output(status="needs_clarification"),        # a question with tool inputs
             openai_output(status="needs_confirmation", tool_calls=[], reply_text="담을까요?"),
-            openai_output(status="needs_confirmation", reply_text="가" * 61),  # too long
-            openai_output(status="needs_clarification", tool_calls=[], reply_text="  "),
             openai_output(status="ignored"),                    # ignored with calls
             openai_output(status="ignored", tool_calls=[], reply_text="네?"),  # ignored with text
             openai_output(tool_calls=[{**ADD_AMERICANO, "tool": "pay"}]),

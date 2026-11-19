@@ -28,7 +28,8 @@ class RecognitionAlternative(BaseModel):
 class VoiceRequestCreate(BaseModel):
     text: str = Field(min_length=1, max_length=500)
     alternatives: list[RecognitionAlternative] = Field(max_length=5)
-    screen_id: str
+    # A screen name, kept with each turn and sent to the model with it: bounded like the text.
+    screen_id: str = Field(min_length=1, max_length=64)
 
     @field_validator("text")
     @classmethod

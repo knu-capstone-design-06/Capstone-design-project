@@ -12,7 +12,7 @@ AI 담당의 시나리오 판단 실험(규칙표에 없는 터치 패턴과 상
 
 | 필드 | 뜻 |
 |---|---|
-| `latency_ms`, `retries` | 그대로입니다. 답을 받은 시도의 시간, 받아들여진 요청의 HTTP 재시도 횟수 |
+| `latency_ms`, `retries` | 그대로입니다. 답을 받은 시도의 시간, 이 단계에서 쓴 재시도 횟수(temperature를 빼고 다시 보낼 때 0으로 돌아가지 않습니다. 본문을 바꾸면 다시 세는 `run_gpt.py`와 다릅니다) |
 | `http_attempts` | 이 단계 요청의 모든 HTTP 시도. 시도마다 `ms`(걸린 시간), `result`(`ok`, `http 503`, `TimeoutError`, `http 400, temperature refused` 등), `wait_ms`(다음 시도 전 대기) |
 | `request_ms` | 그 시도와 대기의 합 |
 | `cumulative_ms` | 이 단계의 `request_ms`에 같은 창의 앞 단계 값을 더한 것. 창의 마지막 줄에서는 창의 첫 요청부터 답까지의 시간 |
@@ -24,7 +24,7 @@ AI 담당의 시나리오 판단 실험(규칙표에 없는 터치 패턴과 상
 
 ## 1초 제한을 채점할 때
 
-새 실행의 1초 판정은 `latency_ms`의 합이 아니라 창 마지막 줄의 `cumulative_ms`로 합니다. `call_time.whole_ms(줄)`이 이 값을 돌려줍니다. 재현 자료에서 GPT 실행의 `latency_ms`로 시간을 보는 채점기는 새 실행을 채점하기 전에 이 값을 읽도록 바꿔야 합니다. 창마다 `latency_ms`를 더하는 것은 `why/score_deadline.py`, `v2/score_heldout.py`, `sit/score_sit.py`, `decode/score_decode.py`, `build_dash.py`이고, 줄 단위 `latency_ms`를 보는 것은 `novel/score_novel.py`, `explore/score_ho2.py`입니다. 채점기는 재현 자료에 있어 이 폴더에서는 바꾸지 않았습니다.
+새 실행의 1초 판정은 `latency_ms`의 합이 아니라 창 마지막 줄의 `cumulative_ms`로 합니다. `call_time.whole_ms(줄)`이 이 값을 돌려줍니다. 이 실행기는 한 창이 두 단계(두 줄)일 수 있으므로, 창 전체 시간은 반드시 그 창의 마지막 줄에서 읽습니다. 첫 단계 줄의 값은 첫 단계까지의 시간입니다. 재현 자료에서 GPT 실행의 `latency_ms`로 시간을 보는 채점기는 새 실행을 채점하기 전에 이 값을 읽도록 바꿔야 합니다. 창마다 `latency_ms`를 더하는 것은 `why/score_deadline.py`, `v2/score_heldout.py`, `sit/score_sit.py`, `decode/score_decode.py`, `build_dash.py`이고, 줄 단위 `latency_ms`를 보는 것은 `novel/score_novel.py`, `explore/score_ho2.py`입니다. 채점기는 재현 자료에 있어 이 폴더에서는 바꾸지 않았습니다.
 
 저장된 실행의 숫자는 바뀌지 않습니다. 저장된 호출 기록 129개 파일(17,536줄)에서 재시도(`retries` > 0)가 있었던 호출은 18건이고, 논문 표에 쓴 세트의 GPT 실행에는 0건이며, 나머지도 1초 판정이 달라지지 않습니다(#85 리뷰에 적은 확인). temperature 0을 거부당한 요청은 원본 기록에 남지 않아 이 18건에 들어 있지 않습니다. 거부가 있었던 실행(`summary.json`의 `temperature_0`이 false)은 18개이고, 거부는 실행의 처음 몇 창에서만 생기는데 그 창들의 `latency_ms` 합이 이미 1,000 ms를 넘어 판정은 같습니다.
 

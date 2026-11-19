@@ -12,7 +12,8 @@ the fields of experiments/eval_llm_2026-11-09/tools/call_time.py:
     request_ms     the sum of those attempts and waits
     cumulative_ms  request_ms of this stage plus that of the window's earlier stages: on the last stage's line, the
                    time from the window's first request to its answer
-latency_ms and retries keep their meaning (the attempt that answered; HTTP retries of the accepted body). An error
+latency_ms and retries keep their meaning (the attempt that answered; the retries this stage used: the count is
+not reset when the request is sent again without temperature, unlike run_gpt.py). An error
 line carries the three new fields too. A 1-s rule reads the window's last line with call_time.whole_ms, not the sum
 of latency_ms.
 
@@ -133,7 +134,7 @@ class Client:
                 return self.failed(type(e).__name__, retries, tries)
             # the attempt answered (every except branch above leaves this pass), so it is recorded once here
             tries.add(latency, "ok")
-            usage = payload.get("usage", {})
+            usage = payload.get("usage") or {}   # a null usage must not stop the run
             details = usage.get("completion_tokens_details") or {}
             return {"answers": answers, "latency_ms": round(latency), "retries": retries,
                     "prompt_tokens": usage.get("prompt_tokens"), "completion_tokens": usage.get("completion_tokens"),
