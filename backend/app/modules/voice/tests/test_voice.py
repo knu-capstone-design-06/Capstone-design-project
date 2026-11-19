@@ -1,5 +1,6 @@
 import asyncio
 import json
+import threading
 import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
@@ -1705,6 +1706,128 @@ class ToolExecutionApiTests(VoiceApiCase):
         self.assertEqual(self.cart()["total_quantity"], 3)
 
 
+class StoreFailureTests(VoiceApiCase):
+    """A repository call that fails, or the task cancelled, must leave the request as what happened (self-review of #92)."""
+
+    SETTINGS = {"voice_execute_tools": True}
+
+    def crash_in(self, method, at=1, always=False):
+        """Make the at-th call (or every call from it) of a repository method raise; returns the calls reached."""
+        repository = self.client.app.state.voice_service._repository
+        real, seen, reached = getattr(repository, method), [0], []
+
+        def boom(*args, **kwargs):
+            seen[0] += 1
+            if seen[0] == at or (always and seen[0] >= at):
+                reached.append(seen[0])
+                raise RuntimeError("boom")
+            return real(*args, **kwargs)
+
+        setattr(repository, method, boom)
+        self.addCleanup(lambda: repository.__dict__.pop(method, None))
+        return reached
+
+    def restore(self, method):
+        self.client.app.state.voice_service._repository.__dict__.pop(method, None)
+
+    def test_a_crash_in_the_last_update_after_the_cart_changed_still_reports_what_happened(self):
+        # Review of #92 named append_turn and update: the tools ran, then writing the result failed.
+        reached = self.crash_in("update", at=2)   # 1: "processing", 2: the result
+        body = self.status(self.say("아이스 아메리카노 두 잔 주세요")).json()
+        self.assertEqual(reached, [2])
+        self.assertEqual(self.cart()["total_quantity"], 2)
+        self.assertEqual((body["status"], body["actions"], body["error"]), ("completed", ["cart_updated"], None))
+
+    def test_an_accepted_offer_whose_turn_could_not_be_kept_leaves_no_open_question(self):
+        self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
+        self.say("아이스 아메리카노 두 개")
+        reached = self.crash_in("append_turn")
+        body = self.status(self.say("네")).json()
+        self.restore("append_turn")
+        self.assertEqual((reached, body["status"], self.cart()["total_quantity"]), ([1], "completed", 2))
+        # The offer ran. Its question must not be the last thing the model sees, or a second
+        # "네 그걸로 주세요" is read against it and adds again with no read-back.
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 1))
+        again = self.status(self.say("네 그걸로 주세요")).json()
+        self.assertNotIn("needs_confirmation", [t.result.status for t in self.interpreter.histories[-1]])
+        self.assertNotEqual(again["status"], "completed")
+        self.assertEqual(self.cart()["total_quantity"], 2)
+
+    def test_a_store_that_keeps_failing_still_leaves_the_request_finished(self):
+        for method in ("discard_proposal_turn", "take_proposal"):
+            with self.subTest(method=method):
+                self.session_id = self.client.post("/api/v1/sessions").json()["session_id"]
+                self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
+                self.say("아이스 아메리카노 두 개")
+                self.crash_in(method, always=True)
+                try:
+                    request_id = self.say("아니요 그거 말고요")
+                finally:
+                    self.restore(method)
+                self.assertEqual(self.status(request_id).json()["status"], "failed")
+                self.assertEqual(self.post().status_code, 202, "the session is not left answering 409")
+
+    def test_an_offer_whose_execution_crashed_leaves_no_question_in_the_context(self):
+        # Not an ordering refusal (ToolExecutionFailed) but any other failure of the execution.
+        self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
+        self.say("아이스 아메리카노 두 개")
+        executor = self.client.app.state.voice_service._executor
+        executor.execute = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("db gone"))
+        self.addCleanup(lambda: executor.__dict__.pop("execute", None))
+        failed = self.status(self.say("네")).json()
+        self.assertEqual((failed["status"], failed["error"]["code"]), ("failed", "cart_update_failed"))
+        executor.__dict__.pop("execute", None)
+        self.interpreter.result = interpretation(call("add_cart_item", "sandwich", None, 1))
+        self.say("에그 샌드위치 하나 주세요")
+        self.assertNotIn("needs_confirmation", [t.result.status for t in self.interpreter.histories[-1]])
+
+
+class CancellationTests(VoiceApiCase):
+    SETTINGS = {"voice_execute_tools": True}
+
+    def cancel_during_execution(self, times, outcome=None):
+        service = self.client.app.state.voice_service
+        executor, entered, hold = service._executor, threading.Event(), threading.Event()
+        real = executor.execute
+
+        def slow(*args, **kwargs):
+            entered.set()
+            hold.wait(5)
+            if outcome is not None:
+                raise outcome
+            return real(*args, **kwargs)
+
+        executor.execute = slow
+        self.addCleanup(lambda: executor.__dict__.pop("execute", None))
+        request = VoiceRequestCreate(text="아이스 아메리카노 두 잔 주세요", alternatives=[], screen_id="menu_list")
+        accepted, _ = service.accept(self.session_id, uuid4(), request)
+
+        async def drive():
+            task = asyncio.create_task(service.process(self.session_id, accepted.request_id, request))
+            await asyncio.get_running_loop().run_in_executor(None, entered.wait, 5)
+            for _ in range(times):
+                task.cancel()
+                await asyncio.sleep(0.05)
+            hold.set()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+
+        asyncio.run(drive())
+        return self.status(accepted.request_id).json()
+
+    def test_cancelled_while_the_tools_run_ends_as_what_the_worker_did(self):
+        for times in (1, 2):
+            with self.subTest(cancellations=times):
+                self.session_id = self.client.post("/api/v1/sessions").json()["session_id"]
+                body = self.cancel_during_execution(times)
+                self.assertEqual(self.cart()["total_quantity"], 2)
+                self.assertEqual((body["status"], body["actions"]), ("completed", ["cart_updated"]))
+
+    def test_cancellation_is_raised_again_when_the_execution_failed(self):
+        body = self.cancel_during_execution(1, outcome=RuntimeError("db gone"))
+        self.assertEqual((body["status"], body["error"]["code"]), ("failed", "cart_update_failed"))
+
+
 class RetentionTests(unittest.TestCase):
     def setUp(self):
         self.now = datetime(2026, 10, 12, 10, 0, tzinfo=timezone.utc)
@@ -1725,6 +1848,15 @@ class RetentionTests(unittest.TestCase):
         self.assertIsNone(self.repository.take_proposal("s1"))
         self.assertEqual(self.repository.history("s1"), [], "the lapsed question leaves the context")
         self.assertTrue(self.repository.needs_reconfirm("s1"), "a reading against it is still not an order")
+
+    def test_an_offer_lapses_just_after_two_minutes_not_before(self):
+        offer = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
+        self.repository.set_proposal("s1", offer.tool_calls)
+        self.now += timedelta(minutes=2)
+        self.assertIsNotNone(self.repository.take_proposal("s1"), "two minutes exactly: still open")
+        self.repository.set_proposal("s1", offer.tool_calls)
+        self.now += timedelta(minutes=2, seconds=1)
+        self.assertIsNone(self.repository.take_proposal("s1"))
 
     def test_only_an_unfinished_request_is_closed_as_failed(self):
         error = VoiceErrorResponse(code="ai_unavailable", detail="x")

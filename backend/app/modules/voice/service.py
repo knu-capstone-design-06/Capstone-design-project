@@ -899,24 +899,41 @@ class VoiceService:
     async def process(
         self, session_id: str, request_id: str, request: VoiceRequestCreate
     ) -> None:
-        """Interpret and (when set up) run one accepted request. It always leaves the request finished:
-        one left "processing" would answer every later request of its session with 409."""
+        """Interpret and (when set up) run one accepted request, and leave it finished whatever fails: one
+        left "processing" would answer every later request of its session with 409. Once the tools have run
+        the request ends as that (completed, cart_updated), also when the task is cancelled meanwhile."""
+        ran: list[VoiceInterpretation] = []  # filled once the tools have run: the request then ends as that
         try:
-            await self._process(session_id, request_id, request)
+            await self._process(session_id, request_id, request, ran)
         except BaseException as exc:
-            # Anything the handling inside did not expect, and cancellation (shutdown). No offer
-            # stays open behind a request that ended this way.
-            self._repository.take_proposal(session_id)
-            self._repository.discard_proposal_turn(session_id)
-            if self._repository.fail_unfinished(request_id, FALLBACK_REPLY, VoiceErrorResponse(
-                    code="ai_unavailable", detail="음성 요청을 끝까지 처리하지 못했습니다.")):
-                logger.error("voice request closed as failed after %s", type(exc).__name__)
+            # Anything the handling inside did not expect, and cancellation (shutdown). The request is
+            # closed first, and each step on its own: one that fails must not leave it "processing".
+            closed = False
+            try:
+                if ran:
+                    closed = self._repository.finish_unfinished(
+                        request_id, "completed", None, ran[0].tool_calls, ["cart_updated"])
+                else:
+                    closed = self._repository.fail_unfinished(request_id, FALLBACK_REPLY, VoiceErrorResponse(
+                        code="ai_unavailable", detail="음성 요청을 끝까지 처리하지 못했습니다."))
+            except Exception:
+                logger.exception("voice request could not be closed")
+            if closed:
+                logger.error("voice request closed by the outer handler after %s", type(exc).__name__)
+            if closed and not ran:
+                # No offer stays open behind a request that ended this way. One that finished by itself
+                # (an offer read back, then the task was cancelled) keeps what it stored.
+                for step in (self._repository.take_proposal, self._repository.discard_proposal_turn):
+                    try:
+                        step(session_id)
+                    except Exception:
+                        logger.exception("voice offer could not be closed")
             if not isinstance(exc, Exception):
                 raise
             logger.exception("voice request crashed outside its handling")
 
     async def _process(
-        self, session_id: str, request_id: str, request: VoiceRequestCreate
+        self, session_id: str, request_id: str, request: VoiceRequestCreate, ran: list,
     ) -> None:
         self._repository.update(request_id, "processing")
         off_menu: str | None = None
@@ -1044,11 +1061,12 @@ class VoiceService:
                 # ends even when this task is cancelled meanwhile (shutdown): the cancellation waits.
                 run = asyncio.ensure_future(
                     asyncio.to_thread(self._executor.execute, session_id, request_id, result.tool_calls, expected))
-                try:
-                    await asyncio.shield(run)
-                except asyncio.CancelledError:
-                    cancelled = True
-                    await run
+                while True:
+                    try:
+                        await asyncio.shield(run)
+                        break
+                    except asyncio.CancelledError:
+                        cancelled = True  # also a second time: keep waiting for the worker's outcome
             except CartChanged as changed:
                 # A touch changed the cart after the inputs were checked ("3잔으로" was
                 # "하나 더" over two cups; now there are five). Nothing ran: read the same
@@ -1069,6 +1087,8 @@ class VoiceService:
                 if proposal is not None:
                     self._repository.discard_proposal_turn(session_id)
                 self._repository.update(request_id, "failed", failed.reply_text, error=failed.error)
+                if cancelled:
+                    raise asyncio.CancelledError()
                 return
             except Exception:
                 # The interpretation succeeded; only the cart change failed, so the code
@@ -1080,23 +1100,34 @@ class VoiceService:
                     request_id, "failed", FALLBACK_EXECUTION_REPLY,
                     error=VoiceErrorResponse(code="cart_update_failed", detail="장바구니에 반영하지 못했습니다."),
                 )
+                if cancelled:
+                    raise asyncio.CancelledError()
                 return
             if result.status == "completed":
                 actions = ["cart_updated"]
-        try:
-            if result.status == "completed":
-                # An order went through (accepted or read with no open offer): later readings
-                # are orders again.
-                self._repository.clear_reconfirm(session_id)
-            if result.status != "ignored":
-                # Speech not meant for the kiosk would only confuse later turns.
-                self._repository.append_turn(session_id, VoiceTurn(request=request, result=result))
-        except Exception:
-            if not actions:
-                raise
-            # The cart has changed already. Whatever fails after that, the request ends as what happened
-            # (completed, cart_updated): told it failed, the customer would say the same order again.
-            logger.exception("voice bookkeeping failed after the cart changed; the request still completes")
+                ran.append(result)
+        for step in ("clear_reconfirm", "append_turn"):
+            try:
+                if step == "clear_reconfirm" and result.status == "completed":
+                    # An order went through (accepted or read with no open offer): later readings
+                    # are orders again.
+                    self._repository.clear_reconfirm(session_id)
+                if step == "append_turn" and result.status != "ignored":
+                    # Speech not meant for the kiosk would only confuse later turns.
+                    self._repository.append_turn(session_id, VoiceTurn(request=request, result=result))
+            except Exception:
+                if not actions:
+                    raise
+                # The cart has changed already. Whatever fails after that, the request ends as what happened
+                # (completed, cart_updated): told it failed, the customer would say the same order again.
+                logger.exception("voice bookkeeping failed after the cart changed; the request still completes")
+                if step == "append_turn" and proposal is not None:
+                    # The accepted offer ran but its completed turn is missing: its question must not stay
+                    # last in the context, where it reads as still open.
+                    try:
+                        self._repository.discard_proposal_turn(session_id)
+                    except Exception:
+                        logger.exception("voice offer turn could not be dropped")
         # Without an executor, tool_calls are MCP inputs only (a proposal when
         # needs_confirmation) and actions stay empty.
         self._repository.update(

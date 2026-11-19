@@ -153,6 +153,17 @@ class VoiceRepository:
             record.tool_calls, record.actions = [], []
             return True
 
+    def finish_unfinished(self, request_id: str, status: VoiceStatus, reply_text: str | None,
+                          tool_calls: list[ToolCall], actions: list[VoiceAction]) -> bool:
+        """Close a request still accepted or processing as what happened; True when it was."""
+        with self._lock:
+            record = self._records.get(request_id)
+            if record is None or record.status not in ACTIVE_STATUSES:
+                return False
+            record.status, record.reply_text, record.error = status, reply_text, None
+            record.tool_calls, record.actions = list(tool_calls), list(actions)
+            return True
+
     def history(self, session_id: str) -> list[VoiceTurn]:
         with self._lock:
             return list(self._history.get(session_id, ()))

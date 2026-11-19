@@ -97,7 +97,7 @@ def tidy_output(result: dict) -> dict:
     """Mend reply_text slips that do not touch what would run, so a good order is not failed for them.
 
     The tool inputs are left as they are and still validated, and nothing here makes an order run
-    that would not have run. A proposal's sentence is always rebuilt by the service from the tool
+    without the customer's yes that would not have run before. A proposal's sentence is always rebuilt by the service from the tool
     inputs, so a missing or long one only needs a stand-in. A completed result that also carries a
     sentence ("담았어요", or a question) contradicts itself: it is read back as a proposal instead of
     run or failed. A question that is missing or too long to show becomes the plain menu question.
