@@ -786,13 +786,38 @@ class ToolExecutionApiTests(VoiceApiCase):
                 self.say("에그 샌드위치 하나 주세요", session_id)
                 self.assertNotIn("needs_confirmation", [t.result.status for t in self.interpreter.histories[-1]])
 
-    def test_a_crash_after_the_checks_still_finishes_the_request(self):
+    def crash_once_in_append_turn(self):
         repository = self.client.app.state.voice_service._repository
-        append, repository.append_turn = repository.append_turn, lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+        reached, append = [], repository.append_turn
+
+        def boom(*args, **kwargs):
+            reached.append(True)
+            repository.append_turn = append
+            raise RuntimeError("boom")
+
+        repository.append_turn = boom
+        return reached
+
+    def test_a_crash_after_the_cart_changed_still_reports_what_happened(self):
+        # Review of #92: the tools ran, then the bookkeeping failed. Told "failed", the customer would order again.
+        reached = self.crash_once_in_append_turn()
         body = self.status(self.say("아이스 아메리카노 두 잔 주세요")).json()
-        self.assertEqual((body["status"], body["error"]["code"]), ("failed", "ai_unavailable"))
-        repository.append_turn = append
+        self.assertEqual(reached, [True], "the crash was reached, after the execution")
+        self.assertEqual((body["status"], body["actions"], body["error"]), ("completed", ["cart_updated"], None))
+        self.assertEqual(self.cart()["total_quantity"], 2)
         self.assertEqual(self.post().status_code, 202, "the session is not left answering 409")
+
+    def test_a_crash_before_anything_ran_fails_the_request_and_leaves_the_cart(self):
+        self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)   # an offer: nothing runs
+        reached = self.crash_once_in_append_turn()
+        body = self.status(self.say("아이스 아메리카노 두 개")).json()
+        self.assertEqual(reached, [True])
+        self.assertEqual((body["status"], body["error"]["code"], body["actions"]), ("failed", "ai_unavailable", []))
+        self.assertEqual(self.cart()["items"], [])
+        # The offer made in the crashed request is not left open.
+        self.interpreter.result = interpretation(ADD_AMERICANO)
+        self.assertNotEqual(self.status(self.say("네")).json()["status"], "completed")
+        self.assertEqual(self.cart()["items"], [])
 
     def test_yes_runs_the_confirmed_proposal_even_if_the_model_now_says_otherwise(self):
         self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)

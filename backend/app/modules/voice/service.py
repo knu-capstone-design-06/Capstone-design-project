@@ -1035,11 +1035,20 @@ class VoiceService:
             )
             return
         actions = []
+        cancelled = False
         if result.status == "completed" and self._executor is not None:
             # A proposal (needs_confirmation) is not run; the customer's "네" comes back
             # as a completed result and is run then.
             try:
-                await asyncio.to_thread(self._executor.execute, session_id, request_id, result.tool_calls, expected)
+                # The worker thread cannot be stopped once it runs, so its outcome decides how the request
+                # ends even when this task is cancelled meanwhile (shutdown): the cancellation waits.
+                run = asyncio.ensure_future(
+                    asyncio.to_thread(self._executor.execute, session_id, request_id, result.tool_calls, expected))
+                try:
+                    await asyncio.shield(run)
+                except asyncio.CancelledError:
+                    cancelled = True
+                    await run
             except CartChanged as changed:
                 # A touch changed the cart after the inputs were checked ("3잔으로" was
                 # "하나 더" over two cups; now there are five). Nothing ran: read the same
@@ -1074,18 +1083,27 @@ class VoiceService:
                 return
             if result.status == "completed":
                 actions = ["cart_updated"]
-        if result.status == "completed":
-            # An order went through (accepted or read with no open offer): later readings
-            # are orders again.
-            self._repository.clear_reconfirm(session_id)
-        if result.status != "ignored":
-            # Speech not meant for the kiosk would only confuse later turns.
-            self._repository.append_turn(session_id, VoiceTurn(request=request, result=result))
+        try:
+            if result.status == "completed":
+                # An order went through (accepted or read with no open offer): later readings
+                # are orders again.
+                self._repository.clear_reconfirm(session_id)
+            if result.status != "ignored":
+                # Speech not meant for the kiosk would only confuse later turns.
+                self._repository.append_turn(session_id, VoiceTurn(request=request, result=result))
+        except Exception:
+            if not actions:
+                raise
+            # The cart has changed already. Whatever fails after that, the request ends as what happened
+            # (completed, cart_updated): told it failed, the customer would say the same order again.
+            logger.exception("voice bookkeeping failed after the cart changed; the request still completes")
         # Without an executor, tool_calls are MCP inputs only (a proposal when
         # needs_confirmation) and actions stay empty.
         self._repository.update(
             request_id, result.status, result.reply_text, result.tool_calls, actions=actions,
         )
+        if cancelled:
+            raise asyncio.CancelledError()
 
     def get(self, session_id: str, request_id: str) -> VoiceRequestStatus:
         if not self._session_exists(session_id):
