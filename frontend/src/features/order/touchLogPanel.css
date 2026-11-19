@@ -1,4 +1,6 @@
-.touch-log-tools { position: fixed; right: 16px; bottom: calc(var(--order-actions-measured-height, 174px) + 16px); z-index: 100; width: min(380px, calc(100vw - 32px)); color: #213c34; font: 13px/1.5 system-ui, sans-serif; }
+/* 380 px 상자는 누름을 받지 않고 안의 버튼·창만 받습니다. 접은 단추는 장바구니 줄의 버튼과 겹치지 않게 주문 바 4 px 위에 둡니다. */
+.touch-log-tools { position: fixed; right: 16px; bottom: calc(var(--order-actions-measured-height, 232px) + 4px); z-index: 100; width: min(380px, calc(100vw - 32px)); color: #213c34; font: 13px/1.5 system-ui, sans-serif; pointer-events: none; }
+.touch-log-tools > * { pointer-events: auto; }
 .touch-log-tools button { min-height: 36px; padding: 7px 11px; font-size: 12px; border-radius: 8px; }
 .touch-log-launcher { display: block; margin-left: auto; background: #173e34; color: white; box-shadow: 0 4px 16px #173e3426; }
 .touch-log-launcher:hover { background: #27574a; }
