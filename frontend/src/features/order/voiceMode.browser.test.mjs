@@ -163,7 +163,7 @@ test('주변 대화는 표시하지 않고 이전 확인 질문에 짧게 답할
     await page.evaluate(() => window.voiceFakes.at(-1).partial('네'));
     assert.match(await page.locator('.voice-mode-feedback').innerText(), /듣는 중: 네/);
     await page.evaluate(() => window.voiceFakes.at(-1).final('네'));
-    await page.locator('.voice-mode-feedback').getByText(/주문을 변경하는 기능은 아직 준비 중/).waitFor();
+    await page.locator('.voice-mode-feedback').getByText('말씀을 확인했어요.', { exact: true }).waitFor();
     assert.equal(fixture.requests.filter(request => request.method === 'POST' && request.path.endsWith('/voice/requests')).at(-1).body.text, '네');
     fixture.verify();
     assert.deepEqual(errors, []);
@@ -189,7 +189,7 @@ test('확인 질문 뒤 서버 실패를 알리고 다시 말하기에서 질문
     await page.waitForFunction(() => window.voiceFakes.length === 3);
     assert.match(await page.locator('.voice-mode-feedback').innerText(), /아이스 아메리카노 담을까요/);
     await page.evaluate(() => window.voiceFakes.at(-1).final('네'));
-    await page.locator('.voice-mode-feedback').getByText(/주문을 변경하는 기능은 아직 준비 중/).waitFor();
+    await page.locator('.voice-mode-feedback').getByText('말씀을 확인했어요.', { exact: true }).waitFor();
     assert.deepEqual(fixture.requests.filter(request => request.method === 'POST' && request.path.endsWith('/voice/requests')).map(request => request.body.text), ['아메리카노 주세요', '네', '네']);
     fixture.verify();
     assert.deepEqual(errors, []);
