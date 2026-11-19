@@ -85,7 +85,10 @@ class Client:
                            "temperature_0": True, "thinking_level": "minimal" if self.use_thinking_level else "default",
                            "schema": True, "error": None}
                 except urllib.error.HTTPError as e:
-                    msg = e.read().decode("utf-8", "replace")
+                    try:
+                        msg = e.read().decode("utf-8", "replace")
+                    except Exception:  # the connection dropped while the error body was read: the status still stands
+                        msg = ""
                     tries.add(ms_since(t0), f"http {e.code}")
                     if e.code == 400 and "thinking" in msg.lower() and "thinkingConfig" in b["generationConfig"]:
                         tries.items[-1]["result"] += ", thinking level refused"

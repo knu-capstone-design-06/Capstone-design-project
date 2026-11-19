@@ -114,7 +114,7 @@ GPT는 2026-11-09, Claude는 2026-11-10에 쟀고, Jev는 앞선 Jev 실험의 �
 AI 담당의 결과 표에 있는 모델 모두가 세 세트에서 값을 갖도록 모델 4개를 더 돌렸습니다. 세트는 novel(SUM 형식, 60건: 도움 28, 대기 32), heldout1(56건: 도움 28, 대기 28), heldout2(56건: 도움 32, 대기 24)입니다. 프롬프트는 AI 담당의 파일을 데이터로 읽어 그대로 재현했고, 그 코드는 실행하지 않았습니다. 선택지는 지원 9개 + none이고, 세트와 모델마다 3번 돌렸습니다.
 
 - 점수(균형 정확도, BA) = (도움 사례 가운데 고른 지원이 허용 목록에 든 비율 + 대기 사례 가운데 답이 null이 아니고 화면에 보이는 지원 7개도 아닌 비율) / 2. AI 담당 실험의 정의를 따랐습니다.
-- 정밀도 · 재현율 · F1은 BA와 같은 사례 판정으로 계산합니다. 도움 사례는 고른 지원이 허용 목록에 들면 TP, 아니면 FN입니다. 대기 사례는 답이 null이거나 화면에 보이는 지원이면 FP, 아니면 TN입니다. 정밀도 = TP / (TP + FP), 재현율 = TP / (TP + FN), F1 = 2TP / (2TP + FP + FN)이고, 재현율은 BA의 도움 사례 비율과 같습니다.
+- 정밀도 · 재현율 · F1은 BA와 같은 사례 판정으로 계산합니다. 도움 사례는 고른 지원이 허용 목록에 들면 TP, 아니면 FN입니다. 대기 사례는 답이 null이거나 화면에 보이는 지원이면 FP, 아니면 TN입니다. 정밀도 = TP / (TP + FP), 재현율 = TP / (TP + FN), F1 = 2TP / (2TP + FP + FN)이고, 재현율은 BA의 도움 사례 비율과 같습니다. 아래 표는 고른 지원이 허용 목록에 들어야 TP로 세지만 AI 담당의 `paper_metrics.py`는 도움 사례의 답이 화면에 보이는 지원이면 무엇이든 TP로 세므로, 두 F1은 나란히 비교하지 않습니다.
 - 같은 답에서 정밀도 · 재현율 · F1과 Macro-F1을 내는 도구는 `tools/score_scen_f1.py`와 `tools/score_scen_f1_macro.py`입니다. 아래 표에는 AI 담당 실험의 값과 나란히 볼 수 있게 균형 정확도를 적었고, 정밀도 · 재현율 · F1도 함께 적었습니다.
 - 1초 변형: 답이 null이거나 1,000 ms보다 늦은 사례는 AI 담당의 규칙표 답으로 바꿉니다.
 - 확인: novel 4건을 gpt-4o-mini에 보내 프롬프트 토큰이 건마다 1,035개로 AI 담당의 기록과 같았습니다. AI 담당이 저장한 답을 `tools/score_scen.py verify`로 다시 채점한 값도 기록된 값과 같았습니다.
@@ -149,7 +149,7 @@ AI 담당의 결과 표에 있는 모델 모두가 세 세트에서 값을 갖�
 | 평가 키트 `llm_eval_kit_2026-11-08`(창별 입력 `data/`, 질문 `questions.json`, 라벨 `labels/`, Jev 기준 답 `reference_answers/`) | `--kit`(`score.py`, `run_gpt.py`, `run_claude.py`), 첫째 인자(`cell_windows.py`), 둘째 인자(`one_second.py`) | 비전 담당 작업 폴더. `eval_llm_2026-11-12_rA/tools/build_kit_2026-11-08.py`로 만들었음 |
 | 모델 답(`answers.jsonl`) | `--answers`(`score.py`) | `run_gpt.py` · `run_claude.py`가 `--out` 폴더에 씀 |
 | 앞선 Jev 실험의 기록 실행(`stage2_3_J_b0_r0`, `stage2_1_swap_C_C0`가 든 폴더) | 셋째 인자(`one_second.py`) | 비전 담당 작업 폴더. Jev의 응답 시간을 이 기록에서 읽음 |
-| AI 담당의 시나리오 재현 자료 | `--repro`(`score_scen_f1.py`, `score_scen_f1_macro.py`: zip이나 푼 폴더), 첫째 인자(`scen_prep.py`: 푼 폴더) | AI 담당이 보낸 자료. 비전 담당 작업 폴더에 있음 |
+| AI 담당의 시나리오 재현 자료 | `--repro`(`score_scen_f1.py`, `score_scen_f1_macro.py`: zip이나 푼 `jev_touch_experiment_repro` 폴더), 첫째 인자(`scen_prep.py`: 푼 `jev_touch_experiment_repro` 폴더) | AI 담당이 보낸 자료. 비전 담당 작업 폴더에 있음 |
 | 시나리오 세트 폴더 `runs/scenarios`(입력 `inputs/`와 실행 폴더) | `--runs`(`score_scen_f1.py`, `score_scen_f1_macro.py`), `--root`(`run_scenarios.py`), 경로 인자(`score_scen.py runs`, `score_scen_1s.py`) | `scen_prep.py`가 `inputs/`를, `run_scenarios.py`가 실행 폴더를 만듦 |
 
 GPT 실행기는 `--env`로 준 파일(`backend/.env`)의 `OPENAI_API_KEY`를, Claude 실행기는 `--env`로 준 파일의 `ANTHROPIC_API_KEY`를 읽습니다. 아래 명령은 실험 때 돌린 순서대로 적었습니다.
