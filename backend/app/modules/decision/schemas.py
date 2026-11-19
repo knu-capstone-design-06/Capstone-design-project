@@ -65,7 +65,7 @@ PILOT_PARAMS = DecisionParams(
 SCREEN_FLOW = ("menu", "review", "complete")
 
 # Shadow-stage settings with no source yet ("기준 없음"): experiment settings, not agreed thresholds.
-HISTORY_WINDOWS = 5         # windows kept for the trajectory stage (2 s windows: about ten seconds)
+HISTORY_WINDOWS = 5         # windows read by the trajectory stage (the records themselves stay for the session) (2 s windows: about ten seconds)
 FORECAST_HORIZON_S = 10     # how far ahead next_difficulty asks about
 
 # The only stage answers the trajectory reads (docs 9.6): stage-1 state scores. A forecast never reads the
