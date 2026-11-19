@@ -1,5 +1,5 @@
 /// <reference types="vite/client" />
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SavedLog } from './touchLog.ts';
 import { logLimit } from './touchLog.ts';
 import { summarizeTouchLog } from './touchLogSummary.ts';
@@ -40,6 +40,32 @@ function DraftPanel() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [sampledAt, setSampledAt] = useState(Date.now);
   const [policy, setPolicy] = useState<TouchPilotPolicy>(() => ({ ...touchPilotPolicy }));
+  const tools = useRef<HTMLElement>(null);
+  // 자리: 고객 조작이 없는 매장 이름 줄의 오른쪽 끝. 보이는 매장 이름 줄(낮은 화면에서는 위쪽 읽기 자리의 줄)의 안쪽 위 끝과
+  // 안쪽 오른쪽 끝(화면 여백 안)을 재어 넣습니다. 설정이 바뀌어 그 줄이 옮겨 가면 다시 잽니다.
+  useEffect(() => {
+    let frame = 0;
+    const fixed = (element: Element) => {
+      for (let node: Element | null = element; node; node = node.parentElement) if (getComputedStyle(node).position === 'fixed') return true;
+      return false;
+    };
+    const place = () => {
+      frame = 0;
+      const element = tools.current;
+      const row = [...document.querySelectorAll('.kiosk .store-name')].map(name => name.parentElement)
+        .find((box): box is HTMLElement => box !== null && box.getBoundingClientRect().width > 1 && box.getBoundingClientRect().height > 1);
+      if (!element || !row) return;
+      const box = row.getBoundingClientRect(), style = getComputedStyle(row);
+      element.style.setProperty('--touch-log-top', `${box.top + (fixed(row) ? 0 : scrollY) + parseFloat(style.borderTopWidth) + parseFloat(style.paddingTop)}px`);
+      element.style.setProperty('--touch-log-right', `${document.documentElement.clientWidth - box.right + parseFloat(style.borderRightWidth) + parseFloat(style.paddingRight)}px`);
+    };
+    const schedule = () => { if (!frame) frame = requestAnimationFrame(place); };
+    const observer = new MutationObserver(schedule);
+    observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
+    window.addEventListener('resize', place);
+    place();
+    return () => { observer.disconnect(); window.removeEventListener('resize', place); cancelAnimationFrame(frame); };
+  }, []);
   useEffect(() => {
     if (!open || paused) return;
     function refresh() {
@@ -63,7 +89,10 @@ function DraftPanel() {
   const selected = recent.find(event => event.id === selectedId) ?? recent[0];
   const summary = useMemo(() => snapshot ? summarizeTouchLog(snapshot) : null, [snapshot]);
   const pilot = useMemo(() => snapshot ? measureTouchPilot(snapshot, sampledAt, 2000, policy) : null, [snapshot, sampledAt, policy]);
-  return <aside className="touch-log-tools" aria-label="개발용 터치 로그 확인">
+  return <aside ref={tools} className="touch-log-tools" aria-label="개발용 터치 로그 확인">
+    <button type="button" className="touch-log-launcher" aria-expanded={open} aria-controls="touch-log-panel" onClick={() => setOpen(!open)}>
+      {open ? '로그 창 접기' : '터치 로그 보기'}
+    </button>
     {open && <section id="touch-log-panel" className="touch-log-panel" aria-labelledby="touch-log-title">
       <header className="touch-log-heading">
         <div><span>개발 확인용 · 로컬 초안</span><h2 id="touch-log-title">터치 로그</h2></div>
@@ -143,8 +172,5 @@ function DraftPanel() {
         <pre>{JSON.stringify(selected, null, 2)}</pre>
       </details>}
     </section>}
-    <button type="button" className="touch-log-launcher" aria-expanded={open} aria-controls="touch-log-panel" onClick={() => setOpen(!open)}>
-      {open ? '로그 창 접기' : '터치 로그 보기'}
-    </button>
   </aside>;
 }
