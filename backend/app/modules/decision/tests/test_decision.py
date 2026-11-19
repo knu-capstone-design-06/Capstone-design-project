@@ -622,8 +622,18 @@ class ObservationTests(unittest.TestCase):
         self.assertEqual([h["t"] - T0.timestamp() for h in repository.history("s1", state.epoch)], [1006, 1008],
                          "not the window at 1000 of the timeline before")
         moved_on = repository.windows("s1")[-2]
-        self.assertIsNone(moved_on.inputs["progress_segment"], "not compared with the menu window of the timeline before")
+        self.assertIs(moved_on.inputs["progress_segment"], False,
+                      "compared with the review window just before it, not with the menu window of the timeline before")
         self.assertEqual(repository.windows("s1")[-1].decision["transition"], "keep", "the screen did not change: 4-2 stays")
+
+    def test_a_screen_change_that_falls_on_the_clock_move_is_still_progress(self):
+        repository, send = self.timed()
+        send(2), send(4, back_count=1)                                        # 4-2 opens on the menu
+        send(1806, "review"), send(1808, "review"), send(1810, "review")      # the clock moved ahead while the screen changed
+        self.assertEqual(self.stale(repository), [False, False, True, False, False])
+        crossed = repository.windows("s1")[-2]
+        self.assertIs(crossed.inputs["progress_segment"], True, "menu before the move, review after it")
+        self.assertEqual(crossed.decision["transition"], "withdraw", "progress withdraws 4-2 as it does without a clock move")
 
     def test_a_support_withdrawn_before_the_clock_moved_is_not_reopened_in_the_same_visit(self):
         repository, clock = DecisionRepository(), {"now": 1000.0}

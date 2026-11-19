@@ -165,10 +165,14 @@ class DecisionService:
         # the table could act on count (measurable, a screen of the flow): when the window that crossed to the
         # next screen was not measurable, the next measurable one still shows the step forward and withdraws 4-2.
         # The screens of the windows passed over since then go along, so a step forward they hide is still seen.
-        # Times compare within one epoch only: after the frontend clock moved, the windows before it are left out.
+        # Times compare within one epoch only. The windows of earlier epochs came before this one whatever their
+        # times say, so they stay ahead in the order they arrived: a screen change that falls on the clock move is
+        # still seen (menu, clock moved, review), and the screen is not read from an earlier time of the old
+        # timeline (review at 3000, clock set back, review at 1006: compared with that review, not with a menu at 1000).
         t = window.window_end.timestamp()
         epoch = self._repository.state(session_id).epoch
-        judged = [w for w in self._repository.windows(session_id) if w.jev != STALE and w.epoch == epoch and w.t <= t]
+        windows = [w for w in self._repository.windows(session_id) if w.jev != STALE]
+        judged = [w for w in windows if w.epoch < epoch] + [w for w in windows if w.epoch == epoch and w.t <= t]
         seen = [i for i, w in enumerate(judged) if w.inputs.get("measurable") and w.inputs.get("screen") in SCREEN_FLOW]
         if not seen:
             return window_input(window, measurable, situation, gaze)
