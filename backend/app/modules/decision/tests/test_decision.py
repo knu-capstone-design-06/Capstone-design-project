@@ -555,38 +555,111 @@ class ObservationTests(unittest.TestCase):
         self.assertIs(repository.windows("s2")[-1].inputs["progress_segment"], True)
         self.assertEqual(jumped.transition, "withdraw")
 
-    def test_a_window_whose_time_jumped_ahead_is_recorded_only(self):
-        repository = DecisionRepository()
-        clock = {"now": 1000.0}
+    def timed(self):
+        """A service on a server clock the test moves: 2 s pass before every window unless told otherwise."""
+        repository, clock = DecisionRepository(), {"now": 1000.0}
         service = DecisionService(repository, P, None, now=lambda: clock["now"])
-        service.observe("s1", ending_at(4), measurable=True)
-        service.observe("s1", ending_at(86400), measurable=True)          # a frontend clock a day ahead, once
-        self.assertEqual(repository.windows("s1")[-1].jev, STALE)
-        self.assertEqual(repository.state("s1").last_t, T0.timestamp() + 4, "the mark does not follow the jump")
-        clock["now"] += 8
-        decision = service.observe("s1", ending_at(12, back_count=1), measurable=True)
-        self.assertEqual((decision.transition, decision.support), ("open", HIGHLIGHT), "the windows after it are judged")
 
-    def test_a_frontend_clock_steadily_ahead_keeps_the_order_of_late_windows(self):
+        def send(seconds, screen="menu", back_count=0, passed=2.0):
+            clock["now"] += passed
+            return service.observe("s1", ending_at(seconds, screen, back_count), measurable=True)
+
+        return repository, send
+
+    def stale(self, repository):
+        return [w.jev == STALE for w in repository.windows("s1")]
+
+    def test_a_late_window_never_sends_the_session_back_however_late(self):
+        # Reviews of #77: the session went on to 124 s; the window that ended at 2 s arrives after it.
+        repository, send = self.timed()
+        send(120), send(122, "review"), send(124, "review")
+        late = send(2, back_count=1)
+        self.assertEqual((late.transition, self.stale(repository)), ("none", [False, False, False, True]))
+        self.assertEqual(repository.state("s1").last_t, T0.timestamp() + 124)
+        self.assertIsNone(repository.state("s1").held, "the back on the late window opens nothing")
+        self.assertEqual([h["t"] - T0.timestamp() for h in repository.history("s1")], [120, 122, 124])
+
+    def test_one_wrong_time_costs_that_window_only(self):
+        for wrong in (86400, -86400):      # a day ahead, a day behind
+            with self.subTest(wrong=wrong):
+                repository, send = self.timed()
+                send(2), send(4), send(wrong + 6)
+                opened = send(8, back_count=1)
+                send(10), send(12, "review")
+                self.assertEqual(self.stale(repository), [False, False, True, False, False, False])
+                self.assertEqual((opened.transition, opened.support), ("open", HIGHLIGHT))
+                self.assertEqual(repository.state("s1").last_t, T0.timestamp() + 12)
+
+    def test_a_wrong_first_window_does_not_shut_out_the_session_or_stay_in_the_history(self):
+        repository, send = self.timed()
+        send(86400)                                       # the very first window is a day ahead
+        send(4)                                           # off that timeline: recorded, waiting for the next
+        opened = send(6, back_count=1)                    # follows it: the session's times move here
+        send(8)
+        self.assertEqual(self.stale(repository), [False, True, False, False])
+        self.assertEqual((opened.transition, opened.support), ("open", HIGHLIGHT))
+        state = repository.state("s1")
+        history = repository.history("s1", state.timeline_from, T0.timestamp() + 10)
+        self.assertEqual([h["t"] - T0.timestamp() for h in history], [6, 8], "the day-ahead window is not shown to Jev")
+
+    def test_a_clock_set_during_the_session_is_followed_from_the_second_window_on(self):
+        repository, send = self.timed()
+        send(2), send(4, back_count=1)                    # 4-2 opens
+        send(1806), send(1808), send(1810), send(1812, "review")     # the frontend clock was set 30 min ahead
+        self.assertEqual(self.stale(repository), [False, False, True, False, False, False])
+        self.assertEqual(repository.windows("s1")[-1].decision["transition"], "withdraw", "progress still withdraws 4-2")
+        state = repository.state("s1")
+        self.assertEqual((state.last_t, state.timeline_from), (T0.timestamp() + 1812, T0.timestamp() + 1806))
+        history = repository.history("s1", state.timeline_from, T0.timestamp() + 1814)
+        self.assertEqual([h["t"] - T0.timestamp() for h in history], [1808, 1810, 1812])
+
+    def test_times_of_what_is_shown_move_with_the_clock(self):
+        from app.modules.decision.service import moved
+
+        repository, send = self.timed()
+        send(2), send(4, back_count=1)
+        before = repository.state("s1")
+        after = moved(before, 1800.0)
+        self.assertEqual(after.held.shown_t - before.held.shown_t, 1800.0)
+        self.assertEqual(after.screen_since - before.screen_since, 1800.0)
+        self.assertEqual(before.held.shown_t, T0.timestamp() + 4, "the stored state is not changed in place")
+
+    def test_a_frontend_clock_steadily_off_keeps_the_order_of_late_windows(self):
         for skew in (0, 30, -30, 3600):
             with self.subTest(skew=skew):
-                repository = DecisionRepository()
-                clock = {"now": T0.timestamp()}
-                service = DecisionService(repository, P, None, now=lambda: clock["now"])
+                repository, send = self.timed()
                 for seconds in (2, 6, 4, 8):     # the window ending at 4 arrives late
-                    clock["now"] += 2
-                    service.observe("s1", ending_at(seconds + skew), measurable=True)
-                self.assertEqual([w.jev == STALE for w in repository.windows("s1")], [False, False, True, False])
+                    send(seconds + skew)
+                self.assertEqual(self.stale(repository), [False, False, True, False])
 
-    def test_a_first_window_with_a_wrong_time_does_not_shut_out_the_session(self):
+    def test_a_replay_faster_than_real_time_is_on_the_timeline(self):
+        repository, send = self.timed()
+        for seconds in range(2, 400, 2):
+            send(seconds, passed=0.001)
+        self.assertNotIn(True, self.stale(repository))
+
+    def test_progress_hidden_by_a_window_that_was_not_measurable_is_seen_either_way(self):
         repository = DecisionRepository()
-        clock = {"now": 1000.0}
-        service = DecisionService(repository, P, None, now=lambda: clock["now"])
-        service.observe("s1", ending_at(86400), measurable=True)          # the very first window is a day ahead
-        clock["now"] += 2
-        decision = service.observe("s1", ending_at(4, back_count=1), measurable=True)
-        self.assertEqual((decision.transition, decision.support), ("open", HIGHLIGHT))
-        self.assertEqual(repository.state("s1").last_t, T0.timestamp() + 4)
+        service = DecisionService(repository, P, None)
+        opened = service.observe("s3", ending_at(2, "review", back_count=1), measurable=True)
+        self.assertEqual((opened.transition, opened.support), ("open", HIGHLIGHT))
+        service.observe("s3", ending_at(4, "menu"), measurable=False)        # back to the menu, unseen
+        again = service.observe("s3", ending_at(6, "review"), measurable=True)
+        self.assertEqual((again.transition, repository.windows("s3")[-1].inputs["progress_segment"]), ("withdraw", True))
+
+    def test_answers_fit_checks_names_types_and_the_options_offered(self):
+        from app.infrastructure.external.jev_schemas import JevResponse
+        from app.modules.decision.service import answers_fit
+
+        questions = {"support_choice": {"type": "choice", "criteria": {"none": "x", "large_button": "y"}}}
+
+        def answers(choice):
+            return JevResponse.model_validate({"model": "m", "usage": {"input_tokens": 1, "output_tokens": 1}, "answers": {
+                "support_choice": {"type": "choice", "choice": choice, "confidence": 0.9, "probabilities": {choice: 0.9}}}}).answers
+
+        self.assertTrue(answers_fit(questions, answers("large_button")))
+        self.assertFalse(answers_fit(questions, answers("format_disk")), "the right type, a choice nobody offered")
+        self.assertFalse(answers_fit({**questions, "other": {"type": "noul"}}, answers("none")), "a question left unanswered")
 
     def test_progress_shows_on_the_next_measurable_window_when_the_crossing_one_was_not(self):
         repository = DecisionRepository()

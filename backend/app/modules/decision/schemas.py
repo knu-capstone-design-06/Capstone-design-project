@@ -74,7 +74,7 @@ HISTORY_STAGES = ("state_scores",)
 # Of those answers, the five contract state scores only (jev_questions.STATE_QUESTIONS): the rule table's own
 # question asked in the same call (proposal_fits, queue_support) stays out of the trajectory.
 HISTORY_SCORES = ("touch_difficulty", "navigation_difficulty", "visual_difficulty", "hesitation", "normal")
-STALE = "stale"   # WindowRecord.jev of a window that ended before the session's last judged window
+STALE = "stale"   # WindowRecord.jev of a window recorded only: late, or off the session's timeline (service._judge)
 
 
 @dataclass(frozen=True)
@@ -176,7 +176,10 @@ class SessionState:
     screen_since: float | None = None
     next_id: int = 1
     last_t: float | None = None   # end of the last judged window; a window ending before it is recorded only
-    last_now: float | None = None  # the server clock when that window was judged (to spot a jump in window times)
+    last_now: float | None = None  # the server clock when that window was judged: with last_t, the session's timeline
+    alt_t: float | None = None     # a window that fell off the timeline, kept to see whether the next one follows it
+    alt_now: float | None = None
+    timeline_from: float | None = None   # after the clock moved: where the present timeline starts (history before it is not shown)
 
     def snapshot(self) -> dict:
         held = None if self.held is None else {

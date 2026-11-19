@@ -34,7 +34,8 @@ def steps_left(screen: str | None) -> int | None:
 
 
 def window_input(window: FeatureWindowRequest, measurable: bool, situation: dict | None = None,
-                 gaze: bool | None = None, previous_screen: str | None = None) -> WindowInput:
+                 gaze: bool | None = None, previous_screen: str | None = None,
+                 between: Sequence[str] = ()) -> WindowInput:
     """One rule-table line from a /features window.
 
     The contract's five touch counts fill what they can: presses, misses and backs. The screen id gives the steps
@@ -45,9 +46,12 @@ def window_input(window: FeatureWindowRequest, measurable: bool, situation: dict
     touch = window.touch
     # Progress is known only between two screens of the flow: with a screen id outside it (the voice API's
     # "menu_list", a new screen) or no window before, it is None, not "no progress". A window lost in between
-    # (menu, then complete) is still a step forward.
+    # (menu, then complete) is still a step forward. `between` holds the screens of the windows since
+    # previous_screen that were not measurable: as in the vision chain, one step forward anywhere on the way
+    # is progress (review, back to the menu unseen, review again).
     known = previous_screen in SCREEN_FLOW and window.screen_id in SCREEN_FLOW
-    forward = known and SCREEN_FLOW.index(window.screen_id) > SCREEN_FLOW.index(previous_screen)
+    path = [SCREEN_FLOW.index(s) for s in (previous_screen, *between, window.screen_id) if s in SCREEN_FLOW]
+    forward = known and any(later > earlier for earlier, later in zip(path, path[1:]))
     return WindowInput(
         t=window.window_end.timestamp(), measurable=measurable, situation=situation, screen=window.screen_id,
         steps_left=steps_left(window.screen_id), gaze=gaze, misses_recent=touch.miss_tap_count,
@@ -56,12 +60,12 @@ def window_input(window: FeatureWindowRequest, measurable: bool, situation: dict
     )
 
 
-# No source: window times come from the frontend clock, which may run ahead of or behind the server's by a
-# constant amount, so they are compared with each other, never with the server clock itself.
-# Wide on purpose: tests and replays of recorded sessions feed windows faster than real time, and only a
-# plainly wrong time (a clock a day off) has to be kept out.
-CLOCK_JUMP_S = 600.0       # a window may end this much later than the server time passed since the last one
-CLOCK_RESET_S = 60.0       # a window this far behind the mark means the mark was wrong (late windows are seconds late)
+# No source. Window times come from the frontend clock, which may run ahead of or behind the server's by a
+# constant amount. The last judged window and the server time it was judged at give the session's timeline;
+# a window is on it when its time is within this of where the server time passed puts it. Wide on purpose:
+# tests and replays of recorded sessions feed windows faster than real time, and only a plainly wrong time
+# (a clock a day off, a clock set mid-session) has to be told apart.
+CLOCK_JUMP_S = 600.0
 
 
 def log_task_failure(task: asyncio.Task) -> None:
@@ -81,9 +85,21 @@ def answers_fit(questions: dict, answers: dict) -> bool:
     return True
 
 
+def moved(state: SessionState, by: float) -> SessionState:
+    """The state with its times moved onto the timeline the frontend clock jumped to."""
+    state = copy.deepcopy(state)
+    if state.tag_since is not None:
+        state.tag_since += by
+    if state.screen_since is not None:
+        state.screen_since += by
+    if state.held is not None:
+        state.held = dataclasses.replace(state.held, shown_t=state.held.shown_t + by)
+    return state
+
+
 def stale_decision() -> Decision:
-    """What judge() returns for a window out of the order of time (late, or jumped ahead): nothing changes."""
-    return Decision("none", {}, reason="window out of time order (late, or its time jumped ahead); recorded only")
+    """What judge() returns for a window recorded only (late, or off the session's timeline): nothing changes."""
+    return Decision("none", {}, reason="window late or off the session's timeline; recorded only")
 
 
 def recorded_answer(answer):
@@ -103,13 +119,13 @@ def passed_answer(answer):
 class DecisionService:
     def __init__(self, repository: DecisionRepository, params: DecisionParams = PILOT_PARAMS,
                  jev: JevClient | None = None, stages: Sequence[JevStage] = DEFAULT_STAGES, clock=time.perf_counter,
-                 now=time.time):
+                 now=time.monotonic):
         self._repository = repository
         self._params = params
         self._jev = jev
         self._stages = tuple(stages)   # Jev calls in order; each sees the answers before it (stackable)
         self._clock = clock
-        self._now = now                # wall clock, to bound a window that claims to end in the future
+        self._now = now                # server time passed between windows (monotonic), for the session's timeline
         self._tasks: set[asyncio.Task] = set()
         self._in_flight: dict[str, asyncio.Task] = {}   # one Jev call chain per session at a time
         if self._stages and self._jev is None:
@@ -134,10 +150,14 @@ class DecisionService:
         # the one before it in time, so its comparison row keeps the time order of the screens. Only windows
         # the table could act on count (measurable, a screen of the flow): when the window that crossed to the
         # next screen was not measurable, the next measurable one still shows the step forward and withdraws 4-2.
+        # The screens of the windows passed over since then go along, so a step forward they hide is still seen.
         t = window.window_end.timestamp()
-        judged = [w for w in self._repository.windows(session_id) if w.jev != STALE and w.t <= t
-                  and w.inputs.get("measurable") and w.inputs.get("screen") in SCREEN_FLOW]
-        return window_input(window, measurable, situation, gaze, judged[-1].inputs.get("screen") if judged else None)
+        judged = [w for w in self._repository.windows(session_id) if w.jev != STALE and w.t <= t]
+        seen = [i for i, w in enumerate(judged) if w.inputs.get("measurable") and w.inputs.get("screen") in SCREEN_FLOW]
+        if not seen:
+            return window_input(window, measurable, situation, gaze)
+        return window_input(window, measurable, situation, gaze, judged[seen[-1]].inputs.get("screen"),
+                            [w.inputs.get("screen") for w in judged[seen[-1] + 1:]])
 
     def judge(self, session_id: str, window: FeatureWindowRequest, measurable: bool,
               situation: dict | None = None, gaze: bool | None = None) -> Decision:
@@ -151,21 +171,31 @@ class DecisionService:
 
         Windows are judged in time order. When /features requests overlap and an earlier window's answer from
         ai-engine arrives after a later window was judged, that earlier window must not roll the session back
-        (reopen a withdrawn support, undo a screen's progress): it changes nothing and the decision is None.
+        (reopen a withdrawn support, undo a screen's progress): it changes nothing and the decision is None,
+        however late it is.
+
+        A window whose time is off the session's timeline in either direction (a bad request, a clock a day
+        off) is recorded only as well: judged, it would lapse an open ask at once or send the session back.
+        Only when the next window follows that one, two in a row on another timeline, has the frontend clock
+        really moved: the session's times move with it and that window is judged. One wrong time, at the
+        start of a session or in the middle, costs that window and no other.
         """
         state = self._repository.state(session_id)
         now = self._now()
-        if state.last_t is not None:
-            behind = state.last_t - inp.t
-            if 0 < behind <= CLOCK_RESET_S:
-                return None, state, None                 # a late window
-            # A window whose time jumped ahead of what the server saw pass (a bad request, a clock set
-            # mid-session) is recorded only: judged, it would lapse an open ask at once and make every later
-            # window "late". A steady offset between the two clocks never trips this.
-            if behind <= 0 and state.last_now is not None and -behind > (now - state.last_now) + CLOCK_JUMP_S:
-                return None, state, None
-            # behind > CLOCK_RESET_S: the mark itself came from such a jump (the session's first window);
-            # this window starts the order of time again.
+        if state.last_t is not None and state.last_now is not None:
+            drift = (inp.t - state.last_t) - (now - state.last_now)
+            if abs(drift) <= CLOCK_JUMP_S:
+                state.alt_t = state.alt_now = None
+                if inp.t < state.last_t:
+                    return None, state, None                 # a late window
+            else:
+                follows = (state.alt_t is not None and inp.t >= state.alt_t
+                           and abs((inp.t - state.alt_t) - (now - state.alt_now)) <= CLOCK_JUMP_S)
+                if not follows:
+                    state.alt_t, state.alt_now = inp.t, now
+                    return None, state, None                 # off the timeline: wait for the next window
+                state = moved(state, drift)                  # how long things have been shown stays the same
+                state.timeline_from, state.alt_t, state.alt_now = state.alt_t, None, None
         state, timed_out = tick(state, inp.t, self._params)      # an unanswered ask lapses first
         before = copy.deepcopy(state)
         state, decision = apply(state, decide(inp, state, self._params))
@@ -178,12 +208,13 @@ class DecisionService:
         """judge(), record the window, then ask Jev in the background when the arm is on and the window allows.
 
         One call chain per session at a time: while an answer is still on its way, the next window is recorded
-        as skipped rather than asked; the window after it asks again. A window that ended before the session's
-        last judged window is recorded as STALE: no state change, no Jev call.
+        as skipped rather than asked; the window after it asks again. A window that is late or off the
+        session's timeline (_judge) is recorded as STALE: no state change, no Jev call.
         """
         inp = self._input(session_id, window, measurable, situation, gaze)
-        history = self._repository.history(session_id)   # the windows before this one
         decision, before, timed_out = self._judge(session_id, inp)
+        # The windows before this one, on the present timeline only (not those from before the clock moved).
+        history = self._repository.history(session_id, self._repository.state(session_id).timeline_from, inp.t)
         if decision is None:
             decision, why = stale_decision(), STALE
         elif not self.shadow:
