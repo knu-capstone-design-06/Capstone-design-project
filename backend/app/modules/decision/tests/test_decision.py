@@ -598,8 +598,7 @@ class ObservationTests(unittest.TestCase):
         send(8)
         self.assertEqual(self.stale(repository), [False, True, False, False])
         self.assertEqual((opened.transition, opened.support), ("open", HIGHLIGHT))
-        state = repository.state("s1")
-        history = repository.history("s1", state.timeline_from, T0.timestamp() + 10)
+        history = repository.history("s1", repository.state("s1").epoch)
         self.assertEqual([h["t"] - T0.timestamp() for h in history], [6, 8], "the day-ahead window is not shown to Jev")
 
     def test_a_clock_set_during_the_session_is_followed_from_the_second_window_on(self):
@@ -609,9 +608,39 @@ class ObservationTests(unittest.TestCase):
         self.assertEqual(self.stale(repository), [False, False, True, False, False, False])
         self.assertEqual(repository.windows("s1")[-1].decision["transition"], "withdraw", "progress still withdraws 4-2")
         state = repository.state("s1")
-        self.assertEqual((state.last_t, state.timeline_from), (T0.timestamp() + 1812, T0.timestamp() + 1806))
-        history = repository.history("s1", state.timeline_from, T0.timestamp() + 1814)
-        self.assertEqual([h["t"] - T0.timestamp() for h in history], [1808, 1810, 1812])
+        self.assertEqual((state.last_t, state.epoch), (T0.timestamp() + 1812, 1))
+        self.assertEqual([h["t"] - T0.timestamp() for h in repository.history("s1", state.epoch)], [1808, 1810, 1812])
+
+    def test_a_clock_set_back_leaves_the_windows_before_it_out_of_the_history_and_the_previous_screen(self):
+        # Review of #77: after the clock moves back, the two timelines overlap in time; only the epoch tells them apart.
+        repository, send = self.timed()
+        send(1000, "menu"), send(3000, "review", back_count=1, passed=2000)     # 4-2 opens on the review screen
+        send(1004, "review"), send(1006, "review"), send(1008, "review")        # the clock was set back by 2,000 s
+        self.assertEqual(self.stale(repository), [False, False, True, False, False])
+        state = repository.state("s1")
+        self.assertEqual((state.last_t, state.epoch), (T0.timestamp() + 1008, 1))
+        self.assertEqual([h["t"] - T0.timestamp() for h in repository.history("s1", state.epoch)], [1006, 1008],
+                         "not the window at 1000 of the timeline before")
+        moved_on = repository.windows("s1")[-2]
+        self.assertIsNone(moved_on.inputs["progress_segment"], "not compared with the menu window of the timeline before")
+        self.assertEqual(repository.windows("s1")[-1].decision["transition"], "keep", "the screen did not change: 4-2 stays")
+
+    def test_a_support_withdrawn_before_the_clock_moved_is_not_reopened_in_the_same_visit(self):
+        repository, clock = DecisionRepository(), {"now": 1000.0}
+        service = DecisionService(repository, P, None, now=lambda: clock["now"])
+
+        def judge(t, passed=2.0, **cues):
+            clock["now"] += passed
+            decision, _, _ = service._judge("s1", window(float(t), gaze=True, **cues))
+            return decision
+
+        asked = judge(2, fixes_recent=2)
+        self.assertEqual((asked.transition, asked.support), ("open", BIG))
+        self.assertEqual(judge(100, passed=98, fixes_recent=2).transition, "none", "the ask lapsed unanswered; not asked again")
+        self.assertIsNone(judge(1904, fixes_recent=2), "the clock moved 30 min ahead: recorded only")
+        again = judge(1906, fixes_recent=2)
+        self.assertEqual(again.transition, "none", "the same visit of the same screen: the withdrawn ask stays withdrawn")
+        self.assertEqual(repository.state("s1").withdrawn[0]["scope"][2], 2.0 + 1802.0)
 
     def test_times_of_what_is_shown_move_with_the_clock(self):
         from app.modules.decision.service import moved

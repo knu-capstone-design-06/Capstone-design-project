@@ -102,7 +102,7 @@ class DecisionRepository:
             self._expire()
             return list(self._windows.get(session_id, []))
 
-    def history(self, session_id: str, since: float | None = None, until: float | None = None) -> list[dict]:
+    def history(self, session_id: str, epoch: int | None = None) -> list[dict]:
         """The last HISTORY_WINDOWS judged windows as plain summaries for the trajectory stage, oldest first.
 
         Only HISTORY_STAGES answers ride along, and of them only the HISTORY_SCORES (the five state scores, not the
@@ -110,9 +110,9 @@ class DecisionRepository:
         """
         with self._lock:
             self._expire()
-            # since / until: the present timeline only, when the frontend clock moved during the session.
+            # epoch: the windows since the frontend clock last moved only; their times are on one timeline.
             judged = [w for w in self._windows.get(session_id, []) if w.jev != STALE
-                      and (since is None or w.t >= since) and (until is None or w.t <= until)]
+                      and (epoch is None or w.epoch == epoch)]
             return [{
                 "t": w.t, "tag": w.decision.get("tag"), "screen": w.inputs.get("screen"), "measurable": w.inputs.get("measurable"),
                 "decision": w.decision.get("transition"), "support": w.decision.get("support"),

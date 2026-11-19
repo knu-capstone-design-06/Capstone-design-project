@@ -179,7 +179,7 @@ class SessionState:
     last_now: float | None = None  # the server clock when that window was judged: with last_t, the session's timeline
     alt_t: float | None = None     # a window that fell off the timeline, kept to see whether the next one follows it
     alt_now: float | None = None
-    timeline_from: float | None = None   # after the clock moved: where the present timeline starts (history before it is not shown)
+    epoch: int = 0                 # goes up each time the frontend clock moved: windows of another epoch are another timeline
 
     def snapshot(self) -> dict:
         held = None if self.held is None else {
@@ -230,3 +230,4 @@ class WindowRecord:
     timed_out: str | None = None           # a shown ask withdrawn for no response before this window
     answers: dict = field(default_factory=dict)   # stage name -> {question: answer}
     outcomes: dict = field(default_factory=dict)  # stage name -> answered | no_answer | skipped
+    epoch: int = 0                         # SessionState.epoch when the window came: its times compare within one epoch only
