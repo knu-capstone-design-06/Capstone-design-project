@@ -72,7 +72,7 @@ async function open(steps, pageUrl = url, manualSpeech = false) {
 test('개발 샘플에서 짧은 말도 인식하고 다시 듣기·오류·화면 이동을 처리하며 backend를 호출하지 않는다', { skip: !process.env.ORDER_SAMPLE_BROWSER_URL }, async () => {
   const { browser, page, errors, fixture } = await open([], process.env.ORDER_SAMPLE_BROWSER_URL);
   try {
-    const toggle = page.getByRole('switch', { name: '음성 인식 테스트', exact: true });
+    const toggle = page.getByRole('switch', { name: '말로 주문하기', exact: true });
     await toggle.click();
     await page.evaluate(() => window.voiceFakes.at(-1).partial('아이스 아메리카노'));
     assert.match(await page.locator('.voice-mode-feedback').innerText(), /아이스 아메리카노/);
@@ -82,7 +82,7 @@ test('개발 샘플에서 짧은 말도 인식하고 다시 듣기·오류·화�
     await page.evaluate(() => window.voiceFakes.at(-1).final('네'));
     await page.locator('[data-log-target="voice-listen"]').waitFor();
     assert.match(await page.locator('.voice-mode-transcript').innerText(), /인식한 말\s+네/);
-    assert.match(await page.locator('.voice-mode-preview').innerText(), /주문은 바뀌지 않습니다/);
+    assert.doesNotMatch(await page.locator('.kiosk').innerText(), /테스트|샘플/, '개발 샘플에서도 고객 화면에는 시험 문구 없음');
     assert.equal(await page.locator('.cart-row').count(), 0);
     await page.locator('[data-log-target="voice-listen"]').click();
     await page.evaluate(() => window.voiceFakes.at(-1).fail('not-allowed'));
@@ -94,6 +94,8 @@ test('개발 샘플에서 짧은 말도 인식하고 다시 듣기·오류·화�
     await page.locator('[data-log-target="product:americano"]').click();
     await page.locator('[data-log-target="cart-add"]').click();
     await page.locator('dialog[open]').waitFor({ state: 'hidden' });
+    // 창이 닫힌 뒤 두 번 클릭 간격 동안 하단 바는 누름을 받지 않습니다.
+    await page.locator('[data-log-target="review-open"][data-armed="true"]').waitFor();
     await page.locator('[data-log-target="voice-listen"]').click();
     await page.locator('[data-log-target="review-open"]').click();
     assert.equal(await page.evaluate(() => window.voiceFakes.at(-1).aborted), true);
@@ -129,13 +131,14 @@ for (const settings of [[], ['lowScreen'], ['largeText'], ['largeText', 'largeBu
       }
       await page.locator('[data-log-target="read-aloud-toggle"]').click();
       await page.waitForFunction(() => window.ttsFakes.playing);
-      await page.locator('[data-log-target="support-toggle"]').click();
+      await page.locator('[data-log-target="support-close"]').click();
       await page.locator('[data-log-target="voice-mode-toggle"]').click();
       assert.equal(await page.evaluate(() => window.ttsFakes.playing), null, '수동 화면 읽기를 먼저 중단');
       await page.evaluate(() => window.voiceFakes.at(-1).final('아이스 아메리카노 두 잔'));
       await page.waitForFunction(() => window.ttsFakes.playing?.text === '아이스 아메리카노 2잔 담을까요?');
       const stop = page.locator('[data-log-target="voice-reply-stop"]');
       assert(await stop.isVisible());
+      await screenshot(page, `tts-question-${settings.join('-') || 'normal'}`);
       assert(await stop.evaluate(button => {
         const rect = button.getBoundingClientRect();
         return document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2) === button;
@@ -386,6 +389,7 @@ test('메뉴에서 마이크·질문·해석 결과를 표시하고 주문 확�
     await page.locator('[data-log-target="product:americano"]').click();
     await page.locator('[data-log-target="cart-add"]').click();
     await page.locator('dialog[open]').waitFor({ state: 'hidden' });
+    await page.locator('[data-log-target="review-open"][data-armed="true"]').waitFor();
     await page.locator('[data-log-target="review-open"]').click();
     assert.equal(await page.locator('.voice-mode-control').count(), 0);
     assert.equal(await page.evaluate(() => window.voiceFakes.at(-1).aborted), true);
@@ -531,7 +535,7 @@ for (const enlarged of [false, true]) {
         await page.locator('[data-log-target="support-toggle"]').click();
         await page.locator('[data-log-target="support:largeText"]').click();
         await page.locator('[data-log-target="support:largeButton"]').click();
-        await page.locator('[data-log-target="support-toggle"]').click();
+        await page.locator('[data-log-target="support-close"]').click();
       }
       await page.locator('[data-log-target="voice-mode-toggle"]').click();
       await page.locator('[data-log-target="product:americano"]').click();
@@ -549,6 +553,8 @@ for (const enlarged of [false, true]) {
       assert.equal(await page.locator('.order-progress').count(), 0);
       assert.match(await page.locator('.total').innerText(), /7,000원/, '늦은 터치 응답의 3,500원 대신 음성 결과까지 표시');
       await screenshot(page, enlarged ? 'voice-cart-concurrent-large' : 'voice-cart-concurrent');
+      // 큰 글씨에서는 장바구니가 '담은 메뉴 보기' 시트 안에 있습니다.
+      if (!(await page.locator('[data-log-target="cart:americano:아이스:increase"]').count())) await page.locator('[data-log-target="cart-sheet-open"]').click();
       await page.locator('[data-log-target="cart:americano:아이스:increase"]').click();
       await page.waitForFunction(() => document.querySelector('.total')?.textContent.includes('10,500원'));
       assert.equal(fixture.requests.find(request => request.method === 'PATCH').body.expected_version, 2);
@@ -565,7 +571,7 @@ test('마이크 권한 오류를 알리고 큰 글씨·큰 버튼·낮은 화면
     await page.locator('[data-log-target="support:largeText"]').click();
     await page.locator('[data-log-target="support:largeButton"]').click();
     await page.locator('[data-log-target="support:lowScreen"]').click();
-    await page.locator('[data-log-target="support-toggle"]').click();
+    await page.locator('[data-log-target="support-close"]').click();
     await page.locator('[data-log-target="voice-mode-toggle"]').click();
     await page.evaluate(() => window.voiceFakes.at(-1).fail('not-allowed'));
     assert.match(await page.locator('.voice-mode-feedback').innerText(), /마이크 사용을 허용/);
@@ -578,5 +584,36 @@ test('마이크 권한 오류를 알리고 큰 글씨·큰 버튼·낮은 화면
     assert.equal(await page.locator('.voice-mode-feedback').count(), 0);
     fixture.verify();
     assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
+test('마이크 버튼의 고리는 말로 주문이 꺼져 있고 누를 수 있을 때만 움직이고, 켜져 있거나 움직임 줄이기에서는 멈춘다', async () => {
+  const { browser, page, errors, fixture } = await open(bootstrap('voice-rings'));
+  try {
+    const toggle = page.locator('[data-log-target="voice-mode-toggle"]');
+    const rings = () => page.locator('.mic-ring').evaluateAll(elements => elements.map(element => getComputedStyle(element).display === 'none' ? 'none' : getComputedStyle(element).animationName));
+    assert.deepEqual(await rings(), ['mic-ping', 'mic-ping'], '꺼져 있고 누를 수 있으면 두 고리가 움직임');
+    await toggle.click();
+    assert.equal(await toggle.getAttribute('aria-checked'), 'true');
+    assert.deepEqual(await rings(), ['none', 'none'], '켜져 있으면 아무것도 움직이지 않음(듣는 중으로 읽히지 않게)');
+    await toggle.click();
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    const still = await page.locator('.mic-ring').evaluateAll(elements => elements.map(element => getComputedStyle(element).animationPlayState));
+    assert.deepEqual(still, ['paused', 'paused'], '움직임 줄이기에서는 한 순간에 멈춤');
+    fixture.verify(); assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
+test('음성 인식을 지원하지 않는 브라우저에서는 마이크 버튼을 두지 않고 이유는 낭독기에 남긴다', async () => {
+  const browser = await chromium.launch({ headless: true, ...(channel === 'default' ? {} : { channel }) });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1080, height: 1920 } });
+    await page.addInitScript(() => { delete window.SpeechRecognition; delete window.webkitSpeechRecognition; });
+    const fixture = await installOrderResponses(page, bootstrap('voice-unsupported'));
+    await page.goto(url);
+    await page.waitForFunction(() => document.querySelector('[data-log-target="product:americano"]')?.disabled === false);
+    assert.equal(await page.locator('[data-log-target="voice-mode-toggle"]').count(), 0);
+    assert.match(await page.locator('.voice-mode-preview').textContent(), /음성 입력을 사용할 수 없어요/);
+    fixture.verify();
   } finally { await browser.close(); }
 });

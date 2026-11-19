@@ -1,49 +1,57 @@
-.voice-mode-control { margin-bottom: 28px; }
-.voice-mode-toggle { width: 100%; display: flex; align-items: center; gap: 18px; padding: 20px 24px; border: 2px solid #b9c3bd; border-radius: 18px; background: #fffefb; color: #45554d; text-align: left; transition: background .2s, border-color .2s, box-shadow .2s; }
-.voice-mode-toggle:hover { background: #f0f3ef; border-color: #7e9185; }
-.voice-mode-toggle:disabled { cursor: not-allowed; opacity: .7; }
-.voice-mode-icon { display: grid; place-items: center; flex-shrink: 0; width: 52px; height: 52px; border-radius: 16px; background: #e9ede8; }
-.voice-mode-icon svg { width: 28px; height: 28px; }
-.voice-mode-mute { stroke-width: 2.4; }
-.voice-mode-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
-.voice-mode-copy strong { font-size: 1.125em; }
-.voice-mode-status { display: flex; align-items: center; gap: 8px; font-size: .875em; line-height: 1.6; }
-.voice-mode-dot { flex-shrink: 0; width: 9px; height: 9px; border-radius: 50%; background: #7a867e; }
-.voice-mode-switch { position: relative; display: flex; align-items: center; justify-content: flex-end; flex-shrink: 0; width: 100px; height: 48px; padding: 0 12px; border: 1px solid #8b9a90; border-radius: 28px; background: #e1e6e0; color: #374b3e; font-size: 14px; font-weight: 800; letter-spacing: .04em; }
-.voice-mode-knob { position: absolute; top: 5px; left: 5px; width: 36px; height: 36px; border-radius: 50%; background: #fff; box-shadow: 0 2px 5px #193c3426; transition: transform .2s; }
-.voice-mode-control[data-enabled=true] .voice-mode-toggle { background: #eaf5ed; border-color: #267548; color: #174d30; box-shadow: 0 0 0 4px #26754814, 0 5px 18px #26754812; }
-.voice-mode-control[data-enabled=true] .voice-mode-toggle:hover { background: #dfefe4; border-color: #1b6038; }
-.voice-mode-control[data-enabled=true] .voice-mode-icon { background: #267548; color: #fff; }
-.voice-mode-control[data-enabled=true] .voice-mode-dot { background: var(--ui-accent); }
-.voice-mode-control[data-enabled=true] .voice-mode-switch { justify-content: flex-start; background: #21683f; border-color: #21683f; color: #fff; }
-.voice-mode-control[data-enabled=true] .voice-mode-knob { transform: translateX(52px); }
-.voice-mode-preview { margin: 9px 4px 0; font-size: .75em; line-height: 1.6; color: #45554d; }
-.voice-mode-transcript { margin: 12px 4px 0; padding: 12px 16px; border: 1px solid #b9c3bd; border-radius: 12px; background: #fffefb; line-height: 1.6; overflow-wrap: anywhere; }
-.voice-mode-transcript span { display: block; color: #45554d; font-size: .8em; }
-.voice-mode-transcript strong { display: block; font-weight: 700; }
-.voice-mode-feedback { margin: 12px 4px 0; padding: 12px 16px; border-radius: 12px; background: #eaf5ed; color: #174d30; line-height: 1.6; overflow-wrap: anywhere; }
-.voice-mode-failure { margin: 12px 4px 0; padding: 12px 16px; border: 2px solid var(--ui-line); border-radius: 12px; background: var(--ui-canvas); color: var(--ui-ink); font-size: 1em; line-height: 1.6; overflow-wrap: anywhere; }
-.voice-mode-listen { margin: 12px 4px 0; padding: 12px 20px; min-height: 48px; border: 2px solid #267548; border-radius: 12px; background: #fffefb; color: #174d30; font: inherit; font-weight: 700; }
-.voice-mode-listen:hover { background: #eaf5ed; }
-.kiosk .voice-mode-copy strong { font-size: 1.125em; }
-.kiosk .voice-mode-status, .kiosk .voice-mode-preview, .kiosk .voice-mode-transcript span,
-.kiosk .voice-mode-transcript, .kiosk .voice-mode-feedback, .kiosk .voice-mode-listen { font-size: 1em; }
-.kiosk .voice-mode-toggle { flex-wrap: wrap; background: var(--ui-surface); color: var(--ui-ink); border-color: var(--ui-line); }
-.kiosk .voice-mode-control[data-enabled=true] .voice-mode-toggle { background: var(--ui-canvas); color: var(--ui-ink); border-color: var(--ui-accent); box-shadow: none; }
-.kiosk .voice-mode-preview, .kiosk .voice-mode-transcript span { color: var(--ui-muted); }
-.kiosk .voice-mode-transcript, .kiosk .voice-mode-feedback { background: var(--ui-canvas); color: var(--ui-ink); border-color: var(--ui-line); }
-.kiosk .voice-mode-switch, .kiosk .voice-mode-control[data-enabled=true] .voice-mode-switch { width: auto; height: auto; min-height: 48px; padding: 4px 16px; font-size: 1em; background: var(--ui-canvas); color: var(--ui-ink); border-color: var(--ui-line); }
-.kiosk .voice-mode-icon { background: var(--ui-canvas); color: var(--ui-ink); }
-.kiosk .voice-mode-control[data-enabled=true] .voice-mode-icon { background: var(--ui-accent); color: var(--ui-on-accent); }
-.large-button .voice-mode-toggle { padding: 24px; min-height: 104px; }
-.large-button .voice-mode-listen { min-height: 64px; padding: 16px 24px; }
-@media (max-width: 520px) {
-  .voice-mode-toggle, .large-button .voice-mode-toggle { gap: 12px; padding: 16px; flex-wrap: wrap; }
-  .voice-mode-icon { width: 44px; height: 44px; border-radius: 12px; }
-  .voice-mode-copy { flex-basis: calc(100% - 56px); }
-  .voice-mode-switch { margin-left: auto; }
-}
+/* 말로 주문 버튼: 탭 줄 오른쪽 끝의 둥근 마이크 버튼. 지름 = 그 모드의 조작 높이, 채움 #163F35(행동색), 흰 마이크, 글자 없음.
+   마이크 그림은 원 지름의 28 / 48(48 px 원 안의 28 px 아이콘)입니다. 버튼 뒤의 두 원은 꺼져 있고 누를 수 있는 동안만 1초 차이로
+   번갈아 퍼지며 옅어집니다(Tailwind CSS animate-ping의 꼴, 끝 지름 = 조작 높이 + 버튼 사이 최소 간격 18 × 2). 켜지면 움직임 없이
+   버튼 둘레 18 px 밖에 4 px 고리 하나가 섭니다(켜진 동안 움직이면 듣는 중으로 읽힘). 움직임 줄이기에서는 한 순간(--still-t)에 멈춥니다. */
+.kiosk .voice-entry { position: relative; flex: none; margin-left: auto; width: var(--h-control); height: var(--h-control); }
+.kiosk .voice-mic { position: relative; z-index: 1; display: inline-grid; place-items: center; width: var(--h-control); height: var(--h-control); min-height: 0; padding: 0;
+  border-radius: var(--r-round); border-color: var(--ui-accent); color: var(--ui-on-accent); background: var(--ui-accent); }
+@media (hover: hover) { .kiosk .voice-mic:hover { color: var(--ui-on-accent); background: var(--ui-accent); border-color: var(--ui-accent); } }
+.kiosk .voice-mic > .pic { width: calc(var(--h-control) * 28 / 48); height: calc(var(--h-control) * 28 / 48); fill: currentColor; }
+.kiosk .voice-entry .mic-ring { position: absolute; inset: 0; border-radius: var(--r-round); background: var(--ui-accent); opacity: 0; pointer-events: none; }
+.kiosk .voice-entry.is-ready:not(.is-on) .mic-ring { animation: mic-ping var(--ping-duration) var(--ping-ease) infinite; }
+.kiosk .voice-entry.is-ready:not(.is-on) .mic-ring + .mic-ring { animation-delay: var(--ping-delay); }
+.kiosk .voice-entry.is-on .mic-ring:first-child { inset: calc(-1 * var(--gap-btn)); border: var(--bw-ring) solid var(--ui-accent); background: transparent; opacity: 1; }
+.kiosk .voice-entry.is-on .mic-ring + .mic-ring { display: none; }
 @media (prefers-reduced-motion: reduce) {
-  .voice-mode-toggle, .voice-mode-knob { transition: none; }
-  .voice-mode-control[data-enabled=true] .voice-mode-dot { animation: none; }
+  .kiosk .voice-entry.is-ready:not(.is-on) .mic-ring { animation-play-state: paused; animation-delay: calc(-1 * var(--still-t)); }
+  .kiosk .voice-entry.is-ready:not(.is-on) .mic-ring + .mic-ring { animation-delay: calc(var(--ping-delay) - var(--still-t)); }
 }
+.kiosk .voice-mic:disabled { color: var(--ui-canvas); background: var(--ui-muted); border-color: var(--ui-muted); }
+
+/* 말로 주문 영역: 하단 주문 바 바로 위, 전체 너비 보조색, 한 모드에 한 높이(가장 큰 상태에 맞춤: 상태가 바뀌어도 목록이 움직이지 않도록) */
+.kiosk .voice-mode-control { display: flex; flex-direction: column; gap: var(--in); min-height: var(--h-panel); margin: 0 calc(-1 * var(--side)); padding: var(--pad-panel) var(--side);
+  background: var(--ui-support); color: var(--ui-on-support); }
+.kiosk .voice-state { display: flex; align-items: center; gap: var(--pad-1); min-height: var(--h-entry); margin: 0; font-size: var(--fs-s); }
+.kiosk .voice-state .pic { width: var(--icon-s); height: var(--icon-s); fill: currentColor; }
+.kiosk .voice-text { display: flex; flex-direction: column; gap: var(--in); min-height: var(--h-voice-text); }
+/* 들은 말: 오른쪽에 선 흰 말풍선(글자색, M 보통 굵기, 안쪽 8·16, 모서리 16), 한 줄 */
+.kiosk .voice-mode-transcript { align-self: flex-end; max-width: 100%; margin: 0; padding: var(--pad-1) var(--in); overflow: hidden;
+  border-radius: var(--r-card); background: var(--ui-surface); color: var(--ui-ink); }
+/* 들은 말: 한 줄, 긴 문장은 끝부분을 보이고 앞에 "…" */
+.kiosk .voice-mode-transcript strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; font-size: var(--fs-m); font-weight: 400; line-height: var(--lh-heard); }
+.kiosk .voice-mode-feedback { margin: 0; font-size: var(--fs-m); font-weight: 700; line-height: var(--lh-q); overflow-wrap: anywhere; }
+.kiosk .voice-mode-failure { margin: 0; padding: var(--pad-1); border: 2px solid var(--ui-line); border-radius: var(--r-card); background: var(--ui-canvas); color: var(--ui-ink); font-size: var(--fs-m); line-height: var(--lh-q); overflow-wrap: anywhere; }
+.kiosk .voice-text .message-voice { display: grid; }
+.kiosk .voice-text .message-voice > * { grid-area: 1 / 1; }
+.kiosk .voice-text .cart-notice, .kiosk .voice-text .order-progress { min-height: 0; padding: 0; background: none; box-shadow: none; color: inherit; font-size: var(--fs-m); }
+.kiosk .voice-answers { display: grid; grid-template-columns: repeat(2, var(--w-answer)); gap: var(--gap-btn); }
+.kiosk .voice-mode-listen { min-height: var(--h-kiosk); font-size: var(--fs-m); color: var(--ui-ink); background: var(--ui-surface); border-color: var(--ui-line); }
+/* 문서 스크롤에서는 고정 주문 바도 피합니다. 낮은 화면의 내부 스크롤은 바 위에서 끝납니다. */
+.kiosk:not(.low-screen) [data-log-target="voice-reply-stop"] { scroll-margin-bottom: calc(var(--order-actions-space) + var(--between)); }
+.kiosk.high-contrast .voice-mode-listen { color: inherit; background: transparent; border-color: currentColor; }
+/* 큰 글씨: 높이는 내용을 따르고 대답은 한 줄에 하나(큰 글씨 말로 주문의 전체 배치는 넘김 목록) */
+.kiosk.large-text .voice-mode-control { min-height: 0; }
+.kiosk.large-text .voice-answers { grid-template-columns: minmax(0, 1fr); }
+@media (max-width: 760px) {
+  .kiosk .tabs-row { flex-direction: column; align-items: stretch; gap: var(--gap-btn); }
+  .kiosk .voice-entry { align-self: flex-end; }
+  .kiosk .voice-mode-control { margin: 0 calc(-1 * var(--in)); padding: var(--in); }
+  .kiosk .voice-answers { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* 듣는 동안(마이크가 열려 있을 때)만 화면 네 가장자리를 따라 돕는 색(--ui-ring)의 옅은 빛이 섭니다. 깊이는 화면 여백(48 px)이라 내용이
+   시작하는 곳에서 끝나고, 힌트의 후광과 같은 값으로 2초에 한 번 옅어졌다 돌아옵니다(1 → 0.5 → 1). 움직임 줄이기에서는 멈추고, 누름을
+   받지 않으며, 시트와 목록 위의 안내 아래에 놓입니다. 다른 말로 주문 상태에서는 빛이 없습니다. */
+.kiosk[data-listening='on']::after { content: ''; position: fixed; inset: 0; z-index: 21; pointer-events: none;
+  box-shadow: inset 0 0 var(--ambient-depth) var(--ui-ring); animation: ambient-breathe var(--pulse-duration) var(--pulse-ease) infinite; }
+@media (prefers-reduced-motion: reduce) { .kiosk[data-listening='on']::after { animation: none; } }

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createTouchLog, distanceToRect } from './touchLog.ts';
 import type { LogContext, Point, Rect, SavedLog } from './touchLog.ts';
 import { summarizeTouchLog } from './touchLogSummary.ts';
@@ -56,22 +56,23 @@ function targetInfo(element: HTMLElement) {
   };
 }
 
-export function useTouchLog(screen: string, category: string, productId: string | null, settings: Settings, serverSessionId: string | null, observation: TouchLogObservation, uploadEnabled = false) {
+export function useTouchLog(screen: string, category: string, productId: string | null, settings: Settings, serverSessionId: string | null, observation: TouchLogObservation, trackFeatures: boolean) {
   const root = useRef<HTMLDivElement>(null);
   const tracker = useRef<ReturnType<typeof createTouchLog> | null>(null);
   const context = useRef<LogContext>({ screen, visitId: '', settings, voiceMode: observation.voice.enabled });
   const previous = useRef<{ screen: string; category: string; productId: string | null; settings: Settings } | null>(null);
   const previousObservation = useRef<TouchLogObservation | null>(null);
   const interruptGestures = useRef<() => void>(() => {});
-  const transport = useRef<ReturnType<typeof createTouchFeatureTransport> | null>(null);
-  const uploadContext = useRef({ session: serverSessionId, enabled: false });
+  const [transport] = useState(() => createTouchFeatureTransport(
+    backendApi.sendFeatureWindow, () => tracker.current?.readForFeatures() ?? null,
+  ));
 
   // effect에서 초기화하고 StrictMode 재설정에서도 세션·방문을 유지합니다.
   useEffect(() => {
     if (!tracker.current) {
       let storage: Storage | null = null;
       try { storage = sessionStorage; } catch { /* 메모리에만 기록 */ }
-      tracker.current = createTouchLog(storage, undefined, undefined, uploadEnabled);
+      tracker.current = createTouchLog(storage, undefined, undefined, trackFeatures);
       if (tracker.current.resumed) {
         const last = tracker.current.read().events.at(-1);
         tracker.current.record(last ?? { screen, visitId: '', settings }, 'session_end', { reason: 'page_reload' });
@@ -183,7 +184,7 @@ export function useTouchLog(screen: string, category: string, productId: string 
     }
     const inspector: DraftInspector = {
       read: () => recorder.read(), status: () => recorder.getWarning(),
-      transmission: () => transport.current?.status() ?? null,
+      transmission: () => trackFeatures ? transport.status() : null,
       summarize: () => summarizeTouchLog(recorder.read()),
       features: policy => measureTouchPilot(recorder.read(), Date.now(), 2000, policy),
       exportJson() {
@@ -256,34 +257,5 @@ export function useTouchLog(screen: string, category: string, productId: string 
     previous.current = { screen, category, productId, settings: { ...settings } };
   }, [screen, category, productId, settings, serverSessionId, observation]);
 
-  useEffect(() => {
-    if (!uploadEnabled || !tracker.current) return;
-    const sender = createTouchFeatureTransport(
-      (session, window, signal) => backendApi.sendFeatureWindow(session, window, signal),
-      () => tracker.current!.readForFeatures(),
-    );
-    transport.current = sender;
-    let suspended = false;
-    const sync = () => sender.setContext(uploadContext.current.session,
-      uploadContext.current.enabled && !suspended && document.visibilityState === 'visible');
-    document.addEventListener('visibilitychange', sync);
-    const suspend = () => { suspended = true; sender.setContext(uploadContext.current.session, false); };
-    const resume = () => { suspended = false; sync(); };
-    window.addEventListener('pagehide', suspend);
-    window.addEventListener('pageshow', resume);
-    const timer = setInterval(() => { sync(); void sender.tick(); }, 250);
-    return () => {
-      clearInterval(timer); sender.dispose(); transport.current = null;
-      document.removeEventListener('visibilitychange', sync);
-      window.removeEventListener('pagehide', suspend); window.removeEventListener('pageshow', resume);
-    };
-  }, [uploadEnabled]);
-
-  useEffect(() => {
-    const enabled = uploadEnabled && !observation.order.completed && ['ready', 'saving'].includes(observation.order.status);
-    uploadContext.current = { session: serverSessionId, enabled };
-    transport.current?.setContext(serverSessionId, enabled && document.visibilityState === 'visible');
-  }, [uploadEnabled, serverSessionId, observation.order.completed, observation.order.status]);
-
-  return { root };
+  return { root, transport };
 }

@@ -20,9 +20,9 @@ export const pendingCopy = {
     abandonWarning: '처음부터 다시 주문하면 새 장바구니로 시작해요. 이전 메뉴 변경 결과는 확인하지 못했어요.',
   },
   order: {
-    uncertain: '샘플 주문이 완료됐는지 아직 확인하지 못했어요. 잠시 후 다시 확인해 주세요.',
-    abandoned: '이전 샘플 주문이 완료됐는지 확인하지 못했어요. 처음부터 다시 주문할 수 있어요.',
-    abandonWarning: '처음부터 다시 주문해도 이전 샘플 주문은 자동으로 취소되지 않아요.',
+    uncertain: '주문이 완료됐는지 아직 확인하지 못했어요. 잠시 후 다시 확인해 주세요.',
+    abandoned: '이전 주문이 완료됐는지 확인하지 못했어요. 처음부터 다시 주문할 수 있어요.',
+    abandonWarning: '처음부터 다시 주문해도 이전 주문은 자동으로 취소되지 않아요.',
   },
 };
 
@@ -39,3 +39,19 @@ const errors: Record<string, string> = {
 export function orderErrorCopy(code: string, ended: boolean): string {
   return ended ? orderCopy.ended : errors[code] ?? orderCopy.failed;
 }
+
+/** 키오스크가 먼저 띄우는 화면 지원의 문구입니다. '버튼을 크게 했어요.'는 임시로 정한 문구입니다. */
+export const supportCopy = {
+  // 크게 보기(큰 글씨와 큰 버튼을 함께)의 질문과 적용 알림입니다. 둘 다 임시 문구입니다.
+  enlarge: { question: '글자와 버튼을 크게 해 드릴까요?', applied: '글자와 버튼을 크게 했어요.' },
+  accept: '크게 하기',
+  decline: '이대로 두기',
+  undo: '원래대로',
+};
+
+/** 버튼 강조 힌트의 한 줄 안내입니다. 계약에 힌트를 주는 필드가 아직 없어 개발용 시험 장치로만 띄웁니다. */
+export const hintCopy = {
+  'option-add': "아래 '담기'를 눌러 주세요",
+  'cart-remove': "빼려는 메뉴 옆 '삭제'를 눌러 주세요",
+};
+export type HintKind = keyof typeof hintCopy;

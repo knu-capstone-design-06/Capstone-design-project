@@ -26,7 +26,12 @@ test('periodic aggregate upload works at kiosk size with normal and enlarged low
         assert.equal(first.vision, null);
         await page.locator('[data-log-target="product:americano"]').click();
         await page.waitForFunction(() => window.kioskTouchLogDraft?.transmission()?.sent > 1);
-        assert(fixture.featureRequests.some(r => r.body.touch.interaction.options_open === true));
+        const windows = fixture.featureRequests.map(request => request.body);
+        assert(windows.some(window => window.touch.interaction?.options_open === true));
+        windows.forEach((window, index) => {
+          assert.equal(window.touch.interaction.window_sequence, index + 1);
+          if (index) assert.equal(window.window_start, windows[index - 1].window_end);
+        });
         assert(!JSON.stringify(fixture.featureRequests.map(r => r.body)).includes('"events"'));
         fixture.verify();
       } finally { await page.close(); }
@@ -178,15 +183,17 @@ test('actual feature endpoint responds to the request; extension forwarding requ
   } finally { await page.close(); await browser.close(); }
 });
 
-test('feature transmission is disabled by default pending team agreement', { skip: !process.env.TOUCH_FEATURE_DEFAULT_URL }, async () => {
+test('default API mode sends the five base fields on one stream', { skip: !process.env.TOUCH_FEATURE_DEFAULT_URL }, async () => {
   const browser = await launch(); const page = await browser.newPage({ viewport: { width: 1080, height: 1920 } });
   try {
     const fixture = await installOrderResponses(page, bootstrap('default-off'));
     await page.goto(process.env.TOUCH_FEATURE_DEFAULT_URL);
     await page.locator('[data-log-target="product:americano"]').waitFor();
-    await page.waitForTimeout(4300);
-    assert.deepEqual(fixture.featureRequests, []);
-    assert.equal(await page.evaluate(() => window.kioskTouchLogDraft.transmission()), null);
+    await page.waitForFunction(() => window.kioskTouchLogDraft.transmission()?.sent >= 2);
+    const windows = fixture.featureRequests.map(request => request.body);
+    for (const window of windows) assert.deepEqual(Object.keys(window.touch).sort(),
+      ['back_count', 'dwell_ms', 'miss_tap_count', 'repeat_tap_count', 'tap_count']);
+    assert.equal(windows[1].window_start, windows[0].window_end);
     fixture.verify();
   } finally { await page.close(); await browser.close(); }
 });
@@ -224,7 +231,7 @@ test('local scroll records distinguish low-screen main, support panel and option
     await scroll('order-main');
     await page.locator('[data-log-target="support-toggle"]').click();
     await scroll('support-panel');
-    await page.locator('[data-log-target="support-toggle"]').click();
+    await page.locator('[data-log-target="support-close"]').click();
     await page.locator('[data-log-target="product:americano"]').click();
     await scroll('options-dialog');
     fixture.verify();
