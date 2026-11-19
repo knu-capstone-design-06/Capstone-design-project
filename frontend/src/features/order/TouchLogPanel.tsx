@@ -28,11 +28,12 @@ const countLabels: [keyof RawTouchCounts, string][] = [
 const screenLabels: Record<string, string> = { menu: '메뉴', review: '주문 확인', complete: '주문 완료' };
 
 // 주문 UI가 아닌 개발 확인 도구. 프로덕션 빌드에서는 표시하지 않습니다.
-export function TouchLogPanel() {
-  return import.meta.env.DEV ? <DraftPanel /> : null;
+// 로그 단추 왼쪽의 [큰 글씨 + 큰 버튼]은 두 설정을 한 번에 켜고 끄는 개발용 비교 옵션입니다(둘 다 켜져 있을 때만 눌린 모습).
+export function TouchLogPanel({ combined, onCombined }: { combined: boolean; onCombined: () => void }) {
+  return import.meta.env.DEV ? <DraftPanel combined={combined} onCombined={onCombined} /> : null;
 }
 
-function DraftPanel() {
+function DraftPanel({ combined, onCombined }: { combined: boolean; onCombined: () => void }) {
   const [open, setOpen] = useState(false);
   const [paused, setPaused] = useState(false);
   const [snapshot, setSnapshot] = useState<SavedLog | null>(null);
@@ -90,9 +91,12 @@ function DraftPanel() {
   const summary = useMemo(() => snapshot ? summarizeTouchLog(snapshot) : null, [snapshot]);
   const pilot = useMemo(() => snapshot ? measureTouchPilot(snapshot, sampledAt, 2000, policy) : null, [snapshot, sampledAt, policy]);
   return <aside ref={tools} className="touch-log-tools" aria-label="개발용 터치 로그 확인">
-    <button type="button" className="touch-log-launcher" aria-expanded={open} aria-controls="touch-log-panel" onClick={() => setOpen(!open)}>
-      {open ? '로그 창 접기' : '터치 로그 보기'}
-    </button>
+    <div className="touch-log-bar">
+      <button type="button" data-log-target="support:combinedEnlargement" className="touch-log-combined" aria-pressed={combined} onClick={onCombined}>큰 글씨 + 큰 버튼</button>
+      <button type="button" className="touch-log-launcher" aria-expanded={open} aria-controls="touch-log-panel" onClick={() => setOpen(!open)}>
+        {open ? '로그 창 접기' : '터치 로그 보기'}
+      </button>
+    </div>
     {open && <section id="touch-log-panel" className="touch-log-panel" aria-labelledby="touch-log-title">
       <header className="touch-log-heading">
         <div><span>개발 확인용 · 로컬 초안</span><h2 id="touch-log-title">터치 로그</h2></div>
