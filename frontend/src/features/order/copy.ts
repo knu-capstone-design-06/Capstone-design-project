@@ -51,7 +51,8 @@ export const supportCopy = {
 
 /** 버튼 강조 힌트의 한 줄 안내입니다. 계약에 힌트를 주는 필드가 아직 없어 개발용 시험 장치로만 띄웁니다. */
 export const hintCopy = {
-  'option-add': "아래 '담기'를 눌러 주세요",
+  // 기본 크기의 옵션 시트 말풍선은 \n에서 두 줄로 나눔(white-space: pre). 줄바꿈을 따르지 않는 다른 자리에서는 빈칸 하나로 보임
+  'option-add': "아래 '담기'를\n눌러 주세요",
   'cart-remove': "빼려는 메뉴 옆 '삭제'를 눌러 주세요",
 };
 export type HintKind = keyof typeof hintCopy;

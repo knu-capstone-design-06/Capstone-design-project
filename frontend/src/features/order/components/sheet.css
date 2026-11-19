@@ -28,6 +28,16 @@
 .kiosk .sheet .cols { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--col)), 1fr)); gap: var(--gap-btn); align-items: center; }
 .kiosk .sheet .qty-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap-btn); }
 .kiosk .sheet .qty-row .field-label { flex: 0 1 var(--col); }
+/* 옵션 시트의 온도·수량 두 열(키오스크 기준 폭 1080px 이상, 큰 글씨 제외): 폭은 (내용 폭 − [담기] 폭 − 버튼 간격 2개) ÷ 2로,
+   1080px 폭에서 둘째 열 오른쪽 끝이 아래 줄 [취소] 오른쪽 끝에 맞음. 열 간격은 그대로이고 왼쪽부터 채우며, 카드 열 폭을 넘지 않음(더 넓은 화면에서는 카드 열 폭에서 멈춤).
+   큰 글씨에서는 [담기]가 글자만큼 넓어지고 1080px보다 좁은 화면에서는 아래 줄의 열 구성이 달라 이 식이 맞지 않으므로 기존 배치 그대로 */
+@media (min-width: 1080px) {
+  .kiosk:not(.large-text) .option-sheet { --option-col: min(var(--col), calc((100% - var(--w-action) - 2 * var(--gap-btn)) / 2)); }
+  .kiosk:not(.large-text) .option-sheet .cols { grid-template-columns: repeat(auto-fill, var(--option-col)); }
+  .kiosk:not(.large-text) .option-sheet .qty-row .field-label { flex: 0 1 var(--option-col); }
+  /* 수량 [−] n [+]: 같은 폭의 둘째 열에 [−]와 [+]는 양 끝, 수는 그 가운데 */
+  .kiosk:not(.large-text) .option-sheet .qty-row .stepper { flex: 0 1 var(--option-col); justify-content: space-between; }
+}
 .kiosk .sheet .cols button[aria-pressed=true] { font-weight: 700; }
 .kiosk .stepper { display: flex; flex-wrap: nowrap; align-items: center; gap: 0; }
 .kiosk .stepper button { width: var(--h-control); min-width: var(--h-control); padding: 0; }
