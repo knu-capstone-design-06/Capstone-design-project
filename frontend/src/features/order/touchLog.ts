@@ -10,6 +10,8 @@ export type LogEvent = LogContext & {
 };
 type StoragePort = Pick<Storage, 'getItem' | 'setItem'>;
 export type SavedLog = { version: 1; sessionId: string; serverSessionId: string | null; startedAt: number; events: LogEvent[] };
+export type FeatureLog = SavedLog & { discardedThrough?: number };
+type FeatureEntry = { event: LogEvent; timestamp: number; sequence: number };
 
 export function distanceToRect(point: Point, rect: Rect) {
   return Math.hypot(
@@ -18,10 +20,13 @@ export function distanceToRect(point: Point, rect: Rect) {
   );
 }
 
-export function createTouchLog(storage: StoragePort | null, id = () => crypto.randomUUID(), now = () => Date.now()) {
+export function createTouchLog(storage: StoragePort | null, id = () => crypto.randomUUID(), now = () => Date.now(), collectFeatures = false) {
   let warning: string | null = null;
   let saved: SavedLog = { version: 1, sessionId: id(), serverSessionId: null, startedAt: now(), events: [] };
   let resumed = false;
+  const featureEvents: FeatureEntry[] = [], featureScrolls: FeatureEntry[] = [];
+  let sequence = 0;
+  let discardedThrough: number | undefined;
   try {
     const raw = storage?.getItem(touchLogKey);
     if (raw) {
@@ -46,8 +51,18 @@ export function createTouchLog(storage: StoragePort | null, id = () => crypto.ra
       occurredAt: new Date(timestamp).toISOString(), elapsedMs: Math.max(0, timestamp - saved.startedAt), kind, data,
     };
     // 설정·이벤트 객체의 후속 변경으로 이전 기록이 변하지 않게 복사합니다.
-    saved.events.push(structuredClone(event));
+    const snapshot = structuredClone(event);
+    saved.events.push(snapshot);
     saved.events = saved.events.slice(-logLimit);
+    if (collectFeatures) {
+      // 스크롤이 많이 기록되어도 현재 세션의 화면·주문 상태는 별도 보관합니다.
+      const history = kind === 'scroll' ? featureScrolls : featureEvents;
+      history.push({ event: snapshot, timestamp, sequence: sequence++ });
+      if (history.length > logLimit) {
+        const removed = history.shift()!;
+        discardedThrough = Math.max(discardedThrough ?? removed.timestamp, removed.timestamp);
+      }
+    }
     persist();
     return event.id;
   }
@@ -55,9 +70,17 @@ export function createTouchLog(storage: StoragePort | null, id = () => crypto.ra
     resumed,
     record,
     newSession(serverSessionId: string | null = null) {
+      featureEvents.length = 0;
+      featureScrolls.length = 0;
+      sequence = 0;
+      discardedThrough = undefined;
       saved.sessionId = id(); saved.serverSessionId = serverSessionId; saved.startedAt = now(); persist();
     },
     read() { return structuredClone(saved); },
+    readForFeatures(): FeatureLog {
+      const events = [...featureEvents, ...featureScrolls].sort((a, b) => a.sequence - b.sequence).map(entry => entry.event);
+      return structuredClone({ ...saved, events, discardedThrough });
+    },
     getServerSessionId() { return saved.serverSessionId; },
     getWarning() { return warning; },
   };

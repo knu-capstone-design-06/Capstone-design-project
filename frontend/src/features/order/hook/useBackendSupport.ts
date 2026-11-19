@@ -1,13 +1,13 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
-import { backendApi } from '../../../shared/api/index.ts';
-import { createSupportTransport, readBackendSupport, supportSettings } from '../backendSupport.ts';
+import { readBackendSupport, supportSettings } from '../backendSupport.ts';
 import type { SupportPreset } from '../backendSupport.ts';
 import type { Settings } from '../model.ts';
-import type { SavedLog } from '../touchLog.ts';
+import type { createTouchFeatureTransport } from '../touchFeatureTransport.ts';
 
-export function useBackendSupport({ sessionId, contextKey, canSend, canOffer, settings, read, onApply }: {
+export function useBackendSupport({ sessionId, contextKey, canSend, canOffer, settings, transport, includeInteraction, onApply }: {
   sessionId: string | null; contextKey: string; canSend: boolean; canOffer: boolean; settings: Settings;
-  read: () => SavedLog | null; onApply: (key: keyof Settings) => void;
+  transport: ReturnType<typeof createTouchFeatureTransport>; includeInteraction: boolean;
+  onApply: (key: keyof Settings) => void;
 }) {
   const [offer, setOffer] = useState<{ preset: SupportPreset; context: string } | null>(null);
   const answered = useRef(new Set<SupportPreset>());
@@ -24,14 +24,13 @@ export function useBackendSupport({ sessionId, contextKey, canSend, canOffer, se
     setOffer(previous => previous ?? { preset, context: current.contextKey });
     return true;
   }, []);
-  const [transport] = useState(() => createSupportTransport(backendApi.sendFeatureWindow, read, receive));
   const current = canOffer && offer?.context === contextKey && !settings[supportSettings[offer.preset].key] ? offer : null;
   const syncContext = useCallback(() => {
     const { sessionId, contextKey, canSend, canOffer } = latest.current;
     const visible = !suspended.current && document.visibilityState === 'visible';
-    transport.setContext(sessionId, contextKey, visible && canSend, canOffer);
+    transport.setContext(sessionId, visible && canSend, { key: contextKey, canOffer, includeInteraction, receive });
     if (!visible) setOffer(null);
-  }, [transport]);
+  }, [transport, includeInteraction, receive]);
 
   useLayoutEffect(() => {
     if (lastSession.current !== sessionId) { answered.current.clear(); lastSession.current = sessionId; }

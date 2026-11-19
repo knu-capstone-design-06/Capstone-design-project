@@ -52,6 +52,9 @@ const guideLines: Record<'menu' | 'review' | 'complete', string[]> = {
 // 큰 글씨와 낮은 화면의 메뉴에서는 장바구니가 [담은 메뉴 보기] 뒤에 있습니다.
 const cartInBarFor = (screen: string, settings: Settings) => screen === 'menu' && (settings.largeText || settings.lowScreen);
 
+// Team contract and backend support are pending; opt in only for a coordinated pilot.
+const touchPilotEnabled = import.meta.env.VITE_TOUCH_INTERACTION_DRAFT === 'true';
+
 export function OrderPage() {
   const [controller] = useState(() => new OrderController(sampleMode ? createSampleOrderApi() : backendApi, fields => {
     if (import.meta.env.DEV) console.warn('주문 응답 검증 실패 필드:', fields);
@@ -99,7 +102,7 @@ export function OrderPage() {
   const actionsRef = useRef<HTMLElement>(null);
   const opener = useRef<HTMLButtonElement | null>(null);
   const observation = captureTouchLogObservation(state, selected ? { productId: selected.product_id, temperature, quantity } : null, voice);
-  const touchLog = useTouchLog(screen, category === 'all' ? '전체' : categoryLabels[category], selected?.product_id ?? null, settings, state.session?.session_id ?? null, observation);
+  const touchLog = useTouchLog(screen, category === 'all' ? '전체' : categoryLabels[category], selected?.product_id ?? null, settings, state.session?.session_id ?? null, observation, !sampleMode);
   useEffect(() => { void controller.initialize(); }, [controller]);
   useEffect(() => {
     voiceController.setEnabled(false);
@@ -162,7 +165,7 @@ export function OrderPage() {
   const canOfferSupport = !writeDisabled && !selected && !supportOpen && !restartOpen && !cartSheetOpen
     && !voice.enabled && state.message === '' && !enlargementPreview.offer;
   const backendSupport = useBackendSupport({
-    sessionId, settings, read: touchLog.read,
+    sessionId, settings, transport: touchLog.transport, includeInteraction: touchPilotEnabled,
     contextKey: JSON.stringify([sessionId, screen, category, menuPaging, reviewPage, state.cart?.version, settings]),
     canSend: !sampleMode && screen !== 'complete' && !state.order && (state.status === 'ready' || state.status === 'saving'),
     canOffer: canOfferSupport,
@@ -339,7 +342,7 @@ export function OrderPage() {
       <div className="banner-copy" aria-hidden="true"><p className="store-name">온기 카페</p><StepsBar screen={screen} /></div>
     </div>}
     <StoreRow />
-    <main data-log-target="order-content">
+    <main data-log-target="order-content" data-log-scroll="order-main">
       <StepsBar screen={screen} headingRef={heading} />
       {standingTop && standing && <div className="guide guide-lines" role="status">{standing.map(line => <p key={line}>{line}</p>)}</div>}
       {storageWarning && <p role="alert">화면 설정을 기억하지 못했어요. 새로고침하면 기본 화면으로 돌아갈 수 있어요.</p>}
