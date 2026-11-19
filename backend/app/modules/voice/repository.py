@@ -208,6 +208,13 @@ class VoiceRepository:
         with self._lock:
             self._reconfirm.discard(session_id)
 
+    def discard_question_turn(self, session_id: str) -> None:
+        """Drop the trailing question (a confirmation or a clarification) that an executed order answered."""
+        with self._lock:
+            history = self._history.get(session_id)
+            if history and history[-1].result.status in ("needs_confirmation", "needs_clarification"):
+                history.pop()
+
     def discard_proposal_turn(self, session_id: str) -> None:
         """Drop the trailing needs_confirmation exchange: its offer is no longer open.
 

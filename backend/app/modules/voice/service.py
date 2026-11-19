@@ -1129,13 +1129,14 @@ class VoiceService:
                 # The cart has changed already. Whatever fails after that, the request ends as what happened
                 # (completed, cart_updated): told it failed, the customer would say the same order again.
                 logger.exception("voice bookkeeping failed after the cart changed; the request still completes")
-                if step == "append_turn" and proposal is not None:
-                    # The accepted offer ran but its completed turn is missing: its question must not stay
-                    # last in the context, where it reads as still open.
+                if step == "append_turn":
+                    # The order ran but its completed turn is missing: the question it answered (an accepted
+                    # offer, or a clarification such as the temperature) must not stay last in the context,
+                    # where it reads as still open and the same answer would run again.
                     try:
-                        self._repository.discard_proposal_turn(session_id)
+                        self._repository.discard_question_turn(session_id)
                     except Exception:
-                        logger.exception("voice offer turn could not be dropped")
+                        logger.exception("voice question turn could not be dropped")
         # Without an executor, tool_calls are MCP inputs only (a proposal when
         # needs_confirmation) and actions stay empty.
         self._repository.update(

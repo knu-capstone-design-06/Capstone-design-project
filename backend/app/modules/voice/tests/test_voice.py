@@ -1923,6 +1923,31 @@ class ReviewerCaseTests(VoiceApiCase):
         self.say("에그 샌드위치 하나 주세요")
         self.assertNotIn("needs_confirmation", [t.result.status for t in self.interpreter.histories[-1]])
 
+    def test_an_answered_clarification_whose_turn_is_lost_does_not_run_again(self):
+        # Review of #92 (wdragon, daa6c38): "아메리카노 두 잔" (asks the temperature) -> "아이스로요" (runs,
+        # append_turn fails once) -> "아이스로요" again. The question it answered must not stay open.
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", None, 2))
+        asked = self.status(self.say("아메리카노 두 잔 주세요")).json()
+        self.assertEqual(asked["status"], "needs_clarification")
+        self.interpreter.result = interpretation(ADD_AMERICANO)
+        reached = self.crash_in("append_turn")
+        self.assertEqual(self.status(self.say("아이스로요")).json()["actions"], ["cart_updated"])
+        self.assertEqual(reached, [1])
+        again = self.status(self.say("아이스로요")).json()
+        self.assertEqual((again["status"], again["reply_text"], again["actions"]),
+                         ("needs_clarification", "어떤 메뉴를 주문할까요?", []))
+        self.assertEqual(self.cart()["total_quantity"], 2, "ran once")
+
+    def test_a_lost_turn_drops_only_a_trailing_question(self):
+        # A completed order last in the context stays: only a question reads as still open.
+        self.interpreter.result = interpretation(call("add_cart_item", "sandwich", None, 1))
+        self.say("에그 샌드위치 하나 주세요")
+        self.interpreter.result = interpretation(ADD_AMERICANO)
+        self.crash_in("append_turn")
+        self.status(self.say("아이스 아메리카노 두 잔 주세요"))
+        self.say("네")
+        self.assertEqual([t.result.status for t in self.interpreter.histories[-1]], ["completed"])
+
 
 class StoreFailureMoreTests(VoiceApiCase):
     SETTINGS = {"voice_execute_tools": True}
