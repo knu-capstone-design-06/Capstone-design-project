@@ -1941,7 +1941,7 @@ class StoreFailureMoreTests(VoiceApiCase):
         self.addCleanup(lambda: repository.__dict__.pop(method, None))
 
     def test_a_request_that_crashed_before_taking_the_offer_still_closes_it(self):
-        # Kills: handler offers never closed / offer not taken / offer's turn not discarded.
+        # Guards: offers closed by the handler, the offer's turn discarded (taking the offer: StoreFailureLastTests).
         self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
         self.say("아이스 아메리카노 두 개")
         self.crash_once("update")                 # the very first write ("processing") fails
@@ -1985,6 +1985,76 @@ class StoreFailureMoreTests(VoiceApiCase):
         self.say("음 잠깐만요")
         statuses = [t.result.status for t in self.interpreter.histories[-1]]
         self.assertEqual(statuses.count("needs_confirmation"), 1, statuses)
+
+
+class StoreFailureLastTests(VoiceApiCase):
+    SETTINGS = {"voice_execute_tools": True}
+
+    def test_a_crashed_request_takes_the_stored_offer(self):
+        repository = self.client.app.state.voice_service._repository
+        self.interpreter.result = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
+        self.say("아이스 아메리카노 두 개")
+        real, seen = repository.update, [0]
+        def boom(*a, **k):
+            seen[0] += 1
+            if seen[0] == 1:
+                raise RuntimeError("boom")
+            return real(*a, **k)
+        repository.update = boom
+        self.addCleanup(lambda: repository.__dict__.pop("update", None))
+        self.assertEqual(self.status(self.say("아니요 그거 말고요")).json()["status"], "failed")
+        self.assertIsNone(repository.take_proposal(self.session_id))
+
+    def test_cancelled_before_the_tools_run_fails_the_request(self):
+        service = self.client.app.state.voice_service
+        entered = threading.Event()
+        interpreter = service._interpreter
+        real = interpreter.interpret
+        async def slow(*a, **k):
+            entered.set()
+            await asyncio.sleep(5)
+            return await real(*a, **k)
+        interpreter.interpret = slow
+        self.addCleanup(lambda: interpreter.__dict__.pop("interpret", None))
+        request = VoiceRequestCreate(text="아이스 아메리카노 두 잔 주세요", alternatives=[], screen_id="menu_list")
+        accepted, _ = service.accept(self.session_id, uuid4(), request)
+        async def drive():
+            task = asyncio.create_task(service.process(self.session_id, accepted.request_id, request))
+            while not entered.is_set():
+                await asyncio.sleep(0.01)
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+        asyncio.run(drive())
+        body = self.status(accepted.request_id).json()
+        self.assertEqual((body["status"], body["error"]["code"]), ("failed", "ai_unavailable"))
+        self.assertEqual(self.post().status_code, 202)
+
+
+class CancellationLastTests(CancellationTests):
+    def test_cancellation_is_raised_again_when_the_ordering_service_refused(self):
+        body = self.cancel_during_execution(1, outcome=ToolExecutionFailed(VoiceErrorResponse(code="quantity_limit_exceeded", detail="x"), "한 상품은 20개까지 담을 수 있어요."))
+        self.assertEqual((body["status"], body["error"]["code"]), ("failed", "quantity_limit_exceeded"))
+
+    def test_a_cancelled_worker_future_is_not_waited_for_forever(self):
+        service = self.client.app.state.voice_service
+        request = VoiceRequestCreate(text="아이스 아메리카노 두 잔 주세요", alternatives=[], screen_id="menu_list")
+        accepted, _ = service.accept(self.session_id, uuid4(), request)
+        async def drive():
+            loop = asyncio.get_running_loop()
+            real = loop.run_in_executor
+            def cancelled(executor, func, *args):
+                if getattr(func, "args", ())[:2] == (service._executor.execute,) or service._executor.execute in getattr(func, "args", ()):
+                    f = loop.create_future(); f.cancel(); return f
+                return real(executor, func, *args)
+            with patch.object(loop, "run_in_executor", cancelled):
+                task = asyncio.create_task(service.process(self.session_id, accepted.request_id, request))
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+        closing = threading.Thread(target=asyncio.run, args=(drive(),), daemon=True)
+        closing.start(); closing.join(5)
+        self.assertFalse(closing.is_alive(), "spun on a cancelled worker future")
+        self.assertEqual(self.status(accepted.request_id).json()["status"], "failed")
 
 
 class RetentionTests(unittest.TestCase):

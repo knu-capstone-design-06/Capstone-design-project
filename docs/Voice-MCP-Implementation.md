@@ -201,7 +201,7 @@ backend 음성 해석 (`backend/app/modules/voice/`)
 - 키 설정: `backend/`에서 직접 실행하면 `backend/.env`, Docker Compose로 실행하면 셸 환경변수나 루트 `.env`(커밋하지 않음)의 `OPENAI_API_KEY`를 씁니다.
 - 브라우저 frontend는 기본으로 같은 출처 프록시(`/backend/`)로 호출합니다. backend CORS는 `Idempotency-Key`를 허용하므로 `CORS_ORIGINS`에 넣은 출처에서는 직접 호출도 됩니다(PR #40).
 - 요청 기록·`Idempotency-Key`는 접수 후 1시간, 대화 맥락은 마지막 발화 후 1시간 보관합니다(제안값, `repository.py`의 `RETENTION`).
-- 요청은 어떤 경우에도 끝난 상태로 남습니다. 도구가 실행된 뒤에는 뒷정리나 결과 기록이 실패하거나 작업이 취소돼도 실제로 일어난 일(`completed`, `cart_updated`)로 끝나고, 실행된 것이 없으면 `failed`(`ai_unavailable`)로 끝납니다. 메뉴 · 장바구니 조회와 실행은 작업 스레드에서 해서, 저장소가 느려도 터치 주문과 상태 조회가 멈추지 않습니다.
+- 요청은 끝 상태를 기록하는 일 자체가 실패하지 않는 한 끝난 상태로 남습니다. 도구가 실행된 뒤에는 뒷정리나 결과 기록이 실패하거나 작업이 취소되거나 서버가 종료돼도 실제로 일어난 일(`completed`, `cart_updated`)로 끝납니다. 실행되지 않았으면 그때까지 정해진 결과(주문 서비스의 거절 코드, 장바구니가 바뀌어 다시 읽어 준 확인 제안)로, 정해진 것이 없으면 `failed`(`ai_unavailable`)로 끝납니다. 메뉴 · 장바구니 조회와 실행은 작업 스레드에서 해서, 저장소가 느려도 터치 주문과 상태 조회가 멈추지 않습니다.
 - 도구 실행은 backend 설정 `VOICE_EXECUTE_TOOLS`로 켭니다(기본 꺼짐). 꺼져 있으면 음성 API는 도구를 실행하지 않고 `actions`는 항상 빈 배열입니다.
   - 켜면 `completed`의 `tool_calls`를 backend 안(`voice/executor.py`)에서 주문 서비스로 말한 순서대로 반영합니다. 별도 MCP 서버나 SDK는 없습니다(결정 2026-10-29). 상품+온도로 `item_id`를 찾고, 주문 잠금 안에서 최신 장바구니 버전을 읽어 `expected_version`을 채우며, 도구 입력마다 `voice:{request_id}:{순서}` 키를 써서 같은 음성 요청이 재전송돼도 다시 실행하지 않습니다.
   - 여러 도구 중 하나라도 주문 서비스에 거절되면(`cart_item_not_found`, `quantity_limit_exceeded`, `product_unavailable`, `cart_version_conflict`, `session_expired` 등) 앞서 반영한 것까지 되돌리고 `failed`로 그 오류 코드와 짧은 안내를 돌려줍니다. 장바구니는 바뀌지 않습니다. 그 밖의 반영 실패는 `cart_update_failed`로, AI 장애(`ai_unavailable`)와 구분합니다.
