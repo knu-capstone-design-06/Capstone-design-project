@@ -18,7 +18,7 @@ from app.modules.voice.executor import CartChanged, ToolExecutionFailed
 from app.modules.voice.repository import HISTORY_TURNS, VoiceRepository
 from app.modules.voice.service import (
     ASK_MENU_REPLY, FALLBACK_REPLY, OFF_MENU_REPLY, REPLY_MAX, SOLD_OUT_REPLY, TEMPERATURE_QUESTION,
-    ask_for_missing_temperature, require_cart_items,
+    ask_for_missing_temperature, require_cart_items, require_named_products,
 )
 from app.modules.voice.schemas import (
     CartLine, MenuItem, VoiceErrorResponse, VoiceInterpretation, VoiceRequestCreate, VoiceTurn,
@@ -2220,19 +2220,111 @@ class AuditCaseTests(VoiceApiCase):
         self.assertEqual((answered["status"], answered["error"]["code"]), ("failed", "product_not_found"))
         self.assertEqual(self.interpreter.histories[-1][-1].result.status, "needs_clarification")
 
-    def test_a_shortened_temperature_question_keeps_a_word_only_its_product_has(self):
-        # The words only the long name has come last: any prefix that fits would name the other product.
-        shared = "제주 유기농 말차 크림 라떼 스페셜 에디션 그란데 사이즈 시즌"
-        long = MenuItem(product_id="long", name=f"{shared} 한정판 리미티드", available=True, temperatures=["iced", "hot"])
-        other = MenuItem(product_id="other", name=f"{shared} 기본", available=True, temperatures=["iced", "hot"])
+    def ask_and_answer(self, menu, ordered, answered_with, utterance="주세요"):
+        """Order `ordered` without a temperature, then answer "아이스로요" read as `answered_with` (iced)."""
+        self.client.app.state.voice_service._menu_provider = lambda: menu
+        self.interpreter.result = interpretation(call("add_cart_item", ordered, None, 1))
+        asked = self.status(self.say(utterance)).json()
+        self.interpreter.result = interpretation(call("add_cart_item", answered_with, "iced", 1))
+        return asked, self.status(self.say("아이스로요")).json()
+
+    def test_a_long_name_without_spaces_asks_without_it_and_the_answer_still_runs(self):
+        # Review of #92 (wdragon, 507b8c4): a one-word name too long for the question asked "따뜻한 것과 아이스
+        # 중?" with no name, and every answer brought the same question back.
+        long = MenuItem(product_id="long", name="제주유기농말차크림콜드브루라떼스페셜에디션그란데사이즈한정판리미티드시즌에디션",
+                        available=True, temperatures=["iced", "hot"])
+        asked, answered = self.ask_and_answer([long], "long", "long", f"{long.name} 하나 주세요")
+        self.assertEqual(asked["reply_text"], TEMPERATURE_QUESTION)
+        # It reached the ordering service (the test catalog has no such product), not the question again.
+        self.assertEqual((answered["status"], answered["error"]["code"]), ("failed", "product_not_found"))
+
+    def test_a_shortened_question_never_reads_out_another_products_name(self):
+        # Self-review of a5bf7c4: "카페 라떼, …?" for "카페 라떼 나나…" would have the customer repeat it and order
+        # the latte. Prefixes naming another product are skipped; the answer goes to the long one by _about.
+        latte = MenuItem(product_id="latte_c", name="카페 라떼", available=True, temperatures=["iced", "hot"])
+        long = MenuItem(product_id="long", name="카페 라떼 " + "나" * 50, available=True, temperatures=["iced", "hot"])
         question = ask_for_missing_temperature(
-            interpretation(call("add_cart_item", "long", None, 1)), [long, other], []).reply_text
-        self.assertLessEqual(len(question), REPLY_MAX)
-        self.assertEqual(question, f"리미티드, {TEMPERATURE_QUESTION}")
+            interpretation(call("add_cart_item", "long", None, 1)), [latte, long], [])
+        self.assertNotIn("라떼", question.reply_text)
+        self.assertLessEqual(len(question.reply_text), REPLY_MAX)
+        self.assertEqual(question._about, "long")
+
+    def test_the_answer_goes_to_the_product_asked_about_not_to_a_name_the_question_text_runs_into(self):
+        # Review of #92 (wdragon, 507b8c4): with "말차" and "말차 따뜻한" on the menu, "말차, 따뜻한 것과…?" read
+        # without spaces holds "말차따뜻한", and an answer read as that product was added.
+        matcha = MenuItem(product_id="matcha", name="말차", available=True, temperatures=["iced", "hot"])
+        warm = MenuItem(product_id="matcha_warm", name="말차 따뜻한", available=True, temperatures=["iced", "hot"])
+        asked, answered = self.ask_and_answer([matcha, warm], "matcha", "matcha_warm", "말차 주세요")
+        self.assertEqual(asked["reply_text"], f"말차, {TEMPERATURE_QUESTION}")
+        self.assertEqual((answered["status"], answered["actions"], answered["reply_text"]),
+                         ("needs_clarification", [], asked["reply_text"]), "the other product is not added")
+        self.session_id = self.client.post("/api/v1/sessions").json()["session_id"]
+        _, answered = self.ask_and_answer([matcha, warm], "matcha", "matcha", "말차 주세요")
+        self.assertEqual((answered["status"], answered["actions"]), ("completed", ["cart_updated"]),
+                         "the product asked about is answered (cf6f7c3 asked again here)")
+
+    def test_a_kiosk_question_the_model_repeats_keeps_its_product_and_the_count(self):
+        # Self-review of 85e99d1: the model asking the kiosk's question again word for word ended the walk back
+        # to "두 잔", and one cup was added without a read-back (main read back 2 cups).
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", None, 2))
+        asked = self.status(self.say("아메리카노 두 잔 주세요")).json()["reply_text"]
+        self.interpreter.result = interpretation(reply_text=asked)
+        self.say("잠깐만요")
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 1))
+        body = self.status(self.say("아이스로요")).json()
+        self.assertEqual((body["status"], body["reply_text"], body["actions"]),
+                         ("needs_confirmation", "아이스 아메리카노 2잔 담을까요?", []))
+
+    def test_a_nameless_question_the_model_repeats_still_leads_to_its_product(self):
+        # Self-review of 85e99d1: after the model echoed the nameless question once, every answer brought it back.
+        long = MenuItem(product_id="long", name="제주유기농말차크림콜드브루라떼스페셜에디션그란데사이즈한정판리미티드시즌에디션",
+                        available=True, temperatures=["iced", "hot"])
+        self.client.app.state.voice_service._menu_provider = lambda: [long]
+        self.interpreter.result = interpretation(call("add_cart_item", "long", None, 1))
+        self.assertEqual(self.status(self.say(f"{long.name} 하나 주세요")).json()["reply_text"], TEMPERATURE_QUESTION)
+        self.interpreter.result = interpretation(reply_text=TEMPERATURE_QUESTION)
+        self.say("잠깐만요")
+        self.interpreter.result = interpretation(call("add_cart_item", "long", "iced", 1))
+        body = self.status(self.say("아이스로요")).json()
+        # It reached the ordering service (the test catalog has no such product), not the question again.
+        self.assertEqual((body["status"], body["error"]["code"]), ("failed", "product_not_found"))
+
+    def chocolates(self):
+        choco = MenuItem(product_id="choco", name="초코", available=True, temperatures=["iced", "hot"])
+        ice_choco = MenuItem(product_id="ice_choco", name="아이스초코", available=True, temperatures=["iced"])
+        americano = MenuItem(product_id="americano", name="아메리카노", available=True, temperatures=["iced", "hot"])
+        self.client.app.state.voice_service._menu_provider = lambda: [choco, ice_choco, americano]
+
+    def test_yes_to_an_offer_read_back_as_a_name_holding_another_runs(self):
+        # Self-review of 1563871: "아이스 초코 2잔 담을까요?" holds "아이스초코" (another product); the offer for
+        # 초코 must still run on "네" and "네 그걸로 주세요".
+        self.chocolates()
+        for answer in ("네", "네 그걸로 주세요"):
+            with self.subTest(answer=answer):
+                self.session_id = self.client.post("/api/v1/sessions").json()["session_id"]
+                self.interpreter.result = interpretation(call("add_cart_item", "choco", "iced", 2),
+                                                         reply_text="아이스 초코 2잔 담을까요?")
+                self.assertEqual(self.status(self.say("아이스 초코 두 잔 주세요")).json()["status"], "needs_confirmation")
+                self.interpreter.result = interpretation(call("add_cart_item", "choco", "iced", 2))
+                body = self.status(self.say(answer)).json()
+                # It reached the ordering service (the test catalog has no such product): the offer ran.
+                self.assertEqual((body["status"], body["error"]["code"]), ("failed", "product_not_found"))
+
+    def test_the_which_line_question_answered_by_a_temperature_picks_that_line(self):
+        # Self-review of 1563871: "아이스 초코, 따뜻한 아메리카노 중 어느 것을…?" answered "아이스요" is 초코.
+        self.chocolates()
+        lines = [CartLine(product_id="choco", temperature="iced", quantity=1),
+                 CartLine(product_id="americano", temperature="hot", quantity=1)]
+        question = VoiceTurn(request=VoiceRequestCreate(text="하나 더요", alternatives=[], screen_id="menu_list"),
+                             result=interpretation(reply_text="아이스 초코, 따뜻한 아메리카노 중 어느 것을 말씀하시나요?"))
+        request = VoiceRequestCreate(text="아이스요", alternatives=[], screen_id="menu_list")
+        result = require_named_products(interpretation(call("update_cart_item", "choco", "iced", 2)),
+                                        request, [question], self.client.app.state.voice_service._menu_provider(), lines)
+        self.assertEqual((result.status, [c.arguments.product_id for c in result.tool_calls]), ("completed", ["choco"]))
 
     def test_a_customer_saying_a_name_inside_another_still_names_both(self):
-        # Only the kiosk's own question reads a name inside a longer one as the longer product: the customer's
-        # "아이스 초코" is 초코 iced, though the menu also has 아이스초코.
+        # The customer's "아이스 초코" is 초코 iced, though the menu also has 아이스초코: a name inside a longer one
+        # still names its product.
         choco = MenuItem(product_id="choco", name="초코", available=True, temperatures=["iced", "hot"])
         ice_choco = MenuItem(product_id="ice_choco", name="아이스초코", available=True, temperatures=["iced"])
         self.client.app.state.voice_service._menu_provider = lambda: [choco, ice_choco]

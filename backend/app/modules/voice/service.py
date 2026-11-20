@@ -119,23 +119,27 @@ def fitted(text: str, shorter: str) -> str:
     return text if len(text) <= REPLY_MAX else shorter
 
 
-def temperature_question(item: MenuItem, menu: list[MenuItem]) -> str:
-    """Ask the temperature of item by name. A name too long for REPLY_MAX is cut to its leading words, but only
-    where they still name it (a word only its name has): the answer ("아이스로요") is matched to the product
-    named in the question (require_named_products), so a question naming none would only be asked again."""
-    full = f"{item.name}, {TEMPERATURE_QUESTION}"
-    if len(full) <= REPLY_MAX:
-        return full
-    keys = _name_keys(menu)
+def temperature_question(item: MenuItem, menu: list[MenuItem]) -> VoiceInterpretation:
+    """Ask the temperature of item, by name as far as the question fits in REPLY_MAX (the database sets no limit
+    on names): the whole name, else its leading words, else no name. Leading words that would read out another
+    product's name ("카페 라떼" of "카페 라떼 …") are skipped: a customer repeating them would order that one.
+    The question carries item as its _about, so the answer goes to item however much of the name was read out
+    (require_named_products)."""
+    others = [key for product_id, keys in _name_keys(menu).items() if product_id != item.product_id for key in keys]
     words = item.name.split()
-    labels = ([" ".join(words[:n]) for n in range(len(words) - 1, 0, -1)]
-              # then a word only its name has (not the name run together without spaces, never read out)
-              + sorted((k for k in keys.get(item.product_id, []) if k != _compact(item.name)), key=len, reverse=True))
-    for label in labels:
-        text = f"{label}, {TEMPERATURE_QUESTION}"
-        if len(text) <= REPLY_MAX and _named_products(_compact(label), keys) == {item.product_id}:
-            return text
-    return TEMPERATURE_QUESTION
+    texts = [f"{item.name}, {TEMPERATURE_QUESTION}"] + [
+        f"{label}, {TEMPERATURE_QUESTION}" for label in (" ".join(words[:n]) for n in range(len(words) - 1, 0, -1))
+        if not any(key in _compact(label) for key in others)
+        and not all(_compact(word) in SPOKEN_TEMPERATURES for word in label.split())]
+    text = next((t for t in texts if len(t) <= REPLY_MAX), TEMPERATURE_QUESTION)
+    return kiosk_question(text, item.product_id)
+
+
+def kiosk_question(text: str, about: str | None) -> VoiceInterpretation:
+    """A question the kiosk asks about one product (about), or about none."""
+    question = VoiceInterpretation(status="needs_clarification", tool_calls=[], reply_text=text)
+    question._about = about
+    return question
 
 
 def menu_from_products(products: Iterable[object]) -> list[MenuItem]:
@@ -180,9 +184,7 @@ def ask_for_missing_temperature(
             calls.append(_with_temperature(call, in_cart[0].temperature))
             continue
         if len(item.temperatures) > 1:
-            return VoiceInterpretation(
-                status="needs_clarification", tool_calls=[], reply_text=temperature_question(item, menu),
-            )
+            return temperature_question(item, menu)
         calls.append(_with_temperature(call, item.temperatures[0]))
     return result.model_copy(update={"tool_calls": calls})
 
@@ -392,19 +394,6 @@ def _name_positions(compact: str, menu: list[MenuItem]) -> list[tuple[int, str]]
     return sorted(set(positions))
 
 
-def _name_spans(compact: str, keys: dict[str, list[str]]) -> list[tuple[int, str]]:
-    """(position, product_id) of every product name in a text the kiosk wrote (its own question). A name
-    found only inside another product's longer name at the same place is that longer product: the question
-    "제주 유기농 말차 라떼, …?" is about the latte, not also "제주 유기농 말차". Not for what the customer
-    says: "아이스 초코" is 초코 iced as much as the product 아이스초코, so both stay named there."""
-    spans = [(found.start(), found.start() + len(key), product_id)
-             for product_id, product_keys in keys.items() for key in product_keys
-             for found in re.finditer(re.escape(key), compact)]
-    return [(start, product_id) for start, end, product_id in spans
-            if not any(other != product_id and s <= start and end <= e and e - s > end - start
-                       for s, e, other in spans)]
-
-
 def spoken_mentions(
     text: str, menu: list[MenuItem],
 ) -> tuple[list[tuple[str | None, str, int]], list[tuple[str | None, str]]]:
@@ -514,7 +503,7 @@ def match_spoken_details(
     if (not counts and last is not None and last.result.status == "needs_clarification"
             and (last.result.reply_text or "").endswith("?")
             and answers_question(request.text, last.result.reply_text)
-            and _name_positions(_compact(last.result.reply_text), menu)):
+            and (last.result._about is not None or _name_positions(_compact(last.result.reply_text), menu))):
         # An answer to the kiosk's question about a product ("아메리카노, 따뜻한 것과 아이스 중?")
         # keeps the counts of the utterance asked about, also when the question had to be
         # repeated in between. A general "어떤 메뉴를 주문할까요?" carries nothing over.
@@ -573,9 +562,7 @@ def match_spoken_details(
         temperature = bound_temperatures.get(product_id) or next(iter(unbound_temperatures), None)
         if temperature is not None and call.arguments.temperature not in (None, temperature):
             if item is not None and temperature not in item.temperatures:
-                return VoiceInterpretation(
-                    status="needs_clarification", tool_calls=[], reply_text=temperature_question(item, menu),
-                )
+                return temperature_question(item, menu)
             logger.warning("voice interpretation temperature disagrees with the spoken one; confirming")
             call, changed = _with_temperature(call, temperature), True
         count = bound_counts.get(product_id) or (unbound_counts[0] if unbound_counts and call in uncounted else None)
@@ -661,6 +648,9 @@ def _asked_utterance(history: Sequence[VoiceTurn], menu: list[MenuItem]) -> tupl
     passed_count = False
     while (index > 0 and history[index - 1].result.status == "needs_clarification"
            and history[index - 1].result.reply_text == question
+           # The same words about two different products are two questions (both carry their product).
+           and not (history[index - 1].result._about and history[index].result._about
+                    and history[index - 1].result._about != history[index].result._about)
            and not answers_question(history[index].request.text, question)
            and not _name_positions(_compact(history[index].request.text), menu)):
         between = history[index].request.text
@@ -764,11 +754,6 @@ def which_in_cart_reply(lines: list[CartLine], menu: list[MenuItem]) -> str:
     return text if len(text) <= REPLY_MAX else "장바구니의 어느 상품을 말씀하시나요?"
 
 
-def _named_products(compact: str, keys: dict[str, list[str]]) -> set[str]:
-    """The products a text the kiosk wrote names (_name_spans)."""
-    return {product_id for _, product_id in _name_spans(compact, keys)}
-
-
 def require_named_products(
     result: VoiceInterpretation, request: VoiceRequestCreate, history: list[VoiceTurn],
     menu: list[MenuItem], cart: Iterable[CartLine] = (),
@@ -810,8 +795,10 @@ def require_named_products(
              if history and history[-1].result.reply_text
              and (answers_question(request.text, history[-1].result.reply_text)
                   or history[-1].result.status == "needs_confirmation") else [])
-    # The kiosk's own question names one product even when another's name sits inside it (_name_spans).
-    asked_products = {product_id for text in asked for product_id in _named_products(text, keys)}
+    # A question the kiosk asked about one product names it by value (_about), however its text reads; the
+    # model's own questions ("라떼는 아이스, 따뜻한 것 중?") are read for names.
+    about = history[-1].result._about if asked else None
+    asked_products = {about} if about is not None else named_in(asked)
     lines = list(cart)
     if (history and history[-1].result.status == "needs_clarification" and len(asked_products) > 1):
         # "아이스 아메리카노, 따뜻한 카페 라떼 중 어느 것?" answered by "아이스요" picks the one line
@@ -851,7 +838,8 @@ def require_named_products(
             reply = question
         else:
             reply = ASK_MENU_REPLY
-        return VoiceInterpretation(status="needs_clarification", tool_calls=[], reply_text=reply)
+        # The same question asked again is still about the same product.
+        return kiosk_question(reply, history[-1].result._about if reply == question else None)
     return result
 
 
@@ -1055,6 +1043,10 @@ class VoiceService:
             else:
                 cart = await asyncio.to_thread(self._cart, session_id)
                 result = await self._interpreter.interpret(request, menu, history, cart)
+                if (result is not None and last is not None and last._about is not None
+                        and result.status == "needs_clarification" and result.reply_text == last.reply_text):
+                    # The model asked the kiosk's question again, word for word: it is about the same product.
+                    result._about = last._about
             if result is not None and not matches_menu(result, menu, allow_missing_temperature=True):
                 logger.warning("voice interpretation rejected (not on menu)")
                 off_menu = off_menu_reply(result, menu, allow_missing_temperature=True)

@@ -1,6 +1,6 @@
 from typing import Annotated, Literal, Self
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 Confidence = Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
 Quantity = Annotated[int, Field(strict=True, ge=1, le=20)]
@@ -104,6 +104,10 @@ class VoiceInterpretation(BaseModel):
     tool_calls: list[ToolCall] = Field(max_length=10)
     # Short enough to read at a glance on the kiosk.
     reply_text: str | None = Field(max_length=60)
+    # The product a question the kiosk itself asked is about ("아메리카노, 따뜻한 것과 아이스 중?"). Set by the
+    # server only (a private attribute: never read from the model's output, never sent), so the answer
+    # ("아이스로요") goes to that product without finding its name again in the question's text.
+    _about: str | None = PrivateAttr(default=None)
 
     @model_validator(mode="after")
     def validate_status(self) -> Self:
