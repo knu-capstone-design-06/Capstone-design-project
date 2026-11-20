@@ -1,9 +1,26 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { categoryLabels, initialSettings, money, readSettings, temperatureLabel } from './model.ts';
+import { categoryLabels, initialSettings, money, orderNumberText, readSettings, temperatureLabel, temperatureText } from './model.ts';
 import { ApiError } from '../../shared/api/client.ts';
 import { OrderController } from './orderController.ts';
 import { OrderResponseError, readOrderResponse } from './orderResponse.ts';
+import { clampPage, menuColumns, menuPageSize, pageCount, pageItems, reviewPageSize } from './utils/paging.ts';
+import { readBackendSupport, supportSettings } from './backendSupport.ts';
+
+test('서버의 네 가지 제안은 각각의 설정에 연결하고 켜진 설정·잘못된 응답은 무시한다', () => {
+  const response = preset => ({ session_id: 'session', ai_available: true, support: { preset, requires_confirmation: true, decided_by: 'jev' } });
+  for (const [preset, { key }] of Object.entries(supportSettings)) {
+    assert.equal(readBackendSupport(response(preset), 'session', initialSettings), preset);
+    assert.equal(readBackendSupport(response(preset), 'session', { ...initialSettings, [key]: true }), null);
+    assert.equal(readBackendSupport({ ...response(preset), support: { ...response(preset).support, requires_confirmation: false } }, 'session', initialSettings), preset);
+  }
+  for (const value of [null, {}, response('none'), response('voice_guide'), response('__proto__'),
+    { ...response('large_text'), ai_available: false }, { ...response('large_text'), session_id: 'old' },
+    { ...response('large_text'), support: { preset: 'large_text', requires_confirmation: 'true', decided_by: 'jev' } },
+    { ...response('large_text'), support: { preset: 'large_text', requires_confirmation: true, decided_by: 'unknown' } }]) {
+    assert.equal(readBackendSupport(value, 'session', initialSettings), null);
+  }
+});
 
 test('API 값과 화면 표시를 구분하고 푸드 온도는 null로 다룬다', () => {
   assert.equal(categoryLabels.coffee, '커피');
@@ -13,6 +30,16 @@ test('API 값과 화면 표시를 구분하고 푸드 온도는 null로 다룬�
   assert.equal(temperatureLabel('hot'), '핫');
   assert.equal(temperatureLabel(null), '기본');
   assert.equal(money(12500), '12,500원');
+});
+test('고객 화면의 온도 이름은 아이스·핫이고 푸드에는 온도를 쓰지 않는다', () => {
+  assert.equal(temperatureText('iced'), '아이스');
+  assert.equal(temperatureText('hot'), '핫');
+  // 개발 샘플과 서버 주문번호 모두 원래 값을 보여 모의 번호의 접두사를 숨기지 않습니다.
+  assert.equal(orderNumberText('DEV-SAMPLE-001'), 'DEV-SAMPLE-001');
+  assert.equal(orderNumberText('DEMO-042'), 'DEMO-042');
+  assert.equal(orderNumberText('A001'), 'A001');
+  assert.equal(temperatureText(null), '');
+  assert.equal(temperatureLabel('iced'), '아이스');
 });
 test('이전 저장 데이터에서는 화면 설정만 읽고 로컬 장바구니를 복원하지 않는다', () => {
   const legacy = { cart: [{ productId: 'latte', temperature: '핫', quantity: 3 }], settings: { ...initialSettings, largeText: true } };
@@ -392,7 +419,7 @@ test('재확인 실패 뒤에만 대기 요청을 버리고 새 주문을 시작
   assert.equal(await retry, false);
   assert.deepEqual(requests[0], requests[1], '재확인은 같은 키·버전·본문');
   assert.equal(controller.getSnapshot().canAbandonPending, true);
-  assert.match(controller.getSnapshot().abandonWarning, /이전 샘플 주문은 자동으로 취소되지/);
+  assert.match(controller.getSnapshot().abandonWarning, /이전 주문은 자동으로 취소되지/);
   assert.equal(controller.getSnapshot().cart.total_amount, 7000);
   assert.equal(controller.abandonPending(), true);
   assert.equal(controller.getSnapshot().status, 'ended');
@@ -489,4 +516,50 @@ test('Cart 조회가 실패해도 받은 서버 세션을 기록하고 재연결
   assert.equal(await controller.initialize(), true);
   assert.equal(controller.getSnapshot().session.session_id, 'session-2');
   assert.equal(controller.getSnapshot().status, 'ready');
+});
+
+test('메뉴는 화면 설정에 맞는 수로 쪽을 나누고 범위를 벗어난 쪽을 마지막 쪽으로 되돌린다', () => {
+  const mode = (settings = {}) => ({ largeText: false, largeButton: false, lowScreen: false, simpleScreen: false, ...settings });
+  assert.equal(menuPageSize(mode()), 9, '기본: 사진 카드 3 × 3, 17개 메뉴는 2쪽');
+  assert.equal(menuPageSize(mode({ largeButton: true })), 9);
+  assert.equal(menuPageSize(mode({ stepGuide: true })), 6, '단계별 안내 줄이 서면 한 줄 줄어듦');
+  assert.equal(menuPageSize(mode({ largeText: true })), 4, '큰 글씨: 사진 카드 2 × 2, 17개 메뉴는 5쪽');
+  assert.equal(menuColumns(mode({ largeText: true })), 2);
+  assert.equal(menuPageSize(mode({ largeText: true, stepGuide: true })), 2, '큰 글씨 + 단계별 안내: 사진 카드 한 줄');
+  assert.equal(menuPageSize(mode({ largeText: true, voiceOn: true })), 2, '큰 글씨 + 말로 주문: 사진 카드 한 줄');
+  assert.equal(menuPageSize(mode({ largeText: true, simpleScreen: true, stepGuide: true })), 4, '큰 글씨 + 간편 화면: 글자 줄 4개');
+  assert.equal(menuColumns(mode({ largeText: true, simpleScreen: true })), 1);
+  assert.equal(menuPageSize(mode({ lowScreen: true })), 6);
+  assert.equal(menuPageSize(mode({ lowScreen: true, stepGuide: true })), 3);
+  assert.equal(menuPageSize(mode({ lowScreen: true, largeText: true })), 2);
+  assert.equal(menuPageSize(mode({ simpleScreen: true })), 10);
+  assert.equal(menuPageSize(mode({ simpleScreen: true, largeButton: true, lowScreen: true, stepGuide: true })), 5);
+  assert.equal(menuPageSize(mode({ voiceOn: true })), 6, '말로 주문: 사진 카드 2 × 3');
+  assert.equal(menuPageSize(mode({ voiceOn: true, stepGuide: true })), 6, '말로 주문 중에는 단계별 안내가 없음');
+  assert.equal(menuPageSize(mode({ voiceOn: true, largeButton: true })), 3);
+  assert.equal(menuPageSize(mode({ voiceOn: true, simpleScreen: true })), 5, '말로 주문 + 간편 화면: 글자 줄 5개(담은 메뉴 위 32 px를 지킴)');
+  assert.equal(menuPageSize(mode({ largeView: true })), 6, '크게 보기: 세 열 두 줄, 17개 메뉴는 3쪽');
+  assert.equal(menuPageSize(mode({ largeView: true, lowScreen: true })), 3, '낮은 화면 + 크게 보기: 세 열 한 줄');
+  const products = Array.from({ length: 17 }, (_, index) => index);
+  assert.equal(pageCount(products.length, 6), 3);
+  assert.deepEqual([0, 1, 2].map(page => pageItems(products, page, 6).length), [6, 6, 5]);
+  assert.equal(pageCount(0, 6), 1, '빈 목록도 한 쪽');
+  assert.equal(clampPage(5, products.length, 6), 2);
+  assert.equal(clampPage(-1, products.length, 6), 0);
+  assert.deepEqual(pageItems(products, 9, 6), [12, 13, 14, 15, 16]);
+});
+
+test('주문 확인은 화면 설정과 줄 수에 맞춰 쪽을 나눈다', () => {
+  const mode = (settings = {}) => ({ largeText: false, largeButton: false, lowScreen: false, simpleScreen: false, ...settings });
+  assert.equal(reviewPageSize(mode(), 0), 1, '빈 주문도 한 줄 자리');
+  assert.equal(reviewPageSize(mode(), 4), 4);
+  assert.equal(reviewPageSize(mode(), 7), 5, '기본 크기는 다섯 줄까지');
+  assert.equal(reviewPageSize(mode({ largeButton: true }), 7), 5);
+  assert.equal(reviewPageSize(mode({ largeText: true }), 3), 3);
+  assert.equal(reviewPageSize(mode({ largeText: true }), 4), 2);
+  assert.equal(reviewPageSize(mode({ lowScreen: true }), 3), 3);
+  assert.equal(reviewPageSize(mode({ lowScreen: true }), 4), 2);
+  assert.equal(reviewPageSize(mode({ lowScreen: true, largeButton: true }), 3), 2);
+  assert.equal(reviewPageSize(mode({ lowScreen: true, largeText: true }), 3), 1);
+  assert.equal(pageCount(17, reviewPageSize(mode(), 17)), 4);
 });

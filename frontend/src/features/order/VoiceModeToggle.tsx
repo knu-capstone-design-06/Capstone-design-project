@@ -1,6 +1,7 @@
-import { useId } from 'react';
+import type { ReactNode } from 'react';
 import { useVoiceInput } from '../voice/index.ts';
 import type { VoiceController, VoiceInputError, VoiceRequestStatus } from '../voice/index.ts';
+import { Icon } from './components/icons.tsx';
 import './voiceModeToggle.css';
 
 const errorCopy: Record<VoiceInputError, string> = {
@@ -26,13 +27,13 @@ function resultCopy(result: VoiceRequestStatus): string {
   }
 }
 
-export function VoiceModeToggle({ controller, ready, sampleMode }: {
-  controller: VoiceController;
-  ready: boolean;
-  sampleMode: boolean;
-}) {
+/** 화면에 한 번만 쓰는 말로 주문 버튼의 설명 문장 id(aria-describedby). */
+const previewId = 'voice-mode-preview';
+/** 자동으로 꺼졌을 때 안내 영역에 보이는 문장입니다. */
+export const voiceAutoOffNotice = '한동안 말씀이 없어 말로 주문을 껐어요. 다시 쓰려면 위의 마이크 버튼을 눌러 주세요.';
+
+function useVoiceView(controller: VoiceController, sampleMode: boolean, ready = true) {
   const voice = useVoiceInput(controller);
-  const hintId = useId();
   const recognitionTest = import.meta.env.DEV && sampleMode;
   const canUse = ready && voice.supported && (!sampleMode || recognitionTest);
   const result = voice.enabled && voice.lastResult;
@@ -41,34 +42,47 @@ export function VoiceModeToggle({ controller, ready, sampleMode }: {
     : voice.phase === 'processing' ? '음성을 확인하고 있어요.'
     : question ? `${resultCopy(result)}${voice.phase === 'listening' ? (voice.partialText ? ` 듣는 중: ${voice.partialText}` : ' 답변을 듣고 있어요.') : ''}`
     : voice.phase === 'listening' ? (voice.partialText ? `듣는 중: ${voice.partialText}` : '듣고 있어요. 말씀해 주세요.')
-    : recognitionTest && voice.lastTranscript ? '인식을 마쳤어요. 다시 말하기로 한 번 더 시험할 수 있어요.'
     : result ? resultCopy(result) : '';
+  return { voice, recognitionTest, canUse, detail };
+}
 
-  return <section className="voice-mode-control" data-enabled={voice.enabled} aria-label="음성 모드 설정">
-    <button type="button" className="voice-mode-toggle" role="switch" aria-checked={voice.enabled}
-      aria-label={recognitionTest ? '음성 인식 테스트' : '음성 모드'} aria-describedby={hintId} data-log-target="voice-mode-toggle"
-      disabled={!canUse} onClick={() => controller.setEnabled(!voice.enabled)}>
-      <span className="voice-mode-icon" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-          <rect x="9" y="2" width="6" height="12" rx="3" />
-          <path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8" />
-          {!voice.enabled && <path className="voice-mode-mute" d="M3 3l18 18" />}
-        </svg>
-      </span>
-      <span className="voice-mode-copy"><strong>{recognitionTest ? '음성 인식 테스트' : '음성 모드'}</strong>
-        {voice.enabled && <span className="voice-mode-status" aria-hidden="true">
-          <span className="voice-mode-dot" aria-hidden="true" />{voice.enabled ? '켜짐 · 다시 누르면 꺼져요' : '꺼짐 · 누르면 켜져요'}
-        </span>}
-      </span>
-      <span className="voice-mode-switch" aria-hidden="true">{voice.enabled ? '켜짐' : '꺼짐'}</span>
-    </button>
-    <p className="voice-mode-preview" id={hintId} hidden={!recognitionTest && !voice.enabled && canUse}>{!voice.supported ? '이 브라우저에서는 음성 입력을 사용할 수 없어요. 음성 인식을 지원하는 Chrome에서 열어 주세요.'
-      : !ready ? '주문 준비가 끝나면 음성 모드를 켤 수 있어요.'
-      : recognitionTest ? '말한 문장만 표시하는 테스트입니다. 주문은 바뀌지 않습니다.'
+/**
+ * 말로 주문 버튼: 탭 줄 오른쪽 끝의 둥근 마이크 버튼입니다(글자 없음, 지름 = 그 모드의 조작 높이, 채움 #163F35, 흰 마이크).
+ * 켜지면 고른 모습에 멈춘 고리가 둘레에 서고, 상태 문장은 말로 주문 영역에 보입니다. 설명 문장은 낭독기용으로만 둡니다.
+ * 이 브라우저가 음성 인식을 지원하지 않으면 버튼을 두지 않고(이유 문장은 낭독기에 남김), 주문 준비 전에는 누를 수 없는 모습입니다.
+ */
+export function VoiceButton({ controller, ready, sampleMode }: { controller: VoiceController; ready: boolean; sampleMode: boolean }) {
+  const { voice, canUse } = useVoiceView(controller, sampleMode, ready);
+  return <div className={`voice-entry${voice.enabled ? ' is-on' : ''}${canUse ? ' is-ready' : ''}`}>
+    {voice.supported && <>
+      <span className="mic-ring" aria-hidden="true" /><span className="mic-ring" aria-hidden="true" />
+      <button type="button" className={`voice-mic${voice.enabled ? ' is-on' : ''}`} role="switch" aria-checked={voice.enabled}
+        aria-label="말로 주문하기" aria-describedby={previewId} data-log-target="voice-mode-toggle"
+        disabled={!canUse} onClick={() => controller.setEnabled(!voice.enabled)}><Icon name="mic" /></button>
+    </>}
+    <p className="voice-mode-preview sr-only" id={previewId} hidden={!voice.enabled && canUse}>{!voice.supported ? '이 브라우저에서는 음성 입력을 사용할 수 없어요. 음성 인식을 지원하는 Chrome에서 열어 주세요.'
+      : !ready ? '주문 준비가 끝나면 말로 주문을 켤 수 있어요.'
       : '켜면 한 문장을 듣고 마이크를 닫아요. 마이크 사용을 허용해 주세요.'}</p>
-    {voice.enabled && voice.lastTranscript && <p className="voice-mode-transcript"><span>인식한 말</span><strong>{voice.lastTranscript}</strong></p>}
-    {voice.enabled && detail && <p className="voice-mode-feedback" role="status" aria-live="polite">{detail}</p>}
-    {!voice.enabled && voice.autoOff && <p className="voice-mode-feedback" role="status" aria-live="polite">한동안 말씀이 없어 음성 모드를 껐어요. 다시 쓰려면 버튼을 눌러 주세요.</p>}
-    {voice.enabled && voice.phase === 'idle' && voice.error !== 'session_expired' && <button type="button" className="voice-mode-listen" data-log-target="voice-listen" onClick={() => controller.listen()}>다시 말하기</button>}
+  </div>;
+}
+
+/**
+ * 말로 주문 영역: 켜져 있는 동안 하단 주문 바 바로 위에 보조색으로 섭니다. 상태 줄, 들은 말(오른쪽의 흰 말풍선, M,
+ * 한 줄, 긴 문장은 끝부분), 질문·결과 문장(왼쪽, M 굵게), [다시 말하기]. 주문 안내는 다른 모드처럼 상품 목록 위의 자리에 뜹니다.
+ */
+export function VoicePanel({ controller, sampleMode, messages = null }: { controller: VoiceController; sampleMode: boolean; messages?: ReactNode }) {
+  const { voice, detail } = useVoiceView(controller, sampleMode);
+  if (!voice.enabled) return null;
+  const state = voice.phase === 'listening' ? '듣고 있어요' : voice.phase === 'processing' ? '알아듣는 중이에요' : '마이크 꺼짐';
+  return <section className="voice-mode-control" data-enabled={voice.enabled} aria-label="말로 주문">
+    <p className="voice-state"><Icon name={voice.phase === 'idle' ? 'mic_off' : 'mic'} />{state}</p>
+    <div className="voice-text">
+      {voice.lastTranscript && <p className="voice-mode-transcript"><span className="sr-only">인식한 말 </span><strong dir="rtl"><span dir="ltr">{voice.lastTranscript}</span></strong></p>}
+      {messages}
+      {detail && <p className="voice-mode-feedback" role="status" aria-live="polite">{detail}</p>}
+    </div>
+    {voice.phase === 'idle' && voice.error !== 'session_expired' && <div className="voice-answers">
+      <button type="button" className="voice-mode-listen" data-log-target="voice-listen" onClick={() => controller.listen()}>다시 말하기</button>
+    </div>}
   </section>;
 }
