@@ -128,7 +128,7 @@ test('힌트는 이름 붙은 조작에 고리를 두고 한 줄 안내를 보�
     await target(page, 'product:americano').click();
     await page.evaluate(() => window.kioskSupportDraft.hint('option-add'));
     await page.locator('[data-log-target="cart-add"].hint-ring').waitFor();
-    assert.match(await page.locator('dialog .hint-callout').innerText(), /아래 '담기'를 눌러 주세요/);
+    assert.match(await page.locator('dialog .hint-callout').innerText(), /아래 '담기'를\s+눌러 주세요/);
     const outline = await target(page, 'cart-add').evaluate(element => getComputedStyle(element).outlineWidth);
     assert.equal(outline, '6px');
     await target(page, 'cart-add').click();
@@ -153,10 +153,12 @@ test('뺀 줄은 다음 터치까지 제자리에 남고 [되돌리기]는 같�
       mutation(session, '/cart/items', cartResponse(session, 3, [iced(2)])),
       mutation(session, '/cart/items/item-iced?expected_version=3', cartResponse(session, 4), { method: 'DELETE' })]);
     const count = (method, path) => fixture.requests.filter(request => request.method === method && request.path.startsWith(`/api/v1/sessions/${session}${path}`)).length;
-    // [삭제]를 250 ms 간격으로 세 번 누릅니다. 같은 자리의 [되돌리기]에 닿는 연속 누름도 보호를 연장합니다.
+    // [삭제]를 250 ms 간격으로 네 번 누릅니다. 같은 자리의 [되돌리기]에 닿는 연속 누름도 보호를 연장합니다.
     const removeRepeatedly = async () => {
       const box = await target(page, 'cart:americano:아이스:remove').boundingBox();
       const point = [box.x + box.width / 2, box.y + box.height / 2];
+      await page.mouse.click(...point);
+      await page.waitForTimeout(250);
       await page.mouse.click(...point);
       await page.waitForTimeout(250);
       await page.mouse.click(...point);

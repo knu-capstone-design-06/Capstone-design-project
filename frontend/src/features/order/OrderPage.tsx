@@ -374,9 +374,8 @@ export function OrderPage() {
         armed={barArmed} onBlockedPress={() => setBarChange(count => count + 1)} />
       <EntryRow supportOpen={supportOpen} onToggleSupport={() => setSupportOpen(!supportOpen)} onUndo={enlargementPreview.largeView ? enlargementPreview.reset : null} />
     </section>
-    <HelpSheet ref={helpDialog} settings={settings} combined={combinedEnlargement}
+    <HelpSheet ref={helpDialog} settings={settings}
       onToggle={key => { setManualSettings(current => ({ ...current, [key]: !settings[key] })); clearAutomaticSettings([key]); }}
-      onCombined={toggleCombinedEnlargement}
       onReset={() => { enlargementPreview.reset(); setAutomaticSettings({ sessionId: '', values: {} }); setManualSettings({ ...initialSettings }); }} onClose={() => setSupportOpen(false)}
       readAloud={<ReadAloudControls root={touchLog.root} voiceController={voiceController} screenKey={`${state.session?.session_id}:${screen}:${selected?.product_id ?? ''}:${restartOpen}:${cartSheetOpen}`} />} />
     <OptionSheet ref={dialog} product={selected} temperature={temperature} quantity={quantity} remaining={remaining} writeDisabled={writeDisabled}
@@ -392,5 +391,5 @@ export function OrderPage() {
       <div className="order-feedback-actions"><button data-log-target="order-restart-cancel" onClick={closeRestart}>계속 주문하기</button>
         <button data-log-target="order-restart-confirm" disabled={busy || state.status === 'uncertain'} onClick={() => { setRestartOpen(false); void startNewOrder(true); }}>처음부터 주문하기</button></div>
     </dialog>
-  </div><TouchLogPanel /></>;
+  </div><TouchLogPanel combined={combinedEnlargement} onCombined={toggleCombinedEnlargement} /></>;
 }
