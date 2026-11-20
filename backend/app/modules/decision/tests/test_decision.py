@@ -982,7 +982,8 @@ class ResponseInvarianceTests(unittest.TestCase):
             else:
                 body = client.post(f"/api/v1/sessions/{session_id}/features", json=self.BODY).json()
                 if decision_patch == "with_layer":
-                    self.assertEqual(client.app.state.decision_repository.windows(session_id)[0].jev, "asked")
+                    (record,) = client.app.state.decision_repository.windows(session_id)
+                    self.assertEqual((record.jev, record.ai), ("asked", "ok"))
         body.pop("session_id")
         return body
 
@@ -991,6 +992,73 @@ class ResponseInvarianceTests(unittest.TestCase):
                     "support": {"preset": "none", "requires_confirmation": False, "decided_by": "rule_placeholder"}}
         self.assertEqual(self.features("with_layer"), expected)
         self.assertEqual(self.features("raise"), expected)
+
+    def post_windows(self, *states_per_window, measurable=True):
+        """POST one /features window per entry (2 s apart), ai-engine answering measurable=true with those states.
+
+        Returns the bodies, the decision repository's window records and state, and the Jev requests made."""
+        from unittest.mock import patch
+
+        jev_calls, answers = [], list(states_per_window)
+
+        async def handler(request):
+            if request.url.path == "/v1/systemone":
+                jev_calls.append(request)
+                return httpx.Response(200, json=RESPONSE)
+            payload = json.loads(request.content)
+            return httpx.Response(200, json={"session_id": payload["session_id"], "measurable": measurable,
+                                             "states": answers.pop(0), "model_version": "dummy-0.1"})
+
+        app = create_app(Settings(_env_file=None, openai_api_key=None, jev_api_key="jev-secret-value",
+                                  jev_stages="state_scores"))
+        real_client = httpx.AsyncClient
+        bodies = []
+        with patch("app.main.httpx.AsyncClient",
+                   side_effect=lambda **kw: real_client(base_url="http://ai-engine:8001",
+                                                        transport=httpx.MockTransport(handler))), \
+                TestClient(app) as client:
+            session_id = client.post("/api/v1/sessions").json()["session_id"]
+            for i in range(len(states_per_window)):
+                end = datetime(2026, 11, 4, 10, 0, 2 + 2 * i, tzinfo=timezone.utc)
+                body = {**self.BODY, "window_start": (end - timedelta(seconds=2)).isoformat(),
+                        "window_end": end.isoformat()}
+                bodies.append(client.post(f"/api/v1/sessions/{session_id}/features", json=body).json())
+            repository = client.app.state.decision_repository
+            records, state = repository.windows(session_id), repository.state(session_id)
+        return bodies, records, state, jev_calls
+
+    INVALID = (("out of range", {**SCORES, "normal": 1.5}), ("missing", {"normal": 0.5}),
+               ("not a number", {**SCORES, "normal": "high"}))
+
+    def test_scores_the_response_rejects_reach_the_table_as_a_window_that_was_not_measurable(self):
+        # Review of #77 (bb, 2aeb780): measurable=true with scores out of range or missing gave ai_available=false,
+        # yet the table opened highlight_next_action on the window and asked Jev.
+        for name, states in self.INVALID:
+            with self.subTest(name):
+                (body,), (record,), state, jev_calls = self.post_windows(states)
+                self.assertEqual((body["ai_available"], body["states"]), (False, None))
+                self.assertEqual((record.inputs["measurable"], record.ai), (False, "invalid_scores"))
+                self.assertNotEqual(record.jev, "asked")
+                self.assertIsNone(state.held, "no row opened on the window")
+                self.assertEqual(jev_calls, [], "Jev is not asked about it")
+
+    def test_rejected_scores_keep_a_support_already_held(self):
+        # The same window while a support is held: nothing withdrawn, nothing asked (the open one asked once).
+        for name, states in self.INVALID:
+            with self.subTest(name):
+                bodies, records, state, jev_calls = self.post_windows(self.SCORES, states)
+                self.assertEqual([b["ai_available"] for b in bodies], [True, False])
+                self.assertEqual([(r.decision["transition"], r.ai) for r in records],
+                                 [("open", "ok"), ("keep", "invalid_scores")])
+                self.assertEqual((state.held.support, state.held.decision_id),
+                                 (records[0].decision["support"], records[0].decision["decision_id"]))
+                self.assertEqual(len(jev_calls), 1)
+
+    def test_a_window_ai_engine_could_not_measure_is_recorded_apart_from_rejected_scores(self):
+        (body,), (record,), state, jev_calls = self.post_windows(None, measurable=False)
+        self.assertEqual((body["ai_available"], body["states"]), (True, None))
+        self.assertEqual((record.inputs["measurable"], record.ai), (False, "unmeasurable"))
+        self.assertEqual(jev_calls, [])
 
 
 class FeaturesEndpointTests(unittest.TestCase):
@@ -1018,6 +1086,8 @@ class FeaturesEndpointTests(unittest.TestCase):
                     self.assertEqual(state.screen_last, "menu", "the table saw the window (not measurable: no row)")
                     self.assertIsNone(state.held)
                     self.assertIs(client.app.state.decision_service.shadow, key is not None)
+                    (record,) = client.app.state.decision_repository.windows(session_id)
+                    self.assertEqual(record.ai, "unavailable", "ai-engine down: a system fault, not unmeasurable")
 
 
     def test_shutdown_waits_for_a_jev_call_still_on_its_way(self):

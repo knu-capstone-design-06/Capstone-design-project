@@ -231,3 +231,8 @@ class WindowRecord:
     answers: dict = field(default_factory=dict)   # stage name -> {question: answer}
     outcomes: dict = field(default_factory=dict)  # stage name -> answered | no_answer | skipped
     epoch: int = 0                         # SessionState.epoch when the window came: its times compare within one epoch only
+    # What ai-engine gave for the window (docs/Convention.md 7: not measurable apart from a system fault):
+    # "ok", "unmeasurable" (its own measurable=false), "unavailable" (no answer) or "invalid_scores" (scores the
+    # response rejected). The last three all reach the table as a window that was not measurable. None: the
+    # window did not come through /features (a direct caller of observe()).
+    ai: str | None = None

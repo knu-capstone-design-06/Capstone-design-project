@@ -45,20 +45,24 @@ class SessionService:
         # An order may complete while the AI request is in flight.
         if await run_in_threadpool(self._ordering.is_completed, session_id):
             raise SessionCompleted()
-        if self._decision is not None:
+        # The scores are checked before the judgment layer sees the window, so both read it the same way: scores
+        # the response rejects (ai_available=false) make the table record a window that was not measurable.
+        valid, states = result is not None, None
+        if result is not None and result.measurable:
             try:
-                self._decision.observe(session_id, window, measurable=result is not None and result.measurable)
+                states = StateScores.model_validate(result.states)
+            except ValidationError:
+                valid = False
+        if self._decision is not None:
+            ai = ("unavailable" if result is None else "invalid_scores" if not valid
+                  else "ok" if result.measurable else "unmeasurable")
+            try:
+                self._decision.observe(session_id, window, measurable=valid and result.measurable, ai=ai)
             except Exception:
                 # The judgment layer is in shadow mode: a failure there must not touch the response.
                 logger.exception("decision layer failed; response unchanged")
-        fallback = FeatureWindowResponse(session_id=session_id, ai_available=False)
-        if result is None:
-            return fallback
-        try:
-            states = StateScores.model_validate(result.states) if result.measurable else None
-        except ValidationError:
-            # Never reflect malformed or out-of-range scores into the UI.
-            return fallback
+        if not valid:
+            return FeatureWindowResponse(session_id=session_id, ai_available=False)
         return FeatureWindowResponse(
             session_id=session_id, ai_available=True,
             states=states, model_version=result.model_version,

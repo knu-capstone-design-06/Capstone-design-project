@@ -267,7 +267,7 @@ class DecisionService:
         return self._decide(session_id, inp)
 
     def observe(self, session_id: str, window: FeatureWindowRequest, measurable: bool,
-                situation: dict | None = None, gaze: bool | None = None) -> Decision:
+                situation: dict | None = None, gaze: bool | None = None, ai: str | None = None) -> Decision:
         """judge(), record the window, then ask Jev in the background when the arm is on and the window allows.
 
         One call chain per session at a time: while an answer is still on its way, the next window is recorded
@@ -295,7 +295,7 @@ class DecisionService:
             {"transition": decision.transition, "support": decision.support, "scene": decision.scene,
              "action": decision.action, "decision_id": decision.decision_id, "reason": decision.reason,
              "tag": decision.meta.get("tag"), "policy": decision.policy},
-            self.stage_names, why, self._jev.model if self._jev else None, timed_out, epoch=epoch,
+            self.stage_names, why, self._jev.model if self._jev else None, timed_out, epoch=epoch, ai=ai,
         )
         self._repository.add_window(record)
         if why == "asked":
