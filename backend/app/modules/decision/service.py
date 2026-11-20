@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import dataclasses
+import json
 import logging
 import os
 import time
@@ -360,11 +361,13 @@ class DecisionService:
                 if built is not None:
                     stage_state, questions = built
                     request = JevRequest(model=self._jev.model, state=stage_state, questions=questions)
+                    # The body must be valid JSON as sent (no NaN or infinity), or the call fails as if Jev did.
+                    json.dumps(request.model_dump(mode="json"), allow_nan=False)
             except Exception as exc:
                 # A shadow call must never surface.
                 logger.error("jev shadow %s could not build its question (%s at %s)", stage.name,
                              type(exc).__name__, where(exc))
-                built, reason = (), "build_error"
+                built, reason, request = (), "build_error", None   # a request built before the failure is not sent
                 # The names of questions built before the request failed stay on the record; nothing else does.
                 questions = questions if isinstance(questions, dict) else {}
             if built is None:

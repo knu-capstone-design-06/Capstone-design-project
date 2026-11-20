@@ -421,21 +421,39 @@ class DecisionServiceTests(unittest.IsolatedAsyncioTestCase):
             def build(self, ctx):
                 return {"secret_field_name": {1, 2}}, {"q": {"type": "noul", "description": "?"}}
 
+        class NotJson:
+            name = "not_json"
+
+            def build(self, ctx):
+                return {"score": float("nan")}, {"q": {"type": "noul", "description": "?"}}
+
         self.service(lambda request: httpx.Response(200, json=RESPONSE))
-        service = DecisionService(self.repository, P, JevClient(self.http, "jev-1.13.0", 3.0),
-                                  stages=(WrongShape(), Unsendable(), ScoreStage()))
+        jev = JevClient(self.http, "jev-1.13.0", 3.0)
+        asked = []
+        real_ask = jev.ask
+
+        async def ask(request):
+            asked.append(set(request.questions))   # counted before httpx, which itself refuses a NaN body
+            return await real_ask(request)
+
+        jev.ask = ask
+        service = DecisionService(self.repository, P, jev, stages=(WrongShape(), Unsendable(), NotJson(), ScoreStage()))
         with self.assertLogs("app.modules.decision.service", "INFO") as logs:
             service.observe("s1", feature_window(), measurable=True)
             await service.drain()
-        wrong, unsendable, scores = self.repository.records("s1")
-        self.assertEqual([(r.stage, r.outcome, r.reason) for r in (wrong, unsendable)],
-                         [("wrong_shape", "no_answer", "build_error"), ("unsendable", "no_answer", "build_error")])
+        wrong, unsendable, not_json, scores = self.repository.records("s1")
+        self.assertEqual([(r.stage, r.outcome, r.reason) for r in (wrong, unsendable, not_json)],
+                         [("wrong_shape", "no_answer", "build_error"), ("unsendable", "no_answer", "build_error"),
+                          ("not_json", "no_answer", "build_error")])
         self.assertEqual((wrong.questions, unsendable.questions), ((), ("q",)), "the names built before the failure")
-        self.assertEqual((scores.outcome, scores.previous_missing), ("answered", ("wrong_shape", "unsendable")))
+        self.assertEqual((scores.outcome, scores.previous_missing), ("answered", ("wrong_shape", "unsendable", "not_json")))
         self.assertNotIn("secret_field_name", "\n".join(logs.output))
         self.assertTrue(any("(ValidationError at service.py:" in line for line in logs.output), "where our code failed")
+        self.assertEqual(len(asked), 1, "only state_scores was asked: a request built before its failure is not sent")
+        self.assertNotIn("q", asked[0])
         self.assertEqual(self.repository.windows("s1")[0].outcomes,
-                         {"wrong_shape": "no_answer", "unsendable": "no_answer", "state_scores": "answered"})
+                         {"wrong_shape": "no_answer", "unsendable": "no_answer", "not_json": "no_answer",
+                          "state_scores": "answered"})
 
     async def test_no_answer_says_why_so_a_jev_fault_is_not_counted_as_a_wrong_answer(self):
         # Convention 7 (system fault apart from the rest), #95 (Jev outage, wrong answer, deadline).
