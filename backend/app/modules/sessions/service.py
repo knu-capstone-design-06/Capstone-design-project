@@ -1,8 +1,12 @@
+import logging
+from datetime import datetime, timezone
+
 from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 
 from app.infrastructure.external.ai_client import AiEngineClient
 from app.infrastructure.external.ai_schemas import AnalyzeRequest
+from app.modules.decision.service import DecisionService
 from app.modules.ordering.repository import OrderingRepository
 from app.modules.sessions.exceptions import SessionCompleted, SessionNotFound
 from app.modules.sessions.repository import SessionRepository
@@ -11,10 +15,16 @@ from app.modules.sessions.schemas import (
 )
 
 
+logger = logging.getLogger(__name__)
+
+
 class SessionService:
-    def __init__(self, repository: SessionRepository, ordering: OrderingRepository):
+    def __init__(self, repository: SessionRepository, ordering: OrderingRepository,
+                 decision: DecisionService | None = None):
         self._repository = repository
         self._ordering = ordering
+        # Shadow judgment layer: runs beside the response and never changes it (docs/Jev-Integration.md).
+        self._decision = decision
 
     def exists(self, session_id: str) -> bool:
         return self._repository.exists(session_id)
@@ -25,6 +35,7 @@ class SessionService:
     async def analyze(
         self, session_id: str, window: FeatureWindowRequest, ai: AiEngineClient
     ) -> FeatureWindowResponse:
+        received_at = datetime.now(timezone.utc)   # kept with the window record: before the ai-engine round trip
         if not await run_in_threadpool(self._repository.exists, session_id):
             raise SessionNotFound()
         if await run_in_threadpool(self._ordering.is_completed, session_id):
@@ -36,14 +47,26 @@ class SessionService:
         # An order may complete while the AI request is in flight.
         if await run_in_threadpool(self._ordering.is_completed, session_id):
             raise SessionCompleted()
-        fallback = FeatureWindowResponse(session_id=session_id, ai_available=False)
-        if result is None:
-            return fallback
-        try:
-            states = StateScores.model_validate(result.states) if result.measurable else None
-        except ValidationError:
-            # Never reflect malformed or out-of-range scores into the UI.
-            return fallback
+        # The scores are checked before the judgment layer sees the window, so both read it the same way: scores
+        # the response rejects (ai_available=false) make the table record a window that was not measurable.
+        valid, states = result is not None, None
+        if result is not None and result.measurable:
+            try:
+                states = StateScores.model_validate(result.states)
+            except ValidationError:
+                valid = False
+        if self._decision is not None:
+            ai = ("unavailable" if result is None else "invalid_scores" if not valid
+                  else "ok" if result.measurable else "unmeasurable")
+            try:
+                self._decision.observe(session_id, window, measurable=valid and result.measurable, ai=ai,
+                                       ai_model_version=result.model_version if result is not None else None,
+                                       received_at=received_at)
+            except Exception:
+                # The judgment layer is in shadow mode: a failure there must not touch the response.
+                logger.exception("decision layer failed; response unchanged")
+        if not valid:
+            return FeatureWindowResponse(session_id=session_id, ai_available=False)
         return FeatureWindowResponse(
             session_id=session_id, ai_available=True,
             states=states, model_version=result.model_version,

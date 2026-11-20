@@ -1,7 +1,7 @@
 """External Jev (TypeSafe AI) transport. Questions and what answers mean belong to the caller.
 
-Only the backend calls external AI APIs (AGENTS.md 4): ai-engine builds the question,
-the backend sends it. Same shape as openai_client.py: application-owned HTTP client,
+Only the backend calls external AI APIs (AGENTS.md 4): the backend judgment layer builds the
+question (app/modules/decision) and sends it. Same shape as openai_client.py: application-owned HTTP client,
 one total deadline, no retries, None on any failure.
 """
 
@@ -49,7 +49,7 @@ class JevClient:
             # Do not log the state, the answers or the key.
             logger.warning("Jev answer unavailable (HTTP %s)", exc.response.status_code)
             return None
-        except (TimeoutError, httpx.HTTPError, ValidationError, ValueError, TypeError) as exc:
+        except (TimeoutError, httpx.HTTPError, ValidationError, ValueError, TypeError, RecursionError) as exc:
             logger.warning("Jev answer unavailable (%s)", type(exc).__name__)
             return None
 

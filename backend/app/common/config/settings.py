@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     # A version ID, not a moving alias, so experiments record what answered.
     jev_model: str = "jev-1.13.0"
     jev_timeout_seconds: float = Field(default=3.0, gt=0, allow_inf_nan=False)
+    # Experiment arm: the Jev stages to run per window, in order, comma-separated ("state_scores",
+    # "state_scores,support_choice", ...). Default "off": a key alone never starts paid calls; an
+    # experiment is switched on explicitly.
+    jev_stages: str = "off"
 
     @field_validator("database_url")
     @classmethod
