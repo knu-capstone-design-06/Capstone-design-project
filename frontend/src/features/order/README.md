@@ -6,7 +6,9 @@ main `9317b0b`에는 PR #70의 상품 그림·쪽 넘김·옵션/장바구니/�
 
 서버 제안은 메뉴를 가리지 않는 주문 바 위 전용 공간에 표시합니다. 다른 조작과 초점을 유지하고 수락한 설정만 적용합니다. 수동 설정은 저장하지만 서버가 제안해 켠 설정은 새 주문·새로고침에서 해제합니다. [대표 화면·검증](../../../../docs/screenshots/nonmodal-support-2026-11-18/README.md)을 참고합니다.
 
-자동 TTS·안내 중단·다시 듣기·400ms 후 재청취와 큰 글씨 중단 버튼 가림 수정은 [PR #79](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/79)의 `fb192f2`에서 통합 검증 후 재검토 중입니다. 아직 main 기능이 아니며, [로컬 FastAPI 연결과 모의 인식·합성·외부 AI의 검증 범위](https://github.com/knu-capstone-design-06/Capstone-design-project/blob/fb192f2/docs/screenshots/tts-design-integration-2026-11-20/README.md)를 구분합니다. #87의 추가 정렬·로그 버튼·샘플 주문번호 수정도 별도 Draft입니다. 현재 서버는 지원 `none`만 반환하며 실제 AI 제안 생성·음성 UI 변경·G10 검증은 후속 작업입니다.
+자동 TTS·안내 중단·다시 듣기와 큰 글씨 중단 버튼 가림 수정은 [PR #79](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/79)의 `fb192f2`에서 통합 검증했습니다. 대답을 기다리는 안내를 끝까지 읽은 경우에만 400ms 후 재청취합니다. 아직 main 기능이 아니며, [로컬 FastAPI 연결과 모의 인식·합성·외부 AI의 검증 범위](https://github.com/knu-capstone-design-06/Capstone-design-project/blob/fb192f2/docs/screenshots/tts-design-integration-2026-11-20/README.md)를 구분합니다. #79와 #87의 현재 검토 상태는 [프론트 MVP 현황](../../../../docs/Frontend-MVP-Status.md#관련-pr-상태)을 따릅니다. 현재 서버는 지원 `none`만 반환하며 실제 AI 제안 생성·음성 UI 변경·G10 검증은 후속 작업입니다.
+
+기존 화면에서는 2026-11-16 개발 PC에서 실제 마이크 → OpenAI(`interpret_v3`, `VOICE_EXECUTE_TOOLS=true`) → Cart → 화면에서 모의 주문 → Supabase 저장 1건과 backend 재시작 후 같은 주문 요청의 성공 응답 재생·주문 1건 유지를 검증했습니다([기록](../../../../docs/DB-Voice-Order-Integration-Verification-2026-11-16.md)). 음성 Cart 변경 설정의 기본값은 꺼짐이며, #70 개편 화면·#79 자동 TTS 조합과 G10 실기기 재검증은 별도 후속 작업입니다.
 
 기본 API 모드에서 기존 터치 통계 5개를 보냅니다. 공동 파일럿에서 `VITE_TOUCH_INTERACTION_DRAFT=true`를 설정하면 같은 요청에 `touch.interaction`을 포함합니다. 원시 기록은 전송하지 않습니다. `window.kioskTouchLogDraft.transmission()`은 HTTP 요청 상태를 표시합니다. [담당자별 요청·판단 용도·전송 조건](../../../../docs/Jev-Touch-Features.md)
 
@@ -156,7 +158,7 @@ node --test src/features/order/support.browser.test.mjs src/features/order/revie
 
 대상 밖 비율은 `대상 밖 pointer_start 수 / 현재 세션의 보관 중인 모든 pointer_start 수`입니다. 누름이 없거나 대상 정보가 빠진 기록이 있으면 비율은 `null`로 두고 화면에 산출하지 않은 이유를 표시합니다. 누락된 대상 정보는 영역 밖으로 추정하지 않고, 취소 여부가 없는 종료 기록도 별도로 셉니다. 비활성 대상은 대상 밖 입력에 포함하지 않습니다.
 
-계산 범위는 최신 1,000개 버퍼 안에 남은 현재 로컬 세션 기록입니다. 이전 세션은 합산하지 않으며 시작 기록이 없으면 세션 전체 수치로 해석하지 않도록 안내합니다. 각 수치는 이벤트 기록 수이므로 시작 기록 없이 종료만 남을 수 있고, 스크롤 이벤트 여러 개가 한 제스처에서 발생할 수도 있습니다. 대상 밖 입력을 실패, 손 뗌을 완료 탭이나 조작 성공, 스크롤 관측 수를 스크롤 의도 횟수로 해석하지 않습니다. 낮은 화면의 위쪽은 2026-11-15부터 [화면 위로 올리기](`screen-position-pad`)가 있는 주문 화면의 일부라서 수집 범위 안입니다.
+계산 범위는 최신 1,000개 버퍼 안에 남은 현재 로컬 세션 기록입니다. 이전 세션은 합산하지 않으며 시작 기록이 없으면 세션 전체 수치로 해석하지 않도록 안내합니다. 각 수치는 이벤트 기록 수이므로 시작 기록 없이 종료만 남을 수 있고, 스크롤 이벤트 여러 개가 한 제스처에서 발생할 수도 있습니다. 대상 밖 입력을 실패, 손 뗌을 완료 탭이나 조작 성공, 스크롤 관측 수를 스크롤 의도 횟수로 해석하지 않습니다. 낮은 화면의 위쪽은 2026-11-15부터 [화면 위로 올리기] 버튼(`screen-position-pad`)이 있는 주문 화면의 일부라서 수집 범위 안입니다.
 
 로컬 요약은 `contract/`의 `TouchFeatures`나 팀의 통계 정책을 확정한 것이 아닙니다. 2026-10-25 추가한 반복·전경 체류·뒤로가기 로컬 파일럿은 아래 별도 절에 정의합니다. 주변 입력, 성공·실패 판정, 재방문 통계, 시스템 대기 시간과 서버 전송은 [터치 로그 검토 문서](../../../../docs/Touch-Log-Review.md)의 T01~T14 합의 후 연결합니다. 원시 수집·보관 형식과 JSON 내보내기 형식은 유지합니다.
 
