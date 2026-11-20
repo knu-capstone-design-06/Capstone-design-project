@@ -1,0 +1,52 @@
+/* 주문 확인: 안내 영역은 단계 표시 아래 32 px에, 주문 묶음은 하단 주문 바 바로 위에 섭니다. */
+.kiosk .review-block { flex: none; margin: 0 0 var(--between); }
+.kiosk .review-back { min-width: var(--col); min-height: var(--h-control); padding: 0 var(--in); font-size: var(--fs-m); line-height: var(--lh); }
+.kiosk .review-lines .cart-line { grid-template-columns: var(--thumb) minmax(0, 1fr) auto var(--w-price) var(--w-delete); min-height: var(--h-review-row); }
+.kiosk .review-lines .cart-line .item { flex-direction: column; align-items: flex-start; gap: 0; }
+.kiosk .tile.thumb { width: var(--thumb); height: var(--thumb); border-radius: var(--r-card); }
+.kiosk .tile.thumb .tile-pic { width: var(--pic-l); height: var(--pic-l); }
+.kiosk .cart-removed .tile.thumb img { opacity: 0.4; }
+.kiosk .review-empty { display: flex; align-items: center; min-height: var(--h-line); margin: 0; font-size: var(--fs-m); }
+.kiosk .review-block .pager { margin-top: var(--gap-btn); }
+/* 큰 글씨·좁은 화면: 사진 없이 두 줄짜리 줄(장바구니 줄과 같음) */
+.kiosk.large-text .review-lines .cart-line { grid-template-columns: minmax(0, 1fr) auto; }
+.kiosk.large-text .review-lines .cart-line .thumb { display: none; }
+.kiosk.large-text .review-back { min-width: 0; white-space: normal; height: auto; padding-block: var(--pad-1); }
+/* 크게 보기: 사진 옆에 두 줄(이름·옵션·금액 / − n + 와 [삭제]) */
+.kiosk.large-view .review-lines .cart-line { grid-template-columns: var(--thumb) minmax(0, 1fr) auto; grid-template-areas: 'thumb item price' 'thumb step action'; }
+.kiosk.large-view .review-lines .cart-line .thumb { grid-area: thumb; align-self: center; }
+.kiosk.large-view .review-lines .cart-line .item { flex-direction: row; align-items: baseline; gap: var(--in); }
+
+/* 주문 완료: 남은 자리의 가운데에 한 묶음, 안내 영역은 아래 묶음 위 32 px. 목록의 선은 테두리로 그어 늘 정수 픽셀에 섭니다. */
+.kiosk .done-area { flex: 1 0 auto; display: flex; flex-direction: column; justify-content: center; padding: var(--between) 0; }
+/* 주문 완료의 안내 영역은 안내가 있을 때만 높이를 가져, 비어 있으면 주문 완료 묶음이 남은 자리의 가운데에 섭니다. */
+.kiosk .done-area + .message-place { flex-grow: 0; min-height: 0; padding: 0; }
+.kiosk .done-block { display: flex; flex-direction: column; align-items: stretch; padding: 0; text-align: left; }
+/* 확인 표시는 L 글자 옆의 아이콘(대문자 높이 × 1.3) */
+.kiosk .done-head { display: flex; align-items: center; gap: var(--in); margin: 0 0 var(--in); }
+.kiosk .done-pic { flex: none; width: var(--pic-l); height: var(--pic-l); fill: var(--ui-accent); }
+.kiosk .done-title { font-size: var(--fs-l); font-weight: 700; line-height: var(--lh); }
+.kiosk .done-label { margin: 0; font-size: var(--fs-s); color: var(--ui-muted); }
+.kiosk .done-block .order-number { display: block; margin: 0; font-size: var(--fs-number); font-weight: 700; line-height: var(--lh); letter-spacing: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.kiosk .sum-list { margin: var(--between) 0 0; padding: 0; list-style: none; border-top: 1px solid var(--ui-divider); }
+.kiosk .sum-row { display: grid; grid-template-columns: minmax(0, 1fr) auto var(--w-sum-price); align-items: center; gap: var(--in); min-height: var(--h-sum-row); border-bottom: 1px solid var(--ui-divider); }
+.kiosk .sum-row .item { display: flex; align-items: baseline; gap: var(--in); min-width: 0; }
+.kiosk .sum-row .name { font-size: var(--fs-m); font-weight: 700; }
+.kiosk .sum-row .opt { font-size: var(--fs-s); color: var(--ui-muted); }
+.kiosk .sum-row .cnt, .kiosk .sum-row .line-price { font-size: var(--fs-m); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.kiosk .sum-row.total-row { min-height: 0; padding-top: var(--in); border-bottom: 0; }
+.kiosk .sum-row.total-row .total-label { font-size: var(--fs-s); color: var(--ui-muted); }
+.kiosk .sum-row.total-row .amount { grid-column: 2 / span 2; text-align: right; font-size: var(--fs-l); font-weight: 700; font-variant-numeric: tabular-nums; }
+.kiosk.large-text .sum-row { grid-template-columns: minmax(0, 1fr) auto auto; }
+
+@media (max-width: 760px) {
+  .kiosk .review-lines .cart-line { grid-template-columns: minmax(0, 1fr) auto; }
+  .kiosk .review-lines .cart-line .thumb { display: none; }
+  .kiosk .review-back { min-width: 0; }
+  .kiosk .sum-row { grid-template-columns: minmax(0, 1fr) auto auto; }
+}
+
+/* 낮은 화면의 주문 확인: 주문 줄이 조작 영역 맨 위에서 시작하고 안내 영역은 그 아래, [메뉴 더 고르기]는 메뉴의 탭 줄 오른쪽 끝(x 684)에서 끝납니다. */
+.kiosk.low-screen .review-block { margin: var(--between) 0 0; }
+.kiosk.low-screen .order-layout > .message-place { order: 2; }
+.kiosk.low-screen:not(.large-text) .review-back { margin-right: calc(var(--w-pill) + var(--between)); }

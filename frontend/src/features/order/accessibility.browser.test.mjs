@@ -61,19 +61,19 @@ test('G10 화면에서 200% 글자·고대비·낮은 화면에도 상품·설�
           await page.waitForFunction(() => document.querySelector('[data-log-target="product:americano"]')?.disabled === false);
           const metrics = await page.evaluate(() => {
             const root = document.querySelector('.kiosk'), bar = document.querySelector('.order-actions');
-            const font = getComputedStyle(document.querySelector('.description')).fontSize;
+            const font = getComputedStyle(document.querySelector('[data-log-target="support-toggle"]')).fontSize;
             return { font: parseFloat(font), overflow: document.documentElement.scrollWidth > innerWidth,
               reserved: parseFloat(root.style.getPropertyValue('--order-actions-space')), bar: bar.getBoundingClientRect().height };
           });
-          const expectedFont = large ? 56 : 28;
+          const expectedFont = large ? 56 : 28, expectedM = large ? 68 : 34;
           assert.equal(metrics.font, expectedFont);
-          assert.equal(await target(page, 'category:전체').evaluate(element => parseFloat(getComputedStyle(element).fontSize)), expectedFont);
+          assert.equal(await target(page, 'category:전체').evaluate(element => parseFloat(getComputedStyle(element).fontSize)), expectedM, '분류 탭은 M 크기');
           assert(!metrics.overflow);
           assert(Math.abs(metrics.bar - metrics.reserved) <= 1);
           const contrasts = await page.evaluate(() => {
             const rgb = value => value.match(/[\d.]+/g).map(Number);
             const luminance = color => rgb(color).slice(0, 3).map(x => x / 255).map(x => x <= .04045 ? x / 12.92 : ((x + .055) / 1.055) ** 2.4).reduce((sum, x, i) => sum + x * [.2126, .7152, .0722][i], 0);
-            return ['.intro h1', '.description', '.product-category', '.product-price', '.sample-badge', '.order-actions p'].map(selector => {
+            return ['.steps h1', '.store-name', '.product-info strong', '.product-price', '[data-log-target="support-toggle"]'].map(selector => {
               const element = document.querySelector(selector);
               let parent = element, background = 'rgb(255, 255, 255)';
               while (parent) {
@@ -89,7 +89,7 @@ test('G10 화면에서 200% 글자·고대비·낮은 화면에도 상품·설�
           await shot(page, `menu-${low ? 'low' : 'normal'}-${large ? '200' : '100'}`);
           await target(page, 'product:americano').click();
           for (const id of ['temperature:핫', 'cart-add']) {
-            assert.equal(await target(page, id).evaluate(element => parseFloat(getComputedStyle(element).fontSize)), expectedFont, `${id} 글자 확대`);
+            assert.equal(await target(page, id).evaluate(element => parseFloat(getComputedStyle(element).fontSize)), expectedM, `${id} 글자 확대(M)`);
           }
           await target(page, 'temperature:핫').click();
           await target(page, 'options-increase').click();
@@ -98,10 +98,10 @@ test('G10 화면에서 200% 글자·고대비·낮은 화면에도 상품·설�
           await target(page, 'options-close').click();
           await target(page, 'support-toggle').click();
           for (const id of ['support:largeText', 'read-aloud-toggle']) {
-            assert.equal(await target(page, id).evaluate(element => parseFloat(getComputedStyle(element).fontSize)), expectedFont, `${id} 글자 확대`);
+            assert.equal(await target(page, id).evaluate(element => parseFloat(getComputedStyle(element).fontSize)), expectedM, `${id} 글자 확대(M)`);
           }
           await target(page, 'support:highContrast').click();
-          await target(page, 'support-toggle').click();
+          await target(page, 'support-close').click();
           const recorded = await page.evaluate(() => window.kioskTouchLogDraft.read().events);
           assert(recorded.some(e => e.kind === 'ui_settings_change' && e.data.after.highContrast === !large));
           assert(recorded.some(e => e.kind === 'pointer_start' && e.data.pointerType === 'mouse'));
@@ -125,6 +125,8 @@ test('처음으로의 취소는 장바구니를 보존하고 확인하면 새 �
     await target(page, 'order-restart-cancel').click();
     assert.equal(await page.evaluate(() => window.kioskTouchLogDraft.read().sessionId), before);
     assert(await target(page, 'review-open').isEnabled());
+    // 창이 닫힌 뒤 두 번 클릭 간격 동안 하단 바는 누름을 받지 않습니다.
+    await page.locator('[data-log-target="order-restart"][data-armed="true"]').waitFor();
     await target(page, 'order-restart').click();
     await target(page, 'order-restart-confirm').click();
     await page.waitForFunction(() => window.kioskTouchLogDraft.read().serverSessionId === 'reset-after');
@@ -154,15 +156,16 @@ test('화면 읽기를 중단·다시 재생하고 화면 이동 때 이전 안�
     await target(page, 'support-toggle').click();
     await target(page, 'read-aloud-toggle').click();
     await page.waitForFunction(() => window.__speechReview.texts.length === 1);
-    assert.match(await page.evaluate(() => window.__speechReview.texts[0]), /메뉴를 골라 주세요/);
+    assert.match(await page.evaluate(() => window.__speechReview.texts[0]), /메뉴 선택/);
     await target(page, 'read-aloud-stop').click();
     assert(await target(page, 'read-aloud-stop').isDisabled());
     await target(page, 'read-aloud-replay').click();
     assert.equal(await page.evaluate(() => window.__speechReview.texts.length), 2);
-    await target(page, 'support-toggle').click();
+    await target(page, 'support-close').click();
+    await page.locator('[data-log-target="review-open"][data-armed="true"]').waitFor();
     await target(page, 'review-open').click();
     await page.waitForFunction(() => window.__speechReview.texts.length === 3);
-    assert.match(await page.evaluate(() => window.__speechReview.texts.at(-1)), /담은 메뉴를 확인/);
+    assert.match(await page.evaluate(() => window.__speechReview.texts.at(-1)), /메뉴 더 고르기/);
     assert(await page.evaluate(() => window.__speechReview.cancelled >= 3));
     fixture.verify();
   } finally { await browser.close(); }
@@ -248,7 +251,7 @@ test('마이크 시작 전에 낭독·누름 소리를 멈추고 실제 종료 �
     await target(page, 'support-toggle').click();
     await target(page, 'read-aloud-toggle').click();
     await page.waitForFunction(() => window.__audioReview.texts.length === 1);
-    await target(page, 'support-toggle').click();
+    await target(page, 'support-close').click();
     await target(page, 'voice-mode-toggle').click();
     assert.equal(await page.evaluate(() => window.__audioReview.speaking), false);
     await target(page, 'support-toggle').click();
@@ -259,7 +262,7 @@ test('마이크 시작 전에 낭독·누름 소리를 멈추고 실제 종료 �
     await page.waitForFunction(() => window.__audioReview.texts.length === 2);
     await target(page, 'read-aloud-toggle').click();
     await target(page, 'touch-sound-toggle').click();
-    await target(page, 'support-toggle').click();
+    await target(page, 'support-close').click();
     await target(page, 'category:커피').click();
     assert(await page.evaluate(() => window.__audioReview.tones > 0));
     await target(page, 'voice-mode-toggle').click();
@@ -287,22 +290,23 @@ test('화면 읽기는 열린 옵션·처음으로 확인 창만 읽고 닫으�
     await page.waitForFunction(() => document.querySelector('[data-log-target="product:americano"]')?.disabled === false);
     await target(page, 'support-toggle').click();
     await target(page, 'read-aloud-toggle').click();
-    await target(page, 'support-toggle').click();
+    await target(page, 'support-close').click();
     await target(page, 'product:americano').click();
     await page.waitForFunction(() => window.__dialogTexts.length === 2);
     const optionText = await page.evaluate(() => window.__dialogTexts.at(-1));
     assert.match(optionText, /아메리카노.*온도/);
-    assert.doesNotMatch(optionText, /메뉴를 골라 주세요/);
+    assert.doesNotMatch(optionText, /메뉴 선택/);
     await target(page, 'options-close').click();
     await page.waitForFunction(() => window.__dialogTexts.length === 3);
+    await page.locator('[data-log-target="order-restart"][data-armed="true"]').waitFor();
     await target(page, 'order-restart').click();
     await page.waitForFunction(() => window.__dialogTexts.length === 4);
     const restartText = await page.evaluate(() => window.__dialogTexts.at(-1));
     assert.match(restartText, /처음부터 주문할까요/);
-    assert.doesNotMatch(restartText, /메뉴를 골라 주세요/);
+    assert.doesNotMatch(restartText, /메뉴 선택/);
     await target(page, 'order-restart-cancel').click();
     await page.waitForFunction(() => window.__dialogTexts.length === 5);
-    assert.match(await page.evaluate(() => window.__dialogTexts.at(-1)), /메뉴를 골라 주세요/);
+    assert.match(await page.evaluate(() => window.__dialogTexts.at(-1)), /메뉴 선택/);
     fixture.verify();
   } finally { await browser.close(); }
 });

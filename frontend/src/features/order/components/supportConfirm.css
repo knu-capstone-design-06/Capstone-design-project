@@ -1,0 +1,33 @@
+/* 상품과 주문 조작을 덮지 않는 안내 바. 빈 상태에도 같은 자리를 확보해 제안 도착으로 메뉴가 움직이지 않습니다. */
+.kiosk .support-confirm-slot { min-height: calc(var(--h-kiosk) + 4 * var(--in) + 2 * var(--bw)); padding: var(--in) var(--side); }
+.kiosk .support-confirm-sheet { width: 100%; min-width: 0; min-height: calc(var(--h-kiosk) + 2 * var(--in));
+  padding: var(--in); display: flex; align-items: center; gap: var(--gap-btn);
+  border: var(--bw) solid var(--ui-accent); border-radius: var(--r-float); background: var(--ui-accent); color: var(--ui-on-accent);
+  box-shadow: var(--shadow-float); animation: support-confirm-enter 160ms ease-out; }
+.kiosk .support-confirm-copy { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: var(--in); }
+.kiosk .support-confirm-copy > [aria-live] { min-width: 0; }
+.kiosk .support-confirm-symbol { display: grid; place-items: center; flex: none; width: calc(72px * var(--text-scale)); height: calc(72px * var(--text-scale));
+  border-radius: var(--r-round); background: var(--ui-on-accent); color: var(--ui-accent); }
+.kiosk .support-confirm-symbol .pic { width: var(--pic-m); height: var(--pic-m); fill: currentColor; }
+.kiosk .support-confirm-sheet h2 { margin: 0; font-size: var(--fs-m); font-weight: 700; line-height: var(--lh); text-wrap: balance; }
+.kiosk .support-confirm-actions { display: grid; flex: none; grid-template-columns: repeat(2, var(--w-offer)); gap: var(--gap-btn); }
+.kiosk .support-confirm-actions button { white-space: normal; min-height: var(--h-kiosk); min-width: 0; padding: var(--pad-1) var(--in);
+  font-size: var(--fs-s); line-height: var(--lh); color: var(--ui-accent); background: var(--ui-surface); border-color: var(--ui-surface); }
+.kiosk:is(.large-text, .large-view) .support-confirm-slot { min-height: calc(2 * var(--fs-m) * var(--lh) + var(--h-kiosk) + 4 * var(--in) + var(--gap-btn) + 2 * var(--bw)); }
+.kiosk:is(.large-text, .large-view) .support-confirm-sheet { flex-direction: column; align-items: stretch; }
+.kiosk:is(.large-text, .large-view) .support-confirm-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+/* 개발용 일괄 확대 시안도 같은 전용 자리와 초록색을 사용합니다. */
+.kiosk .support-confirm-slot .offer-card { min-height: calc(var(--h-kiosk) + 2 * var(--in)); padding: var(--in); background: var(--ui-accent); color: var(--ui-on-accent); }
+.kiosk .support-confirm-slot .offer-card .o-pic { background: var(--ui-on-accent); color: var(--ui-accent); }
+.kiosk .support-confirm-slot .offer-card .o-buttons button { color: var(--ui-accent); background: var(--ui-surface); border-color: var(--ui-surface); }
+@media (max-width: 760px) {
+  .kiosk .support-confirm-sheet { flex-direction: column; align-items: stretch; }
+  .kiosk .support-confirm-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+/* 짧은 개발 창에서는 빈 제안 자리를 접고, 제안이 있을 때는 하단 영역을 스크롤해 주문 버튼까지 접근합니다. */
+@media (max-height: 900px) {
+  .kiosk .support-confirm-slot:empty { display: none; }
+  .kiosk .order-actions:has(.support-confirm-sheet, .offer-card) { max-height: calc(100dvh - var(--h-control)); }
+}
+@keyframes support-confirm-enter { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .kiosk .support-confirm-sheet { animation: none; } }

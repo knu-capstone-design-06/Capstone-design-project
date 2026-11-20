@@ -1,0 +1,60 @@
+/* 아래 묶음: 하단 주문 바과 [화면 도움] 줄. 높이는 화면이 재서 --order-actions-space로 씁니다. */
+.kiosk .order-actions { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; height: auto; max-height: 45dvh; overflow-y: auto; background: var(--ui-surface); border: 0; box-shadow: none; }
+
+/* 하단 주문 바: 32 + 72 + 32. 금액 묶음(S 위 L)은 72보다 높아 위아래 여백으로 고르게 넘칩니다. */
+.kiosk .action-bar { display: flex; align-items: center; gap: var(--gap-btn); height: calc(var(--h-control) + 2 * var(--between)); padding: var(--between) var(--side); box-shadow: inset 0 1px 0 var(--ui-divider); }
+.kiosk .action-bar.only-action { justify-content: flex-end; }
+.kiosk .total { flex: 1 1 auto; display: flex; flex-direction: column; justify-content: center; gap: 0; min-width: 0; line-height: var(--lh); }
+.kiosk .total-label { font-size: var(--fs-s); color: var(--ui-muted); white-space: nowrap; }
+.kiosk .total .amount { font-size: var(--fs-l); font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.kiosk .action-bar button { display: inline-flex; align-items: center; justify-content: center; gap: var(--pad-1); flex: none; min-height: var(--h-control); padding: 0 var(--in); font-size: var(--fs-m); line-height: var(--lh); white-space: nowrap; }
+.kiosk .action-bar .pic { width: var(--pic-m); height: var(--pic-m); fill: currentColor; flex: none; }
+.kiosk .order-restart { width: auto; min-width: var(--w-restart); padding: 0 var(--in); }
+.kiosk .order-confirm { width: auto; min-width: var(--w-action); font-weight: 700; }
+
+/* [화면 도움] 줄: 왼쪽 부분(x 48–656)에만 둡니다. 글자만 있는 테두리 버튼 64, S 보조색 */
+.kiosk .entry-row { padding: var(--in) var(--side); box-shadow: inset 0 1px 0 var(--ui-divider); }
+.kiosk .entries { display: flex; flex-wrap: wrap; gap: var(--gap-btn); max-width: var(--left-part); }
+.kiosk .entry { display: inline-flex; align-items: center; justify-content: center; gap: var(--pad-1); width: var(--w-entry); min-height: var(--h-entry); padding: 0; font-size: var(--fs-s); line-height: var(--lh); color: var(--ui-muted); white-space: nowrap; }
+.kiosk .entry .pic { width: var(--pic-s); height: var(--pic-s); fill: currentColor; flex: none; }
+
+.kiosk .bar-pair { display: contents; }
+/* [담은 메뉴 보기]: 장바구니가 버튼 뒤에 있는 모드에서 섭니다. 낮은 화면에서는 금액(M 굵게)을 함께 담습니다. */
+/* [담은 메뉴 보기]는 남는 너비를 받아 주요 버튼의 오른쪽 끝이 x 1032에 섭니다. */
+.kiosk .action-bar .cart-button { flex: 1 1 auto; justify-content: space-between; gap: var(--in); padding: 0 var(--in); }
+.kiosk .cart-button b { font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* 큰 글씨: 첫 줄은 총 금액과 오른쪽 끝의 [담은 메뉴 보기], 둘째 줄은 [처음으로]와 주요 버튼(오른쪽 끝 고정, 너비는 글자를 따름) */
+.kiosk.large-text .action-bar { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--gap-btn); height: auto; align-items: center; }
+.kiosk.large-text .action-bar .total { grid-column: 1; grid-row: 1; line-height: 1; }
+.kiosk.large-text .action-bar .cart-button { grid-column: 2; grid-row: 1; justify-self: end; }
+.kiosk.large-text .action-bar .bar-pair { grid-column: 1 / span 2; grid-row: 2; display: flex; justify-content: flex-end; gap: var(--gap-btn); }
+.kiosk.large-text .action-bar.only-action { display: flex; }
+/* 낮은 화면 + 크게 보기: [담은 메뉴 보기 금액]이 자기 줄을 쓰고 그 아래 [처음으로]와 주요 버튼(한 줄에는 1,126 px가 필요함) */
+.kiosk.low-screen.large-view .action-bar:has(> .cart-button) { display: grid; grid-template-columns: minmax(0, 1fr); height: auto; }
+.kiosk.low-screen.large-view .action-bar:has(> .cart-button) .bar-pair { display: flex; justify-content: flex-end; gap: var(--gap-btn); }
+/* 낮은 화면 + 큰 글씨: 금액을 담은 [담은 메뉴 보기]가 첫 줄 전체를 씁니다. */
+.kiosk.low-screen.large-text .action-bar .cart-button { grid-column: 1 / span 2; justify-self: stretch; }
+/* 낮은 화면 + 큰 글씨: 두 줄인 하단 주문 바과 두 줄인 [화면 도움] 줄은 조작 영역의 40 %보다 높습니다(1080 × 1920에서 약 520 px > 461 px).
+   위쪽 읽기 자리가 보이는 높이(order.css와 같은 901 px 이상)에서는 기존 낮은 화면의 상한 대신 기본 상한(화면의 45 %)을 써서
+   [화면 도움] 줄이 아래 묶음 안에서 잘리지 않게 합니다. 짧은 창은 기존 상한을 그대로 씁니다. */
+@media (min-height: 901px) { .kiosk.low-screen.large-text .order-actions { max-height: 45dvh; } }
+/* 큰 글씨에서 [화면 도움] 줄의 버튼은 왼쪽 부분의 정해진 자리: [화면 도움]과 [원래대로]가 한 줄 */
+.kiosk.large-text .entries { display: grid; grid-template-columns: repeat(2, var(--w-entry)); grid-auto-rows: minmax(var(--h-entry), auto); }
+.kiosk.large-text .entries .e-help { grid-area: 1 / 1; }
+.kiosk.large-text .entries .e-undo { grid-area: 1 / 2; }
+/* 큰 글씨: 줄이 바뀌는 이름은 버튼이 자라며 담고, 줄 높이는 큰 글씨의 글자 줄과 같은 1.1입니다(한 줄 이름은 조작 높이 안에 들어감). */
+.kiosk.large-text .action-bar button, .kiosk.large-text .entry { white-space: normal; height: auto; padding-block: var(--pad-1); line-height: var(--lh-total); }
+/* 큰 글씨: [화면 도움] 줄의 버튼은 글자만 둡니다(아이콘을 두면 안쪽 여백이 16 px보다 좁아짐). */
+.kiosk.large-text .entry .pic { display: none; }
+
+@media (max-width: 760px) {
+  .kiosk .action-bar { height: auto; flex-wrap: wrap; padding: var(--in); }
+  .kiosk .total { flex-basis: 100%; }
+  .kiosk .action-bar .order-confirm, .kiosk .action-bar .order-restart { flex: 1 1 0; min-width: 0; }
+  .kiosk.large-text .action-bar { grid-template-columns: minmax(0, 1fr); }
+  .kiosk.large-text .action-bar .cart-button, .kiosk.low-screen.large-text .action-bar .cart-button { grid-column: 1; grid-row: 2; justify-self: stretch; }
+  .kiosk.large-text .action-bar .bar-pair { grid-column: 1; grid-row: 3; }
+  .kiosk .entry-row { padding: var(--in); }
+  .kiosk.large-text .entries { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

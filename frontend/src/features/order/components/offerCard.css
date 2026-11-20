@@ -1,0 +1,46 @@
+/* 제안 카드: 채움 #1B4975, 흰 질문, 흰 72 px 원 안의 아이콘, 흰 대답(글자 #1B4975), 모든 쌍 9.31:1.
+   상품 줄 위의 자리에서는 한 줄 안내와 같이 마지막 줄 카드의 글자 칸만큼 높고(기본 122), 위아래 16, 글은 카드의 글자 열에서 시작합니다.
+   모서리 24, 그림자 하나, 대답 246 × 2 + 사이 18. */
+.kiosk .offer-card { display: flex; align-items: center; gap: var(--between); min-height: calc(var(--h-card-text) + var(--bw)); margin: 0; padding: var(--in) calc(var(--pad-3) + var(--bw));
+  border-radius: var(--r-float); box-shadow: var(--shadow-float); background: var(--ui-on-support); color: var(--ui-on-dark); }
+.kiosk .offer-card .o-head { flex: 1 1 auto; display: flex; align-items: center; gap: var(--in); min-width: 0; }
+.kiosk .offer-card .o-pic { display: grid; place-items: center; flex: none; width: var(--o-circle); height: var(--o-circle); border-radius: var(--r-round);
+  background: var(--ui-on-dark); color: var(--ui-on-support); }
+.kiosk .offer-card .o-pic .pic { width: var(--pic-m); height: var(--pic-m); fill: currentColor; }
+.kiosk .offer-card .q { flex: 1 1 auto; margin: 0; font-size: var(--fs-m); font-weight: 700; line-height: var(--lh); text-wrap: balance; }
+.kiosk .offer-card .o-buttons { display: grid; grid-template-columns: repeat(2, var(--w-offer)); gap: var(--gap-btn); flex: none; }
+.kiosk .offer-card .o-buttons button { min-height: var(--h-kiosk); padding: 0 var(--in); font-size: var(--fs-m); line-height: var(--lh);
+  color: var(--ui-on-support); background: var(--ui-on-dark); border-color: var(--ui-on-dark); }
+/* 고대비: 채움 위의 버튼은 채움의 글자색 테두리 버튼 */
+.kiosk.high-contrast .offer-card .o-buttons button { color: inherit; background: transparent; border-color: currentColor; }
+/* 큰 글씨·크게 보기: 질문 위, 같은 너비의 대답 두 개 아래 */
+.kiosk:is(.large-text, .large-view) .offer-card { flex-direction: column; align-items: stretch; gap: var(--in); }
+.kiosk.large-text .offer-card .q { line-height: 1.1; }
+.kiosk:is(.large-text, .large-view) .offer-card .o-buttons { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.kiosk.large-text .offer-card .o-buttons button { white-space: normal; height: auto; padding-block: var(--pad-1); }
+@media (max-width: 760px) {
+  .kiosk .offer-card { flex-direction: column; align-items: stretch; gap: var(--in); padding: var(--in); }
+  .kiosk .offer-card .o-buttons { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* 키오스크가 한 일의 알림(적용 알림): 보조색 바탕과 확인 아이콘, 아이콘과 글 사이 16 */
+.kiosk .cart-notice.is-kiosk { flex-direction: row; align-items: center; justify-content: flex-start; gap: var(--in); background: var(--ui-support); color: var(--ui-on-support); }
+.kiosk .cart-notice.is-kiosk .pic { flex: none; width: var(--pic-m); height: var(--pic-m); fill: currentColor; }
+/* [원래대로]: 보조색 채움의 버튼 */
+.kiosk .entry.is-undo { color: var(--ui-on-support); background: var(--ui-support); border-color: var(--ui-line); }
+
+/* 버튼 강조 힌트: 조작 둘레의 6 px 고리(#37618E, 멈춤)와 숨 쉬듯 옅어졌다 돌아오는 후광. 시트 안에서는 그 버튼 위의
+   말풍선으로 한 줄 안내. 움직임 줄이기에서는 후광도 멈춥니다. */
+.kiosk .hint-ring, .kiosk .hint-ring:focus-visible { outline: var(--bw-hint) solid var(--ui-ring); outline-offset: 0; box-shadow: 0 0 0 var(--halo) var(--ui-support);
+  animation: halo-pulse var(--pulse-duration) var(--pulse-ease) infinite; }
+@media (prefers-reduced-motion: reduce) { .kiosk .hint-ring, .kiosk .hint-ring:focus-visible { animation: none; } }
+.kiosk .sheet-bar { position: relative; }
+.kiosk .hint-callout { position: absolute; right: 0; bottom: calc(100% + var(--halo) + var(--pointer)); z-index: 1; display: flex; align-items: center; gap: var(--pad-1);
+  max-width: var(--col); margin: 0; padding: var(--between); border-radius: var(--r-float); box-shadow: var(--shadow-float);
+  background: var(--ui-support); color: var(--ui-on-support); font-size: var(--fs-m); line-height: var(--lh); text-wrap: balance; }
+.kiosk .hint-callout .pic { flex: none; width: var(--pic-m); height: var(--pic-m); fill: currentColor; }
+.kiosk .hint-callout::after { content: ''; position: absolute; top: 100%; right: var(--between); border: var(--pointer) solid transparent; border-top-color: var(--ui-support); }
+@media (hover: hover) {
+  .kiosk .offer-card .o-buttons button:hover { color: var(--ui-on-support); background: var(--ui-on-dark); border-color: var(--ui-on-dark); }
+  .kiosk .entry.is-undo:hover { color: var(--ui-on-support); background: var(--ui-support); border-color: var(--ui-line); }
+}
