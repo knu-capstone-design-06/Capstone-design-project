@@ -12,8 +12,11 @@ import asyncio
 import copy
 import dataclasses
 import logging
+import os
 import time
+import traceback
 from collections.abc import Sequence
+from datetime import datetime, timezone
 
 from app.infrastructure.external.jev_client import JevClient
 from app.infrastructure.external.jev_schemas import JevRequest, NoulAnswer, ScoreAnswer
@@ -72,6 +75,14 @@ def log_task_failure(task: asyncio.Task) -> None:
     """A background Jev chain that died outside its own handling (a store error) is logged, never raised."""
     if not task.cancelled() and task.exception() is not None:
         logger.error("jev shadow task failed", exc_info=task.exception())
+
+
+def where(exc: BaseException) -> str:
+    """file:line of the innermost frame an exception came from: enough to find a bug in our own code, without
+    the exception's message, which may quote the state."""
+    frames = traceback.extract_tb(exc.__traceback__)
+    ours = [f for f in frames if f"{os.sep}app{os.sep}" in f.filename or "/app/" in f.filename] or frames
+    return f"{os.path.basename(ours[-1].filename)}:{ours[-1].lineno}" if ours else "?"
 
 
 def answers_fit(questions: dict, answers: dict) -> bool:
@@ -133,13 +144,14 @@ def passed_answer(answer):
 class DecisionService:
     def __init__(self, repository: DecisionRepository, params: DecisionParams = PILOT_PARAMS,
                  jev: JevClient | None = None, stages: Sequence[JevStage] = DEFAULT_STAGES, clock=time.perf_counter,
-                 now=time.monotonic):
+                 now=time.monotonic, wall=lambda: datetime.now(timezone.utc)):
         self._repository = repository
         self._params = params
         self._jev = jev
         self._stages = tuple(stages)   # Jev calls in order; each sees the answers before it (stackable)
         self._clock = clock
         self._now = now                # server time passed between windows (monotonic), for the session's timeline
+        self._wall = wall              # server UTC kept in the records, beside the frontend's window times
         self._tasks: set[asyncio.Task] = set()
         self._in_flight: dict[str, asyncio.Task] = {}   # one Jev call chain per session at a time
         if self._stages and self._jev is None:
@@ -229,7 +241,8 @@ class DecisionService:
         if abs(drift) <= CLOCK_JUMP_S:
             state.alt_t = state.alt_now = None
             self._repository.save_state(session_id, state)
-            return t >= state.last_t                     # False: a late window
+            # False: a late window, or the same window sent again (an equal end time is not a second window).
+            return t > state.last_t
         # A later window that continues the one before it. The same window sent twice is not a second one.
         follows = (state.alt_t is not None and t > state.alt_t
                    and abs((t - state.alt_t) - (now - state.alt_now)) <= CLOCK_JUMP_S)
@@ -267,7 +280,8 @@ class DecisionService:
         return self._decide(session_id, inp)
 
     def observe(self, session_id: str, window: FeatureWindowRequest, measurable: bool,
-                situation: dict | None = None, gaze: bool | None = None, ai: str | None = None) -> Decision:
+                situation: dict | None = None, gaze: bool | None = None, ai: str | None = None,
+                ai_model_version: str | None = None, received_at: datetime | None = None) -> Decision:
         """judge(), record the window, then ask Jev in the background when the arm is on and the window allows.
 
         One call chain per session at a time: while an answer is still on its way, the next window is recorded
@@ -296,6 +310,7 @@ class DecisionService:
              "action": decision.action, "decision_id": decision.decision_id, "reason": decision.reason,
              "tag": decision.meta.get("tag"), "policy": decision.policy},
             self.stage_names, why, self._jev.model if self._jev else None, timed_out, epoch=epoch, ai=ai,
+            ai_model_version=ai_model_version, received_at=received_at or self._wall(),
         )
         self._repository.add_window(record)
         if why == "asked":
@@ -334,29 +349,46 @@ class DecisionService:
         records = []
         for stage in self._stages:
             questions: dict = {}
-            started = self._clock()
+            started, reason, response = self._clock(), None, None
+            request = None
             try:
                 # The whole stage: building the question can fail as well as the call. Either way this stage
-                # simply has no answer, the later stages still run and the window keeps its record.
+                # simply has no answer, the later stages still run and the window keeps its record. Building
+                # covers the request too (a stage's wrong shape, a state that does not serialise): our fault,
+                # not Jev's. Only the exception's type is logged: its message may quote the state.
                 built = stage.build(StageInput(inp, state, decision, window.touch, dict(previous), list(history or [])))
-                if built is None:
-                    mark(stage.name, "skipped")
-                    continue
-                stage_state, questions = built
-                response = await self._jev.ask(JevRequest(model=self._jev.model, state=stage_state, questions=questions))
-            except Exception:
+                if built is not None:
+                    stage_state, questions = built
+                    request = JevRequest(model=self._jev.model, state=stage_state, questions=questions)
+            except Exception as exc:
                 # A shadow call must never surface.
-                logger.exception("jev shadow %s crashed", stage.name)
-                response = None
+                logger.error("jev shadow %s could not build its question (%s at %s)", stage.name,
+                             type(exc).__name__, where(exc))
+                built, reason = (), "build_error"
+                # The names of questions built before the request failed stay on the record; nothing else does.
+                questions = questions if isinstance(questions, dict) else {}
+            if built is None:
+                mark(stage.name, "skipped")
+                continue
+            if request is not None:
+                try:
+                    response = await self._jev.ask(request)
+                except Exception as exc:
+                    logger.error("jev shadow %s crashed (%s at %s)", stage.name, type(exc).__name__, where(exc))
+                    response = None
+                if response is None:
+                    reason = "unavailable"
             latency_ms = round((self._clock() - started) * 1000)
             if response is not None and not answers_fit(questions, response.answers):
                 # Answers that do not answer what was asked would spoil the record and the next stage's state.
                 logger.warning("jev shadow %s answered something else than asked", stage.name)
-                response = None
-            if response is None:
+                reason = "mismatch"
+            if reason is not None:
+                billed = response if reason == "mismatch" else None
                 record = JevRecord(session_id, window.window_end, tuple(questions), self._jev.model, "no_answer",
-                                   latency_ms, decision_id=decision.decision_id, stage=stage.name,
-                                   previous_missing=tuple(missing))
+                                   latency_ms, billed.model if billed else None, {},
+                                   billed.usage.model_dump() if billed else None, decision.decision_id, stage.name,
+                                   tuple(missing), reason, None if reason == "build_error" else self._wall())
                 missing.append(stage.name)
                 mark(stage.name, "no_answer")
             else:
@@ -364,13 +396,13 @@ class DecisionService:
                 answers = {name: recorded_answer(answer) for name, answer in asked.items()}
                 record = JevRecord(session_id, window.window_end, tuple(questions), self._jev.model, "answered",
                                    latency_ms, response.model, answers, response.usage.model_dump(),
-                                   decision.decision_id, stage.name, tuple(missing))
+                                   decision.decision_id, stage.name, tuple(missing), answered_at=self._wall())
                 previous[stage.name] = {name: passed_answer(answer) for name, answer in asked.items()}
                 mark(stage.name, "answered", answers)
             self._repository.add_record(record, window_record)
             records.append(record)
-            logger.info("jev shadow %s %s: %.40s in %d ms (%d questions)", stage.name, record.outcome,
-                        response.model if response else "-", latency_ms, len(questions))
+            logger.info("jev shadow %s %s%s: %.40s in %d ms (%d questions)", stage.name, record.outcome,
+                        f" ({reason})" if reason else "", record.response_model or "-", latency_ms, len(questions))
         return records
 
     async def drain(self) -> None:

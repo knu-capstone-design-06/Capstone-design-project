@@ -190,6 +190,13 @@ class SessionState:
                 "withdrawn": [{**w, "scope": list(w["scope"])} for w in self.withdrawn]}
 
 
+# Versions kept with every record (docs/Convention.md 7: the rule and question versions of an experiment).
+# Bump RULES_VERSION when a row, a rank, a parameter or a transition of the rule table changes, and
+# QUESTIONS_VERSION when the wording or the state given to Jev changes.
+RULES_VERSION = "rule_table_v0"
+QUESTIONS_VERSION = "jev_questions_v1"
+
+
 @dataclass(frozen=True)
 class JevRecord:
     """One shadow call: what was asked, what came back, how long it took. No state, no key."""
@@ -206,6 +213,13 @@ class JevRecord:
     decision_id: str | None = None
     stage: str = "state_scores"            # which Jev stage asked (stages can be stacked)
     previous_missing: tuple[str, ...] = ()  # earlier stages that had no answer when this one ran
+    # Why there was no answer (None when answered), so a Jev fault is not counted as a wrong answer:
+    # "unavailable" (the call failed: HTTP error, timeout, a body that is not a Jev answer; latency_ms near the
+    # timeout tells a timeout apart), "mismatch" (Jev answered, but not what was asked: its model and usage
+    # are kept, the tokens were billed) or "build_error" (the question could not be built: a fault here).
+    reason: str | None = None
+    answered_at: datetime | None = None    # server UTC when the call ended; None when no call was made (build_error)
+    questions_version: str = QUESTIONS_VERSION
 
 
 @dataclass
@@ -236,3 +250,6 @@ class WindowRecord:
     # response rejected). The last three all reach the table as a window that was not measurable. None: the
     # window did not come through /features (a direct caller of observe()).
     ai: str | None = None
+    ai_model_version: str | None = None    # ai-engine's model_version for the window, when it answered
+    received_at: datetime | None = None    # server UTC when /features received the window (window_end is the frontend's)
+    rules_version: str = RULES_VERSION

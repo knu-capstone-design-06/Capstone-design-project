@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 
 from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
@@ -34,6 +35,7 @@ class SessionService:
     async def analyze(
         self, session_id: str, window: FeatureWindowRequest, ai: AiEngineClient
     ) -> FeatureWindowResponse:
+        received_at = datetime.now(timezone.utc)   # kept with the window record: before the ai-engine round trip
         if not await run_in_threadpool(self._repository.exists, session_id):
             raise SessionNotFound()
         if await run_in_threadpool(self._ordering.is_completed, session_id):
@@ -57,7 +59,9 @@ class SessionService:
             ai = ("unavailable" if result is None else "invalid_scores" if not valid
                   else "ok" if result.measurable else "unmeasurable")
             try:
-                self._decision.observe(session_id, window, measurable=valid and result.measurable, ai=ai)
+                self._decision.observe(session_id, window, measurable=valid and result.measurable, ai=ai,
+                                       ai_model_version=result.model_version if result is not None else None,
+                                       received_at=received_at)
             except Exception:
                 # The judgment layer is in shadow mode: a failure there must not touch the response.
                 logger.exception("decision layer failed; response unchanged")

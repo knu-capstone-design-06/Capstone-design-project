@@ -292,16 +292,16 @@ class DecisionServiceTests(unittest.IsolatedAsyncioTestCase):
             return httpx.Response(200, json=RESPONSE)
 
         service = self.service(slow)
-        service.observe("s1", feature_window(back_count=1), measurable=True)
+        service.observe("s1", ending_at(2, back_count=1), measurable=True)
         await asyncio.sleep(0)  # let the first call start
-        service.observe("s1", feature_window(back_count=2), measurable=True)   # skipped: s1 is in flight
-        service.observe("s2", feature_window(back_count=3), measurable=True)   # another session is not held back
+        service.observe("s1", ending_at(4, back_count=2), measurable=True)   # skipped: s1 is in flight
+        service.observe("s2", ending_at(2, back_count=3), measurable=True)   # another session is not held back
         self.assertTrue(service.in_flight("s1"))
         gate.set()
         await service.drain()
         self.assertEqual(sorted(calls), [1, 3])
         self.assertFalse(service.in_flight("s1"))
-        service.observe("s1", feature_window(back_count=4), measurable=True)   # asked again once free
+        service.observe("s1", ending_at(6, back_count=4), measurable=True)   # asked again once free
         await service.drain()
         self.assertEqual(sorted(calls), [1, 3, 4])
 
@@ -342,7 +342,7 @@ class DecisionServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(self.repository.windows("s1")[-1].inputs["progress_segment"], True)
 
     async def test_an_answer_goes_to_its_own_window_only(self):
-        """Two windows ending at the same time: the one skipped while the first call is in flight gets no answer."""
+        """The window skipped while the first call is in flight, and a resend of the first, get no answer."""
         gate = asyncio.Event()
         calls = []
 
@@ -352,15 +352,36 @@ class DecisionServiceTests(unittest.IsolatedAsyncioTestCase):
             return httpx.Response(200, json=RESPONSE)
 
         service = self.service(slow)
-        service.observe("s1", feature_window(), measurable=True)
+        service.observe("s1", ending_at(2, back_count=1), measurable=True)
         await asyncio.sleep(0)
-        service.observe("s1", feature_window(), measurable=True)   # same end time, recorded as skipped
+        service.observe("s1", ending_at(2, back_count=1), measurable=True)   # the same window sent again
+        service.observe("s1", ending_at(4), measurable=True)                 # skipped: s1 is in flight
         gate.set()
         await service.drain()
-        asked, skipped = self.repository.windows("s1")
+        asked, resent, skipped = self.repository.windows("s1")
         self.assertEqual(len(calls), 1)
         self.assertEqual((asked.jev, asked.outcomes), ("asked", {"state_scores": "answered"}))
+        self.assertEqual((resent.jev, resent.outcomes, resent.answers), (STALE, {}, {}))
         self.assertEqual((skipped.jev, skipped.outcomes, skipped.answers), ("skipped_in_flight", {}, {}))
+
+    async def test_a_window_sent_twice_is_judged_and_asked_about_once(self):
+        # Review of the whole PR (381425f): an equal end time was judged again, opened its row's keep a second
+        # time and asked Jev twice. #95: a resent window never yields a second proposal.
+        calls = []
+
+        async def handler(request):
+            calls.append(1)
+            return httpx.Response(200, json=RESPONSE)
+
+        service = self.service(handler)
+        for _ in range(2):
+            service.observe("s1", ending_at(2, back_count=1), measurable=True)
+            await service.drain()
+        first, again = self.repository.windows("s1")
+        self.assertEqual((first.jev, first.decision["transition"]), ("asked", "open"))
+        self.assertEqual(again.jev, STALE)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(self.repository.state("s1").last_t, first.t)
 
     async def test_a_stage_that_fails_before_the_call_has_no_answer_and_the_next_stage_runs(self):
         from app.modules.decision.jev_questions import ScoreStage
@@ -378,8 +399,78 @@ class DecisionServiceTests(unittest.IsolatedAsyncioTestCase):
             await service.drain()
         broken, scores = self.repository.records("s1")
         self.assertEqual((broken.stage, broken.outcome, broken.questions), ("broken", "no_answer", ()))
+        self.assertEqual((broken.reason, scores.reason), ("build_error", None))
+        self.assertIsNone(broken.answered_at, "no call was made")
         self.assertEqual((scores.stage, scores.outcome, scores.previous_missing), ("state_scores", "answered", ("broken",)))
         self.assertEqual(self.repository.windows("s1")[0].outcomes, {"broken": "no_answer", "state_scores": "answered"})
+
+    async def test_a_question_that_cannot_be_sent_is_a_build_error_and_its_state_is_not_logged(self):
+        # Round 2 of the self-review: a stage of the wrong shape killed the whole chain, and a state that does
+        # not serialise read as a Jev outage with the state's contents in the log.
+        from app.modules.decision.jev_questions import ScoreStage
+
+        class WrongShape:
+            name = "wrong_shape"
+
+            def build(self, ctx):
+                return {"a": 1}, {}, "extra"
+
+        class Unsendable:
+            name = "unsendable"
+
+            def build(self, ctx):
+                return {"secret_field_name": {1, 2}}, {"q": {"type": "noul", "description": "?"}}
+
+        self.service(lambda request: httpx.Response(200, json=RESPONSE))
+        service = DecisionService(self.repository, P, JevClient(self.http, "jev-1.13.0", 3.0),
+                                  stages=(WrongShape(), Unsendable(), ScoreStage()))
+        with self.assertLogs("app.modules.decision.service", "INFO") as logs:
+            service.observe("s1", feature_window(), measurable=True)
+            await service.drain()
+        wrong, unsendable, scores = self.repository.records("s1")
+        self.assertEqual([(r.stage, r.outcome, r.reason) for r in (wrong, unsendable)],
+                         [("wrong_shape", "no_answer", "build_error"), ("unsendable", "no_answer", "build_error")])
+        self.assertEqual((wrong.questions, unsendable.questions), ((), ("q",)), "the names built before the failure")
+        self.assertEqual((scores.outcome, scores.previous_missing), ("answered", ("wrong_shape", "unsendable")))
+        self.assertNotIn("secret_field_name", "\n".join(logs.output))
+        self.assertTrue(any("(ValidationError at service.py:" in line for line in logs.output), "where our code failed")
+        self.assertEqual(self.repository.windows("s1")[0].outcomes,
+                         {"wrong_shape": "no_answer", "unsendable": "no_answer", "state_scores": "answered"})
+
+    async def test_no_answer_says_why_so_a_jev_fault_is_not_counted_as_a_wrong_answer(self):
+        # Convention 7 (system fault apart from the rest), #95 (Jev outage, wrong answer, deadline).
+        wrong = {**RESPONSE, "answers": {**RESPONSE["answers"], "normal": {"type": "choice", "choice": "x", "confidence": 0.5, "probabilities": {"x": 1.0}}}}
+        cases = {
+            "http 500": (lambda request: httpx.Response(500, json={}), "unavailable", None, None),
+            "timeout": (None, "unavailable", None, None),
+            "wrong answer type": (lambda request: httpx.Response(200, json=wrong), "mismatch", "jev-1.13.0",
+                                  RESPONSE["usage"]),
+        }
+        for name, (handler, reason, model, usage) in cases.items():
+            with self.subTest(name):
+                if handler is None:
+                    def handler(request):
+                        raise httpx.ReadTimeout("slow")
+                service = self.service(handler)
+                service.observe("s1", feature_window(), measurable=True)
+                await service.drain()
+                (record,) = self.repository.records("s1")
+                self.assertEqual((record.outcome, record.reason, record.answers), ("no_answer", reason, {}))
+                self.assertEqual((record.response_model, record.usage), (model, usage), "billed tokens are kept")
+                self.assertIsNotNone(record.answered_at)
+
+    async def test_records_carry_server_times_and_versions(self):
+        from app.modules.decision.schemas import QUESTIONS_VERSION, RULES_VERSION
+
+        wall = datetime(2026, 11, 20, 12, 0, tzinfo=timezone.utc)
+        self.service(lambda request: httpx.Response(200, json=RESPONSE))
+        service = DecisionService(self.repository, P, JevClient(self.http, "jev-1.13.0", 3.0), wall=lambda: wall)
+        service.observe("s1", feature_window(), measurable=True, ai="ok", ai_model_version="dummy-0.1")
+        await service.drain()
+        (window,), (record,) = self.repository.windows("s1"), self.repository.records("s1")
+        self.assertEqual((window.received_at, window.ai_model_version, window.rules_version),
+                         (wall, "dummy-0.1", RULES_VERSION))
+        self.assertEqual((record.answered_at, record.questions_version, record.reason), (wall, QUESTIONS_VERSION, None))
 
     async def test_stages_without_a_client_warn_and_are_marked_apart_from_off(self):
         from app.modules.decision.jev_questions import ScoreStage
@@ -909,7 +1000,7 @@ class WindowRecordTests(unittest.IsolatedAsyncioTestCase):
         repository = DecisionRepository()
         service = DecisionService(repository, P, None, stages=())
         for i in range(8):
-            service.observe("s1", feature_window(back_count=1 if i == 0 else 0), measurable=True)
+            service.observe("s1", ending_at(2 + 2 * i, back_count=1 if i == 0 else 0), measurable=True)
         rows = repository.windows("s1")
         self.assertEqual(len(rows), 8)
         self.assertEqual({r.jev for r in rows}, {"off"})
@@ -968,6 +1059,8 @@ class ResponseInvarianceTests(unittest.TestCase):
             if request.url.path == "/v1/systemone":   # the patched client class is also the Jev client's
                 return httpx.Response(200, json=RESPONSE)
             payload = json.loads(request.content)
+            self.ai_engine_called_at = datetime.now(timezone.utc)
+            await asyncio.sleep(0.02)   # the round trip: a stamp taken after it is later than this one
             return httpx.Response(200, json={"session_id": payload["session_id"], "measurable": True, "states": self.SCORES, "model_version": "dummy-0.1"})
 
         app = create_app(Settings(_env_file=None, openai_api_key=None, jev_api_key="jev-secret-value", jev_stages="state_scores"))
@@ -983,7 +1076,9 @@ class ResponseInvarianceTests(unittest.TestCase):
                 body = client.post(f"/api/v1/sessions/{session_id}/features", json=self.BODY).json()
                 if decision_patch == "with_layer":
                     (record,) = client.app.state.decision_repository.windows(session_id)
-                    self.assertEqual((record.jev, record.ai), ("asked", "ok"))
+                    self.assertEqual((record.jev, record.ai, record.ai_model_version), ("asked", "ok", "dummy-0.1"))
+                    self.assertLessEqual(record.received_at, self.ai_engine_called_at,
+                                         "stamped when /features got the window, before the ai-engine round trip")
         body.pop("session_id")
         return body
 
