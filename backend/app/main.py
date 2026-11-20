@@ -110,7 +110,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 executor = OrderingCartExecutor(ordering_service, app.state.ordering_repository)
             app.state.voice_service = VoiceService(
                 session_repository.exists, VoiceRepository(),
-                build_voice_interpreter(openai),
+                # A server that changes carts by voice or stores orders is not a development run:
+                # without a key it answers with the outage reply instead of the development sentence.
+                build_voice_interpreter(openai, development=not settings.voice_execute_tools and settings.database_url is None),
                 # Same demo catalog the ordering API sells.
                 menu_provider=lambda: (
                     _database_voice_menu(app.state.ordering_repository)

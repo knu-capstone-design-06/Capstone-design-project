@@ -54,7 +54,8 @@ class OpenAiClient:
                 return result
         except (TimeoutError, httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as exc:
             # Do not log transcripts, prompts, keys or response bodies.
-            logger.warning("OpenAI completion unavailable (%s)", type(exc).__name__)
+            status = f" {exc.response.status_code}" if isinstance(exc, httpx.HTTPStatusError) else ""
+            logger.warning("OpenAI completion unavailable (%s%s)", type(exc).__name__, status)
             return None
 
 
