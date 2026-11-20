@@ -85,10 +85,13 @@ export function VoicePanel({ controller, sampleMode, messages = null }: { contro
     if (voice.phase === 'speaking') stopButton.current?.scrollIntoView({ block: 'nearest', behavior: 'instant' });
   }, [voice.phase]);
   if (!voice.enabled) return null;
+  const canListen = voice.phase === 'idle' && voice.error !== 'session_expired';
+  const canReplay = Boolean(voice.lastReplyText) && (voice.phase === 'idle' || voice.phase === 'listening');
+  const speaking = voice.phase === 'speaking';
   const state = voice.phase === 'listening' ? '듣고 있어요' : voice.phase === 'processing' ? '알아듣는 중이에요'
     : voice.phase === 'speaking' ? '안내를 읽고 있어요' : '마이크 꺼짐';
   return <section className="voice-mode-control" data-enabled={voice.enabled} aria-label="말로 주문">
-    <p className="voice-state"><Icon name={voice.phase === 'idle' ? 'mic_off' : 'mic'} />{state}</p>
+    <p className="voice-state"><Icon name={speaking ? 'volume_up' : voice.phase === 'idle' ? 'mic_off' : 'mic'} />{state}</p>
     <div className="voice-text">
       {voice.lastTranscript && <p className="voice-mode-transcript"><span className="sr-only">인식한 말 </span><strong dir="rtl"><span dir="ltr">{voice.lastTranscript}</span></strong></p>}
       {messages}
@@ -96,10 +99,10 @@ export function VoicePanel({ controller, sampleMode, messages = null }: { contro
       {question && failure && <p className="voice-mode-failure" role="status" aria-live="polite">{failure}</p>}
       {voice.replyAudioError && <p className="voice-mode-failure" role="status">음성 안내를 재생하지 못했어요. 화면을 확인하고 ‘다시 말하기’를 눌러 주세요.</p>}
     </div>
-    <div className="voice-answers">
-      {voice.phase === 'idle' && voice.error !== 'session_expired' && <button type="button" className="voice-mode-listen" data-log-target="voice-listen" onClick={() => controller.listen()}>다시 말하기</button>}
-      {voice.phase === 'speaking' && <button ref={stopButton} type="button" className="voice-mode-listen" data-log-target="voice-reply-stop" onClick={() => controller.stopReply()}>안내 중단</button>}
-      {voice.lastReplyText && (voice.phase === 'idle' || voice.phase === 'listening') && <button type="button" className="voice-mode-listen" data-log-target="voice-reply-replay" onClick={() => controller.replayReply()}>마지막 안내 다시 듣기</button>}
-    </div>
+    {(canListen || speaking || canReplay) && <div className="voice-answers">
+      {canListen && <button type="button" className="voice-mode-listen" data-log-target="voice-listen" onClick={() => controller.listen()}>다시 말하기</button>}
+      {speaking && <button ref={stopButton} type="button" className="voice-mode-listen" data-log-target="voice-reply-stop" onClick={() => controller.stopReply()}>안내 중단</button>}
+      {canReplay && <button type="button" className="voice-mode-listen" data-log-target="voice-reply-replay" onClick={() => controller.replayReply()}>마지막 안내 다시 듣기</button>}
+    </div>}
   </section>;
 }

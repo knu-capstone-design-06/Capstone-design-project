@@ -129,11 +129,13 @@ export function OrderPage() {
   const largeView = enlargementPreview.largeView && !settings.largeText;
   useEffect(() => { try { localStorage.setItem(settingsStorageKey, JSON.stringify(manualSettings)); } catch { setStorageWarning(true); } }, [manualSettings]);
   useEffect(() => { heading.current?.focus(); }, [screen]);
+  // 모달 밖의 안내를 조작할 수 없는 동안 읽기와 자동 재청취를 함께 보류합니다.
+  const replyBlocked = selected !== null || supportOpen || cartSheetOpen;
+  useLayoutEffect(() => { voiceController.setReplyBlocked(replyBlocked); }, [replyBlocked, voiceController]);
   useLayoutEffect(() => {
-    voiceController.setReplyBlocked(selected !== null);
     if (selected) dialog.current?.showModal();
     else if (dialog.current?.open) dialog.current.close();
-  }, [selected, voiceController]);
+  }, [selected]);
   useLayoutEffect(() => {
     if (restartOpen) restartDialog.current?.showModal();
     else if (restartDialog.current?.open) restartDialog.current.close();
