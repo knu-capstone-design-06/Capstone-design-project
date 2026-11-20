@@ -4,6 +4,7 @@ import functools
 import hashlib
 import logging
 import re
+from dataclasses import dataclass
 from collections import Counter
 from collections.abc import Callable, Iterable, Sequence
 from uuid import UUID
@@ -108,6 +109,35 @@ def confirmation_text(tool_calls: list, menu: list[MenuItem]) -> str | None:
     return text if len(text) <= REPLY_MAX else None
 
 
+TEMPERATURE_QUESTION = "따뜻한 것과 아이스 중 무엇으로 할까요?"
+
+
+def fitted(text: str, shorter: str) -> str:
+    """A reply that names a product, or a shorter one without the name when that does not fit in REPLY_MAX.
+
+    The database sets no limit on product names, and a reply over the limit would fail the whole request."""
+    return text if len(text) <= REPLY_MAX else shorter
+
+
+def temperature_question(item: MenuItem, menu: list[MenuItem]) -> str:
+    """Ask the temperature of item by name. A name too long for REPLY_MAX is cut to its leading words, but only
+    where they still name it (a word only its name has): the answer ("아이스로요") is matched to the product
+    named in the question (require_named_products), so a question naming none would only be asked again."""
+    full = f"{item.name}, {TEMPERATURE_QUESTION}"
+    if len(full) <= REPLY_MAX:
+        return full
+    keys = _name_keys(menu)
+    words = item.name.split()
+    labels = ([" ".join(words[:n]) for n in range(len(words) - 1, 0, -1)]
+              # then a word only its name has (not the name run together without spaces, never read out)
+              + sorted((k for k in keys.get(item.product_id, []) if k != _compact(item.name)), key=len, reverse=True))
+    for label in labels:
+        text = f"{label}, {TEMPERATURE_QUESTION}"
+        if len(text) <= REPLY_MAX and _named_products(_compact(label), keys) == {item.product_id}:
+            return text
+    return TEMPERATURE_QUESTION
+
+
 def menu_from_products(products: Iterable[object]) -> list[MenuItem]:
     """Keep only the product fields the interpreter needs (e.g. the ordering catalog)."""
     fields = MenuItem.model_fields.keys()
@@ -151,8 +181,7 @@ def ask_for_missing_temperature(
             continue
         if len(item.temperatures) > 1:
             return VoiceInterpretation(
-                status="needs_clarification", tool_calls=[],
-                reply_text=f"{item.name}, 따뜻한 것과 아이스 중 무엇으로 할까요?",
+                status="needs_clarification", tool_calls=[], reply_text=temperature_question(item, menu),
             )
         calls.append(_with_temperature(call, item.temperatures[0]))
     return result.model_copy(update={"tool_calls": calls})
@@ -187,7 +216,8 @@ def require_cart_items(
         if (call.arguments.product_id, call.arguments.temperature) not in lines:
             name = names.get(call.arguments.product_id, call.arguments.product_id)
             return VoiceInterpretation(
-                status="needs_clarification", tool_calls=[], reply_text=f"{name}, 지금 장바구니에 없어요.",
+                status="needs_clarification", tool_calls=[],
+                reply_text=fitted(f"{name}, 지금 장바구니에 없어요.", "말씀하신 상품은 지금 장바구니에 없어요."),
             )
     return result
 
@@ -362,6 +392,19 @@ def _name_positions(compact: str, menu: list[MenuItem]) -> list[tuple[int, str]]
     return sorted(set(positions))
 
 
+def _name_spans(compact: str, keys: dict[str, list[str]]) -> list[tuple[int, str]]:
+    """(position, product_id) of every product name in a text the kiosk wrote (its own question). A name
+    found only inside another product's longer name at the same place is that longer product: the question
+    "제주 유기농 말차 라떼, …?" is about the latte, not also "제주 유기농 말차". Not for what the customer
+    says: "아이스 초코" is 초코 iced as much as the product 아이스초코, so both stay named there."""
+    spans = [(found.start(), found.start() + len(key), product_id)
+             for product_id, product_keys in keys.items() for key in product_keys
+             for found in re.finditer(re.escape(key), compact)]
+    return [(start, product_id) for start, end, product_id in spans
+            if not any(other != product_id and s <= start and end <= e and e - s > end - start
+                       for s, e, other in spans)]
+
+
 def spoken_mentions(
     text: str, menu: list[MenuItem],
 ) -> tuple[list[tuple[str | None, str, int]], list[tuple[str | None, str]]]:
@@ -531,8 +574,7 @@ def match_spoken_details(
         if temperature is not None and call.arguments.temperature not in (None, temperature):
             if item is not None and temperature not in item.temperatures:
                 return VoiceInterpretation(
-                    status="needs_clarification", tool_calls=[],
-                    reply_text=f"{item.name}, 따뜻한 것과 아이스 중 무엇으로 할까요?",
+                    status="needs_clarification", tool_calls=[], reply_text=temperature_question(item, menu),
                 )
             logger.warning("voice interpretation temperature disagrees with the spoken one; confirming")
             call, changed = _with_temperature(call, temperature), True
@@ -722,6 +764,11 @@ def which_in_cart_reply(lines: list[CartLine], menu: list[MenuItem]) -> str:
     return text if len(text) <= REPLY_MAX else "장바구니의 어느 상품을 말씀하시나요?"
 
 
+def _named_products(compact: str, keys: dict[str, list[str]]) -> set[str]:
+    """The products a text the kiosk wrote names (_name_spans)."""
+    return {product_id for _, product_id in _name_spans(compact, keys)}
+
+
 def require_named_products(
     result: VoiceInterpretation, request: VoiceRequestCreate, history: list[VoiceTurn],
     menu: list[MenuItem], cart: Iterable[CartLine] = (),
@@ -763,7 +810,8 @@ def require_named_products(
              if history and history[-1].result.reply_text
              and (answers_question(request.text, history[-1].result.reply_text)
                   or history[-1].result.status == "needs_confirmation") else [])
-    asked_products = named_in(asked)
+    # The kiosk's own question names one product even when another's name sits inside it (_name_spans).
+    asked_products = {product_id for text in asked for product_id in _named_products(text, keys)}
     lines = list(cart)
     if (history and history[-1].result.status == "needs_clarification" and len(asked_products) > 1):
         # "아이스 아메리카노, 따뜻한 카페 라떼 중 어느 것?" answered by "아이스요" picks the one line
@@ -796,7 +844,7 @@ def require_named_products(
             )
         shared = [w for w in words.get(product_id, []) if uses[w] > 1 and any(w in text for text in now)]
         if shared:
-            reply = f"{max(shared, key=len)} 중 어떤 메뉴로 할까요?"
+            reply = fitted(f"{max(shared, key=len)} 중 어떤 메뉴로 할까요?", ASK_MENU_REPLY)
         elif question is not None and not mentions_product:
             # An unanswered question ("따뜻한 것과 아이스 중?", "A, B 중 어느 것?") is asked again,
             # so "핫으로요" or "그거요" does not throw the order away.
@@ -831,25 +879,50 @@ def matches_menu(
     return True
 
 
-def off_menu_reply(result: VoiceInterpretation, menu: list[MenuItem]) -> str | None:
+def off_menu_reply(
+    result: VoiceInterpretation, menu: list[MenuItem], allow_missing_temperature: bool = False,
+) -> str | None:
     """What to tell the customer when matches_menu turns the tool inputs down.
 
     None when nothing the customer said is at fault: a temperature on a product that has
     none ("에그 샌드위치" as iced) or a drink left without one is the model's format, and
     that stays a failure rather than telling the customer the product cannot be ordered.
+    allow_missing_temperature as in matches_menu: a drink without one is then still to be asked.
     """
     products = {item.product_id: item for item in menu}
-    sold_out = False
+    off_menu = sold_out = model_format = False
     for call in result.tool_calls:
         item = products.get(call.arguments.product_id)
         if item is None:
-            return OFF_MENU_REPLY
+            off_menu = True
+            continue
         temperature = call.arguments.temperature
         if temperature is not None and item.temperatures and temperature not in item.temperatures:
-            return OFF_MENU_REPLY
+            off_menu = True
+        elif temperature is not None and not item.temperatures:
+            model_format = True   # a temperature on a product that has none
+        elif temperature is None and item.temperatures and not allow_missing_temperature:
+            model_format = True   # a drink still without one after the temperature questions
         if isinstance(call, AddCartItemCall) and not item.available:
             sold_out = True
-    return SOLD_OUT_REPLY if sold_out else None
+    # One call in the model's broken format makes the whole reading a failure, whatever the other calls
+    # name: the customer is not told about a product the reading may have got wrong.
+    if model_format:
+        return None
+    return OFF_MENU_REPLY if off_menu else SOLD_OUT_REPLY if sold_out else None
+
+
+@dataclass
+class Outcome:
+    """What one request has come to so far, for the outer handler of process() when the handling fails.
+
+    ran: the tools ran, so the request ends as that. failure: nothing ran and the request fails as this
+    (reply_text, error), such as the ordering service's refusal code, even when the store did not take the
+    write once. cancelled: a cancellation came while the worker ran and waits to be raised.
+    """
+    ran: VoiceInterpretation | None = None
+    failure: tuple[str, VoiceErrorResponse] | None = None
+    cancelled: bool = False
 
 
 class VoiceService:
@@ -905,17 +978,20 @@ class VoiceService:
         the store refusing to record the end itself: one left "processing" would answer every later request of
         its session with 409. Once the tools have run
         the request ends as that (completed, cart_updated), also when the task is cancelled meanwhile."""
-        ran: list[VoiceInterpretation] = []  # filled once the tools have run: the request then ends as that
+        outcome = Outcome()
         try:
-            await self._process(session_id, request_id, request, ran)
+            await self._process(session_id, request_id, request, outcome)
         except BaseException as exc:
             # Anything the handling inside did not expect, and cancellation (shutdown). The request is
             # closed first, and each step on its own: one that fails must not leave it "processing".
             closed = False
             try:
-                if ran:
+                if outcome.ran is not None:
                     closed = self._repository.finish_unfinished(
-                        request_id, "completed", None, ran[0].tool_calls, ["cart_updated"])
+                        request_id, "completed", None, outcome.ran.tool_calls, ["cart_updated"])
+                elif outcome.failure is not None:
+                    # Nothing ran and the failure was decided (a refusal code): record that, not an AI outage.
+                    closed = self._repository.fail_unfinished(request_id, *outcome.failure)
                 else:
                     closed = self._repository.fail_unfinished(request_id, FALLBACK_REPLY, VoiceErrorResponse(
                         code="ai_unavailable", detail="음성 요청을 끝까지 처리하지 못했습니다."))
@@ -923,7 +999,7 @@ class VoiceService:
                 logger.exception("voice request could not be closed")
             if closed:
                 logger.error("voice request closed by the outer handler after %s", type(exc).__name__)
-            if closed and not ran:
+            if closed and outcome.ran is None:
                 # No offer stays open behind a request that ended this way. One that finished by itself
                 # (an offer read back, then the task was cancelled) keeps what it stored.
                 for step in (self._repository.take_proposal, self._repository.discard_proposal_turn):
@@ -934,9 +1010,12 @@ class VoiceService:
             if not isinstance(exc, Exception):
                 raise
             logger.exception("voice request crashed outside its handling")
+            if outcome.cancelled:
+                # The cancellation waited for the worker's outcome; it still goes on to the caller.
+                raise asyncio.CancelledError() from exc
 
     async def _process(
-        self, session_id: str, request_id: str, request: VoiceRequestCreate, ran: list,
+        self, session_id: str, request_id: str, request: VoiceRequestCreate, outcome: Outcome,
     ) -> None:
         self._repository.update(request_id, "processing")
         off_menu: str | None = None
@@ -950,14 +1029,12 @@ class VoiceService:
             menu = await asyncio.to_thread(self._menu_provider)
             if not menu:
                 # Nothing can be ordered, so do not spend an OpenAI call on it.
+                error = VoiceErrorResponse(
+                    code="ai_unavailable", detail="판매 메뉴가 연결되지 않아 음성 해석을 하지 않았습니다.")
+                outcome.failure = (FALLBACK_REPLY, error)
                 if proposal is not None:
                     self._repository.discard_proposal_turn(session_id)
-                self._repository.update(
-                    request_id, "failed", FALLBACK_REPLY,
-                    error=VoiceErrorResponse(
-                        code="ai_unavailable", detail="판매 메뉴가 연결되지 않아 음성 해석을 하지 않았습니다.",
-                    ),
-                )
+                self._repository.update(request_id, "failed", FALLBACK_REPLY, error=error)
                 return
             history = self._repository.history(session_id)
             last = history[-1].result if history else None
@@ -980,7 +1057,7 @@ class VoiceService:
                 result = await self._interpreter.interpret(request, menu, history, cart)
             if result is not None and not matches_menu(result, menu, allow_missing_temperature=True):
                 logger.warning("voice interpretation rejected (not on menu)")
-                off_menu = off_menu_reply(result, menu)
+                off_menu = off_menu_reply(result, menu, allow_missing_temperature=True)
                 result = None
             if result is not None:
                 cart = list(await asyncio.to_thread(self._cart, session_id))
@@ -1049,13 +1126,11 @@ class VoiceService:
             result = VoiceInterpretation(status="needs_clarification", tool_calls=[], reply_text=off_menu)
         if result is None:
             # Failed exchanges stay out of the context so later turns read cleanly.
-            self._repository.update(
-                request_id, "failed", FALLBACK_REPLY,
-                error=VoiceErrorResponse(code="ai_unavailable", detail="외부 AI를 사용할 수 없습니다."),
-            )
+            error = VoiceErrorResponse(code="ai_unavailable", detail="외부 AI를 사용할 수 없습니다.")
+            outcome.failure = (FALLBACK_REPLY, error)
+            self._repository.update(request_id, "failed", FALLBACK_REPLY, error=error)
             return
         actions = []
-        cancelled = False
         if result.status == "completed" and self._executor is not None:
             # A proposal (needs_confirmation) is not run; the customer's "네" comes back
             # as a completed result and is run then.
@@ -1074,7 +1149,7 @@ class VoiceService:
                     except asyncio.CancelledError:
                         if run.cancelled():
                             raise  # nothing left to wait for; never loop on a cancelled future
-                        cancelled = True  # also a second time: keep waiting for the worker's outcome
+                        outcome.cancelled = True  # also a second time: keep waiting for the worker's outcome
             except CartChanged as changed:
                 # A touch changed the cart after the inputs were checked ("3잔으로" was
                 # "하나 더" over two cups; now there are five). Nothing ran: read the same
@@ -1092,28 +1167,28 @@ class VoiceService:
             except ToolExecutionFailed as failed:
                 # The offer the customer accepted did not run and is closed: its question leaves
                 # the context, as a refused one does, so a later "그걸로 주세요" is not read against it.
+                outcome.failure = (failed.reply_text, failed.error)   # first: a failing step below must not lose it
                 if proposal is not None:
                     self._repository.discard_proposal_turn(session_id)
                 self._repository.update(request_id, "failed", failed.reply_text, error=failed.error)
-                if cancelled:
+                if outcome.cancelled:
                     raise asyncio.CancelledError()
                 return
             except Exception:
                 # The interpretation succeeded; only the cart change failed, so the code
                 # must not blame the AI (the transaction already rolled the cart back).
                 logger.exception("voice tool execution crashed")
+                error = VoiceErrorResponse(code="cart_update_failed", detail="장바구니에 반영하지 못했습니다.")
+                outcome.failure = (FALLBACK_EXECUTION_REPLY, error)   # first, as above
                 if proposal is not None:
                     self._repository.discard_proposal_turn(session_id)
-                self._repository.update(
-                    request_id, "failed", FALLBACK_EXECUTION_REPLY,
-                    error=VoiceErrorResponse(code="cart_update_failed", detail="장바구니에 반영하지 못했습니다."),
-                )
-                if cancelled:
+                self._repository.update(request_id, "failed", FALLBACK_EXECUTION_REPLY, error=error)
+                if outcome.cancelled:
                     raise asyncio.CancelledError()
                 return
             if result.status == "completed":
                 actions = ["cart_updated"]
-                ran.append(result)
+                outcome.ran = result
         for step in ("clear_reconfirm", "append_turn"):
             try:
                 if step == "clear_reconfirm" and result.status == "completed":
@@ -1142,7 +1217,7 @@ class VoiceService:
         self._repository.update(
             request_id, result.status, result.reply_text, result.tool_calls, actions=actions,
         )
-        if cancelled:
+        if outcome.cancelled:
             raise asyncio.CancelledError()
 
     def get(self, session_id: str, request_id: str) -> VoiceRequestStatus:

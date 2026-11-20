@@ -14,11 +14,14 @@ from app.infrastructure.external.openai_client import OpenAiClient
 from app.main import create_app
 from app.modules.voice.interpreter import OpenAiVoiceInterpreter, StubVoiceInterpreter
 from app.modules.voice.exceptions import VoiceSessionCompleted
-from app.modules.voice.executor import ToolExecutionFailed
+from app.modules.voice.executor import CartChanged, ToolExecutionFailed
 from app.modules.voice.repository import HISTORY_TURNS, VoiceRepository
-from app.modules.voice.service import ASK_MENU_REPLY, OFF_MENU_REPLY, REPLY_MAX, SOLD_OUT_REPLY
+from app.modules.voice.service import (
+    ASK_MENU_REPLY, FALLBACK_REPLY, OFF_MENU_REPLY, REPLY_MAX, SOLD_OUT_REPLY, TEMPERATURE_QUESTION,
+    ask_for_missing_temperature, require_cart_items,
+)
 from app.modules.voice.schemas import (
-    MenuItem, VoiceErrorResponse, VoiceInterpretation, VoiceRequestCreate, VoiceTurn,
+    CartLine, MenuItem, VoiceErrorResponse, VoiceInterpretation, VoiceRequestCreate, VoiceTurn,
 )
 
 BODY = {
@@ -1899,7 +1902,8 @@ class ReviewerCaseTests(VoiceApiCase):
                 reached = self.crash_in("update", at=2)   # 1: "processing", 2: the failed result
                 ran = []
                 execute = self.client.app.state.voice_service._executor.execute
-                with patch.object(ordering, "add_item", crash or real),                         patch.object(self.client.app.state.voice_service._executor, "execute",
+                with patch.object(ordering, "add_item", crash or real), \
+                        patch.object(self.client.app.state.voice_service._executor, "execute",
                                      lambda *a, **k: (ran.append(True), execute(*a, **k))[1]):
                     text = "아이스 아메리카노 열아홉 잔 주세요" if quantity == 19 else "아이스 아메리카노 한 잔 주세요"
                     body = self.status(self.say(text)).json()
@@ -2127,6 +2131,196 @@ class CancellationLastTests(CancellationTests):
         self.assertEqual(self.status(accepted.request_id).json()["status"], "failed")
 
 
+class AuditCaseTests(VoiceApiCase):
+    """Cases from a review of the whole PR (cf6f7c3): each failed before its fix."""
+
+    SETTINGS = {"voice_execute_tools": True}
+
+    def crash_in(self, method, at=1):
+        repository = self.client.app.state.voice_service._repository
+        real, seen, reached = getattr(repository, method), [0], []
+
+        def boom(*args, **kwargs):
+            seen[0] += 1
+            if seen[0] == at:
+                reached.append(seen[0])
+                raise RuntimeError("store down")
+            return real(*args, **kwargs)
+
+        setattr(repository, method, boom)
+        self.addCleanup(lambda: repository.__dict__.pop(method, None))
+        return reached
+
+    def shift_clock(self, delta):
+        repository = self.client.app.state.voice_service._repository
+        real = repository._clock
+        repository._clock = lambda: real() + delta
+
+    def test_an_unanswered_question_lapses_like_an_offer(self):
+        # PROPOSAL_TTL keeps the next person's "좋아요" from adding the last customer's offer; an open
+        # temperature question is the same, and its answer would run without a read-back.
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", None, 2))
+        self.assertEqual(self.status(self.say("아메리카노 두 잔 주세요")).json()["status"], "needs_clarification")
+        self.shift_clock(timedelta(minutes=30))
+        self.interpreter.result = interpretation(ADD_AMERICANO)
+        body = self.status(self.say("아이스로요")).json()
+        self.assertEqual((body["status"], body["actions"]), ("needs_clarification", []))
+        self.assertEqual(self.cart()["total_quantity"], 0)
+        self.assertEqual(self.interpreter.histories[-1], [], "the lapsed question left the context")
+
+    def test_a_question_answered_in_time_still_runs(self):
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", None, 2))
+        self.say("아메리카노 두 잔 주세요")
+        self.shift_clock(timedelta(minutes=1))
+        self.interpreter.result = interpretation(ADD_AMERICANO)
+        self.assertEqual(self.status(self.say("아이스로요")).json()["actions"], ["cart_updated"])
+        self.assertEqual(self.cart()["total_quantity"], 2)
+
+    def test_a_refusal_keeps_its_code_when_writing_it_fails_once(self):
+        # Nothing ran: the request ends as the ordering service's refusal, not as an AI outage.
+        self.add_by_touch("americano", "iced", 2)
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 19))
+        reached = self.crash_in("update", at=2)
+        body = self.status(self.say("아이스 아메리카노 열아홉 잔 주세요")).json()
+        self.assertEqual(reached, [2])
+        self.assertEqual((body["status"], body["error"]["code"]), ("failed", "quantity_limit_exceeded"))
+        self.assertNotEqual(body["reply_text"], FALLBACK_REPLY)
+        self.assertEqual(self.cart()["total_quantity"], 2)
+
+    def test_an_offer_read_back_after_the_cart_changed_fails_and_closes_when_its_turn_is_lost(self):
+        # As any offer whose turn could not be stored (test_a_crash_before_anything_ran_fails_the_request_and_
+        # leaves_the_cart): nothing ran, the request fails and its offer is closed, so "네" cannot run it.
+        executor = self.client.app.state.voice_service._executor
+
+        def changed(*args, **kwargs):
+            raise CartChanged([CartLine(product_id="americano", temperature="iced", quantity=5)])
+
+        executor.execute = changed
+        self.addCleanup(lambda: executor.__dict__.pop("execute", None))
+        reached = self.crash_in("append_turn")
+        self.interpreter.result = interpretation(ADD_AMERICANO)
+        body = self.status(self.say("아이스 아메리카노 두 잔 주세요")).json()
+        self.assertEqual(reached, [1])
+        self.assertEqual((body["status"], body["error"]["code"], body["actions"]), ("failed", "ai_unavailable", []))
+        self.assertNotIn(self.session_id, self.client.app.state.voice_service._repository._proposals)
+
+    def test_a_long_product_name_still_gets_its_temperature_question(self):
+        long = MenuItem(product_id="long", name="제주 유기농 말차 크림 콜드브루 라떼 스페셜 에디션 그란데 사이즈 한정판",
+                        available=True, temperatures=["iced", "hot"])
+        self.client.app.state.voice_service._menu_provider = lambda: [long]
+        self.interpreter.result = interpretation(call("add_cart_item", "long", None, 1))
+        body = self.status(self.say("말차 크림 콜드브루 라떼 하나 주세요")).json()
+        self.assertEqual(body["status"], "needs_clarification")
+        self.assertLessEqual(len(body["reply_text"]), REPLY_MAX)
+        self.assertTrue(body["reply_text"].startswith("제주 유기농 말차") and body["reply_text"].endswith(TEMPERATURE_QUESTION))
+        # The shortened name still names it, so the answer runs instead of the question coming back.
+        self.interpreter.result = interpretation(call("add_cart_item", "long", "iced", 1))
+        answered = self.status(self.say("아이스로요")).json()
+        # It reached the ordering service, whose catalog has no such product here: not the question again.
+        self.assertEqual((answered["status"], answered["error"]["code"]), ("failed", "product_not_found"))
+        self.assertEqual(self.interpreter.histories[-1][-1].result.status, "needs_clarification")
+
+    def test_a_shortened_temperature_question_keeps_a_word_only_its_product_has(self):
+        # The words only the long name has come last: any prefix that fits would name the other product.
+        shared = "제주 유기농 말차 크림 라떼 스페셜 에디션 그란데 사이즈 시즌"
+        long = MenuItem(product_id="long", name=f"{shared} 한정판 리미티드", available=True, temperatures=["iced", "hot"])
+        other = MenuItem(product_id="other", name=f"{shared} 기본", available=True, temperatures=["iced", "hot"])
+        question = ask_for_missing_temperature(
+            interpretation(call("add_cart_item", "long", None, 1)), [long, other], []).reply_text
+        self.assertLessEqual(len(question), REPLY_MAX)
+        self.assertEqual(question, f"리미티드, {TEMPERATURE_QUESTION}")
+
+    def test_a_customer_saying_a_name_inside_another_still_names_both(self):
+        # Only the kiosk's own question reads a name inside a longer one as the longer product: the customer's
+        # "아이스 초코" is 초코 iced, though the menu also has 아이스초코.
+        choco = MenuItem(product_id="choco", name="초코", available=True, temperatures=["iced", "hot"])
+        ice_choco = MenuItem(product_id="ice_choco", name="아이스초코", available=True, temperatures=["iced"])
+        self.client.app.state.voice_service._menu_provider = lambda: [choco, ice_choco]
+        self.interpreter.result = interpretation(call("add_cart_item", "choco", "iced", 1))
+        body = self.status(self.say("아이스 초코 한 잔 주세요")).json()
+        # It reached the ordering service (the test catalog has no such product), not "어떤 메뉴를…?".
+        self.assertEqual((body["status"], body["error"]["code"]), ("failed", "product_not_found"))
+
+    def test_an_answer_to_a_product_whose_name_holds_another_name_runs(self):
+        # "제주 유기농 말차" is inside "제주 유기농 말차 라떼": the question about the latte names the latte only,
+        # so "아이스로요" answers it instead of bringing the question back forever.
+        latte = MenuItem(product_id="latte_m", name="제주 유기농 말차 라떼", available=True, temperatures=["iced", "hot"])
+        plain = MenuItem(product_id="plain_m", name="제주 유기농 말차", available=True, temperatures=["iced", "hot"])
+        self.client.app.state.voice_service._menu_provider = lambda: [latte, plain]
+        self.interpreter.result = interpretation(call("add_cart_item", "latte_m", None, 2))
+        asked = self.status(self.say("제주 유기농 말차 라떼 두 잔 주세요")).json()
+        self.assertEqual(asked["reply_text"], f"제주 유기농 말차 라떼, {TEMPERATURE_QUESTION}")
+        self.interpreter.result = interpretation(call("add_cart_item", "latte_m", "iced", 2))
+        answered = self.status(self.say("아이스로요")).json()
+        # It reached the ordering service (the test catalog has no such product), not the question again.
+        self.assertEqual((answered["status"], answered["error"]["code"]), ("failed", "product_not_found"))
+
+    def test_every_reply_naming_a_product_fits_a_long_name(self):
+        name = "제주 유기농 말차 크림 콜드브루 라떼 스페셜 에디션 그란데 사이즈 한정판 리미티드 시즌 메뉴"
+        long = MenuItem(product_id="long", name=name, available=True, temperatures=["iced", "hot"])
+        missing = require_cart_items(interpretation(call("remove_cart_item", "long", "iced")), [], [long])
+        asked = ask_for_missing_temperature(interpretation(call("add_cart_item", "long", None, 1)), [long], [])
+        for reply in (missing.reply_text, asked.reply_text):
+            self.assertLessEqual(len(reply), REPLY_MAX)
+            self.assertNotIn(name, reply)
+
+    def test_a_format_error_beside_a_sold_out_drink_stays_a_failure(self):
+        # A temperature on the sandwich is the model's format: the whole reading fails, as it does alone.
+        self.interpreter.result = interpretation(call("add_cart_item", "sandwich", "iced", 1),
+                                                 call("add_cart_item", "latte", "hot", 1))
+        body = self.status(self.say("샌드위치 하나랑 라떼 하나요")).json()
+        self.assertEqual((body["status"], body["error"]["code"]), ("failed", "ai_unavailable"))
+
+    def test_a_blank_screen_id_is_refused(self):
+        response = self.post(body={"text": "아메리카노", "alternatives": [], "screen_id": "   "})
+        self.assertEqual((response.status_code, response.json()["code"]), (422, "invalid_request"))
+
+    def test_a_refusal_keeps_its_code_when_closing_the_offer_fails(self):
+        # The refusal is kept before the offer is closed: a failing close must not turn it into an AI outage.
+        self.add_by_touch("americano", "iced", 2)
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", "iced", 19), reply_text=CONFIRM)
+        self.assertEqual(self.status(self.say("아이스 아메리카노 열아홉 잔 주세요")).json()["status"], "needs_confirmation")
+        reached = self.crash_in("discard_proposal_turn")
+        body = self.status(self.say("네")).json()
+        self.assertEqual(reached, [1])
+        self.assertEqual((body["status"], body["error"]["code"]), ("failed", "quantity_limit_exceeded"))
+        self.assertEqual(self.cart()["total_quantity"], 2)
+
+    def test_a_cancellation_goes_on_when_the_last_write_fails(self):
+        service = self.client.app.state.voice_service
+        executor, entered, hold = service._executor, threading.Event(), threading.Event()
+        real = executor.execute
+
+        def slow(*args, **kwargs):
+            entered.set()
+            hold.wait(5)
+            return real(*args, **kwargs)
+
+        executor.execute = slow
+        self.addCleanup(lambda: executor.__dict__.pop("execute", None))
+        self.crash_in("update", at=2)
+        self.interpreter.result = interpretation(ADD_AMERICANO)
+        request = VoiceRequestCreate(text="아이스 아메리카노 두 잔 주세요", alternatives=[], screen_id="menu_list")
+        accepted, _ = service.accept(self.session_id, uuid4(), request)
+        raised = []
+
+        async def drive():
+            task = asyncio.create_task(service.process(self.session_id, accepted.request_id, request))
+            await asyncio.get_running_loop().run_in_executor(None, entered.wait, 5)
+            task.cancel()
+            await asyncio.sleep(0.05)
+            hold.set()
+            try:
+                await task
+            except asyncio.CancelledError:
+                raised.append(True)
+
+        asyncio.run(drive())
+        body = self.status(accepted.request_id).json()
+        self.assertEqual((body["status"], body["actions"]), ("completed", ["cart_updated"]))
+        self.assertEqual(raised, [True], "the cancellation is raised again, as on the other paths")
+
+
 class RetentionTests(unittest.TestCase):
     def setUp(self):
         self.now = datetime(2026, 10, 12, 10, 0, tzinfo=timezone.utc)
@@ -2147,6 +2341,20 @@ class RetentionTests(unittest.TestCase):
         self.assertIsNone(self.repository.take_proposal("s1"))
         self.assertEqual(self.repository.history("s1"), [], "the lapsed question leaves the context")
         self.assertTrue(self.repository.needs_reconfirm("s1"), "a reading against it is still not an order")
+
+    def test_an_offer_or_a_mark_whose_turn_was_never_stored_goes_with_its_last_request(self):
+        offer = interpretation(ADD_AMERICANO, reply_text=CONFIRM)
+        self.accept("kept")
+        self.repository.mark_reconfirm("kept")       # its request is still retained
+        self.repository.mark_reconfirm("lost")       # no request, no turn: the store failed after marking
+        self.repository.set_proposal("lost-offer", offer.tool_calls)
+        self.accept("other")                         # any request prunes
+        self.assertTrue(self.repository.needs_reconfirm("kept"))
+        self.assertFalse(self.repository.needs_reconfirm("lost"))
+        self.assertIsNone(self.repository.take_proposal("lost-offer"))
+        self.now += timedelta(hours=2)
+        self.accept("other")
+        self.assertFalse(self.repository.needs_reconfirm("kept"), "gone with its request")
 
     def test_an_offer_lapses_just_after_two_minutes_not_before(self):
         offer = interpretation(ADD_AMERICANO, reply_text=CONFIRM)

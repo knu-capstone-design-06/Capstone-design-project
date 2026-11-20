@@ -31,6 +31,8 @@ RETENTION = timedelta(hours=1)
 # Proposed value: an offer nobody answered lapses after this. Nothing ends a session when a customer
 # walks away, so without it the next person's "좋아요" would add the last customer's offer.
 PROPOSAL_TTL = timedelta(minutes=2)
+# The kiosk's questions: the last turn of the context with one of these reads as still open.
+QUESTION_STATUSES = ("needs_confirmation", "needs_clarification")
 
 
 def utc_now() -> datetime:
@@ -89,6 +91,12 @@ class VoiceRepository:
         for session_id in [s for s, at in self._last_turn_at.items() if at < cutoff]:
             del self._last_turn_at[session_id]
             self._history.pop(session_id, None)
+            self._proposals.pop(session_id, None)
+            self._reconfirm.discard(session_id)
+        # An offer or a reconfirm mark whose turn was never stored (the store failed) has no turn time:
+        # it goes once the session has no request left either.
+        active = {r.session_id for r in self._records.values()}
+        for session_id in (set(self._proposals) | self._reconfirm) - set(self._last_turn_at) - active:
             self._proposals.pop(session_id, None)
             self._reconfirm.discard(session_id)
 
@@ -177,16 +185,20 @@ class VoiceRepository:
         """Return and clear the pending proposal: it answers one utterance only.
 
         An offer older than PROPOSAL_TTL has lapsed: it is dropped with its question, as a refused one is
-        (the reconfirm mark stays), and None is returned.
+        (the reconfirm mark stays), and None is returned. A question nobody answered within PROPOSAL_TTL
+        (the temperature, which menu) lapses the same way: the questions at the end of the context are
+        dropped, so the next customer's "아이스로요" is not read as the answer to the last one's order.
         """
         with self._lock:
+            now = self._clock()
             proposal = self._proposals.pop(session_id, None)
-            if proposal is None or proposal.made_at is None or self._clock() - proposal.made_at <= PROPOSAL_TTL:
-                return proposal
+            lapsed = proposal is not None and proposal.made_at is not None and now - proposal.made_at > PROPOSAL_TTL
+            asked_at = self._last_turn_at.get(session_id)
             history = self._history.get(session_id)
-            if history and history[-1].result.status == "needs_confirmation":
-                history.pop()
-            return None
+            if lapsed or (asked_at is not None and now - asked_at > PROPOSAL_TTL):
+                while history and history[-1].result.status in QUESTION_STATUSES:
+                    history.pop()
+            return None if lapsed else proposal
 
     def set_proposal(self, session_id: str, tool_calls: list[ToolCall], cart: Iterable[CartLine] = ()) -> None:
         """Keep the offer with the cart it was checked against, so "네" runs it on that cart only."""
@@ -218,7 +230,7 @@ class VoiceRepository:
         """
         with self._lock:
             history = self._history.get(session_id)
-            while history and history[-1].result.status in ("needs_confirmation", "needs_clarification"):
+            while history and history[-1].result.status in QUESTION_STATUSES:
                 history.pop()
 
     def discard_proposal_turn(self, session_id: str) -> None:

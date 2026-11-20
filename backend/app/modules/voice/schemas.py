@@ -31,11 +31,11 @@ class VoiceRequestCreate(BaseModel):
     # A screen name, kept with each turn and sent to the model with it: bounded like the text.
     screen_id: str = Field(min_length=1, max_length=64)
 
-    @field_validator("text")
+    @field_validator("text", "screen_id")
     @classmethod
-    def reject_blank(cls, value: str) -> str:
+    def reject_blank(cls, value: str, info) -> str:
         if not value.strip():
-            raise ValueError("text must not be blank")
+            raise ValueError(f"{info.field_name} must not be blank")
         return value
 
 
