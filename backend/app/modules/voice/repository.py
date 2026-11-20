@@ -209,10 +209,16 @@ class VoiceRepository:
             self._reconfirm.discard(session_id)
 
     def discard_question_turn(self, session_id: str) -> None:
-        """Drop the trailing question (a confirmation or a clarification) that an executed order answered."""
+        """Drop every question (confirmation or clarification) at the end of the context after an executed order.
+
+        All of them go, not only the last: a question asked again ("네" to the temperature question), or the
+        clarification an offer answered, stays behind it and would read as still open once the last one is gone.
+        With its completed turn stored, the order would have closed them all the same way: only the last turn
+        is read as an open question.
+        """
         with self._lock:
             history = self._history.get(session_id)
-            if history and history[-1].result.status in ("needs_confirmation", "needs_clarification"):
+            while history and history[-1].result.status in ("needs_confirmation", "needs_clarification"):
                 history.pop()
 
     def discard_proposal_turn(self, session_id: str) -> None:

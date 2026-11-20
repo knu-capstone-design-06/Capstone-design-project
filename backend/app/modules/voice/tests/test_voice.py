@@ -1938,6 +1938,51 @@ class ReviewerCaseTests(VoiceApiCase):
                          ("needs_clarification", "어떤 메뉴를 주문할까요?", []))
         self.assertEqual(self.cart()["total_quantity"], 2, "ran once")
 
+    def test_a_repeated_question_whose_answer_lost_its_turn_does_not_run_again(self):
+        # Review of #92 (bb, 9cb3b87): "아메리카노 두 잔" (asks the temperature) -> "네" (asks it again) ->
+        # "아이스로요" (runs, append_turn fails once) -> "아이스로요". Dropping only the last question left its
+        # copy open and the order ran twice (4 cups).
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", None, 2))
+        asked = self.status(self.say("아메리카노 두 잔 주세요")).json()
+        repeated = self.status(self.say("네")).json()
+        self.assertEqual((repeated["status"], repeated["reply_text"]), (asked["status"], asked["reply_text"]))
+        self.interpreter.result = interpretation(ADD_AMERICANO)
+        reached = self.crash_in("append_turn")
+        self.assertEqual(self.status(self.say("아이스로요")).json()["actions"], ["cart_updated"])
+        self.assertEqual(reached, [1])
+        again = self.status(self.say("아이스로요")).json()
+        self.assertEqual((again["status"], again["reply_text"], again["actions"]),
+                         ("needs_clarification", "어떤 메뉴를 주문할까요?", []))
+        self.assertEqual(self.cart()["total_quantity"], 2, "ran once")
+        self.assertEqual(self.interpreter.histories[-1], [], "no question of the order is left")
+
+    def test_an_offer_read_back_after_a_clarification_leaves_neither_open_once_its_turn_is_lost(self):
+        # The same bug through an offer: "아메리카노 두 잔" (temperature?) -> "아이스로요" (read back) -> "네" (runs,
+        # append_turn fails once) -> "아이스로요". Dropping only the offer left the temperature question last.
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", None, 2))
+        self.say("아메리카노 두 잔 주세요")
+        self.interpreter.result = interpretation(ADD_AMERICANO, reply_text="아이스 아메리카노 두 잔 담을까요?")
+        self.assertEqual(self.status(self.say("아이스로요")).json()["status"], "needs_confirmation")
+        reached = self.crash_in("append_turn")
+        self.assertEqual(self.status(self.say("네")).json()["actions"], ["cart_updated"])
+        self.assertEqual(reached, [1])
+        self.interpreter.result = interpretation(ADD_AMERICANO)
+        again = self.status(self.say("아이스로요")).json()
+        self.assertEqual((again["status"], again["actions"]), ("needs_clarification", []))
+        self.assertEqual(self.cart()["total_quantity"], 2, "ran once")
+        self.assertEqual(self.interpreter.histories[-1], [], "no question of the order is left")
+
+    def test_a_repeated_question_answered_without_a_lost_turn_runs_once(self):
+        # The same order with its completed turn stored: what the failure path has to match.
+        self.interpreter.result = interpretation(call("add_cart_item", "americano", None, 2))
+        self.say("아메리카노 두 잔 주세요")
+        self.say("네")
+        self.interpreter.result = interpretation(ADD_AMERICANO)
+        self.assertEqual(self.status(self.say("아이스로요")).json()["actions"], ["cart_updated"])
+        again = self.status(self.say("아이스로요")).json()
+        self.assertEqual((again["status"], again["actions"]), ("needs_clarification", []))
+        self.assertEqual(self.cart()["total_quantity"], 2)
+
     def test_a_lost_turn_drops_only_a_trailing_question(self):
         # A completed order last in the context stays: only a question reads as still open.
         self.interpreter.result = interpretation(call("add_cart_item", "sandwich", None, 1))
