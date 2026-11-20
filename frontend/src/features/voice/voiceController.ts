@@ -2,8 +2,9 @@ import { ApiError } from '../../shared/api/index.ts';
 import { createSpeechCapture, findRecognition } from './speech.ts';
 import type { RecognitionFactory, SpeechCapture, SpeechErrorCode, SpeechResult } from './speech.ts';
 import type { VoiceApi, VoiceRequestStatus, VoiceStatus } from './voiceApi.ts';
+import type { ReplySpeaker } from './replySpeech.ts';
 
-export type VoicePhase = 'idle' | 'listening' | 'processing';
+export type VoicePhase = 'idle' | 'listening' | 'processing' | 'speaking';
 /** 음성 모드가 저절로 꺼진 이유. silence: 마이크가 무음으로 연달아 닫힘. idle: 켜진 채 한동안 쓰지 않음. */
 export type VoiceAutoOffReason = 'silence' | 'idle';
 /** session_expired: 주문을 마친 세션이라 backend가 새 음성 요청을 410으로 거절했습니다. */
@@ -19,9 +20,15 @@ export type VoiceSnapshot = {
   /** 마지막으로 Chrome이 확정 인식한 문장. 모드를 끄거나 세션이 바뀌면 지웁니다. */
   lastTranscript: string;
   lastResult: VoiceRequestStatus | null;
+  /** 확인 질문을 덮어쓰지 않고 서버 실패 문장을 표시합니다. */
+  failureReplyText: string | null;
+  /** 현재 이용 중 마지막 안내. 다시 듣기는 주문 요청이나 자동 재청취를 하지 않습니다. */
+  lastReplyText: string | null;
   error: VoiceInputError | null;
   /** 쓰지 않아 저절로 꺼졌을 때 그 이유. 다시 켜거나 세션이 바뀌면 지웁니다. */
   autoOff: VoiceAutoOffReason | null;
+  /** 재생 실패 시 화면의 질문을 유지하고 수동 재청취를 제공합니다. */
+  replyAudioError: boolean;
 };
 export type VoiceControllerOptions = {
   api: VoiceApi;
@@ -31,6 +38,8 @@ export type VoiceControllerOptions = {
   recognition?: RecognitionFactory | null;
   /** 결과가 정해질 때마다 불립니다. 장바구니 반영·MCP 실행은 부르는 쪽이 합니다. */
   onResult?: (result: VoiceRequestStatus) => void;
+  /** 주입한 경우 reply_text를 읽고, 성공적으로 끝난 질문 뒤에만 다시 듣습니다. */
+  replySpeaker?: ReplySpeaker;
   silenceMs?: number;
   /** 마이크가 무음으로 이 횟수만큼 연달아 닫히면 음성 모드를 끕니다. 0이면 끄지 않습니다. */
   autoOffSilences?: number;
@@ -51,6 +60,8 @@ export const VOICE_AUTO_OFF_MS = 30_000;
 // 계약(contract/voice.openapi.yaml)의 상태 조회 간격 1초 이상을 따릅니다.
 const POLL_INTERVAL_MS = 1_000;
 const POLL_TIMEOUT_MS = 15_000;
+const MAX_AUTO_RELISTENS = 3;
+const POST_REPLY_MIC_DELAY_MS = 400;
 const SETTLED = new Set<VoiceStatus>(['completed', 'needs_confirmation', 'needs_clarification', 'ignored', 'failed']);
 // 손님의 대답이 필요한 결과에서는 마이크를 다시 엽니다.
 const ASKS_USER = new Set<VoiceStatus>(['needs_confirmation', 'needs_clarification']);
@@ -79,6 +90,7 @@ export class VoiceController {
   private readonly recognitionOnly: boolean;
   private readonly recognition: RecognitionFactory | null;
   private readonly onResult: (result: VoiceRequestStatus) => void;
+  private readonly replySpeaker: ReplySpeaker | undefined;
   private readonly minConfidence: number;
   private readonly pollIntervalMs: number;
   private readonly pollTimeoutMs: number;
@@ -97,9 +109,13 @@ export class VoiceController {
   // 끈 마이크. Chrome은 abort 뒤에도 onend 전까지 결과·오류를 보낼 수 있어 onend만 받습니다.
   private readonly cancelled = new WeakSet<SpeechCapture>();
   private processing: AbortController | null = null;
+  private reply: AbortController | null = null;
+  private replyBlocked = false;
   private context = { sessionId: '', screenId: '' };
   // 확인·질문 결과 뒤 대답을 기다리는 중. 마이크가 닫혀도 다음 결과가 나올 때까지 유지합니다.
   private awaitingAnswer = false;
+  private autoRelistenCount = 0;
+  private lastAutoRelistenQuestion: string | null = null;
   // backend가 이 세션의 새 음성 요청을 410으로 거절함. 세션이 바뀔 때까지 다시 듣지 않습니다.
   private sessionExpired = false;
 
@@ -108,6 +124,7 @@ export class VoiceController {
     this.recognitionOnly = options.recognitionOnly ?? false;
     this.recognition = options.recognition === undefined ? findRecognition() : options.recognition;
     this.onResult = options.onResult ?? (() => {});
+    this.replySpeaker = options.replySpeaker;
     this.silenceMs = options.silenceMs ?? VOICE_SILENCE_MS;
     this.autoOffSilences = options.autoOffSilences ?? VOICE_AUTO_OFF_SILENCES;
     this.autoOffMs = options.autoOffMs ?? VOICE_AUTO_OFF_MS;
@@ -115,7 +132,7 @@ export class VoiceController {
     this.pollIntervalMs = options.pollIntervalMs ?? POLL_INTERVAL_MS;
     this.pollTimeoutMs = options.pollTimeoutMs ?? POLL_TIMEOUT_MS;
     this.createKey = options.createKey ?? (() => crypto.randomUUID());
-    this.state = { supported: this.recognition !== null, enabled: false, microphoneActive: false, phase: 'idle', partialText: '', lastTranscript: '', lastResult: null, error: null, autoOff: null };
+    this.state = { supported: this.recognition !== null, enabled: false, microphoneActive: false, phase: 'idle', partialText: '', lastTranscript: '', lastResult: null, failureReplyText: null, lastReplyText: null, error: null, autoOff: null, replyAudioError: false };
   }
   getSnapshot = () => this.state;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
@@ -131,7 +148,7 @@ export class VoiceController {
       this.awaitingAnswer = false;
       this.sessionExpired = false;
       this.silentEnds = 0;
-      this.set({ lastTranscript: '', lastResult: null, error: null, autoOff: null });
+      this.set({ lastTranscript: '', lastResult: null, failureReplyText: null, lastReplyText: null, error: null, autoOff: null, replyAudioError: false });
     }
     this.context = { ...context };
   }
@@ -142,20 +159,71 @@ export class VoiceController {
       this.halt();
       this.awaitingAnswer = false;
       this.silentEnds = 0;
-      this.set({ enabled: false, lastTranscript: '', lastResult: null, error: null, autoOff: null });
+      this.set({ enabled: false, lastTranscript: '', lastResult: null, failureReplyText: null, lastReplyText: null, error: null, autoOff: null, replyAudioError: false });
       return true;
     }
     if (!this.recognition) { this.set({ error: 'not_supported' }); return false; }
     if (!this.state.enabled) {
       this.silentEnds = 0;
-      this.set({ enabled: true, lastTranscript: '', lastResult: null, error: null, autoOff: null });
+      this.set({ enabled: true, lastTranscript: '', lastResult: null, failureReplyText: null, lastReplyText: null, error: null, autoOff: null, replyAudioError: false });
     }
     return this.listen();
   }
 
   /** 모드가 켜져 있고 쉬는 중일 때 한 문장을 듣습니다(예: 부르는 쪽의 마이크 버튼). */
   listen(): boolean {
+    if (this.state.phase === 'idle') this.resetAutoRelisten();
     return this.open(this.awaitingAnswer);
+  }
+
+  private resetAutoRelisten() {
+    this.autoRelistenCount = 0;
+    this.lastAutoRelistenQuestion = null;
+  }
+
+  private canAutoRelisten(question: string | null): boolean {
+    return this.state.enabled && this.awaitingAnswer && !this.replyBlocked
+      && this.autoRelistenCount < MAX_AUTO_RELISTENS
+      && (question === null || question !== this.lastAutoRelistenQuestion);
+  }
+
+  private autoRelisten(question: string | null): boolean {
+    if (!this.canAutoRelisten(question) || this.state.phase !== 'idle' || !this.open(true)) return false;
+    this.autoRelistenCount++;
+    this.lastAutoRelistenQuestion = question;
+    return true;
+  }
+
+  /** 안내만 중단합니다. 제안을 수락하지 않으며 다음 듣기는 사용자가 시작합니다. */
+  stopReply() {
+    this.reply?.abort();
+    this.reply = null;
+    if (this.state.phase === 'speaking') this.set({ phase: 'idle', replyAudioError: false });
+    if (!this.capture && !this.processing) this.armIdle();
+  }
+
+  /** 모달 밖 안내를 조작할 수 없는 동안 읽기와 자동 재청취를 보류합니다. */
+  setReplyBlocked(blocked: boolean) {
+    this.replyBlocked = blocked;
+    if (blocked) this.stopReply();
+  }
+
+  /** 마이크를 닫고 마지막 안내만 다시 읽습니다. 끝나도 자동으로 듣지 않습니다. */
+  replayReply(): boolean {
+    const text = this.state.lastReplyText;
+    if (!this.state.enabled || !this.replySpeaker || !text || this.replyBlocked
+      || (this.state.phase !== 'idle' && this.state.phase !== 'listening')) return false;
+    this.clearIdle();
+    this.pendingListen = null;
+    const reply = new AbortController();
+    this.reply = reply;
+    this.set({ phase: 'speaking', partialText: '', replyAudioError: false });
+    if (this.capture) {
+      this.cancelled.add(this.capture);
+      this.capture.abort();
+    }
+    void this.readReply(text, reply, false);
+    return true;
   }
 
   /** answering: 확인·질문에 대한 대답이라 "네" 같은 짧은 말도 받습니다. */
@@ -182,12 +250,12 @@ export class VoiceController {
           this.silentEnds += 1;
           if (this.autoOffSilences > 0 && this.silentEnds >= this.autoOffSilences) { this.turnOffUnused('silence'); return; }
         }
-        if (!this.processing) this.armIdle();
+        if (!this.processing && !this.reply) this.armIdle();
       },
     }, { silenceMs: this.silenceMs });
     this.clearIdle();
     this.capture = capture;
-    this.set({ phase: 'listening', microphoneActive: true, partialText: '', error: null });
+    this.set({ phase: 'listening', microphoneActive: true, partialText: '', error: null, failureReplyText: null, replyAudioError: false });
     capture.start();
     return true;
   }
@@ -197,16 +265,16 @@ export class VoiceController {
     this.halt();
     this.awaitingAnswer = false;
     this.silentEnds = 0;
-    this.set({ enabled: false, lastTranscript: '', lastResult: null, error: null, autoOff: reason });
+    this.set({ enabled: false, lastTranscript: '', lastResult: null, failureReplyText: null, lastReplyText: null, error: null, autoOff: reason, replyAudioError: false });
   }
 
   /** 마이크도 처리도 없이 쉬는 동안만 시간을 잽니다. 듣기를 시작하면 다시 잽니다. */
   private armIdle() {
     this.clearIdle();
-    if (this.autoOffMs <= 0 || !this.state.enabled) return;
+    if (this.autoOffMs <= 0 || !this.state.enabled || this.reply) return;
     this.idleTimer = setTimeout(() => {
       this.idleTimer = null;
-      if (this.state.enabled && this.state.phase === 'idle' && !this.capture && !this.processing) this.turnOffUnused('idle');
+      if (this.state.enabled && this.state.phase === 'idle' && !this.capture && !this.processing && !this.reply) this.turnOffUnused('idle');
     }, this.autoOffMs);
   }
 
@@ -216,15 +284,19 @@ export class VoiceController {
   }
 
   dispose() {
-    this.halt();
+    this.setEnabled(false);
+    this.clearIdle();
     this.listeners.clear();
   }
 
   private halt() {
     this.clearIdle();
     this.pendingListen = null;
+    this.resetAutoRelisten();
     this.processing?.abort();
     this.processing = null;
+    this.reply?.abort();
+    this.reply = null;
     if (this.state.phase !== 'idle' || this.state.partialText) this.set({ phase: 'idle', partialText: '' });
     if (this.capture) {
       this.cancelled.add(this.capture);
@@ -250,7 +322,7 @@ export class VoiceController {
     this.silentEnds = 0;
     const controller = new AbortController();
     this.processing = controller;
-    this.set({ phase: 'processing', partialText: result.text, lastTranscript: result.text });
+    this.set({ phase: 'processing', partialText: result.text, lastTranscript: result.text, failureReplyText: null });
     const { sessionId, screenId } = this.context;
     void this.process(sessionId, { text: result.text, alternatives: result.alternatives, screen_id: screenId }, controller.signal)
       .finally(() => { if (!this.processing && !this.capture) this.armIdle(); });
@@ -270,7 +342,7 @@ export class VoiceController {
       // 끝난 세션의 질문에는 더 대답할 수 없으므로 대기를 풀고, 새 주문은 부르는 쪽이 안내합니다.
       this.awaitingAnswer = false;
       this.sessionExpired = true;
-      this.set({ phase: 'idle', partialText: '', lastResult: null, error: outcome });
+      this.set({ phase: 'idle', partialText: '', lastResult: null, lastReplyText: null, error: outcome });
       return;
     }
     if (typeof outcome === 'string') {
@@ -285,15 +357,64 @@ export class VoiceController {
     }
     if (outcome.status === 'failed') {
       // 서버도 실패한 발화를 대화 맥락에 넣지 않으므로 이전 질문과 대답 대기를 유지합니다.
-      this.set({ phase: 'idle', partialText: '', lastResult: this.awaitingAnswer ? this.state.lastResult : outcome, error: 'request_failed' });
+      const reply = this.prepareReply(outcome);
+      this.set({ phase: reply ? 'speaking' : 'idle', partialText: '', lastResult: this.awaitingAnswer ? this.state.lastResult : outcome, failureReplyText: outcome.reply_text?.trim() || null, lastReplyText: outcome.reply_text?.trim() || null, error: 'request_failed', replyAudioError: false });
       this.onResult(outcome);
+      if (reply) await this.readReply(outcome.reply_text!, reply, false);
       return;
     }
     // 구독자·onResult가 세션을 바꾸거나 모드를 끄면 그 초기화가 남도록, 알리기 전에 대기 상태를 정합니다.
     this.awaitingAnswer = ASKS_USER.has(outcome.status);
-    this.set({ phase: 'idle', partialText: '', lastResult: outcome, error: null });
+    const reply = this.prepareReply(outcome);
+    const question = outcome.reply_text?.trim() || null;
+    this.set({ phase: reply ? 'speaking' : 'idle', partialText: '', lastResult: outcome, lastReplyText: question, error: null, replyAudioError: false });
     this.onResult(outcome);
-    if (this.awaitingAnswer && this.context.sessionId === sessionId) this.open(true);
+    if (reply) await this.readReply(outcome.reply_text!, reply, this.awaitingAnswer);
+    else if (this.context.sessionId === sessionId) this.autoRelisten(question);
+  }
+
+  private prepareReply(result: VoiceRequestStatus): AbortController | null {
+    if (this.replyBlocked || !this.replySpeaker || !result.reply_text?.trim()) return null;
+    this.clearIdle();
+    this.reply = new AbortController();
+    return this.reply;
+  }
+
+  private async readReply(text: string, reply: AbortController, listenAfter: boolean) {
+    const live = () => this.reply === reply && !reply.signal.aborted && this.state.enabled;
+    if (!live()) return;
+    const question = text.trim() || null;
+    let played = false;
+    let resume = false;
+    try {
+      // stop() 뒤에도 실제 onend까지 마이크가 살아 있으므로 재생을 기다립니다.
+      const closed = await this.waitForMicrophoneEnd(reply.signal);
+      if (closed && live()) played = await this.replySpeaker!(text, reply.signal);
+      if (played && live() && listenAfter && this.canAutoRelisten(question)) {
+        // 합성 종료 이벤트 뒤에도 스피커에 남을 수 있는 끝소리가 지나기를 기다립니다.
+        await wait(POST_REPLY_MIC_DELAY_MS, reply.signal);
+        resume = true;
+      }
+    } catch { /* 재생 실패 시 화면 표시와 수동 재청취로 계속할 수 있습니다. */ }
+    if (!live()) return;
+    this.reply = null;
+    this.set({ phase: 'idle', replyAudioError: !played });
+    const reopened = resume && this.autoRelisten(question);
+    if (!reopened && !this.capture && !this.processing) this.armIdle();
+  }
+
+  private waitForMicrophoneEnd(signal: AbortSignal): Promise<boolean> {
+    if (signal.aborted) return Promise.resolve(false);
+    if (!this.capture) return Promise.resolve(true);
+    return new Promise(resolve => {
+      const finish = (closed: boolean) => {
+        clearTimeout(timer); unsubscribe(); signal.removeEventListener('abort', abort); resolve(closed);
+      };
+      const abort = () => finish(false);
+      const unsubscribe = this.subscribe(() => { if (!this.capture) finish(true); });
+      const timer = setTimeout(() => finish(false), 3000);
+      signal.addEventListener('abort', abort, { once: true });
+    });
   }
 
   private async poll(sessionId: string, requestId: string, signal: AbortSignal): Promise<VoiceRequestStatus | 'timeout'> {
