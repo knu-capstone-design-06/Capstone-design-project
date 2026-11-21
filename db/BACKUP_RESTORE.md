@@ -31,6 +31,10 @@
 - 관리자 DB 접속 정보는 비밀 저장소에서 가져옵니다. 백엔드 전용 `kiosk_backend` 역할은 전체 백업 권한이 없으므로 백업에 쓰지 않습니다. 연결할 네트워크가 IPv4 전용이면 Supabase `Connect`의 Session pooler를, IPv6가 가능하면 Direct connection을 사용합니다.
 - 백업 파일에는 개인 데이터나 인증 정보가 포함될 수 있습니다. 접근 권한을 최소화하고 암호화된 저장소로 옮긴 뒤, 불필요한 로컬 복사본을 지웁니다. Supabase Storage의 실제 객체는 DB 덤프에 들어가지 않으므로 Storage를 사용하게 되면 별도 백업을 설계합니다.
 
+### 주문 응답 재생에 필요한 기준 자료
+
+시연용 주문 백업의 복구를 연습할 때는 백업에 포함될 합성 모의 주문 한 건을 준비합니다. 원래 주문에 사용한 백엔드 커밋, 주문 경로의 세션 ID, `Idempotency-Key`, `expected_version`을 포함한 원래 JSON 요청 본문, 최초 HTTP `201`과 전체 응답 JSON을 기준 자료로 남깁니다. 기준 자료는 암호화해 Git 저장소 밖에서 백업과 연결해 보관합니다.
+
 ## 수동 백업 실행 (PowerShell)
 
 1. [Supabase CLI](https://supabase.com/docs/guides/local-development/cli/getting-started)와 Docker를 준비하고 `supabase --version`, `supabase db dump --help`를 확인합니다. 비밀 저장소에서 관리자 접속 문자열을 가져와 **가려진 입력창 또는 비밀 저장소의 프로세스 환경변수 주입 기능**으로 현재 프로세스의 `SUPABASE_ADMIN_DB_URL`에 넣습니다. `$env:SUPABASE_ADMIN_DB_URL = '실제 URL'`처럼 콘솔 명령에 값을 직접 쓰면 PSReadLine 기록에 남으므로 사용하지 않습니다. 문자열이나 실제 값을 CI 로그·문서에 출력하지 않습니다. 환경변수를 사용해도 실행 중인 CLI 프로세스 인수에 연결 문자열이 나타날 수 있으므로 신뢰할 수 있는 장비에서 실행합니다.
