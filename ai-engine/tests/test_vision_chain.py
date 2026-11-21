@@ -137,7 +137,8 @@ class ParamsTests(unittest.TestCase):   # plain Python: runs with the server pac
     def test_scene_boundaries_have_no_value_and_say_how_to_get_one(self):
         from app.modules.vision.params import SCENE_BOUNDARIES, SCENE_METHOD, UNDECIDED, Bundle, PilotParams
         p = PilotParams()
-        self.assertEqual(SCENE_BOUNDARIES[:2], ("seated_face_cy_min", "approach_ratio_min"))
+        self.assertEqual(SCENE_BOUNDARIES, ("seated_face_cy_min", "approach_ratio_min", "seated_head_cy_min",
+                                            "head_down_pitch_min", "head_approach_ratio_min"))
         for name in SCENE_BOUNDARIES:
             self.assertIsNone(getattr(p, name), name)
             source = PilotParams.sources()[name]
@@ -145,8 +146,8 @@ class ParamsTests(unittest.TestCase):   # plain Python: runs with the server pac
             self.assertIn(SCENE_METHOD, source)
             self.assertNotIn(name, PilotParams.pilot_fields())
             self.assertEqual(Bundle(p, None).to_dict()["chain"][name]["origin"], "default")
-            ok = 1.2 if name in ("approach_ratio_min", "head_approach_ratio_min") else 0.6
-            for bad in (0, -0.5, float("nan"), float("inf"), str(ok), True):
+            ok = 1.2 if name in ("approach_ratio_min", "head_approach_ratio_min") else 0.6   # a ratio above 1
+            for bad in (0, -0.5, float("nan"), float("inf"), str(ok), True) + ((1.0, 0.6) if ok > 1 else ()):
                 with self.assertRaises(ValueError, msg=f"{name}={bad!r}"):
                     PilotParams(**{name: bad})
             self.assertEqual(getattr(PilotParams(**{name: ok}), name), ok)
@@ -542,6 +543,24 @@ class ColumnsTests(unittest.TestCase):
         self.assertIsNone(ref.update({"face_state": SEEN, "iod_px": 32.0, "primary_track": 1}))
         self.assertEqual(ref.update({"face_state": SEEN, "iod_px": 32.0, "primary_track": 1}), 1.0)
 
+    def test_head_size_reference_follows_the_main_users_head_box(self):
+        """head_ratio_user: the main user's head-box height over the same user's reference (the rules of
+        FaceSizeRef); rows without the box give None."""
+        from app.modules.vision.columns import HeadSizeRef, add_head_size_ratio
+        ref = HeadSizeRef()
+        box = lambda h: (0.4, 0.2, 0.6, 0.2 + h)                     # noqa: E731
+        got = [ref.update({"primary_track": 1, "primary_box": box(h)}) for h in (0.20, 0.20, 0.20, 0.26)]
+        self.assertEqual(got[:3], [None, 1.0, 1.0])
+        self.assertAlmostEqual(got[3], 1.3)
+        self.assertIsNone(ref.update({"primary_track": 1, "primary_box": None}))
+        rows = add_head_size_ratio([{"t_s": t, "primary_track": "1", "primary_box": box(0.2)} for t in (0.1, 0.0)])
+        self.assertEqual([r["head_ratio_user"] for r in rows], [1.0, None])
+        self.assertEqual(add_head_size_ratio([{"t_s": 0.0}]), [{"t_s": 0.0}])  # no head detector: left as is
+        self.assertIsNone(HeadSizeRef().update({"primary_track": 1, "primary_box": (0.4, float("nan"), 0.6, 0.5)}))
+        text = HeadSizeRef()                                          # a box read back from rows.csv as text
+        self.assertEqual([text.update({"primary_track": 1, "primary_box": "0.4;0.2;0.6;0.4"}) for _ in range(2)],
+                         [None, 1.0])
+
     def test_face_size_reference_takes_only_the_main_users_face(self):
         """With the head detector a face matched to no box while the main user's track lives may be someone else's:
         no ratio, nothing collected. Without the head detector (no face_in_primary column) a seen face counts."""
@@ -876,6 +895,34 @@ class ColumnsTests(unittest.TestCase):
         cell = row(0.0, 1, 0.3, [behind])
         cell["head_boxes"] = json.dumps(cell["head_boxes"])       # read back from rows.csv: a JSON cell
         self.assertIsNone(MainUserChange().update(cell)["main_user_prev_track"])
+
+    def test_rewindow_fills_the_scene_columns_only_where_the_rows_lack_them(self):
+        from app.modules.vision.params import PilotParams
+        from app.modules.vision.tools.companion_eval import fill_scene_columns
+        old = [{"t_s": t, "face_state": SEEN, "iod_px": 40.0, "primary_track": k, "primary_box": box,
+                "body_state": SEEN, "pitch_deg": p}
+               for t, k, box, p in ((0.0, "1", (0, 0, 1, 1), 5.0), (0.1, "1", (0, 0, 1, 1), 8.0),
+                                    (0.2, "2", (0.8, 0, 1, 1), 9.0))]             # elsewhere: a new user
+        fill_scene_columns(old)
+        self.assertEqual([r["iod_ratio_user"] for r in old], [None, 1.0, None])   # the new track starts again
+        self.assertEqual([r["head_ratio_user"] for r in old], [None, 1.0, None])
+        self.assertEqual([r["dpitch_user_deg"] for r in old], [0.0, 3.0, 0.0])
+        self.assertEqual(old[2]["main_user_prev_track"], 1)
+        strict = [{k: v for k, v in r.items() if k not in ("iod_ratio_user", "head_ratio_user", "dpitch_user_deg")
+                   and not k.startswith("main_user_")} for r in old]
+        fill_scene_columns(strict, PilotParams(track_iou_min=0.1))       # the bundle's chain values are used
+        self.assertIs(strict[2]["main_user_reacquired"], True)            # IoU 0.2 passes 0.1
+        stitch_columns = ("main_user_new_start_s", "main_user_start_shift", "main_user_start_size",
+                          "main_user_stitched", "main_user_body_gap_s")
+        stale = [{k: v for k, v in r.items() if k not in stitch_columns} for r in old]   # rows.csv before them
+        fill_scene_columns(stale, PilotParams(stitch_shift_max=0.1, stitch_size_max=0.1))
+        self.assertIs(stale[2]["main_user_stitched"], False)              # written again: 0.4 box widths away
+        new = [dict(r, iod_ratio_user=1.7, head_ratio_user=1.6, dpitch_user_deg=30.0, main_user_prev_track=None)
+               for r in old]
+        fill_scene_columns(new)
+        self.assertEqual([(r["iod_ratio_user"], r["head_ratio_user"], r["dpitch_user_deg"]) for r in new],
+                         [(1.7, 1.6, 30.0)] * 3)                                   # recorded values stay
+        self.assertTrue(all(r["main_user_prev_track"] is None for r in new))
 
     def test_add_face_size_ratio_fills_recorded_rows_in_time_order(self):
         from app.modules.vision.columns import add_face_size_ratio
@@ -1366,6 +1413,26 @@ class WindowJudgeTests(unittest.TestCase):
         self.assertNotIn("turns", rec["contract"]["extension"])
         self.assertIsNone(WindowJudge(bundle(situation=False)).evaluate(rows, 2.2)["turns"])
 
+    def test_the_bundle_carries_both_gates_to_the_scene_tags(self):
+        """WindowJudge passes head_down_pitch_min and head_approach_ratio_min from the bundle to the scene tags: a
+        bowed window whose face grew is no face approach with the head-down value and one without it; head rows grown
+        by a lean are left out of seated_height's head-box path with the head value (head_near)."""
+        from app.modules.vision.chain import WindowJudge
+
+        def tags(rows, **chain):
+            out = WindowJudge(bundle(**chain)).evaluate(rows, 0.9)["situation"]["tags"]
+            return {t["name"]: (t["status"], t["unknown_reason"]) for t in out}
+        bowed = rows_of([(10, {})], extra={**FULL, "iod_ratio_user": 1.4, "dpitch_user_deg": 30.0})
+        self.assertEqual(tags(bowed, approach_ratio_min=1.2)["face_approach"], (True, None))
+        gated = tags(bowed, approach_ratio_min=1.2, head_down_pitch_min=PITCH_TEST)
+        self.assertEqual(gated["face_approach"], (False, None))
+        lean = rows_of([(10, {"face_state": NOT_SEEN})], extra={**FULL, "primary_track": 1, "head_count": 1,
+                                                                 "primary_box": "0.40;0.60;0.60;0.90",
+                                                                 "head_ratio_user": 1.4})
+        seated = dict(seated_face_cy_min=0.6, seated_head_cy_min=0.7)
+        self.assertEqual(tags(lean, **seated)["seated_height"], (True, None))
+        self.assertEqual(tags(lean, head_approach_ratio_min=1.2, **seated)["seated_height"], ("unknown", "head_near"))
+
     def test_a_new_touch_log_session_starts_the_state_again(self):
         from app.modules.vision.chain import WindowJudge
         from app.modules.vision.touch import load_timeline
@@ -1637,6 +1704,58 @@ class FrameChainTests(unittest.TestCase):
         got = [no_heads.process(f)["dpitch_user_deg"] for f in frames(36)]
         self.assertAlmostEqual(got[29], 0.0)
         self.assertAlmostEqual(got[35], 0.0)                 # the next session's user against its own first face
+
+    def test_the_head_size_reference_in_the_chain(self):
+        """head_ratio_user as FrameChain writes it with a touch log: from the session's first press, a lean of the head
+        box kept out of the reference (head_approach_ratio_min), and a new touch-log session starts it again."""
+        from app.modules.vision.chain import FrameChain
+        from app.modules.vision.params import PilotParams
+        from app.modules.vision.touch import load_timeline
+        folder = tempfile.mkdtemp()
+        video = os.path.join(folder, "take.mp4")
+        press = {"target": {"id": "product:1", "kind": "button", "disabled": False}}
+        events = [(-1000, "session_start", "menu", None), (-900, "screen_enter", "menu", None),
+                  (500, "pointer_start", "menu", press), (4900, "session_end", "menu", {"reason": "server_session_change"}),
+                  (5000, "session_start", "menu", {"reason": "server_session_change"}, "s2"),
+                  (5000, "screen_enter", "menu", None, "s2"), (5200, "pointer_start", "menu", press, "s2")]
+        tl = load_timeline(touch_log(folder, events, video), video)
+        normal, tall = [0.38, 0.22, 0.62, 0.58], [0.38, 0.22, 0.62, 0.72]      # heights 0.36 and 0.50
+        boxes = [normal] * 15 + [tall] * 20 + [normal] * 15 + [tall] * 10        # s2 from frame 50: a taller head
+        chain = FrameChain(FakeModels([fake_inference() for _ in range(60)]), PilotParams(head_approach_ratio_min=1.2),
+                           ScheduledHeads(boxes), None, tl)
+        got = [chain.process(f)["head_ratio_user"] for f in frames(60)]
+        self.assertEqual(got[:6], [None] * 6)                     # before the press, and the press row itself
+        self.assertAlmostEqual(got[14], 1.0)
+        self.assertAlmostEqual(got[34], 0.50 / 0.36)              # twenty lean rows later: kept out of the reference
+        self.assertIsNone(got[52])                                # s2's first press starts it again
+        self.assertAlmostEqual(got[59], 1.0)
+
+    def test_a_sustained_lean_stays_face_approach_and_never_becomes_seated_height(self):
+        """With a touch log (the reference starts at the first press): 1 s at the normal size, then the face 1.5 times
+        larger and lower in the frame for 7 s. Every later window keeps face_approach True, and seated_height never
+        turns True from the leaning rows (they are left out: face_near)."""
+        from app.modules.vision.chain import FrameChain, WindowJudge
+        from app.modules.vision.params import PilotParams
+        from app.modules.vision.touch import load_timeline
+        folder = tempfile.mkdtemp()
+        video = os.path.join(folder, "take.mp4")
+        tl = load_timeline(touch_log(folder, MENU_EVENTS[:3], video), video)   # the first press at 0.5 s
+
+        def lean(k):
+            inf = fake_inference()
+            if k >= 15:                                   # from 1.5 s: eyes 1.5 times apart, the face lower
+                inf.face_points[:, 1] = 0.55                # (still inside the head box, so it stays the user's)
+                inf.face_points[[33, 133]] = [(0.38, 0.55), (0.44, 0.55)]
+                inf.face_points[[362, 263]] = [(0.56, 0.55), (0.62, 0.55)]
+            return inf
+        p = PilotParams(approach_ratio_min=1.2, seated_face_cy_min=0.5)
+        chain = FrameChain(FakeModels([lean(k) for k in range(85)]), p, FakeHeads(), None, tl)
+        rows = [chain.process(f) for f in frames(85)]
+        judge = WindowJudge(bundle(approach_ratio_min=1.2, seated_face_cy_min=0.5), tl)
+        tags = [{t["name"]: t["status"] for t in judge.evaluate(rows, t_end)["situation"]["tags"]}
+                for t_end in (3.0, 5.0, 8.0)]
+        self.assertEqual([t["face_approach"] for t in tags], [True, True, True])
+        self.assertTrue(all(t["seated_height"] is not True for t in tags))
 
     def test_without_a_touch_log_the_walk_up_does_not_read_as_face_approach(self):
         """No touch log: the reference starts with the main-user track while the person still walks up (eyes 20 to 40

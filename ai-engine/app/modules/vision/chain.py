@@ -75,6 +75,7 @@ class FrameChain:
         self.mouth = C.MouthMotion(params.mouth_dials, params.mouth_baseline_s)
         self.people = C.HeadPeople(params)
         self.size_ref = C.FaceSizeRef(params.approach_ratio_min, params.track_max_gap_s)   # iod_ratio_user
+        self.head_ref = C.HeadSizeRef(params.head_approach_ratio_min, params.track_max_gap_s)  # head_ratio_user
         self.pitch_ref = C.PitchRef(params.track_max_gap_s)                                  # dpitch_user_deg
         self.change = C.MainUserChange(params.track_iou_min, params.track_max_gap_s,        # the change columns
                                        params.role_window_s, params.segment_s,
@@ -91,6 +92,7 @@ class FrameChain:
                 self.observer.reset_reference()  # the start-relative columns (iod_ratio_start, d*_start_deg)
                 self.people.reset()
                 self.size_ref.reset()
+                self.head_ref.reset()
                 self.pitch_ref.reset()
                 self.change.reset()
             if session is not None:
@@ -129,6 +131,8 @@ class FrameChain:
         row["mouth_motion"] = self.mouth.update(t, scores)
         row["iod_ratio_user"] = self.size_ref.update(row, self._pressed(t), self.timeline is not None)
         row["dpitch_user_deg"] = self.pitch_ref.update(row, self._pressed(t))
+        if self.heads is not None:
+            row["head_ratio_user"] = self.head_ref.update(row, self._pressed(t), self.timeline is not None)
         if self.timeline is not None:
             counts = self.timeline.counts(self.prev_t, t)
             row["tap_count"] = None if counts is None else counts["tap_count"]
@@ -334,8 +338,10 @@ class WindowJudge:
             out, reasons = None, [{"code": "no_value_bundle"}]
         else:
             out, events = assess(rows, t_end, sp, landmarker_num_faces=LANDMARKER_NUM_FACES,
-                                 baseline_s=p.mouth_baseline_s, approach_ratio_min=p.approach_ratio_min,
-                                 head_down_pitch_min=p.head_down_pitch_min)
+                                 baseline_s=p.mouth_baseline_s, seated_face_cy_min=p.seated_face_cy_min,
+                                 approach_ratio_min=p.approach_ratio_min,
+                                 seated_head_cy_min=p.seated_head_cy_min, head_down_pitch_min=p.head_down_pitch_min,
+                                 head_approach_ratio_min=p.head_approach_ratio_min)
             reasons = unknown_reasons(rows, t_end, sp) if out["name"] == UNKNOWN else []
             turns = [{"event_id": e["event_id"], "kind": e["kind"], "t_start": e["t_start"], "t_end": e["t_end"],
                       "obs": e["obs"]} for e in events if e["kind"] in TURN_KINDS]

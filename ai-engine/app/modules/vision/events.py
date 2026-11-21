@@ -22,7 +22,7 @@ incremental version.
 Every window, count, angle and floor is a pilot value ([파일럿]): PilotParams has no defaults and this file sets
 none (dec section 3: '모든 창 길이 · 횟수 · 각도는 [파일럿]', set from the distribution in the team's self-recording).
 
-The scene tags of situation.py (face approach, user change, nothing seen; 2026-11-22) read a second,
+The scene tags of situation.py (seated height, face approach, user change, nothing seen; 2026-11-22) read a second,
 separate set of measurement events (observe_scene, SCENE_KINDS); they do not change the events above.
 
 Input: one dict per frame.
@@ -451,7 +451,7 @@ def detect_events(rows: list, params: PilotParams, *, landmarker_num_faces: int,
 
 
 # --- the scene tags' measurements (situation.py SCENE_TAGS; 2026-11-22) ------------------------------------------
-SCENE_KINDS = ("face_size", "main_user_changed", "nothing_seen")
+SCENE_KINDS = ("face_height", "face_size", "main_user_changed", "nothing_seen")
 
 
 def _main_face(row: dict) -> bool:
@@ -465,6 +465,17 @@ def _main_face(row: dict) -> bool:
 def _blank(value) -> bool:
     """A blank cell: None, "" or NaN (a CSV reader or a data frame may give any of them)."""
     return value is None or value == "" or (isinstance(value, float) and math.isnan(value))
+
+
+def _box_cy(box) -> float | None:
+    """The vertical centre of an (x0, y0, x1, y1) box (a tuple, or 'x0;y0;x1;y1' from rows.csv), or None."""
+    if isinstance(box, str):
+        box = box.split(";")
+    try:
+        cy = (float(box[1]) + float(box[3])) / 2.0
+    except (TypeError, ValueError, IndexError):
+        return None
+    return cy if math.isfinite(cy) else None
 
 
 def _track_value(value):
@@ -490,8 +501,15 @@ def _flag(value) -> bool | None:
 @dataclass(frozen=True)
 class SceneCues:
     """What the scene tags read for one window. Their events are measurements of the window's rows:
+      face_height        the main user's face rows (face values not blanked; with the head detector, face_in_primary
+                         True) without the rows closer than
+                         approach_ratio_min (leaning in moves the face down): face_cy_median, rows
       head_pitch         the main user's face rows with a dpitch_user_deg (pitch against the same main user's first
                          face, columns.PitchRef; + = down): dpitch_median, rows
+      head_size          the rows with a head_ratio_user (columns.HeadSizeRef): head_ratio_median, rows
+      head_height        the rows with the main user's head box, without the rows whose head_ratio_user is above
+                         head_approach_ratio_min (a lean makes the head bigger) (primary_box, the head detector):
+                         head_cy_median (the box's vertical centre), rows
       face_size          the main user's face rows with an iod_ratio_user (columns.FaceSizeRef): iod_ratio_median, rows
       main_user_changed  one per row that starts a new main-user track (columns.MainUserChange): track,
                          previous_track, gap_s, body_kept, reacquired (the same place: not a new user), stitched (a
@@ -500,24 +518,49 @@ class SceneCues:
                          new_rel_dist, new_growth (observation only)
       nothing_seen       one over the whole window when no row sees a face (landmarks or a face-detector box), a body
                          or a head box: unseen_s = min(face_unseen_s, body_unseen_s) at the window's last row
-    No value is compared here; situation.py compares the medians with the camera's boundaries."""
+    No value is compared here except the two size boundaries that mark near rows (face: approach_ratio_min, head box:
+    head_approach_ratio_min); situation.py compares the medians with the camera's boundaries."""
     events: list
     frames: int                  # rows inside the window
     track_measured: bool         # every row carries primary_track: the head detector ran, a change can be seen
+    near_rows: int               # face rows left out of face_height as closer than approach_ratio_min
     face_rows: int = 0           # rows with the main user's face (face values not blanked)
     head_measured: bool = False  # every row carries head_count: 'no head box' can be concluded
+    head_near_rows: int = 0      # main-user head-box rows left out of head_height as grown beyond head_approach_ratio_min
 
     def of(self, *kinds: str) -> list:
         return [e for e in self.events if e["kind"] in kinds]
 
 
-def observe_scene(rows: list, window: tuple) -> SceneCues:
-    """SceneCues of window = (t0, t1) from the rows inside it (rows after t1 are never read)."""
+def observe_scene(rows: list, window: tuple, approach_ratio_min: float | None = None,
+                  head_approach_ratio_min: float | None = None) -> SceneCues:
+    """SceneCues of window = (t0, t1) from the rows inside it (rows after t1 are never read). approach_ratio_min = the
+    face-approach boundary of the bundle, or None (then no row is left out of face_height); head_approach_ratio_min =
+    the head-box boundary, or None (then no row is left out of head_height)."""
     rows, first = _split(rows, window)
     inside = rows[first:]
     events = []
     own = [_main_face(r) for r in inside]
     ratios = [_num(r, "iod_ratio_user") if own[i] else None for i, r in enumerate(inside)]
+    near = [approach_ratio_min is not None and q is not None and q > approach_ratio_min for q in ratios]
+    height = [i for i, r in enumerate(inside) if own[i] and _num(r, "face_cy") is not None and not near[i]]
+    if height:
+        events.append(_event("face_height", inside, height,
+                             {"face_cy_median": statistics.median(_num(inside[i], "face_cy") for i in height),
+                              "rows": len(height)}))
+    head_ratios = [_num(r, "head_ratio_user") for r in inside]
+    boxed = [i for i, r in enumerate(inside) if _box_cy(r.get("primary_box")) is not None]
+    head = [i for i in boxed if not (head_approach_ratio_min is not None and head_ratios[i] is not None
+                                     and head_ratios[i] > head_approach_ratio_min)]
+    head_sized = [i for i, q in enumerate(head_ratios) if q is not None]
+    if head_sized:
+        events.append(_event("head_size", inside, head_sized,
+                             {"head_ratio_median": statistics.median(head_ratios[i] for i in head_sized),
+                              "rows": len(head_sized)}))
+    if head:
+        events.append(_event("head_height", inside, head,
+                             {"head_cy_median": statistics.median(_box_cy(inside[i]["primary_box"]) for i in head),
+                              "rows": len(head)}))
     pitched = [i for i, r in enumerate(inside) if own[i] and _num(r, "dpitch_user_deg") is not None]
     if pitched:
         events.append(_event("head_pitch", inside, pitched,
@@ -555,7 +598,9 @@ def observe_scene(rows: list, window: tuple) -> SceneCues:
     return SceneCues(events=sorted(events, key=lambda e: (e["t_start"], e["kind"])), frames=len(inside),
                      track_measured=bool(inside) and all("primary_track" in r for r in inside),
                      face_rows=sum(own[i] and _num(r, "face_cy") is not None for i, r in enumerate(inside)),
-                     head_measured=bool(inside) and all(_num(r, "head_count") is not None for r in inside))
+                     head_measured=bool(inside) and all(_num(r, "head_count") is not None for r in inside),
+                     near_rows=sum(n and _face(r) and _num(r, "face_cy") is not None for n, r in zip(near, inside)),
+                     head_near_rows=len(boxed) - len(head))
 
 
 # --- what the rules read for one window --------------------------------------------------------------------------

@@ -33,6 +33,10 @@ Columns (names = the ones events.py reads, then observation-only columns no rule
                         not the main user's (its iod_px is blank), before the reference has a row, and before the first
                         press. Without the head detector the reference starts again when nobody has been seen for
                         longer than params.track_max_gap_s.
+  head_ratio_user       the main user's head-box height over the same user's reference (HeadSizeRef): the anchors and
+                        rules of iod_ratio_user, with params.head_approach_ratio_min as the keep-out. None without the
+                        main user's box, before the reference has a row and before the first press. Absent when the
+                        head detector did not run.
   dpitch_user_deg       the main user's head pitch (pitch_deg, + = down) minus the pitch of the same user's first face
                         row after the anchor (PitchRef): the anchors of iod_ratio_user (a new main-user track that is
                         not a reacquisition in the same place, the touch-log session and its first press, and without
@@ -160,7 +164,7 @@ CHANGE_COLUMNS = ("main_user_prev_track", "main_user_gap_s", "main_user_body_kep
                   "main_user_new_growth", "main_user_reacquired", "main_user_prev_settled", "main_user_new_start_s",
                   "main_user_start_shift", "main_user_start_size", "main_user_stitched", "main_user_body_gap_s")
 OPTIONAL_COLUMNS = HEAD_COLUMNS + CHANGE_COLUMNS + ("shoulder_cx", "shoulder_cy", "mouth_motion", "iod_ratio_user",
-                                                  "dpitch_user_deg")
+                                                  "head_ratio_user", "dpitch_user_deg")
 # features.COLUMNS that the Face Landmarker's face gives (its position, size, angles and the face box's image
 # statistics): blanked where that face is not the main user's (face_in_primary False). face_state, the face detector's
 # columns (face_count, face_det_score, det_box_w_frac) and the run counters stay.
@@ -621,6 +625,17 @@ class FaceSizeRef(_UserAnchor):
         return ratio
 
 
+class HeadSizeRef(FaceSizeRef):
+    """head_ratio_user per frame: the head-box analogue of iod_ratio_user - the main user's head-box height over the
+    same user's reference, from the same anchor and with the same rules as FaceSizeRef (near_min =
+    params.head_approach_ratio_min keeps a lean out of the reference after a press). Rows without the main user's box
+    give None. A lean makes the head bigger; a seated user at operating distance does not."""
+
+    def _value(self, row: dict) -> float | None:
+        h = _box_height(row.get("primary_box"))
+        return None if h is None else _finite(h * 1000.0)   # permille of the frame height: the 0.1 step is 1/10,000
+
+
 class PitchRef(_UserAnchor):
     """dpitch_user_deg per frame (module docstring): the main user's pitch_deg minus the pitch of that user's first
     face row after the anchor - the session-start pitch change of features.py, taken per main user. The anchors are
@@ -829,6 +844,21 @@ def add_face_size_ratio(rows: list, params=None) -> list:
     ref = FaceSizeRef(params.approach_ratio_min, params.track_max_gap_s)
     for row in sorted(rows, key=lambda r: float(r["t_s"])):
         row["iod_ratio_user"] = ref.update(row)
+    return rows
+
+
+def add_head_size_ratio(rows: list, params=None) -> list:
+    """head_ratio_user written into recorded rows that carry primary_box (an earlier replay with the head detector), in
+    time order, as a run without a touch log writes it (HeadSizeRef). When no row carries primary_box, the rows are
+    left as they are. Returns the rows."""
+    if params is None:
+        from .params import PilotParams
+        params = PilotParams()
+    if not any("primary_box" in r for r in rows):
+        return rows
+    ref = HeadSizeRef(params.head_approach_ratio_min, params.track_max_gap_s)
+    for row in sorted(rows, key=lambda r: float(r["t_s"])):
+        row["head_ratio_user"] = ref.update(row)
     return rows
 
 

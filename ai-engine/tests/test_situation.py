@@ -632,6 +632,21 @@ class LookingAroundTests(unittest.TestCase):
 class SceneCueTests(unittest.TestCase):
     """events.observe_scene: the measurements of the scene tags (values made for these frames)."""
 
+    def test_face_height_is_the_median_of_the_main_user_face_rows_without_the_near_ones(self):
+        from app.modules.vision.events import observe_scene
+        rows = put(rows_of(face(10), extra={**OPTIONAL, "face_cy": 0.5, "iod_ratio_user": 1.0}), 6, 9,
+                   face_cy=0.8, iod_ratio_user=1.4)                    # frames 6-9: leaning in, the face lower
+        put(rows, 0, 0, face_cy=None, iod_ratio_user=None)             # someone else's face: blank values
+        c = observe_scene(rows, (0.0, 0.9))
+        (height,) = c.of("face_height")
+        self.assertEqual(height["obs"], {"face_cy_median": 0.5, "rows": 9})   # 5 x 0.5 and 4 x 0.8 -> 0.5
+        c = observe_scene(rows, (0.0, 0.9), approach_ratio_min=1.3)
+        (height,) = c.of("face_height")
+        self.assertEqual((height["obs"], c.near_rows), ({"face_cy_median": 0.5, "rows": 5}, 4))
+        (size,) = c.of("face_size")
+        self.assertEqual(size["obs"], {"iod_ratio_median": 1.0, "rows": 9})
+        self.assertEqual(observe_scene(rows_of(face(3)), (0.0, 0.2)).of("face_height", "face_size"), [])
+
     def test_a_window_with_nobody_seen(self):
         from app.modules.vision.events import observe_scene
         rows = rows_of(face(4), [(6, GONE)], face(4), extra={**OPTIONAL, "head_count": 1})
@@ -656,6 +671,40 @@ class SceneCueTests(unittest.TestCase):
     @staticmethod
     def tags(out):
         return {t["name"]: (t["status"], t["unknown_reason"]) for t in out["tags"]}
+
+
+    def test_seated_height_falls_back_to_the_head_box_where_the_face_cannot_tell(self):
+        """The face decides when it can; where it cannot (no face seen, as a seated user low in the frame), the main
+        user's head box decides with the head detector and a head value; without a box it cannot tell; without the
+        head value the face's reason stands."""
+        from app.modules.vision.events import observe_scene
+        from app.modules.vision.situation import seated_height
+        rows = rows_of([(10, GONE)], extra={**OPTIONAL, "primary_track": 1, "head_count": 1,
+                                            "primary_box": "0.40;0.60;0.60;0.90"})       # centre 0.75, no face
+        sc = observe_scene(rows, (0.0, 0.9))
+        self.assertEqual(seated_height(sc, 0.6, 0.5, seated_head_cy_min=0.7)[0], True)
+        self.assertEqual(seated_height(sc, 0.6, 0.5, seated_head_cy_min=0.8)[0], False)
+        self.assertEqual(seated_height(sc, 0.6, 0.5)[2], "no_main_user_face")          # face rule without the value
+        nobox = observe_scene(put(rows, 0, 9, primary_box=None), (0.0, 0.9))
+        self.assertEqual(seated_height(nobox, 0.6, 0.5, seated_head_cy_min=0.7)[2], "no_main_user_box")
+        faced = observe_scene(rows_of(face(10), extra={**OPTIONAL, "primary_track": 1, "head_count": 1,
+                                                       "face_in_primary": True, "face_cy": 0.5,
+                                                       "primary_box": "0.40;0.60;0.60;0.90"}), (0.0, 0.9))
+        self.assertEqual(seated_height(faced, 0.6, 0.5, seated_head_cy_min=0.7)[0], False)  # the face decides
+
+    def test_the_head_box_fallback_leaves_out_a_head_grown_by_a_lean(self):
+        """The head-box fallback of seated_height: rows whose head box is larger than the user's own reference beyond
+        head_approach_ratio_min (a lean brings the head closer and lower) do not count; a seated user's head at
+        operating distance (ratio about 1) does."""
+        from app.modules.vision.events import observe_scene
+        from app.modules.vision.situation import seated_height
+        rows = rows_of([(10, GONE)], extra={**OPTIONAL, "primary_track": 1, "head_count": 1,
+                                            "primary_box": "0.40;0.60;0.60;0.90", "head_ratio_user": 1.4})
+        lean = observe_scene(rows, (0.0, 0.9), head_approach_ratio_min=1.2)
+        self.assertEqual((seated_height(lean, 0.6, 0.5, seated_head_cy_min=0.7)[2], lean.head_near_rows),
+                         ("head_near", 10))                          # the box is there on every row: not 'no box'
+        seated = observe_scene(put(rows, 0, 9, head_ratio_user=1.0), (0.0, 0.9), head_approach_ratio_min=1.2)
+        self.assertIs(seated_height(seated, 0.6, 0.5, seated_head_cy_min=0.7)[0], True)
 
     def test_face_approach_does_not_count_a_bowed_head(self):
         """A larger face while the head is pitched down beyond the camera's head-down boundary is bowing (a phone,
@@ -685,6 +734,30 @@ class SceneCueTests(unittest.TestCase):
         sc = observe_scene(rows, (0.0, 0.9))
         self.assertEqual(face_approach(sc, 1.2, 0.5, head_down_pitch_min=PITCH_TEST)[::2], (True, None))
 
+    def test_change_evidence_reads_the_same_from_rows_csv_and_a_data_frame(self):
+        """Track ids from rows.csv are text ('2') and a data frame gives NaN for an empty cell: the evidence carries
+        the same int ids as a replay and None for the empty role, and the output passes its check."""
+        from app.modules.vision.events import observe_scene
+        rows = rows_of(face(4), extra={**OPTIONAL, "primary_track": "2", "head_count": 1})
+        put(rows, 1, 1, main_user_prev_track="1", main_user_gap_s=1.2, main_user_new_was_role=float("nan"))
+        (change,) = observe_scene(rows, (0.0, 0.3)).of("main_user_changed")
+        self.assertEqual((change["obs"]["track"], change["obs"]["previous_track"], change["obs"]["new_was_role"]),
+                         (2, 1, None))
+        out, _ = assess(rows, rows[-1]["t_s"], P, landmarker_num_faces=1)
+        self.assertIs(out["tags"][2]["status"], True)
+
+    def test_only_the_main_users_face_counts_when_the_head_detector_ran(self):
+        """A face matched to no head box while the main user's track lives (face_in_primary None) may be someone
+        else's: it gives no face height and no face size. True (also 'True' read back from rows.csv) counts."""
+        from app.modules.vision.events import observe_scene
+        rows = rows_of(face(10), extra={**OPTIONAL, "face_cy": 0.8, "iod_ratio_user": 1.8, "primary_track": 1,
+                                        "face_in_primary": None})
+        c = observe_scene(rows, (0.0, 0.9), approach_ratio_min=1.2)
+        self.assertEqual((c.of("face_height", "face_size"), c.face_rows), ([], 0))
+        put(rows, 0, 9, face_in_primary="True")
+        c = observe_scene(rows, (0.0, 0.9), approach_ratio_min=1.2)
+        self.assertEqual(len(c.of("face_size")), 1)
+
 
 class SceneTagTests(unittest.TestCase):
     """The second list `tags` of situation.assess (values made for these frames, not proposals)."""
@@ -701,6 +774,53 @@ class SceneTagTests(unittest.TestCase):
         self.assertEqual({t["name"]: t["display_text"] for t in out["tags"]}["none_seen"], "카메라에 사람이 안 보임")
         self.assertEqual(check_output(out, events, P), [])
 
+    def test_seated_height_and_face_approach_compare_window_medians(self):
+        from app.modules.vision.situation import assess
+        rows = rows_of(face(10), extra={**OPTIONAL, "face_cy": 0.7, "iod_ratio_user": 1.0})
+        t = rows[-1]["t_s"]
+        out, _ = assess(rows, t, P, landmarker_num_faces=1, seated_face_cy_min=0.6, approach_ratio_min=1.2)
+        self.assertEqual(self.tags(out)["seated_height"], (True, None))
+        self.assertEqual(self.tags(out)["face_approach"], (False, None))
+        (item,) = [e for e in out["tags"][0]["evidence"] if e["obs"] == "face_cy_median"]
+        self.assertEqual(item["value"], 0.7)
+        out, _ = assess(rows, t, P, landmarker_num_faces=1, seated_face_cy_min=0.75)
+        self.assertEqual(self.tags(out)["seated_height"], (False, None))
+        out, _ = assess(rows, t, P, landmarker_num_faces=1, seated_face_cy_min=0.7, approach_ratio_min=1.0)
+        self.assertEqual((self.tags(out)["seated_height"], self.tags(out)["face_approach"]),
+                         ((False, None), (False, None)))               # equal to the value is not above it
+        lean = put(rows_of(face(10), extra={**OPTIONAL, "face_cy": 0.5, "iod_ratio_user": 1.0}), 3, 9,
+                   face_cy=0.8, iod_ratio_user=1.4)              # 7 of 10 rows leaning in: the face lower and larger
+        out, _ = assess(lean, t, P, landmarker_num_faces=1, seated_face_cy_min=0.6, approach_ratio_min=1.2)
+        self.assertEqual(self.tags(out)["face_approach"], (True, None))
+        self.assertEqual(self.tags(out)["seated_height"], (UNKNOWN, "too_few_rows"))   # 3 of 10 rows left, < 0.6
+        out, _ = assess(lean, t, P, landmarker_num_faces=1, seated_face_cy_min=0.6)
+        self.assertEqual(self.tags(out)["seated_height"], (True, None))    # no approach value: nothing left out
+        away = rows_of(face(10), extra={**OPTIONAL, "face_cy": None, "iod_ratio_user": None})
+        out, _ = assess(away, t, P, landmarker_num_faces=1, seated_face_cy_min=0.6, approach_ratio_min=1.2)
+        self.assertEqual((self.tags(out)["seated_height"], self.tags(out)["face_approach"]),
+                         ((UNKNOWN, "no_main_user_face"), (UNKNOWN, "no_main_user_face")))
+        unref = rows_of(face(10), extra={**OPTIONAL, "face_cy": 0.7, "iod_ratio_user": None})
+        out, _ = assess(unref, t, P, landmarker_num_faces=1, seated_face_cy_min=0.6, approach_ratio_min=1.2)
+        self.assertEqual(self.tags(out)["face_approach"], (UNKNOWN, "no_reference"))   # a face, no reference yet
+        near = rows_of(face(10), extra={**OPTIONAL, "face_cy": 0.8, "iod_ratio_user": 1.4})
+        out, _ = assess(near, t, P, landmarker_num_faces=1, seated_face_cy_min=0.6, approach_ratio_min=1.2)
+        self.assertEqual(self.tags(out)["seated_height"], (UNKNOWN, "face_near"))      # every face row leans in
+
+    def test_user_changed_and_none_seen(self):
+        rows = rows_of(face(5), [(10, GONE)], face(5), extra={**OPTIONAL, "primary_track": 1, "head_count": 1})
+        put(rows, 5, 14, primary_track=None, head_count=0)
+        put(rows, 15, 19, primary_track=2)
+        put(rows, 15, 15, main_user_prev_track=1, main_user_gap_s=1.1, main_user_body_kept=False)
+        out, _ = run(rows)
+        self.assertEqual(self.tags(out)["user_changed"], (True, None))
+        self.assertEqual(self.tags(out)["none_seen"], (False, None))
+        changed = out["tags"][2]["evidence"]
+        self.assertEqual({e["obs"]: e["value"] for e in changed if e["value"] is not None},
+                         {"track": 2, "previous_track": 1, "gap_s": 1.1, "body_kept": False})
+        out, _ = assess(rows, 1.4, dataclasses.replace(P, window_s=0.9), landmarker_num_faces=1)
+        self.assertEqual(self.tags(out)["none_seen"], (True, None))        # 0.5 .. 1.4 s: nothing seen
+        self.assertEqual(self.tags(out)["user_changed"], (False, None))    # the column on every row, no change
+
     def test_the_scene_columns_do_not_leak_into_the_three_tags(self):
         from app.modules.vision.situation import assess
         windows = [put(rows_of(face(5), look_back(), face(5), look_back(), face(5)), 0, 30, people_behind_count=1),
@@ -716,6 +836,22 @@ class SceneTagTests(unittest.TestCase):
                              {k: v for k, v in plain.items() if k != "tags"})
             self.assertEqual(events, plain_events)
             self.assertIs(self.tags(out)["none_seen"][0], False)
+
+    def test_a_stitched_track_break_is_no_change(self):
+        rows = rows_of(face(5), face(5), extra={**OPTIONAL, "primary_track": 1, "head_count": 1})
+        put(rows, 5, 9, primary_track=2)
+        put(rows, 5, 5, main_user_prev_track=1, main_user_gap_s=1.1, main_user_body_kept=True,
+            main_user_reacquired=False, main_user_stitched=True, main_user_new_start_s=0.1)   # broke in place
+        out, _ = run(rows)
+        self.assertEqual(self.tags(out)["user_changed"], (False, None))
+        evidence = {e["obs"]: e["value"] for e in out["tags"][2]["evidence"]}
+        self.assertEqual(evidence, {})                             # the stitched switch is no evidence of a change
+        put(rows, 5, 5, main_user_stitched=False)
+        self.assertEqual(self.tags(run(rows)[0])["user_changed"], (True, None))
+        put(rows, 5, 5, main_user_stitched=None)                    # no boundary: counted as before
+        self.assertEqual(self.tags(run(rows)[0])["user_changed"], (True, None))
+        put(rows, 5, 5, main_user_stitched=True, main_user_reacquired=True)   # both: the stitch's time bound decides
+        self.assertEqual(self.tags(run(rows)[0])["user_changed"], (False, None))
 
     def test_check_rules_for_the_tags(self):
         rows = rows_of(face(10))
