@@ -55,11 +55,12 @@ SCENE_BOUNDARIES = ("seated_face_cy_min", "approach_ratio_min", "seated_head_cy_
                     "head_approach_ratio_min")   # None = no value yet (situation.py scene tags)
 STITCH_BOUNDARIES = ("stitch_shift_max", "stitch_size_max")   # None = no value yet (columns.MainUserChange: no stitch)
 SCENE_METHOD = ("정하는 방법 = 그 카메라 앞에서 서서 보통으로 쓰는 녹화(평가 촬영본과 따로 찍은 것)의 창 중앙값(창 길이 = "
-                "값 묶음의 window_s)으로 기준선 평균 + 2 SD(Wu 외, W4A 2021의 기준선 ± 2 SD; 조사 22 §2-1 · §2-11)")
+                "값 묶음의 window_s)으로 기준선 평균 + 2 SD(Wu 외, W4A 2021의 기준선 ± 2 SD; 조사 22 §2-1 · §2-11), "
+                "tools/calibrate_scene.py")
 STITCH_METHOD = ("정하는 방법 = 그 카메라 앞에서 서서 보통으로 쓰는 녹화에서 같은 주 사용자 트랙의 머리 상자가 "
                  "track_max_gap_s(트랙 잇기가 건너는 가장 긴 시간) 안에 움직인 위치 차 · 크기 차(상자 하나와 그 뒤 "
                  "track_max_gap_s 안의 같은 트랙 마지막 상자)의 평균 + 2 SD(Wu 외, W4A 2021의 기준선 + 2 SD; 조사 84 §4-3 "
-                 "'트랙 안 상자 변화의 위쪽 꼬리')")
+                 "'트랙 안 상자 변화의 위쪽 꼬리'), tools/calibrate_scene.py")
 
 
 def _p(default, source: str, unit: str = ""):

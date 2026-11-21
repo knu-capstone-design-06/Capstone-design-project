@@ -9,6 +9,7 @@ person, no camera, no window.
 Every number below is made for these synthetic inputs and is not a proposal for a pilot value.
 """
 
+import csv
 import dataclasses
 import datetime
 import importlib.util
@@ -789,6 +790,19 @@ class ColumnsTests(unittest.TestCase):
         filled = add_main_user_change([dict(r) for r in rows], PilotParams(stitch_shift_max=1.0, stitch_size_max=0.3))
         self.assertEqual([r["main_user_stitched"] for r in filled if r["main_user_prev_track"] is not None], [True])
 
+    def test_a_box_coordinate_that_is_not_finite_gives_no_break_measure(self):
+        """_break gives no shift or size for a box with a NaN coordinate (as _box_height gives no height), so
+        stitch_motion leaves that pair out and one such row cannot turn the calibrated stitch value into NaN."""
+        from app.modules.vision.columns import _break, stitch_motion
+        here = (0.40, 0.20, 0.60, 0.50)
+        self.assertEqual(_break(0.0, here, 0.1, (NAN, 0.20, 0.60, 0.50)), (0.1, None, None))
+        self.assertEqual(_break(0.0, (0.40, 0.20, 0.60, NAN), 0.1, here)[1:], (None, None))
+        rows = [{"t_s": round(i * DT, 1), "primary_track": "1",
+                 "primary_box": "nan;0.2;0.6;0.5" if i == 1 else "0.4;0.2;0.6;0.5"} for i in range(3)]
+        pairs = stitch_motion(rows, 1.0)
+        self.assertEqual(len(pairs), 1)                           # the NaN row's own pair is left out
+        self.assertTrue(all(math.isfinite(v) for v in pairs[0]))
+
     def test_a_stitch_starts_the_size_reference_again_and_a_reacquisition_keeps_it(self):
         """A stitch is no user change, but the size reference starts again (most stitches fall in the walk-up, whose
         smaller sizes would stay in it); a reacquisition in the same place keeps it."""
@@ -923,6 +937,196 @@ class ColumnsTests(unittest.TestCase):
         self.assertEqual([(r["iod_ratio_user"], r["head_ratio_user"], r["dpitch_user_deg"]) for r in new],
                          [(1.7, 1.6, 30.0)] * 3)                                   # recorded values stay
         self.assertTrue(all(r["main_user_prev_track"] is None for r in new))
+
+    def test_calibration_tool_takes_mean_plus_two_sd_of_window_medians(self):
+        import statistics
+        from app.modules.vision.params import load_bundle
+        from app.modules.vision.tools.calibrate_scene import main
+        folder = tempfile.mkdtemp()
+        paths = []
+        for k, cy in enumerate((0.4, 0.6)):                      # two standing recordings, 3 s each
+            path = os.path.join(folder, f"rec{k}.csv")
+            with open(path, "w", encoding="utf-8", newline="") as f:
+                w = csv.writer(f)
+                w.writerow(["frame_idx", "t_s", "face_state", "body_state", "face_cy", "iod_px"])
+                for i in range(30):
+                    w.writerow([i, round(i * DT, 6), SEEN, SEEN, cy, 40 + (i % 2)])
+            paths.append(path)
+        params = os.path.join(folder, "b.json")
+        with open(params, "w", encoding="utf-8") as f:
+            json.dump({"bundle_id": "t", "situation": sourced({**SIT_VALUES, "window_s": 1.0})}, f)
+        out = os.path.join(folder, "snippet.json")
+        with redirect_stdout(io.StringIO()) as printed:
+            self.assertEqual(main(["--params", params, "--rows", *paths, "--note", "test rows", "--out", out]), 0)
+        self.assertIn("no minimum count", printed.getvalue())
+        with open(out, encoding="utf-8") as f:
+            chain = json.load(f)["chain"]
+        medians = [0.4] * 3 + [0.6] * 3                         # windows end at 1.0, 2.0 and the last row 2.9 s
+        expected = statistics.fmean(medians) + 2 * statistics.stdev(medians)
+        self.assertAlmostEqual(chain["seated_face_cy_min"]["value"], expected)
+        self.assertIn("창 6개(녹화 2개", chain["seated_face_cy_min"]["source"])
+        self.assertIn("test rows", chain["seated_face_cy_min"]["source"])
+        self.assertIn("approach_ratio_min", chain)
+        self.assertIn("computed here", printed.getvalue())       # the face-height pass used the new approach value
+        with redirect_stdout(io.StringIO()) as printed:          # one recording: the spread between people is unknown
+            self.assertEqual(main(["--params", params, "--rows", paths[0], "--out", out]), 0)
+        self.assertIn("no value is written", printed.getvalue())
+        with open(out, encoding="utf-8") as f:
+            self.assertEqual(json.load(f)["chain"], {})
+        with open(params, "w", encoding="utf-8") as f:           # the snippet merges into a bundle as it is
+            json.dump({"situation": sourced(SIT_VALUES), "chain": chain}, f)
+        self.assertAlmostEqual(load_bundle(params).chain.seated_face_cy_min, expected)
+
+    def test_calibration_leaves_out_the_near_rows_and_the_windows_the_tag_would_not_judge(self):
+        """The face-height pass works on the same rows and windows as seated_height: rows above approach_ratio_min
+        are left out (a lean lowers the face), and a window whose median stands on fewer than face_visible_min of its
+        frames is dropped."""
+        from app.modules.vision.tools.calibrate_scene import calibrate
+
+        def recording(k):
+            rows = []
+            for i in range(30):                           # 2 s standing, then 1 s leaning in: lower and larger
+                lean = i >= 20
+                rows.append({"frame_idx": i, "t_s": round(i * DT, 6), "face_state": SEEN, "body_state": SEEN,
+                             "face_cy": (0.9 if lean else 0.4 + k * 0.05), "iod_ratio_user": 1.5 if lean else 1.0})
+            return rows
+        recs = [recording(0), recording(1)]
+        kept = calibrate(recs, 1.0, 1.0, approach_ratio_min=1.2)["seated_face_cy_min"]["windows"]
+        mixed = calibrate(recs, 1.0, 1.0, approach_ratio_min=10.0)["seated_face_cy_min"]["windows"]
+        self.assertAlmostEqual(kept["mean"], 0.425)                 # standing rows only
+        self.assertGreater(mixed["mean"], kept["mean"])            # the lean rows would raise it
+        result = calibrate(recs, 1.0, 1.0, approach_ratio_min=1.2, min_share=0.6)
+        self.assertEqual(result["seated_face_cy_min"]["windows_dropped"], 2)   # the lean window of each recording
+        self.assertEqual(result["seated_face_cy_min"]["windows"]["n"], 4)
+
+    def test_calibration_writes_no_approach_value_not_above_one(self):
+        """A constant distance gives ratios around 1, so mean + 2 SD can stay at or below 1, the reference size
+        itself. No value is written, the face-height pass keeps every row, and a bundle refuses such a value."""
+        import random
+        from app.modules.vision.params import PilotParams
+        from app.modules.vision.tools.calibrate_scene import calibrate, snippet
+        recordings = []
+        for k in range(3):
+            rng = random.Random(k)
+            recordings.append([{"frame_idx": i, "t_s": round(i * DT, 6), "face_state": SEEN, "body_state": SEEN,
+                                "face_cy": 0.4 + k * 0.05, "iod_ratio_user": 0.97 + rng.random() * 0.02}
+                               for i in range(30)])
+        result = calibrate(recordings, 1.0, 1.0)
+        self.assertLessEqual(result["approach_ratio_min"]["windows"]["value"], 1.0)
+        self.assertIsNone(result["approach_used"])
+        chain = snippet(result, 1.0, 1.0, "")["chain"]
+        self.assertEqual(sorted(chain), ["seated_face_cy_min"])
+        with self.assertRaises(ValueError):
+            PilotParams(approach_ratio_min=1.0)
+
+    def test_calibration_takes_the_stitch_values_from_the_same_heads_motion(self):
+        """stitch_shift_max / stitch_size_max = mean + 2 SD of how far the same main-user box moves within
+        track_max_gap_s: each box against the last box of the same track at most that much later (a new track is a
+        new pair set). No value from one recording; a recording without head boxes does not count as one. The tool's
+        main() takes track_max_gap_s from the bundle and writes the stitch value."""
+        import statistics
+        from app.modules.vision.columns import stitch_motion
+        from app.modules.vision.tools.calibrate_scene import calibrate, main, snippet
+
+        def recording(step):                  # 0.1 s rows; the box moves right by `step` box widths per row
+            rows = []
+            for i in range(30):
+                x0 = 0.4 + step * 0.2 * i
+                rows.append({"frame_idx": i, "t_s": round(i * DT, 6), "face_state": SEEN, "body_state": SEEN,
+                             "face_cy": 0.4, "primary_track": "1" if i < 20 else "2",
+                             "primary_box": f"{x0};0.2;{x0 + 0.2};0.5"})
+            return rows
+        pairs = stitch_motion(recording(0.01), 1.0)
+        self.assertEqual(len(pairs), 19 + 9)                      # the last box of each track has no later pair
+        self.assertAlmostEqual(pairs[0][0], 0.10)                 # 10 rows (1.0 s) later: 10 x 0.01 box widths
+        self.assertAlmostEqual(pairs[0][1], 0.0)
+        self.assertEqual(stitch_motion(recording(0.01), None), [])
+        recs = [recording(0.01), recording(0.02)]
+        result = calibrate(recs, 1.0, 1.0, max_gap_s=1.0)
+        shift = result["stitch_shift_max"]["windows"]
+        values = [p[0] for r in recs for p in stitch_motion(r, 1.0)]
+        self.assertEqual((shift["n"], result["stitch_shift_max"]["recordings_with_windows"]), (len(values), 2))
+        self.assertAlmostEqual(shift["value"], statistics.fmean(values) + 2 * statistics.stdev(values))
+        chain = snippet(result, 1.0, 1.0, "")["chain"]
+        self.assertIn("상자 짝", chain["stitch_shift_max"]["source"])
+        self.assertNotIn("stitch_size_max", chain)               # the size never changes: no spread, no value
+        self.assertNotIn("stitch_shift_max", snippet(calibrate(recs[:1], 1.0, 1.0, max_gap_s=1.0), 1.0, 1.0,
+                                                     "")["chain"])        # one recording: no spread between people
+        nobox = [{k: v for k, v in r.items() if k not in ("primary_track", "primary_box")}
+                 for r in recording(0.03)]                                # a replay without the head detector
+        self.assertEqual(calibrate(recs + [nobox], 1.0, 1.0, max_gap_s=1.0)["stitch_shift_max"]
+                         ["recordings_with_windows"], 2)
+        self.assertNotIn("stitch_shift_max", snippet(calibrate(recs[:1] + [nobox], 1.0, 1.0, max_gap_s=1.0), 1.0, 1.0,
+                                                     "")["chain"])        # still one recording with pairs
+        folder = tempfile.mkdtemp()
+        paths = []
+        for k, rec in enumerate(recs):
+            paths.append(os.path.join(folder, f"rec{k}.csv"))
+            with open(paths[-1], "w", encoding="utf-8", newline="") as f:
+                w = csv.DictWriter(f, fieldnames=list(rec[0]))
+                w.writeheader()
+                w.writerows(rec)
+        params = os.path.join(folder, "b.json")
+        with open(params, "w", encoding="utf-8") as f:                   # track_max_gap_s: the chain default 1.0
+            json.dump({"bundle_id": "t", "situation": sourced({**SIT_VALUES, "window_s": 1.0})}, f)
+        out = os.path.join(folder, "snippet.json")
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(main(["--params", params, "--rows", *paths, "--out", out]), 0)
+        with open(out, encoding="utf-8") as f:
+            self.assertAlmostEqual(json.load(f)["chain"]["stitch_shift_max"]["value"], shift["value"])
+
+    def test_calibration_of_the_head_boundaries_and_the_pitch_share(self):
+        """The head-box passes of calibrate(): head_approach_ratio_min is computed first and leaves the grown head
+        rows out of the seated_head_cy_min windows; a head_pitch median on fewer than min_share of its window's frames
+        is dropped; a head_approach_ratio_min not above 1 is not written."""
+        import statistics
+        from app.modules.vision.tools.calibrate_scene import _windows, calibrate, no_value_reason
+
+        def recording(k):
+            rows = []
+            for i in range(30):
+                lean = 20 <= i < 25                       # in the third window the head grows and drops
+                cy = 0.95 if lean else 0.40 + 0.01 * (i % 10) + 0.05 * k
+                rows.append({"frame_idx": i, "t_s": round(i * DT, 6), "body_state": SEEN,
+                             "face_state": SEEN if (i < 20 or i >= 27) else NOT_SEEN,   # the face lost meanwhile
+                             "primary_track": "1", "primary_box": (0.4, cy - 0.1, 0.6, cy + 0.1),
+                             "head_ratio_user": 3.0 if lean else 1.0 + 0.05 * k,
+                             "dpitch_user_deg": 2.0 * k + 0.1 * (i % 10)})
+            return rows
+        recs = [recording(0), recording(1)]
+        result = calibrate(recs, 1.0, 1.0, min_share=0.5)
+        head = result["head_approach_ratio_min"]["windows"]["value"]
+        self.assertTrue(head is not None and 1.0 < head < 3.0)
+        kept = [m for r in recs for m in _windows(r, 1.0, 1.0, None, "head_height", "head_cy_median", 0.5, head)[0]]
+        mixed = [m for r in recs for m in _windows(r, 1.0, 1.0, None, "head_height", "head_cy_median", 0.5, None)[0]]
+        self.assertNotAlmostEqual(statistics.fmean(kept), statistics.fmean(mixed))
+        self.assertAlmostEqual(result["seated_head_cy_min"]["windows"]["mean"], statistics.fmean(kept))
+        self.assertEqual(result["head_down_pitch_min"]["windows_dropped"], 2)   # the third window of each recording
+        self.assertEqual(result["head_down_pitch_min"]["windows"]["n"], 4)
+        low = {"recordings_with_windows": 2, "windows": {"sd": 0.01, "value": 0.99}}
+        self.assertIn("not above 1", no_value_reason("head_approach_ratio_min", low))
+        below = {"recordings_with_windows": 2, "windows": {"sd": 1.0, "value": -0.5}}
+        self.assertIn("not above 0", no_value_reason("head_down_pitch_min", below))   # a bundle would refuse it
+        given = calibrate(recs, 1.0, 1.0, min_share=0.5, head_approach_ratio_min=10.0)   # the bundle's head value
+        self.assertEqual(given["head_approach_used"], 10.0)
+        self.assertAlmostEqual(given["seated_head_cy_min"]["windows"]["mean"], statistics.fmean(mixed))
+
+    def test_read_rows_fills_the_head_and_pitch_columns(self):
+        """calibrate_scene.read_rows fills head_ratio_user and dpitch_user_deg on rows.csv that lack them, and writes
+        the change columns again on a rows.csv that has main_user_prev_track but not the stitch columns."""
+        from app.modules.vision.tools.calibrate_scene import read_rows
+        folder = tempfile.mkdtemp()
+        path = os.path.join(folder, "rows.csv")
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["frame_idx", "t_s", "face_state", "body_state", "pitch_deg", "primary_track", "primary_box",
+                        "main_user_prev_track"])
+            for i, pitch in enumerate((4.0, 4.0, 9.0)):
+                w.writerow([i, round(i * DT, 6), SEEN, SEEN, pitch, 1, "0.40;0.30;0.60;0.50", ""])
+        rows = read_rows(path)
+        self.assertEqual([r["head_ratio_user"] for r in rows], [None, 1.0, 1.0])
+        self.assertEqual([r["dpitch_user_deg"] for r in rows], [0.0, 0.0, 5.0])
+        self.assertTrue(all("main_user_stitched" in r for r in rows))   # the change columns written again
 
     def test_add_face_size_ratio_fills_recorded_rows_in_time_order(self):
         from app.modules.vision.columns import add_face_size_ratio

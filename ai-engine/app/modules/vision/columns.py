@@ -834,6 +834,35 @@ def add_main_user_change(rows: list, params=None) -> list:
     return rows
 
 
+def stitch_motion(rows: list, max_gap_s: float | None) -> list:
+    """(shift, size) of the same head within max_gap_s (params.track_max_gap_s, the longest break the stitch bridges),
+    from the rows of one recording (primary_track and primary_box, e.g. a replay with the head detector): every main-user
+    box paired with the last box of the same track at most max_gap_s later, measured as a break is (_break: centre shift
+    in box widths and heights, |ln height ratio|). The distribution stitch_shift_max and stitch_size_max are calibrated
+    from (params.STITCH_METHOD). [] when max_gap_s is None."""
+    if max_gap_s is None:
+        return []
+    tracks = {}
+    for r in sorted(rows, key=lambda r: float(r["t_s"])):
+        k, box = _track_id(r.get("primary_track")), r.get("primary_box")
+        if isinstance(box, str):
+            box = tuple(float(x) for x in box.split(";")) if box else None
+        if k is not None and box is not None:
+            tracks.setdefault(k, []).append((float(r["t_s"]), box))
+    out = []
+    for seq in tracks.values():
+        j = 0
+        for i, (t, box) in enumerate(seq):
+            j = max(j, i)
+            while j + 1 < len(seq) and seq[j + 1][0] - t <= max_gap_s + 1e-9:
+                j += 1
+            if j > i:
+                _, shift, size = _break(t, box, seq[j][0], seq[j][1])
+                if shift is not None:
+                    out.append((shift, size))
+    return out
+
+
 def add_face_size_ratio(rows: list, params=None) -> list:
     """iod_ratio_user written into recorded rows (rows.csv of an earlier replay), in time order, with the anchor of a
     run without a touch log (the main-user track). params = params.PilotParams (default values when None): its
