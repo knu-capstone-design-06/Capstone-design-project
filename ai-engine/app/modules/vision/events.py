@@ -22,7 +22,7 @@ incremental version.
 Every window, count, angle and floor is a pilot value ([파일럿]): PilotParams has no defaults and this file sets
 none (dec section 3: '모든 창 길이 · 횟수 · 각도는 [파일럿]', set from the distribution in the team's self-recording).
 
-The scene tags of situation.py (face approach, nothing seen; 2026-11-22) read a second,
+The scene tags of situation.py (face approach, user change, nothing seen; 2026-11-22) read a second,
 separate set of measurement events (observe_scene, SCENE_KINDS); they do not change the events above.
 
 Input: one dict per frame.
@@ -451,7 +451,7 @@ def detect_events(rows: list, params: PilotParams, *, landmarker_num_faces: int,
 
 
 # --- the scene tags' measurements (situation.py SCENE_TAGS; 2026-11-22) ------------------------------------------
-SCENE_KINDS = ("face_size", "nothing_seen")
+SCENE_KINDS = ("face_size", "main_user_changed", "nothing_seen")
 
 
 def _main_face(row: dict) -> bool:
@@ -462,17 +462,48 @@ def _main_face(row: dict) -> bool:
     return "face_in_primary" not in row or row["face_in_primary"] is True or row["face_in_primary"] == "True"
 
 
+def _blank(value) -> bool:
+    """A blank cell: None, "" or NaN (a CSV reader or a data frame may give any of them)."""
+    return value is None or value == "" or (isinstance(value, float) and math.isnan(value))
+
+
+def _track_value(value):
+    """A track id as in a replay (an int): rows.csv gives '2', a data frame 2.0; a blank cell None."""
+    if _blank(value):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return value
+    return int(number) if number.is_integer() else number
+
+
+def _flag(value) -> bool | None:
+    """A true / false cell: a bool in memory, 'True' / 'False' read back from rows.csv; anything else None."""
+    if value is True or value == "True":
+        return True
+    if value is False or value == "False":
+        return False
+    return None
+
+
 @dataclass(frozen=True)
 class SceneCues:
     """What the scene tags read for one window. Their events are measurements of the window's rows:
       head_pitch         the main user's face rows with a dpitch_user_deg (pitch against the same main user's first
                          face, columns.PitchRef; + = down): dpitch_median, rows
       face_size          the main user's face rows with an iod_ratio_user (columns.FaceSizeRef): iod_ratio_median, rows
+      main_user_changed  one per row that starts a new main-user track (columns.MainUserChange): track,
+                         previous_track, gap_s, body_kept, reacquired (the same place: not a new user), stitched (a
+                         break stitched by start time, place and size: not a new user), the break measures new_start_s,
+                         start_shift, start_size and the size evidence previous_h, new_h, h_ratio, new_was_role,
+                         new_rel_dist, new_growth (observation only)
       nothing_seen       one over the whole window when no row sees a face (landmarks or a face-detector box), a body
                          or a head box: unseen_s = min(face_unseen_s, body_unseen_s) at the window's last row
     No value is compared here; situation.py compares the medians with the camera's boundaries."""
     events: list
     frames: int                  # rows inside the window
+    track_measured: bool         # every row carries primary_track: the head detector ran, a change can be seen
     face_rows: int = 0           # rows with the main user's face (face values not blanked)
     head_measured: bool = False  # every row carries head_count: 'no head box' can be concluded
 
@@ -496,6 +527,24 @@ def observe_scene(rows: list, window: tuple) -> SceneCues:
     if sized:
         events.append(_event("face_size", inside, sized,
                              {"iod_ratio_median": statistics.median(ratios[i] for i in sized), "rows": len(sized)}))
+    for i, r in enumerate(inside):
+        if not _blank(r.get("main_user_prev_track")):
+            events.append(_event("main_user_changed", inside, [i],
+                                 {"track": _track_value(r.get("primary_track")),
+                                  "previous_track": _track_value(r["main_user_prev_track"]),
+                                  "gap_s": _num(r, "main_user_gap_s"), "body_kept": _flag(r.get("main_user_body_kept")),
+                                  "previous_h": _num(r, "main_user_prev_h"), "new_h": _num(r, "main_user_new_h"),
+                                  "h_ratio": _num(r, "main_user_h_ratio"),
+                                  "new_was_role": None if _blank(r.get("main_user_new_was_role"))
+                                  else r.get("main_user_new_was_role"),
+                                  "new_rel_dist": _num(r, "main_user_new_rel_dist"),
+                                  "new_growth": _num(r, "main_user_new_growth"),
+                                  "reacquired": _flag(r.get("main_user_reacquired")),
+                                  "previous_settled": _flag(r.get("main_user_prev_settled")),
+                                  "stitched": _flag(r.get("main_user_stitched")),
+                                  "new_start_s": _num(r, "main_user_new_start_s"),
+                                  "start_shift": _num(r, "main_user_start_shift"),
+                                  "start_size": _num(r, "main_user_start_size")}))
     if inside and all(not _face(r) and not _body(r) and not (_num(r, "head_count") or 0) > 0
                       and not (_num(r, "face_count") or 0) > 0
                       for r in inside):
@@ -504,6 +553,7 @@ def observe_scene(rows: list, window: tuple) -> SceneCues:
         events.append(_event("nothing_seen", inside, list(range(len(inside))),
                              {"unseen_s": min(unseen) if unseen else None}))
     return SceneCues(events=sorted(events, key=lambda e: (e["t_start"], e["kind"])), frames=len(inside),
+                     track_measured=bool(inside) and all("primary_track" in r for r in inside),
                      face_rows=sum(own[i] and _num(r, "face_cy") is not None for i, r in enumerate(inside)),
                      head_measured=bool(inside) and all(_num(r, "head_count") is not None for r in inside))
 

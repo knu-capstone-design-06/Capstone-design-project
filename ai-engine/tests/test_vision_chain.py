@@ -123,6 +123,17 @@ class ParamsTests(unittest.TestCase):   # plain Python: runs with the server pac
         with self.assertRaises(ValueError):
             PilotParams(track_iou_min=1.2)
 
+    def test_stitch_boundaries_have_no_value_and_say_how_to_get_one(self):
+        from app.modules.vision.params import STITCH_BOUNDARIES, STITCH_METHOD, UNDECIDED, PilotParams
+        self.assertEqual(STITCH_BOUNDARIES, ("stitch_shift_max", "stitch_size_max"))
+        for name in STITCH_BOUNDARIES:
+            self.assertIsNone(getattr(PilotParams(), name), name)
+            self.assertTrue(PilotParams.sources()[name].startswith(UNDECIDED), name)
+            self.assertIn(STITCH_METHOD, PilotParams.sources()[name])
+            for bad in (0, -1.0, float("nan"), "0.5", True):
+                with self.assertRaises(ValueError, msg=f"{name}={bad!r}"):
+                    PilotParams(**{name: bad})
+
     def test_scene_boundaries_have_no_value_and_say_how_to_get_one(self):
         from app.modules.vision.params import SCENE_BOUNDARIES, SCENE_METHOD, UNDECIDED, Bundle, PilotParams
         p = PilotParams()
@@ -545,6 +556,18 @@ class ColumnsTests(unittest.TestCase):
         self.assertEqual(ref.n, 3)
         self.assertEqual(ref.update(row(30.0, "True")), 1.0)                # read back from rows.csv
 
+    def test_face_size_reference_goes_on_through_a_same_place_reacquisition(self):
+        """A cap or a camera stall ends the head track and the same person is found again in the same place
+        (main_user_reacquired): the reference goes on, so a lean keeps its ratio. A new main user starts it again."""
+        from app.modules.vision.columns import FaceSizeRef
+        ref = FaceSizeRef()
+        for _ in range(5):
+            ref.update({"face_state": SEEN, "iod_px": 40.0, "primary_track": 1})
+        again = {"face_state": SEEN, "iod_px": 52.0, "primary_track": 2, "main_user_reacquired": True}
+        self.assertAlmostEqual(ref.update(again), 1.3)
+        self.assertAlmostEqual(ref.update(dict(again, primary_track=3, main_user_reacquired="True")), 1.3)  # rows.csv
+        self.assertIsNone(ref.update(dict(again, primary_track=4, main_user_reacquired=False)))
+
     def test_face_size_reference_keeps_the_lean_out(self):
         """Rows whose ratio already reached the face-approach boundary stay out of the reference, so a user who leans
         in and stays close keeps the ratio; without the boundary the running median drifts up to the close size."""
@@ -602,6 +625,257 @@ class ColumnsTests(unittest.TestCase):
                                for t, p, k in ((0.1, -15.0, "1"), (0.0, -15.0, "1"), (0.2, 10.0, "2"),
                                                (0.3, 12.0, "2"))])
         self.assertEqual([r["dpitch_user_deg"] for r in rows], [0.0, 0.0, 0.0, 2.0])
+
+    def test_main_user_change_marks_the_first_row_of_a_new_track(self):
+        from app.modules.vision.columns import MainUserChange, add_main_user_change
+        change = MainUserChange()
+        seq = [(0.0, 1, SEEN), (0.1, 1, SEEN), (0.2, None, SEEN), (0.3, None, NOT_SEEN), (0.4, 2, SEEN),
+               (0.5, 2, SEEN), (0.6, 3, SEEN)]
+        got = [change.update({"t_s": t, "primary_track": k, "body_state": b}) for t, k, b in seq]
+        self.assertTrue(all(g["main_user_prev_track"] is None for i, g in enumerate(got) if i not in (4, 6)))
+        self.assertEqual(got[0]["main_user_prev_track"], None)        # the first track of the session is no change
+        self.assertEqual((got[4]["main_user_prev_track"], got[4]["main_user_body_kept"]), (1, False))   # body lost at 0.3
+        self.assertAlmostEqual(got[4]["main_user_gap_s"], 0.3)
+        self.assertEqual((got[6]["main_user_prev_track"], got[6]["main_user_body_kept"]), (2, True))
+        rows = [{"t_s": 0.1, "primary_track": "1", "body_state": SEEN}, {"t_s": 0.0, "primary_track": "1",
+                "body_state": SEEN}, {"t_s": 0.2, "primary_track": "4", "body_state": SEEN}, {"t_s": 0.3}]
+        add_main_user_change(rows)
+        self.assertEqual(rows[2]["main_user_prev_track"], 1)             # "1" read back from rows.csv is track 1
+        self.assertNotIn("main_user_prev_track", rows[3])               # no head detector column: left as it is
+        self.assertEqual(MainUserChange().update({"t_s": 0.0, "primary_track": float("nan")})["main_user_prev_track"],
+                         None)                                          # a NaN cell is no track
+
+    def test_a_reacquired_head_in_the_same_place_is_not_a_new_user(self):
+        """A cap or a camera stall: the head detector loses the user for longer than the track gap and the next box
+        starts a new track in the same place. It overlaps the ended track's last box by at least track_iou_min, so the
+        change row says reacquired; a box elsewhere (the next customer) does not."""
+        from app.modules.vision.columns import MainUserChange
+        here, there = (0.40, 0.20, 0.60, 0.50), (0.05, 0.30, 0.20, 0.45)
+
+        def row(t, track, box):
+            return {"t_s": t, "primary_track": track, "primary_box": box, "body_state": SEEN}
+        change = MainUserChange(iou_min=0.3)
+        change.update(row(0.0, 1, here))
+        same = change.update(row(1.4, 2, (0.41, 0.21, 0.61, 0.51)))
+        self.assertEqual((same["main_user_prev_track"], same["main_user_reacquired"]), (1, True))
+        other = change.update(row(3.0, 3, there))
+        self.assertEqual((other["main_user_prev_track"], other["main_user_reacquired"]), (2, False))
+        self.assertIsNone(MainUserChange().update(row(0.0, 1, here))["main_user_reacquired"])   # no iou_min: unknown
+
+    def test_a_change_needs_an_earlier_user_who_had_settled(self):
+        """A track that ends while its head box is still growing (the first approach) hands over without a change; a
+        user whose box stopped growing (a 1-s bin not above the one before) was at the kiosk, and the next one is."""
+        from app.modules.vision.columns import MainUserChange
+
+        def run(heights):
+            ch = MainUserChange(iou_min=0.3, max_gap_s=1.0, window_s=2.0, segment_s=1.0)
+            t = 0.0
+            for h in heights:                                      # track 1, one row every 0.1 s
+                ch.update({"t_s": t, "primary_track": 1, "primary_box": (0.4, 0.1, 0.6, 0.1 + h),
+                           "body_state": SEEN, "head_boxes": []})
+                t += 0.1
+            return ch.update({"t_s": t + 1.2, "primary_track": 2, "primary_box": (0.0, 0.5, 0.2, 0.8),
+                              "body_state": NOT_SEEN, "head_boxes": []})
+        walking = [0.10 + 0.01 * i for i in range(25)]             # growing in every bin
+        standing = walking[:10] + [0.20] * 30                      # grows, then stays
+        self.assertIs(run(walking)["main_user_prev_settled"], False)
+        self.assertIs(run(standing)["main_user_prev_settled"], True)
+
+    def test_a_reacquisition_needs_the_body_kept_through_the_gap(self):
+        """Same place after the head track ended: the same person when the body stayed in view, a new customer when
+        the place stood empty (nobody's body seen in the gap)."""
+        from app.modules.vision.columns import MainUserChange
+        box = (0.4, 0.2, 0.6, 0.5)
+
+        def change(body_in_gap):
+            ch = MainUserChange(iou_min=0.3, max_gap_s=1.0, window_s=2.0)
+            ch.update({"t_s": 0.0, "primary_track": 1, "primary_box": box, "body_state": SEEN, "head_boxes": []})
+            ch.update({"t_s": 0.5, "primary_track": None, "primary_box": None,
+                       "body_state": SEEN if body_in_gap else NOT_SEEN, "head_boxes": []})
+            return ch.update({"t_s": 1.6, "primary_track": 2, "primary_box": box, "body_state": SEEN, "head_boxes": []})
+        self.assertIs(change(True)["main_user_reacquired"], True)
+        self.assertIs(change(False)["main_user_reacquired"], False)
+
+    def test_a_track_that_breaks_in_place_is_stitched_back(self):
+        """A deep bow or a cap: the main user's box jumps (no IoU with the last box), so a new track starts at once in
+        about the same place and size while the old one is still alive; when the old one ends the new one is the main
+        user. It began after the last box and within track_max_gap_s, near it and about as large: stitched (the same
+        user), and the earlier user's Settle state is kept. A head first seen in the frame of the old track's last box
+        (two heads at once), a head first seen 3 s after it (the next customer in the same place), one that began
+        elsewhere or much smaller, or a run without the boundaries is not stitched (None without boundaries).
+        add_main_user_change with the bundle's stitch values stitches the same rows."""
+        from app.modules.vision.columns import MainUserChange, add_main_user_change
+        from app.modules.vision.params import PilotParams
+        here = (0.40, 0.20, 0.60, 0.50)
+
+        def listed(track, box, role="unknown"):
+            return {"track": track, "cx": (box[0] + box[2]) / 2, "cy": (box[1] + box[3]) / 2, "w": box[2] - box[0],
+                    "h": box[3] - box[1], "role": role}
+
+        def stitch(new_first, first_t=0.6, bounds=(1.0, 0.3), box_until=0.55):
+            ch = MainUserChange(iou_min=0.3, max_gap_s=1.0, window_s=2.0, segment_s=1.0, shift_max=bounds[0],
+                                size_max=bounds[1])
+            rows, out, t = [], [], 0.0
+            while t < box_until + 1.5:
+                if t < box_until:                                  # track 1 with its box
+                    row = {"primary_track": 1, "primary_box": here, "head_boxes": [listed(1, here, "primary")]}
+                elif t < box_until + 1.0:                          # track 1 alive without a box; track 2 another head
+                    row = {"primary_track": 1, "primary_box": None,
+                           "head_boxes": [listed(2, new_first)] if t >= first_t - 1e-9 else []}
+                else:                                              # track 1 ended: track 2 is the main user
+                    row = {"primary_track": 2, "primary_box": new_first, "head_boxes": [listed(2, new_first, "primary")]}
+                if first_t < box_until and first_t - 1e-9 <= t < box_until:   # seen together with track 1
+                    row["head_boxes"].append(listed(2, new_first))
+                rows.append({"t_s": round(t, 1), "body_state": SEEN, **row})
+                out.append(ch.update(rows[-1]))
+                t += 0.1
+            (change,) = [r for r in out if r["main_user_prev_track"] is not None]
+            return change, ch, rows
+
+        def run(*args, **kwargs):
+            return stitch(*args, **kwargs)[0]
+        bowed = (0.42, 0.40, 0.62, 0.70)                           # 2/3 box heights lower, same size (IoU 0.18)
+        got = run(bowed)
+        self.assertAlmostEqual(got["main_user_new_start_s"], 0.1)
+        self.assertAlmostEqual(got["main_user_start_shift"], math.hypot(0.02 / 0.2, 0.2 / 0.3))
+        self.assertAlmostEqual(got["main_user_start_size"], 0.0)
+        self.assertIs(got["main_user_stitched"], True)
+        self.assertIs(got["main_user_reacquired"], False)          # IoU below track_iou_min: only the stitch says same
+        self.assertIs(run(bowed, first_t=0.3)["main_user_stitched"], False)      # seen together: two people
+        self.assertLess(run(bowed, first_t=0.3)["main_user_new_start_s"], 0)
+        same_frame = run(bowed, first_t=0.5)                       # first seen in the frame of the last box
+        self.assertAlmostEqual(same_frame["main_user_new_start_s"], 0.0)
+        self.assertIs(same_frame["main_user_stitched"], False)     # two heads in one frame: two people
+        self.assertIs(run((0.05, 0.20, 0.25, 0.50))["main_user_stitched"], False)  # began elsewhere (the next one)
+        self.assertIs(run((0.45, 0.30, 0.55, 0.42))["main_user_stitched"], False)  # much smaller (farther, behind)
+        self.assertIsNone(run(bowed, bounds=(None, None))["main_user_stitched"])   # no boundary: not decided
+        ch = MainUserChange(iou_min=0.3, max_gap_s=1.0, window_s=2.0, segment_s=1.0, shift_max=1.0, size_max=0.3)
+        for i in range(35):                                        # track 1 until 0.5 s, then nobody until 3.4 s
+            t = round(i * DT, 1)
+            ch.update({"t_s": t, "primary_track": 1 if i <= 15 else None, "primary_box": here if i <= 5 else None,
+                       "head_boxes": [listed(1, here, "primary")] if i <= 5 else [],
+                       "body_state": SEEN if i <= 5 else NOT_SEEN, "body_unseen_s": round(max(0.0, t - 0.5), 1)})
+        later = ch.update({"t_s": 3.5, "primary_track": 2, "primary_box": here, "body_state": SEEN,
+                           "head_boxes": [listed(2, here, "primary")], "body_unseen_s": 0.0})   # the next customer
+        self.assertAlmostEqual(later["main_user_new_start_s"], 3.0)
+        self.assertAlmostEqual(later["main_user_start_shift"], 0.0)
+        self.assertAlmostEqual(later["main_user_start_size"], 0.0)
+        self.assertIs(later["main_user_stitched"], False)          # began after track_max_gap_s: not stitched
+        self.assertIs(later["main_user_reacquired"], False)        # the place stood empty
+        settled, ch, _ = stitch(bowed, first_t=2.6, box_until=2.55)      # the user stood 2.5 s, then bowed
+        self.assertIs(settled["main_user_prev_settled"], True)
+        self.assertIs(settled["main_user_stitched"], True)
+        self.assertIs(ch.settle.settled, True)                     # the same user: Settle does not start again
+        _, _, rows = stitch(bowed)
+        filled = add_main_user_change([dict(r) for r in rows], PilotParams(stitch_shift_max=1.0, stitch_size_max=0.3))
+        self.assertEqual([r["main_user_stitched"] for r in filled if r["main_user_prev_track"] is not None], [True])
+
+    def test_a_stitch_starts_the_size_reference_again_and_a_reacquisition_keeps_it(self):
+        """A stitch is no user change, but the size reference starts again (most stitches fall in the walk-up, whose
+        smaller sizes would stay in it); a reacquisition in the same place keeps it."""
+        from app.modules.vision.columns import FaceSizeRef
+        ref = FaceSizeRef()
+        row = {"face_state": SEEN, "iod_px": 40.0, "primary_track": 1, "face_in_primary": True}
+        self.assertEqual([ref.update(dict(row)) for _ in range(2)], [None, 1.0])
+        self.assertIsNone(ref.update({**row, "primary_track": 2, "iod_px": 44.0, "main_user_stitched": True}))
+        self.assertAlmostEqual(ref.update({**row, "primary_track": 3, "iod_px": 48.4, "main_user_reacquired": True}),
+                               1.1)                                # the reference 44 px of track 2 is kept
+
+    def test_a_reacquisition_allows_body_dropouts_up_to_the_track_gap(self):
+        """The place stood empty only when nothing of the user (head box or body) was seen for longer than
+        track_max_gap_s, the gap a head track survives: a pose dropout of 0.5 s during a deep bow keeps the place, a
+        body unseen for 1.2 s does not. Rows without body_unseen_s keep the every-row reading."""
+        from app.modules.vision.columns import MainUserChange
+        box = (0.4, 0.2, 0.6, 0.5)
+
+        def change(unseen_from, unseen_to, with_column=True):
+            ch = MainUserChange(iou_min=0.3, max_gap_s=1.0, window_s=2.0)
+            ch.update({"t_s": 0.0, "primary_track": 1, "primary_box": box, "body_state": SEEN, "head_boxes": [],
+                       "body_unseen_s": 0.0})
+            t, last_seen = 0.1, 0.0
+            while t < 1.55:                                       # no head box from 0.1 s to 1.5 s
+                gone = unseen_from - 1e-9 <= t <= unseen_to + 1e-9
+                last_seen = last_seen if gone else t
+                row = {"t_s": round(t, 1), "primary_track": None, "primary_box": None,
+                       "body_state": NOT_SEEN if gone else SEEN, "head_boxes": []}
+                if with_column:
+                    row["body_unseen_s"] = round(t - last_seen, 1)
+                ch.update(row)
+                t += 0.1
+            last_row = {"t_s": 1.6, "primary_track": 2, "primary_box": box, "body_state": SEEN, "head_boxes": []}
+            if with_column:
+                last_row["body_unseen_s"] = 0.0
+            if unseen_to >= 1.6:                                  # the body still unseen when the head comes back
+                last_row.update(body_state=NOT_SEEN, body_unseen_s=round(1.6 - last_seen, 1) if with_column else None)
+            return ch.update(last_row)
+        short = change(0.6, 1.0)                                  # unseen 0.5 s
+        self.assertIs(short["main_user_body_kept"], False)        # not on every row ...
+        self.assertAlmostEqual(short["main_user_body_gap_s"], 0.5)
+        self.assertIs(short["main_user_reacquired"], True)        # ... but never longer than the track gap
+        long = change(0.2, 1.3)                                   # unseen 1.2 s
+        self.assertAlmostEqual(long["main_user_body_gap_s"], 1.2)
+        self.assertIs(long["main_user_reacquired"], False)        # the place stood empty: the next customer
+        back = change(1.2, 1.6)                                   # the head is back before the body: 0.5 s
+        self.assertAlmostEqual(back["main_user_body_gap_s"], 0.5)
+        self.assertIs(back["main_user_reacquired"], True)
+        old = change(0.6, 1.0, with_column=False)
+        self.assertIsNone(old["main_user_body_gap_s"])
+        self.assertIs(old["main_user_reacquired"], False)         # without the column: the body on every row
+        edge = change(0.6, 1.5)                                   # unseen exactly track_max_gap_s (1.0 s)
+        self.assertAlmostEqual(edge["main_user_body_gap_s"], 1.0)
+        self.assertIs(edge["main_user_reacquired"], True)         # not longer than the track gap
+        ch = MainUserChange(iou_min=0.3, max_gap_s=1.0, window_s=2.0)
+        for i in range(61):          # head box until 5.0 s with the body unseen from 3.0 s (shoulders out of view),
+            t = round(i * DT, 1)     # then no head box from 5.1 to 6.0 s and the body back from 5.2 s
+            gone = 30 <= i <= 51
+            ch.update({"t_s": t, "primary_track": 1, "primary_box": box if i <= 50 else None, "head_boxes": [],
+                       "body_state": NOT_SEEN if gone else SEEN, "body_unseen_s": round(t - 2.9, 1) if gone else 0.0})
+        capped = ch.update({"t_s": 6.1, "primary_track": 2, "primary_box": box, "body_state": SEEN, "head_boxes": [],
+                            "body_unseen_s": 0.0})
+        self.assertAlmostEqual(capped["main_user_body_gap_s"], 0.1)   # counted from the last head box, not from 3.0 s
+        self.assertIs(capped["main_user_reacquired"], True)       # the head box was there until 5.0 s: the same place
+
+    def test_main_user_change_keeps_a_bounded_history_of_the_other_heads(self):
+        from app.modules.vision.columns import MainUserChange
+        change = MainUserChange(iou_min=0.3, max_gap_s=1.0, window_s=2.0)
+
+        def row(t, others):
+            return {"t_s": t, "primary_track": 1, "primary_box": (0.4, 0.2, 0.6, 0.5), "body_state": SEEN,
+                    "head_boxes": [{"track": k, "h": h, "role": "behind", "rel_dist_med": 2.0} for k, h in others]}
+        for i in range(50):                                             # a passer-by (track 5) for 0.5 s, then gone
+            change.update(row(i * 0.1, [(2, 0.15)] + ([(5, 0.1)] if i < 5 else [])))
+        self.assertEqual(sorted(change.others), [2])                    # track 5 unseen > 1.0 s: dropped
+        self.assertLessEqual(len(change.others[2]["hist"]), 21)         # heights of the last 2.0 s only
+
+    def test_main_user_change_records_the_size_of_the_head_that_took_over(self):
+        """The owner's suggestion (2026-11-22): a person behind is smaller and becomes the next user by stepping
+        forward. The change row says how big the new main user's head is against the earlier one, whether that track
+        was another head before (its role and rel_dist then) and how much it grew; no threshold is applied."""
+        from app.modules.vision.columns import MainUserChange
+        change = MainUserChange()
+
+        def row(t, track, primary_h, others=()):
+            boxes = [{"track": track, "h": primary_h, "role": "primary", "rel_dist_med": None}] if primary_h else []
+            boxes += [{"track": k, "h": h, "role": role, "rel_dist_med": rel} for k, h, role, rel in others]
+            box = (0.4, 0.2, 0.6, 0.2 + primary_h) if primary_h else None
+            return {"t_s": t, "primary_track": track, "primary_box": box, "body_state": SEEN, "head_boxes": boxes}
+        behind = (2, 0.15, "unknown", 2.0)
+        got = [change.update(row(0.0, 1, 0.3, [behind])), change.update(row(0.1, 1, 0.3, [(2, 0.15, "behind", 2.0)])),
+               change.update(row(0.2, 2, 0.16))]                 # the user's head is lost; the head behind takes over
+        last = got[-1]
+        self.assertEqual((last["main_user_prev_track"], last["main_user_new_was_role"]), (1, "behind"))
+        self.assertAlmostEqual(last["main_user_prev_h"], 0.3)
+        self.assertAlmostEqual(last["main_user_new_h"], 0.16)
+        self.assertAlmostEqual(last["main_user_h_ratio"], 0.16 / 0.3)
+        self.assertEqual(last["main_user_new_rel_dist"], 2.0)
+        self.assertAlmostEqual(last["main_user_new_growth"], 0.16 / 0.15)   # still at a behind size
+        fresh = change.update(row(0.3, 3, 0.31))                  # a head never seen before
+        self.assertEqual((fresh["main_user_prev_track"], fresh["main_user_new_was_role"]), (2, None))
+        self.assertIsNone(fresh["main_user_new_growth"])
+        self.assertAlmostEqual(fresh["main_user_h_ratio"], 0.31 / 0.16)
+        cell = row(0.0, 1, 0.3, [behind])
+        cell["head_boxes"] = json.dumps(cell["head_boxes"])       # read back from rows.csv: a JSON cell
+        self.assertIsNone(MainUserChange().update(cell)["main_user_prev_track"])
 
     def test_add_face_size_ratio_fills_recorded_rows_in_time_order(self):
         from app.modules.vision.columns import add_face_size_ratio
@@ -1306,6 +1580,25 @@ class FrameChainTests(unittest.TestCase):
         for key in ("ms_heads", "ms_head_dir", "ms_chain", "cpu_ms_chain", "ms_total"):
             self.assertGreaterEqual(r[key], 0.0, key)
 
+    def test_face_size_reference_waits_for_the_first_press_of_the_touch_session(self):
+        from app.modules.vision.chain import FrameChain
+        from app.modules.vision.params import PilotParams
+        from app.modules.vision.touch import load_timeline
+        folder = tempfile.mkdtemp()
+        video = os.path.join(folder, "take.mp4")
+        tl = load_timeline(touch_log(folder, MENU_EVENTS, video), video)   # first press at 0.5 s
+        with_log = FrameChain(FakeModels([fake_inference() for _ in range(8)]), PilotParams(), FakeHeads(), None, tl)
+        got = [with_log.process(f)["iod_ratio_user"] for f in frames(8)]
+        self.assertEqual(got[:6], [None] * 6)        # walking up (before the press), then the press row: no reference
+        self.assertAlmostEqual(got[6], 1.0)
+        without = FrameChain(FakeModels([fake_inference() for _ in range(3)]), PilotParams(), FakeHeads())
+        rows = [without.process(f) for f in frames(3)]
+        self.assertIsNone(rows[0]["iod_ratio_user"])  # no touch log: from the main-user track's first face row
+        self.assertAlmostEqual(rows[1]["iod_ratio_user"], 1.0)
+        self.assertTrue(all(r["main_user_prev_track"] is None for r in rows))   # one main-user track: no change
+        no_heads = FrameChain(FakeModels([fake_inference()]), PilotParams()).process(frames(1)[0])
+        self.assertNotIn("main_user_prev_track", no_heads)                      # no head detector: column absent
+
     def test_the_head_pitch_reference_follows_the_main_user_and_the_press(self):
         """dpitch_user_deg in the chain: with a touch log None before the session's first press, then pitch against
         the first main-user face after it (the walk-up rows look 10 deg up); a new touch-log session without a press
@@ -1379,6 +1672,101 @@ class FrameChainTests(unittest.TestCase):
         faded = FaceSizeRef(near_min=1.2)                 # without a log the same long lean enters it and fades
         got = [faded.update({"face_state": SEEN, "iod_px": v, "primary_track": 1}) for v in walk + lean * 4]
         self.assertLess(got[-1], 1.2)
+
+    def test_a_new_touch_session_restarts_the_session_start_reference_and_nothing_else(self):
+        """iod_ratio_start, dyaw_start_deg and dpitch_start_deg compare with the first face frame of the session: a
+        new sessionId in the touch log takes that frame again (the run counters keep going). Without a touch log the
+        rows are those of a single session."""
+        from app.modules.vision.chain import FrameChain
+        from app.modules.vision.params import PilotParams
+        from app.modules.vision.touch import load_timeline
+        folder = tempfile.mkdtemp()
+        video = os.path.join(folder, "take.mp4")
+        tl = load_timeline(touch_log(folder, MENU_EVENTS, video), video)   # session s2 from 8.1 s
+
+        def grown(k):                                   # the eye corners move apart: the face comes closer
+            inf = fake_inference(yaw=float(k % 5))
+            inf.face_points[[33, 133]] -= [0.001 * k, 0.0]
+            inf.face_points[[362, 263]] += [0.001 * k, 0.0]
+            return inf
+        sched = [grown(k) for k in range(90)]
+        chain = FrameChain(FakeModels(sched), PilotParams(), FakeHeads(), None, tl)
+        rows = [chain.process(f) for f in frames(90)]
+        self.assertGreater(rows[80]["iod_ratio_start"], 1.0)
+        self.assertEqual((rows[81]["iod_ratio_start"], rows[81]["dyaw_start_deg"]), (1.0, 0.0))   # s2's first frame
+        self.assertGreater(rows[85]["iod_ratio_start"], 1.0)
+        self.assertGreater(rows[81]["face_run_s"], 8.0)            # the face run is not restarted
+        self.assertTrue(all(r["main_user_prev_track"] is None for r in rows))   # the new session's track: no change
+        self.assertIsNone(rows[81]["iod_ratio_user"])               # the size reference starts again (no press yet)
+        plain = FrameChain(FakeModels(sched), PilotParams(), FakeHeads())
+        rows = [plain.process(f) for f in frames(90)]
+        self.assertGreater(rows[81]["iod_ratio_start"], 1.0)        # no touch log: one session, no restart
+
+    def test_a_covered_face_keeps_the_main_user_track_and_only_a_long_head_loss_starts_a_new_one(self):
+        """A cap or a hand covers the face (2026-11-22, scene 2-2): the head box stays, so the main user's track goes
+        on - no main_user_changed row and user_changed False. A head box lost for longer than track_max_gap_s
+        (1.0 s by default) ends the track; when the next box is in the same place (IoU >= track_iou_min with the last
+        one) it is a reacquisition and user_changed says unknown; a box elsewhere is a new user (True)."""
+        from app.modules.vision.chain import FrameChain, WindowJudge
+        from app.modules.vision.params import PilotParams
+        box = [0.38, 0.22, 0.62, 0.58]
+        sched = [fake_inference() for _ in range(5)] + [fake_inference(face=False) for _ in range(15)] +                 [fake_inference() for _ in range(5)]
+        covered = FrameChain(FakeModels(sched), PilotParams(), ScheduledHeads([[box]] * 25))
+        rows = [covered.process(f) for f in frames(25)]
+        self.assertEqual({r["primary_track"] for r in rows}, {1})
+        self.assertTrue(all(r["main_user_prev_track"] is None for r in rows))
+        tags = {t["name"]: t["status"] for t in WindowJudge(bundle()).evaluate(rows, 2.4)["situation"]["tags"]}
+        self.assertEqual((tags["user_changed"], tags["none_seen"]), (False, False))
+        stood = [fake_inference() for _ in range(21)] + [fake_inference(face=False) for _ in range(15)] +             [fake_inference() for _ in range(5)]                     # the user stands 2 s (the box stops growing)
+        lost = FrameChain(FakeModels(stood), PilotParams(), ScheduledHeads([[box]] * 21 + [[]] * 15 + [[box]] * 5))
+        rows = [lost.process(f) for f in frames(41)]                 # no head box from 2.1 to 3.5 s
+        self.assertEqual((rows[20]["primary_track"], rows[36]["primary_track"]), (1, 2))
+        self.assertEqual(rows[36]["main_user_prev_track"], 1)
+        self.assertAlmostEqual(rows[36]["main_user_gap_s"], 1.6)
+        self.assertIs(rows[36]["main_user_body_kept"], True)          # the body stayed in view
+        self.assertIs(rows[36]["main_user_reacquired"], True)         # the same place: the same person found again
+        self.assertIs(rows[36]["main_user_prev_settled"], True)       # the user had stood at the kiosk
+        out = WindowJudge(bundle()).evaluate(rows, 4.0)["situation"]["tags"]
+        self.assertEqual({t["name"]: (t["status"], t["unknown_reason"]) for t in out}["user_changed"],
+                         ("unknown", "reacquired_same_place"))
+        moved = [0.05, 0.25, 0.25, 0.55]                             # the next box elsewhere: a new customer
+        elsewhere = FrameChain(FakeModels(stood), PilotParams(), ScheduledHeads([[box]] * 21 + [[]] * 15 + [[moved]] * 5))
+        rows = [elsewhere.process(f) for f in frames(41)]
+        self.assertIs(rows[36]["main_user_reacquired"], False)
+        tags = {t["name"]: t["status"] for t in WindowJudge(bundle()).evaluate(rows, 4.0)["situation"]["tags"]}
+        self.assertEqual(tags["user_changed"], True)
+        early = FrameChain(FakeModels(sched), PilotParams(), ScheduledHeads([[box]] * 5 + [[]] * 15 + [[moved]] * 5))
+        rows = [early.process(f) for f in frames(25)]                # the first track ends after 0.5 s: an approach
+        self.assertIs(rows[20]["main_user_prev_settled"], False)
+        tags = {t["name"]: t["status"] for t in WindowJudge(bundle()).evaluate(rows, 2.4)["situation"]["tags"]}
+        self.assertEqual(tags["user_changed"], False)
+
+    def test_a_head_box_that_jumps_in_place_is_stitched_in_the_chain(self):
+        """A deep bow: after 2 s standing the main user's head box jumps lower in the same place (IoU below
+        track_iou_min), so the tracker starts a new track at once and hands the main user over when the old track ends
+        (track_max_gap_s later). With the two stitch values the chain marks that row stitched and user_changed is
+        False; without them the same frames count a change."""
+        from app.modules.vision.chain import FrameChain, WindowJudge
+        from app.modules.vision.params import PilotParams
+        box, bowed = [0.38, 0.22, 0.62, 0.58], [0.38, 0.45, 0.62, 0.81]     # IoU 0.22: no match for the tracker
+
+        def run(**values):
+            chain = FrameChain(FakeModels([fake_inference() for _ in range(41)]), PilotParams(**values),
+                               ScheduledHeads([[box]] * 21 + [[bowed]] * 20))
+            rows = [chain.process(f) for f in frames(41)]
+            tags = WindowJudge(bundle()).evaluate(rows, 4.0)["situation"]["tags"]
+            return rows, {t["name"]: (t["status"], t["unknown_reason"]) for t in tags}["user_changed"]
+        rows, changed = run(stitch_shift_max=1.0, stitch_size_max=0.3)
+        self.assertEqual((rows[30]["primary_track"], rows[31]["primary_track"]), (1, 2))   # track 1 ends after 1.0 s
+        self.assertEqual(rows[31]["main_user_prev_track"], 1)
+        self.assertAlmostEqual(rows[31]["main_user_new_start_s"], 0.1)    # first seen in the frame after the last box
+        self.assertIs(rows[31]["main_user_reacquired"], False)
+        self.assertIs(rows[31]["main_user_prev_settled"], True)
+        self.assertIs(rows[31]["main_user_stitched"], True)
+        self.assertEqual(changed, (False, None))
+        rows, changed = run()                                              # no stitch values: a change
+        self.assertIsNone(rows[31]["main_user_stitched"])
+        self.assertEqual(changed, (True, None))
 
     def test_a_face_outside_the_main_user_box_is_missing(self):
         """The main user's track is a head box left of the face (chosen while it was the only box); a box around the

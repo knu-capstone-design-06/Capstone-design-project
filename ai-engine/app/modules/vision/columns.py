@@ -40,6 +40,50 @@ Columns (names = the ones events.py reads, then observation-only columns no rule
                         not the main user's, without a pitch and before the first press. The session-start
                         dpitch_start_deg of features.py stays as an observation column; this is the one face_approach's
                         head-down gate reads.
+  main_user_prev_track, main_user_gap_s, main_user_body_kept   on the first row of a new main-user track that follows
+                        an earlier main-user track of the same touch-log session (MainUserChange; tree table 3-가 2-2
+                        '앞 사람 추적이 끊긴 뒤'): the earlier track's id, the seconds since its last head box, and whether
+                        the body was seen on every row from then to this one (2-2 '기다리는 동안 몸이 계속 보였는지';
+                        someone's body, not necessarily the same person's). None on every other row. Absent when the
+                        head detector did not run.
+  main_user_reacquired  on the same row: True when the new main-user box overlaps the ended track's last box by at
+                        least params.track_iou_min (the SORT association value the tracker uses) - the same place, so
+                        the head detector lost and found the same person (a cap, a deep bow, a camera stall) - and the
+                        place did not stand empty: with body_unseen_s on the rows, nothing of the user (that head box
+                        or a body) was unseen for longer than params.track_max_gap_s at a stretch (the gap a head track
+                        survives; main_user_body_gap_s), else the body was seen on every row (main_user_body_kept);
+                        False otherwise; None when a box is missing. The tag user_changed does not count a
+                        reacquisition as a change.
+  main_user_body_gap_s  on the same row: the longest stretch since the ended track's last box, up to and including this
+                        row, with neither that box nor a body (body_unseen_s, at most the time since the last box); None
+                        when a row lacks body_unseen_s.
+  main_user_prev_settled  on the same row: whether the earlier main user had settled at the kiosk - its head-box
+                        height had stopped growing (Settle: the first params.segment_s bin whose median height is not
+                        above the bin before it). False: the track changed during the first approach (a walk-up, or the
+                        head detector passing the main user on before anyone stood at the kiosk); the tag user_changed
+                        does not count that as a change. A reacquisition or a stitch keeps the earlier track's state.
+  main_user_new_start_s, main_user_start_shift, main_user_start_size, main_user_stitched   on the same row, the track
+                        break measured without appearance (StrongSORT's AFLink idea, Du et al. IEEE TMM 2023: link
+                        tracklets from time and position only): the seconds from the earlier track's last head box to the
+                        new track's first box (the new track may have started as another head while the earlier one
+                        still lived; <= 0 = both were seen at once, so two people), the shift of the first box's centre
+                        from that last box (horizontal difference over the last box's width and vertical difference over
+                        its height, as a Euclidean distance: the R-CNN box deltas tx, ty, Girshick et al. CVPR 2014
+                        appendix C) and the size step |ln(first height / last height)| (R-CNN th). main_user_stitched =
+                        True when the new track began after the last box and within params.track_max_gap_s (the gap
+                        a track survives) with shift <= params.stitch_shift_max and size <= params.stitch_size_max: the
+                        same user whose track broke in place (a cap, a deep bow); False otherwise; None when a boundary
+                        has no value or a box is missing. The tag user_changed does not count a stitch as a change;
+                        the size references (iod_ratio_user, head_ratio_user) still start again there (FaceSizeRef).
+  main_user_prev_h, main_user_new_h, main_user_h_ratio, main_user_new_was_role, main_user_new_rel_dist,
+  main_user_new_growth  size evidence on the same row, observation only (no threshold): the head-box height (fraction
+                        of the frame) of the earlier main user's last box and of the new main user's box, new / earlier;
+                        and when the new main-user track was already seen as another head before the change, its last
+                        role then (head_boxes 'role': behind, companion, other or unknown), its last rel_dist_med then
+                        (the earlier main user's height / its height: > 1 = smaller, i.e. farther), and its growth = its
+                        height now / the median of its heights while it was not the main user. A person behind becomes
+                        the next user by stepping forward, so a growth near 1 with rel_dist above 1 means the head that
+                        took over is still at a behind size. None when not known.
   head_count, primary_box, primary_score, primary_from   all kept head boxes; the main user's box, its H1 score and how
                         it was chosen ('track' = the main user's track from earlier frames, 'face' | 'largest' = chosen
                         anew at this frame); observation only. primary_box is None while the main user's track is alive
@@ -96,6 +140,7 @@ The three boundaries have no value (params.UNDECIDED): until a value bundle give
 from __future__ import annotations
 
 import bisect
+import json
 import math
 from collections import deque
 from dataclasses import dataclass
@@ -110,7 +155,12 @@ SHOULDERS = (11, 12)   # left / right shoulder in the 33-point pose map [D3]; = 
 DIR_COLUMNS = tuple(f"head_dir_{k}" for k in DIR_KEYS)
 HEAD_COLUMNS = ("people_behind_count", "companion_box", "head_count", "primary_box", "primary_score",
                 "primary_from", "primary_track", "face_in_primary", "face_track") + DIR_COLUMNS + ("head_boxes",)
-OPTIONAL_COLUMNS = HEAD_COLUMNS + ("shoulder_cx", "shoulder_cy", "mouth_motion", "iod_ratio_user", "dpitch_user_deg")
+CHANGE_COLUMNS = ("main_user_prev_track", "main_user_gap_s", "main_user_body_kept", "main_user_prev_h",
+                  "main_user_new_h", "main_user_h_ratio", "main_user_new_was_role", "main_user_new_rel_dist",
+                  "main_user_new_growth", "main_user_reacquired", "main_user_prev_settled", "main_user_new_start_s",
+                  "main_user_start_shift", "main_user_start_size", "main_user_stitched", "main_user_body_gap_s")
+OPTIONAL_COLUMNS = HEAD_COLUMNS + CHANGE_COLUMNS + ("shoulder_cx", "shoulder_cy", "mouth_motion", "iod_ratio_user",
+                                                  "dpitch_user_deg")
 # features.COLUMNS that the Face Landmarker's face gives (its position, size, angles and the face box's image
 # statistics): blanked where that face is not the main user's (face_in_primary False). face_state, the face detector's
 # columns (face_count, face_det_score, det_box_w_frac) and the run counters stay.
@@ -427,6 +477,45 @@ def main_user_face(row: dict) -> bool:
     return "face_in_primary" not in row or row["face_in_primary"] is True or row["face_in_primary"] == "True"
 
 
+class Settle:
+    """Whether a size that grows while a person walks up has stopped growing (the person stands at the kiosk): the
+    values are binned every segment_s seconds (params.segment_s, the runners' window step) and the size has settled at
+    the first bin whose median is not above the median of the bin before it. No constant of its own; segment_s None:
+    settled from the start. Once settled it stays so until reset."""
+
+    def __init__(self, segment_s: float | None = None):
+        self.segment_s = segment_s
+        self.reset()
+
+    def reset(self):
+        self.settled = self.segment_s is None
+        self.start, self.values, self.previous, self.last_bin = None, [], None, []
+
+    def add(self, t: float, value: float) -> bool:
+        """Add one value at time t; returns whether the size has settled (last_bin = the bin that settled it; the value
+        given in the call that settles is not in it)."""
+        if self.settled:
+            return True
+        if self.start is None:
+            self.start = t
+        elif t - self.start >= self.segment_s:
+            median = float(np.median(self.values)) if self.values else None
+            if median is not None and self.previous is not None and median <= self.previous:
+                self.settled, self.last_bin = True, list(self.values)
+                return True
+            if median is not None:
+                self.previous = median
+            self.start, self.values = t, []
+        self.values.append(value)
+        return False
+
+    def close(self) -> bool:
+        """Whether the size had settled when the values end (a track that ends): the open bin is judged as it stands."""
+        if not self.settled and self.values and self.previous is not None                 and float(np.median(self.values)) <= self.previous:
+            self.settled, self.last_bin = True, list(self.values)
+        return self.settled
+
+
 class _UserAnchor:
     """The anchor shared by FaceSizeRef and PitchRef: a row whose primary_track differs from the track so far starts
     the reference again (reset), unless it marks a reacquisition in the same place (main_user_reacquired); rows
@@ -554,6 +643,180 @@ class PitchRef(_UserAnchor):
         if self.ref is None:
             self.ref = pitch
         return pitch - self.ref
+
+
+class MainUserChange:
+    """The CHANGE_COLUMNS per row (module docstring) from primary_track and body_state, kept across rows so that a
+    change after a long gap is still seen (the windows only hold a few seconds of rows).
+
+    iou_min (params.track_iou_min): a new main-user box that overlaps the ended track's last box at least this much,
+    with the place kept through the gap, is a reacquisition - the head detector lost the same person in the same place
+    (a cap, a deep bow, a camera stall) - and is marked main_user_reacquired. The place is kept when nothing of the
+    user (the head box or a body) was unseen for longer than max_gap_s at a stretch (main_user_body_gap_s, from
+    body_unseen_s; the rule a head track lives by), or, on rows without body_unseen_s, when the body was seen on every
+    row (main_user_body_kept). Otherwise (the place stood empty, as when the next customer steps in) it is a change. segment_s (params.segment_s) bins the
+    main user's head-box height for Settle: a track that ends before its user settled is the first approach, and the
+    next track is marked main_user_prev_settled False. max_gap_s (params.track_max_gap_s) and window_s (params.role_window_s) bound the
+    history of the other heads: a head not seen for longer than max_gap_s is dropped (its track has ended), and only
+    its heights of the last window_s seconds are kept (the role rule's window). None = no bound.
+    shift_max, size_max (params.stitch_shift_max, stitch_size_max): a new main-user track whose first box (kept from
+    the frames where it was another head) came after the ended track's last box, within max_gap_s, and lies within
+    shift_max of it with a size step within size_max, is the same user whose track broke in place (main_user_stitched;
+    module docstring). None: no stitch is decided (main_user_stitched None)."""
+
+    def __init__(self, iou_min: float | None = None, max_gap_s: float | None = None, window_s: float | None = None,
+                 segment_s: float | None = None, shift_max: float | None = None, size_max: float | None = None):
+        self.iou_min, self.max_gap_s, self.window_s = iou_min, max_gap_s, window_s
+        self.shift_max, self.size_max = shift_max, size_max
+        self.settle = Settle(segment_s)
+        self.reset()
+
+    def reset(self):
+        self.track = None          # the current main-user track
+        self.last_t = None         # time of its last row with a head box (any row of it without the box column)
+        self.last_h = None         # height of that last box
+        self.last_box = None       # that last box
+        self.body_kept = True      # the body seen on every row since that last row
+        self.body_gap = 0.0        # the longest stretch since that last row with neither that box nor a body
+        self.gap_known = True      # every row since then said how long the body had been unseen (body_unseen_s)
+        self.others = {}           # track id -> {"role", "rel", "last_t", "hist": deque of (t, h), "first": (t, box)}
+                                   # of the other heads (first = the track's first box seen here)
+        self.settle.reset()        # whether the current main user has settled at the kiosk
+
+    def update(self, row: dict) -> dict:
+        t, track = float(row["t_s"]), _track_id(row.get("primary_track"))
+        body = row.get("body_state") == SEEN
+        out = dict.fromkeys(CHANGE_COLUMNS)
+        boxes = _head_boxes(row)
+        box = row.get("primary_box")
+        h = _box_height(box)
+        if track is None:
+            self._gap_row(t, row, body)
+        elif self.track is not None and track != self.track:
+            seen = self.others.pop(track, None)
+            ratio = None if h is None or not self.last_h else h / self.last_h
+            heights = [v for _, v in seen["hist"]] if seen else []
+            growth = h / float(np.median(heights)) if heights and h is not None else None
+            reacquired = None
+            self._gap_row(t, row, body)                  # the gap runs up to this row (its body counts too)
+            body_gap = self.body_gap if self.gap_known else None
+            kept = self.body_kept if body_gap is None or self.max_gap_s is None else body_gap <= self.max_gap_s
+            if self.iou_min is not None and box is not None and self.last_box is not None:
+                reacquired = bool(box_iou(box, self.last_box) >= self.iou_min and kept)
+            first_t, first_box = seen["first"] if seen and seen.get("first") else (t, box)
+            start_s, shift, size = _break(self.last_t, self.last_box, first_t, first_box)
+            stitched = None
+            if None not in (self.max_gap_s, self.shift_max, self.size_max, start_s, shift, size):
+                stitched = bool(0 < start_s <= self.max_gap_s and shift <= self.shift_max and size <= self.size_max)
+            out.update(main_user_prev_track=self.track, main_user_gap_s=t - self.last_t,
+                       main_user_body_kept=self.body_kept, main_user_prev_h=self.last_h,
+                       main_user_new_h=h, main_user_h_ratio=ratio,
+                       main_user_new_was_role=seen["role"] if seen else None,
+                       main_user_new_rel_dist=seen["rel"] if seen else None, main_user_new_growth=growth,
+                       main_user_reacquired=reacquired, main_user_prev_settled=self.settle.close(),
+                       main_user_new_start_s=start_s, main_user_start_shift=shift, main_user_start_size=size,
+                       main_user_stitched=stitched, main_user_body_gap_s=body_gap)
+            self.track, self.last_t, self.last_h, self.last_box, self.body_kept = track, t, h, box, True
+            self.body_gap, self.gap_known = 0.0, True
+            if not (reacquired or stitched):
+                self.settle.reset()                  # a new main user: its own approach
+            if h is not None:
+                self.settle.add(t, h)
+        elif box is None and "primary_box" in row:   # the track lives on without a box in this frame
+            self._gap_row(t, row, body)
+        else:
+            self.track, self.last_t, self.body_kept = track, t, True
+            self.body_gap, self.gap_known = 0.0, True
+            if h is not None:
+                self.last_h, self.last_box = h, box
+                self.settle.add(t, h)
+        for other in boxes:                          # the other heads, against the main user of this frame
+            k = _track_id(other.get("track"))
+            if other.get("role") == "primary" or k is None:
+                continue
+            seen = self.others.setdefault(k, {"role": None, "rel": None, "last_t": t, "hist": deque(), "first": None})
+            seen["role"], seen["rel"], seen["last_t"] = other.get("role"), _finite(other.get("rel_dist_med")), t
+            if seen["first"] is None:
+                seen["first"] = (t, _listed_box(other))
+            if _finite(other.get("h")) is not None:
+                seen["hist"].append((t, float(other["h"])))
+        for k in list(self.others):
+            seen = self.others[k]
+            if self.max_gap_s is not None and t - seen["last_t"] > self.max_gap_s:
+                del self.others[k]
+                continue
+            while self.window_s is not None and seen["hist"] and seen["hist"][0][0] < t - self.window_s:
+                seen["hist"].popleft()
+        return out
+
+    def _gap_row(self, t: float, row: dict, body: bool):
+        """A row since the main user's last head box without that box (and the row that starts the next track):
+        body_kept (the body on every row) and body_gap, the longest stretch with neither that box nor a body
+        (body_unseen_s, at most the time since the last box)."""
+        self.body_kept = self.body_kept and body
+        unseen = 0.0 if body else _finite(row.get("body_unseen_s"))
+        if unseen is None:
+            self.gap_known = False
+        elif self.last_t is not None:
+            self.body_gap = max(self.body_gap, min(unseen, t - self.last_t))
+
+
+def _listed_box(head: dict):
+    """(x0, y0, x1, y1) of one head_boxes entry (cx, cy, w, h fractions), or None."""
+    cx, cy, w, h = (_finite(head.get(k)) for k in ("cx", "cy", "w", "h"))
+    return None if None in (cx, cy, w, h) else (cx - w / 2.0, cy - h / 2.0, cx + w / 2.0, cy + h / 2.0)
+
+
+def _break(last_t, last_box, first_t, first_box) -> tuple:
+    """(start_s, shift, size) of a track break (module docstring, main_user_new_start_s ...): the seconds from the
+    ended track's last box to the new track's first box, the centre shift in last-box widths and heights (Euclidean, the
+    R-CNN deltas tx, ty) and |ln(first height / last height)| (R-CNN th); None where a box or a time is missing, and
+    shift and size None where a box coordinate is not finite (as _box_height)."""
+    start_s = None if last_t is None or first_t is None else float(first_t) - float(last_t)
+    try:
+        w0, h0 = float(last_box[2]) - float(last_box[0]), float(last_box[3]) - float(last_box[1])
+        h1 = float(first_box[3]) - float(first_box[1])
+        dx = (float(first_box[0]) + float(first_box[2]) - float(last_box[0]) - float(last_box[2])) / 2.0
+        dy = (float(first_box[1]) + float(first_box[3]) - float(last_box[1]) - float(last_box[3])) / 2.0
+    except (TypeError, ValueError, IndexError):
+        return start_s, None, None
+    if not all(math.isfinite(v) for v in (w0, h0, h1, dx, dy)) or w0 <= 0 or h0 <= 0 or h1 <= 0:
+        return start_s, None, None
+    return start_s, math.hypot(dx / w0, dy / h0), abs(math.log(h1 / h0))
+
+
+def _box_height(box) -> float | None:
+    """y1 - y0 of an (x0, y0, x1, y1) box (a tuple, or 'x0;y0;x1;y1' from rows.csv, as events._box_cy reads it), or
+    None (also for a coordinate that is not finite)."""
+    if isinstance(box, str):
+        box = box.split(";")
+    try:
+        return _finite(float(box[3]) - float(box[1]))
+    except (TypeError, ValueError, IndexError):
+        return None
+
+
+def _head_boxes(row: dict) -> list:
+    """The row's head_boxes as a list of dicts (a JSON cell read back from rows.csv is parsed); [] when absent."""
+    boxes = row.get("head_boxes")
+    if isinstance(boxes, str):
+        boxes = json.loads(boxes) if boxes else []
+    return [b for b in boxes or [] if isinstance(b, dict)]
+
+
+def add_main_user_change(rows: list, params=None) -> list:
+    """The CHANGE_COLUMNS written into recorded rows that carry primary_track (an earlier replay with the head detector),
+    in time order; rows without that column are left as they are. params = params.PilotParams (default values when
+    None). Returns the rows."""
+    if params is None:
+        from .params import PilotParams
+        params = PilotParams()
+    change = MainUserChange(params.track_iou_min, params.track_max_gap_s, params.role_window_s, params.segment_s,
+                            params.stitch_shift_max, params.stitch_size_max)
+    for row in sorted(rows, key=lambda r: float(r["t_s"])):
+        if "primary_track" in row:
+            row.update(change.update(row))
+    return rows
 
 
 def add_face_size_ratio(rows: list, params=None) -> list:

@@ -76,6 +76,9 @@ class FrameChain:
         self.people = C.HeadPeople(params)
         self.size_ref = C.FaceSizeRef(params.approach_ratio_min, params.track_max_gap_s)   # iod_ratio_user
         self.pitch_ref = C.PitchRef(params.track_max_gap_s)                                  # dpitch_user_deg
+        self.change = C.MainUserChange(params.track_iou_min, params.track_max_gap_s,        # the change columns
+                                       params.role_window_s, params.segment_s,
+                                       params.stitch_shift_max, params.stitch_size_max)
         self.session = None                     # the touch log's sessionId at the previous row
         self.prev_t = None
 
@@ -89,6 +92,7 @@ class FrameChain:
                 self.people.reset()
                 self.size_ref.reset()
                 self.pitch_ref.reset()
+                self.change.reset()
             if session is not None:
                 self.session = session
         row, _ = self.observer.process(frame, source_kind=self.source_kind)
@@ -117,6 +121,7 @@ class FrameChain:
                 for col in C.FACE_VALUE_COLUMNS:
                     if col in row:
                         row[col] = None
+            row.update(self.change.update(row))
             row["ms_heads"] = sum(heads.ms.values())
         row.update(C.shoulder_columns(inf.pose if inf is not None else None))
         face_seen = row.get("face_state") == SEEN and row.get("face_in_primary") is not False

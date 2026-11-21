@@ -24,13 +24,15 @@ Output for one window (sem section 4: dec section 3's output line plus quality, 
   alternatives  the other tags that no measured cue ruled out and that have supporting events, most events first;
                 one with fewer than min_events supporting events has confidence "unknown"
   tags          the scene tags (SCENE_TAGS, 2026-11-22), each judged on its own and never competing with name:
-                face_approach (2-1; window median of iod_ratio_user > approach_ratio_min), none_seen (the absence
-                node; no face, body or head box on any row).
+                face_approach (2-1; window median of iod_ratio_user > approach_ratio_min), user_changed (2-2; a new
+                main-user track starts in the window, not the same user found again or stitched back), none_seen
+                (the absence node; no face, body or head box on any row).
                 status True | False | "unknown"; unknown_reason a code exactly when "unknown" (no_frames, no_value,
                 no_main_user_face, no_reference, too_few_rows (the rows behind a median are fewer than
-                face_visible_min of the window), column:head_count); evidence points into the window's scene events
-                (events.observe_scene). The boundary is params.SCENE_BOUNDARIES (bundle values; None = unknown).
-                Touch and duration (the absence warning) are the judgment layer's, not these tags'.
+                face_visible_min of the window), reacquired_same_place, column:primary_track, column:head_count);
+                evidence points into the window's scene events (events.observe_scene). The boundary is
+                params.SCENE_BOUNDARIES (bundle values; None = unknown). Touch and duration (2-2's no-input trigger,
+                the absence warning) are the judgment layer's, not these tags'.
 
 How a window is decided. From sem section 4: fewer than min_events supporting events -> "unknown"; quality per cue
 (a face turned away is not a sensor failure: face loss is the look_back cue, and only the cues that need the face -
@@ -198,6 +200,7 @@ TAGS = tuple(RULES)
 # its own status in `tags` and the single `name` is decided as before, without them.
 SCENE_DISPLAY_TEXT = {                             # the scenario tree's terms (table 3-가)
     "face_approach": "얼굴 접근",                   # 2-1 low vision: the face grown against the user's reference
+    "user_changed": "사용자 교체 가능성",            # 2-2 new customer: a new main-user track
     "none_seen": "카메라에 사람이 안 보임",          # the absence node (nothing seen; not 'nobody')
 }
 SCENE_TAGS = tuple(SCENE_DISPLAY_TEXT)
@@ -240,6 +243,28 @@ def face_approach(sc: SceneCues, approach_ratio_min: float | None, min_share: fl
     return False, size, None
 
 
+def user_changed(sc: SceneCues) -> tuple:
+    """(status, events, unknown reason): a row of the window starts a new main-user track (main_user_changed) that is
+    not a reacquisition in the same place, not a track break stitched by start time, place and size (main_user_stitched:
+    the same user's track broke in place, as under a cap or a deep bow), and whose earlier main user had settled at the
+    kiosk (columns.MainUserChange, main_user_prev_settled; a swap during the first approach is no change). Only
+    reacquisitions: unknown (reacquired_same_place). A break that is both stitched and reacquired counts as stitched
+    (no change, not unknown): the stitch also meets a time bound, the new head first seen within track_max_gap_s after
+    the earlier track's last box, which a reacquisition (the same place, kept by a body) does not ask. No change is
+    concluded only when every row carries primary_track (the head detector ran)."""
+    if not sc.frames:
+        return None, [], "no_frames"
+    changes = [e for e in sc.of("main_user_changed")          # a swap during the first approach is not a change,
+               if e["obs"].get("previous_settled") is not False  # nor a track stitched back to the same user
+               and e["obs"].get("stitched") is not True]
+    new = [e for e in changes if e["obs"].get("reacquired") is not True]
+    if new:
+        return True, new, None
+    if changes:
+        return None, changes, "reacquired_same_place"
+    return (False, [], None) if sc.track_measured else (None, [], "column:primary_track")
+
+
 def none_seen(sc: SceneCues) -> tuple:
     """(status, events, unknown reason): no row of the window sees a face, a body or a head box (nothing_seen). That no
     head box was there needs head_count on every row (the head detector ran); otherwise unknown (column:head_count)."""
@@ -256,7 +281,7 @@ def scene_tags(sc: SceneCues, *, head_down_pitch_min: float | None = None,
     """The `tags` list of one window, in SCENE_TAGS order. min_share = the share of the window's frames a median must
     stand on (assess passes params.face_visible_min)."""
     verdicts = {"face_approach": face_approach(sc, approach_ratio_min, min_share, head_down_pitch_min),
-                "none_seen": none_seen(sc)}
+                "user_changed": user_changed(sc), "none_seen": none_seen(sc)}
     return [{"name": name, "display_text": SCENE_DISPLAY_TEXT[name],
              "status": UNKNOWN if status is None else status, "evidence": _evidence(events),
              "unknown_reason": reason}
