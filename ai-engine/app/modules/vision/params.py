@@ -176,6 +176,21 @@ class PilotParams:
                "재현율 0.786; 모델 aid_det joint_416, 입력 416). PMMA 검증 분할은 0.479, 키오스크 시점 값이 아님",
         "score 0~1")
 
+    # --- phone detector (app/inference/phone.py; optional input, off unless its ONNX file is given) -------------
+    phone_score_min: float = _p(
+        0.3, "관행값: YOLOX ONNX Runtime 데모(commit 6ddff48, demo/ONNXRuntime/onnx_inference.py)의 --score_thr 기본값 "
+             "0.3(점수가 이 값 이상인 상자만 그림, yolox/utils/visualize.py). 키오스크 시점 값 아님", "score 0~1")
+    phone_nms_iou: float = _p(
+        0.45, "관행값: 같은 데모의 multiclass_nms(nms_thr=0.45, 클래스를 가리지 않는 판)", "IoU 0~1")
+    phone_every: int = _p(
+        1, "규칙: 머리 탐지기처럼 처리하는 프레임마다 돎(1). 휴대폰 길은 segment_s(1초) 구간마다 탐지가 한 번만 있어도 "
+           "그 구간을 세므로, 처리 속도가 초당 f장이면 이 값은 f x segment_s 이하여야 구간마다 한 번 이상 돎(초당 "
+           "10장이면 10 이하). 값 묶음으로 올리면 탐지기 비용이 그만큼 줄지만, 팀 휴대폰 테이크(초당 10장, 합성 터치 조건 C0)에서 "
+           "5로 올리면 기다림이 열린 테이크가 5편 가운데 4편에서 3편으로, phone_use가 참인 창이 34개에서 14개로 "
+           "줄었음(2026-11-22). 휴대폰이 있어야 하는 구간 수는 새 "
+           "값을 두지 않고 같은 값 묶음의 상황 값 min_events를 다시 씀: 세 상황 태그가 근거 사건 수로 쓰는 값과 같은 "
+           "규칙이고, 그 값의 출처 표시는 값 묶음 파일에, 이 읽기의 표시는 비전 README '휴대폰 입력'에 있음", "frames")
+
     # --- runners (replay.py, live.py) -------------------------------------------------------------------------
     segment_s: float = _p(
         1.0, f"계약 sendFeatureWindow의 '1~3초 구간' 안에서 고른 {PILOT} 값: 창 결과 한 줄의 간격이자 터치 횟수 · "
@@ -236,7 +251,7 @@ class PilotParams:
                         or value <= 0:
                     raise ValueError(f"PilotParams.{f.name} must be a finite number > 0, got {value!r}")
                 if f.name in ("head_score_min", "head_nms_iou", "track_iou_min", "aid_score_min",
-                              "aid_nms_iou", "aid_use_min") and value > 1:
+                              "aid_nms_iou", "aid_use_min", "phone_score_min", "phone_nms_iou") and value > 1:
                     raise ValueError(f"PilotParams.{f.name} is a score / IoU and must be at most 1, got {value!r}")
 
     @staticmethod

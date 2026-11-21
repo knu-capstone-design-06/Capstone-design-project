@@ -11,7 +11,9 @@ states when measurable=true. Sensor measurability and the pipeline version are p
   support           {preset, requires_confirmation, decided_by}: UIPreset and the confirmation flag of the rule table's
                     support (JP 2-5 table); decided_by 'rule_placeholder' (shadow mode: Jev never changes the screen)
   extension         {measurement: {measurable, basis}, model_version, situation: {...}, decision_meta: {...}};
-                    measurement follows the team placeholder (a tap or back in the segment, or a face).
+                    measurement follows the team placeholder (a tap or back in the segment, or a face); with the
+                    scene tag phone_use true (3-2's phone path, only with the phone detector) basis adds that the 3-2
+                    wait alone may open or keep its hold_timer in the window.
                     situation.tags carries the scene tags (name, status, unknown_reason, evidence ids).
                     decision_meta also carries the execution fields of
                     JP 2-5 (steps_left, target_id, message_id) and session_signal ({name: hold_timer} on the 3-2 wait)
@@ -20,17 +22,22 @@ from __future__ import annotations
 
 MODEL_VERSION = "vision-situation-rules_v1+rule_table_v0-shadow"
 DECIDED_BY = "rule_placeholder"     # contract SupportDecision.decided_by enum: rule_placeholder | jev
+BASIS = "A tap or back in the segment, or a face seen in the segment (team placeholder)."
+BASIS_PHONE = ("A tap or back in the segment, or a face seen in the segment (team placeholder). The scene tag "
+               "phone_use is true (the main user's phone seen, no touch, body still): the 3-2 wait alone may open or "
+               "keep its hold_timer in this window.")
 
 
 def to_contract(record: dict, session_id: str) -> dict:
     d = record["decision"]
     sit = record["situation"]
+    phone = any(t.get("name") == "phone_use" and t.get("status") is True for t in sit.get("tags", []))
     return {
         "support": {"preset": d["preset"], "requires_confirmation": bool(d["requires_confirmation"]),
                     "decided_by": DECIDED_BY},
         "extension": {
             "measurement": {"measurable": bool(record["measurable"]),
-                            "basis": "A tap or back in the segment, or a face seen in the segment (team placeholder)."},
+                            "basis": BASIS_PHONE if phone else BASIS},
             "model_version": MODEL_VERSION,
             "situation": {"tag": sit["name"], "display_text": sit["display_text"], "evidence_ids": sit["evidence_ids"],
                           "confidence": sit["confidence"], "alternatives": sit["alternatives"],

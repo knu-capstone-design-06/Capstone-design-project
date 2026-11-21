@@ -176,6 +176,23 @@ class ParamsTests(unittest.TestCase):   # plain Python: runs with the server pac
             with self.assertRaises(ValueError, msg=repr(bad)):
                 PilotParams(**bad)
 
+    def test_phone_detector_values_are_the_yolox_demos(self):
+        from app.modules.vision.params import PilotParams
+        p = PilotParams()
+        self.assertEqual((p.phone_score_min, p.phone_nms_iou), (0.3, 0.45))
+        for name in ("phone_score_min", "phone_nms_iou"):
+            source = PilotParams.sources()[name]
+            self.assertTrue(source.startswith("관행값"), name)
+            self.assertNotIn(name, PilotParams.pilot_fields())
+            with self.assertRaises(ValueError):
+                PilotParams(**{name: 1.5})
+        self.assertIn("onnx_inference.py", PilotParams.sources()["phone_score_min"])
+        self.assertEqual(p.phone_every, 1)                       # every processed frame, as the head detector
+        self.assertNotIn("phone_every", PilotParams.pilot_fields())
+        for bad in (0, 2.5, True):
+            with self.assertRaises(ValueError):
+                PilotParams(phone_every=bad)
+
     def test_values_are_checked(self):
         from app.modules.vision.params import PilotParams
         for bad in ({"segment_s": 0}, {"head_score_min": 1.5}, {"tremor_miss_min": 0}, {"tremor_miss_min": 2.5},
@@ -326,6 +343,38 @@ class HeadPostprocessTests(unittest.TestCase):
             custom_metadata_map={"classes": json.dumps(["head"])})})
         with self.assertRaises(ValueError):
             AidDetector("stub.onnx", 0.01, 0.65, session=bad)
+
+    def test_phone_detector_keeps_the_cell_phone_boxes_of_the_demo_postprocess_with_a_stub_session(self):
+        """The phone detector (optional input): each box takes its best COCO class (objectness x class score), the
+        boxes below score_min go, one class-agnostic NMS, then only 'cell phone' boxes stay."""
+        import numpy as np
+        from app.inference.phone import COCO_CLASSES, PHONE, PhoneDetector
+        self.assertEqual((len(COCO_CLASSES), COCO_CLASSES.index(PHONE), COCO_CLASSES[0]), (80, 67, "person"))
+        raw = np.zeros((1, 3549, 85), np.float32)
+
+        def anchor(k, dx, obj, scores):
+            raw[0, k, :5] = [dx, 0.5, math.log(2.0), math.log(3.0), obj]
+            for c, s in scores.items():
+                raw[0, k, 5 + COCO_CLASSES.index(c)] = s
+        anchor(10, 0.5, 0.9, {PHONE: 0.8, "remote": 0.1})       # a phone, 0.72
+        anchor(11, -0.5, 0.9, {PHONE: 0.5})                      # the same place, lower: removed by the NMS
+        anchor(200, 0.5, 0.9, {"remote": 0.6, PHONE: 0.5})       # best class remote: not a phone box
+        anchor(300, 0.5, 0.9, {PHONE: 0.3})                      # 0.27 < 0.3: dropped
+        anchor(400, 0.5, 0.9, {"person": 0.9})                   # a person: not kept
+        anchor(20, 0.5, 0.9, {"remote": 0.95})                   # a remote, 0.855, and at the same place ...
+        anchor(21, -0.5, 0.9, {PHONE: 0.7})                      # ... a phone, 0.63: the class-agnostic NMS removes it
+        session = SimpleNamespace(
+            get_inputs=lambda: [SimpleNamespace(name="images", shape=[1, 3, 416, 416])],
+            get_outputs=lambda: [SimpleNamespace(shape=[1, 3549, 85])], run=lambda _o, feed: [raw])
+        det = PhoneDetector("stub.onnx", score_min=0.3, nms_iou=0.45, session=session)
+        phones = det(np.zeros((480, 640, 3), np.uint8))          # r = 0.65
+        self.assertEqual(len(phones), 1)
+        self.assertAlmostEqual(phones.scores[0], 0.72, places=5)
+        cx, cy, w, h = 84.0 / 0.65, 4.0 / 0.65, 16.0 / 0.65, 24.0 / 0.65
+        self.assertTrue(np.allclose(phones.boxes[0], [(cx - w / 2) / 640, 0.0, (cx + w / 2) / 640, (cy + h / 2) / 480]))
+        bad = SimpleNamespace(**{**vars(session), "get_outputs": lambda: [SimpleNamespace(shape=[1, 3549, 6])]})
+        with self.assertRaises(ValueError):
+            PhoneDetector("stub.onnx", 0.3, 0.45, session=bad)
 
 
 @unittest.skipUnless(HAS_ORT and os.path.isfile(H1_PATH) and os.path.isfile(P1_PATH),
@@ -956,6 +1005,71 @@ class ColumnsTests(unittest.TestCase):
         self.assertEqual(aid_columns(aids, None, (0.40, 0.10, 0.60, 0.30))["aid_owner"], "yes")   # head-box centre
         self.assertEqual(aid_columns(aids, None, None)["aid_owner"], "unknown")
 
+    def test_phone_columns_tie_the_phone_to_the_main_users_head_or_hand(self):
+        """A phone box meeting the main user's head box is 'head' unless another head box overlaps it more; one meeting
+        a box spanned by a hand's pose points of the main user (its nose in the head box) is 'hand'; a phone elsewhere
+        is 'no'; without the head box, or with someone else's pose (or no finite hand point) and a phone not at the
+        head, it cannot be told."""
+        import numpy as np
+        from app.inference.phone import Phones
+        from app.modules.vision.columns import phone_columns
+
+        def phones(*boxes):
+            return Phones(np.array(boxes, float).reshape(-1, 4), np.array([0.5 + 0.1 * i for i in range(len(boxes))]),
+                          (100, 100))
+        head = (0.40, 0.10, 0.60, 0.30)
+        pose = np.full((33, 4), np.nan)
+        pose[0, :2] = (0.50, 0.20)                                # nose in the head box: the main user's pose
+        for k, xy in zip((15, 17, 19, 21), ((0.30, 0.60), (0.28, 0.58), (0.29, 0.56), (0.32, 0.57))):
+            pose[k, :2] = xy                                      # the left hand around (0.30, 0.58)
+        ear = (0.58, 0.15, 0.66, 0.28)                            # beside the head, overlapping its edge
+        held = (0.31, 0.50, 0.40, 0.57)                           # touching the hand box
+        away = (0.80, 0.80, 0.90, 0.90)
+        out = phone_columns(phones(ear), pose, head)
+        self.assertEqual((out["phone_owner"], out["phone_at"], out["phone_count"]), ("yes", "head", 1))
+        out = phone_columns(phones(held, away), pose, head)
+        self.assertEqual((out["phone_owner"], out["phone_at"], out["phone_box"]), ("yes", "hand", held))
+        self.assertAlmostEqual(out["phone_score"], 0.5)
+        self.assertEqual(phone_columns(phones(away), pose, head)["phone_owner"], "no")
+        self.assertEqual(phone_columns(phones(), None, head)["phone_owner"], "no")             # no phone at all
+        self.assertEqual(phone_columns(phones(held), pose, None)["phone_owner"], "unknown")    # no head box
+        other = pose.copy()
+        other[0, :2] = (0.85, 0.20)                               # the pose's nose outside: someone else's pose
+        self.assertEqual(phone_columns(phones(held), other, head)["phone_owner"], "unknown")
+        self.assertEqual(phone_columns(phones(ear), other, head)["phone_at"], "head")         # the head box still tells
+        self.assertEqual(phone_columns(phones(away), other, head)["phone_owner"], "unknown")
+        no_hands = pose.copy()
+        no_hands[15:23, :2] = np.nan                              # the main user's pose without one finite hand point
+        self.assertEqual(phone_columns(phones(away), no_hands, head)["phone_owner"], "unknown")   # nothing checked
+        # several heads: a phone meeting the main user's head box is the main user's only when no other head box of
+        # the frame overlaps it more (box_iou); the companion's phone at the companion's ear is not the main user's
+        main = {"cx": 0.50, "cy": 0.20, "w": 0.20, "h": 0.20, "role": "primary"}
+        beside = {"cx": 0.71, "cy": 0.21, "w": 0.18, "h": 0.18, "role": "companion"}     # (0.62, 0.12, 0.80, 0.30)
+        far = {"cx": 0.90, "cy": 0.80, "w": 0.10, "h": 0.10, "role": "behind"}
+        out = phone_columns(phones(ear), pose, head, [main, beside])   # ear box: IoU 0.05 with main, 0.10 beside
+        self.assertEqual((out["phone_owner"], out["phone_at"]), ("no", None))
+        self.assertEqual(phone_columns(phones(ear), other, head, [main, beside])["phone_owner"], "no")   # checked
+        self.assertEqual(phone_columns(phones(ear), pose, head, [main, far])["phone_at"], "head")   # no rival head
+        self.assertEqual(phone_columns(phones(ear), pose, head, [])["phone_at"], "head")
+        out = phone_columns(phones(ear, held), pose, head, [main, beside])   # the user's own phone in the hand stays
+        self.assertEqual((out["phone_owner"], out["phone_at"], out["phone_box"]), ("yes", "hand", held))
+        big = (0.30, 0.10, 0.55, 0.45)                            # the main user near: a large head box ...
+        small = {"cx": 0.63, "cy": 0.23, "w": 0.12, "h": 0.16, "role": "companion"}   # ... and a small one beside
+        call = (0.52, 0.20, 0.58, 0.32)                           # share of the phone box: main 0.50, beside 0.15
+        out = phone_columns(phones(call), None, big, [dict(main, cx=0.425, cy=0.275, w=0.25, h=0.35), small])
+        self.assertEqual((out["phone_owner"], out["phone_at"]), ("yes", "head"))   # (IoU would favour the small head)
+        edge = (0.60, 0.15, 0.66, 0.28)                           # touches the main head box's edge only: no area
+        self.assertEqual(phone_columns(phones(edge), pose, head, [main, far])["phone_at"], "head")   # tie: main user
+        left = {"cx": 0.30, "cy": 0.20, "w": 0.20, "h": 0.20, "role": "primary"}         # main (0.20, 0.10, 0.40, 0.30)
+        right = {"cx": 0.70, "cy": 0.20, "w": 0.20, "h": 0.20, "role": "companion"}      # (0.60, 0.10, 0.80, 0.30)
+        reach = pose.copy()
+        reach[0, :2] = (0.30, 0.20)                               # the main user's nose in the left head box
+        for k, xy in zip((15, 17, 19, 21), ((0.55, 0.26), (0.62, 0.30), (0.58, 0.28), (0.56, 0.29))):
+            reach[k, :2] = xy                                     # a hand near the companion's ear
+        companion_call = (0.58, 0.14, 0.64, 0.28)                 # at the companion's head, not at the main head
+        out = phone_columns(phones(companion_call), reach, (0.20, 0.10, 0.40, 0.30), [left, right])
+        self.assertEqual((out["phone_owner"], out["phone_at"]), ("no", None))   # another head holds it: not a hand
+
     def test_aid_columns_use_the_shoulders_only_when_they_are_the_main_users(self):
         """One pose per frame, not always the main user's. Shoulders under another person's box give way to the main
         user's head box; with the head detector on and no main-user box in the frame there is no anchor."""
@@ -1503,6 +1617,60 @@ class RuleTableTests(unittest.TestCase):   # plain Python: runs with the server 
         self.assertEqual(state.held.decision_id, d4.decision_id)
         self.assertEqual(d1.to_dict()["session_signal"], {"name": "hold_timer"})
 
+    def test_3_2_phone_path_ranks_with_the_other_rows(self):
+        """The phone path opens the same rank-2 wait as the companion: it wins over a 3-1 row in the same window,
+        replaces a held 4-2 highlight (which comes back after the touch ends the wait) and a held 4-1 ask (JP 0-3 ⑤);
+        with both paths the cues name both."""
+        def phone(name="none", tags=True):
+            return {**sit(name), "tags": [{"name": "phone_use", "status": tags}]}
+        (d,), _ = self.run_windows([win(situation=phone("looking_back_with_people_behind"), screen="menu",
+                                        steps_left=2)])
+        self.assertEqual((d.transition, d.scene, d.cues), ("open", "3-2", {"tag": "looking_back_with_people_behind",
+                                                                         "path": "phone_use"}))
+        (d,), _ = self.run_windows([win(situation=phone("consulting_companion"))])
+        self.assertEqual(d.cues, {"tag": "consulting_companion", "path": "phone_use"})
+        (d,), _ = self.run_windows([win(situation=phone("consulting_companion", tags="unknown"))])
+        self.assertEqual(d.cues, {"tag": "consulting_companion"})   # an unknown phone_use is no path
+        lost = dict(screen="menu", steps_left=2, backs_recent=1)
+        (h1, w1, w2, h2), _ = self.run_windows([
+            win(10, situation=sit("none", 0), **lost), win(11, situation=phone(), **lost),
+            win(12, situation=sit("none", 0), taps_segment=1, **lost), win(13, situation=sit("none", 0), **lost)])
+        self.assertEqual([(d.transition, d.scene) for d in (h1, w1, w2, h2)],
+                         [("open", "4-2"), ("replace", "3-2"), ("withdraw", None), ("open", "4-2")])
+        ask = dict(screen="menu", steps_left=2, gaze=True, fixes_recent=self.p.tremor_miss_min, misses_recent=0)
+        (a1, w1), state = self.run_windows([win(10, situation=sit("none", 0), **ask), win(11, situation=phone(), **ask)])
+        self.assertEqual([(d.transition, d.scene) for d in (a1, w1)], [("open", "4-1"), ("replace", "3-2")])
+        self.assertEqual(state.held.support, "wait_hold_timer")
+
+    def test_3_2_phone_path_counts_for_the_wait_only_in_a_window_that_is_not_measurable(self):
+        """A window not measurable by the placeholder (no touch, no face) with phone_use true opens or keeps the 3-2
+        wait (hold_timer) and nothing else: with the wait refused, a 9-s pause after choosing opens no 4-2 there; a
+        true scene tag other than phone_use changes nothing."""
+        R = self.R
+
+        def phone(status=True, name="phone_use"):
+            return {**sit("none", 0), "tags": [{"name": name, "status": status}]}
+        pause = dict(screen="menu", steps_left=2, pause_s=self.p.lost_pause_s + 1.0)
+        (d1, d2), state = self.run_windows([win(5.0, measurable=False, situation=phone()),
+                                            win(6.0, measurable=False, situation=phone())])
+        self.assertEqual((d1.transition, d1.support, d1.session_signal), ("open", "wait_hold_timer",
+                                                                          {"name": "hold_timer"}))
+        self.assertEqual((d2.transition, d2.session_signal), ("keep", {"name": "hold_timer"}))
+        state = R.react(state, "refuse", d1.decision_id)
+        self.assertIn("wait_hold_timer", state.refused)
+        (d3,), _ = self.run_windows([win(20.0, measurable=False, situation=phone(), **pause)], state)
+        self.assertEqual((d3.transition, d3.support), ("none", None))       # no 4-2 in a phone-only window
+        (d4,), _ = self.run_windows([win(20.0, measurable=True, situation=phone(), **pause)], state)
+        self.assertEqual((d4.transition, d4.scene), ("open", "4-2"))         # measurable: the 4-2 row runs
+        (h, k), _ = self.run_windows([win(5.0, measurable=True, situation=phone()),
+                                      win(6.0, measurable=False, situation=phone(True, "aid_use"))])
+        self.assertEqual((k.transition, k.session_signal), ("keep", None))   # another tag: not measurable
+        (d5,), _ = self.run_windows([win(5.0, measurable=False, situation=phone(True, "aid_use"), **pause)])
+        self.assertEqual(d5.transition, "none")
+        (q, w), _ = self.run_windows([win(5.0, situation=sit("none", 0), backs_recent=1, screen="menu", steps_left=2),
+                                      win(6.0, measurable=False, situation=phone(), screen="menu", steps_left=2)])
+        self.assertEqual([(d.transition, d.scene) for d in (q, w)], [("open", "4-2"), ("replace", "3-2")])
+
     def test_a_kept_decision_keeps_its_content(self):
         lost = dict(situation=sit("none", 0), screen="menu", steps_left=2, backs_recent=1)
         (d1, d2), state = self.run_windows([win(10, **lost), win(11, **lost)])
@@ -1721,6 +1889,31 @@ class WindowJudgeTests(unittest.TestCase):
         self.assertTrue(gaze(rows_of([(3, {"yaw_deg": 5.0})], [(2, nothing)]), sp))   # the last frame seeing anyone
         self.assertIsNone(gaze(rows_of(facing(3)), None))                          # no situation values
 
+    def test_away_from_screen_reads_the_gaze_gate_or_a_head_box_without_a_face(self):
+        """phone_use's hand path: away = the gaze gate says away, or the segment has rows with the main user's head box
+        and none of them shows the main user's face (the camera above the screen); not away when one of them shows it;
+        unknown only without the head box. face_in_primary read back from rows.csv ('True' / 'False') reads as in
+        memory."""
+        from app.modules.vision.chain import away_from_screen as away
+        sp = sit_params()                                          # offscreen_yaw_deg 30 (test value)
+        box = (0.38, 0.22, 0.62, 0.58)
+        face_lost = {"face_state": NOT_SEEN, "yaw_deg": NAN, "face_cx": NAN}      # the body is still seen
+        self.assertFalse(away(rows_of([(3, {"yaw_deg": 10.0, "primary_box": box})]), sp))   # facing the screen
+        self.assertTrue(away(rows_of([(3, {"yaw_deg": -45.0})]), sp))                       # the gaze gate: away
+        self.assertTrue(away(rows_of(facing(3), [(2, {**face_lost, "primary_box": box})]), sp))   # head, no face
+        self.assertIsNone(away(rows_of(facing(3), [(2, face_lost)]), sp))                    # no head box: unknown
+        self.assertIsNone(away(rows_of(facing(3), [(2, {**face_lost, "primary_box": None})]), sp))
+        for other in (False, "False"):                            # someone else's face, in memory and read back
+            row = {"yaw_deg": NAN, "face_in_primary": other, "primary_box": box}
+            self.assertTrue(away(rows_of(facing(3), [(2, row)]), sp), other)
+        for mine in (True, "True"):
+            self.assertFalse(away(rows_of([(3, {"yaw_deg": NAN, "face_in_primary": mine, "primary_box": box})]), sp))
+        head_only = {**face_lost, "body_state": NOT_SEEN, "primary_box": box}
+        self.assertFalse(away(rows_of([(3, {"yaw_deg": 10.0, "primary_box": box})], [(1, head_only)]), sp))
+        missed = rows_of([(9, {"yaw_deg": 0.0, "primary_box": box})], [(1, {**face_lost, "primary_box": box})])
+        self.assertFalse(away(missed, sp))                          # one missed face frame while reading the screen
+        self.assertIsNone(away(rows_of(facing(3)), None))                                  # no situation values
+
     def test_pause_counts_only_after_a_press_on_this_screen_visit(self):
         from app.modules.vision.chain import WindowJudge
         from app.modules.vision.touch import load_timeline
@@ -1749,7 +1942,7 @@ class WindowJudgeTests(unittest.TestCase):
         rec = WindowJudge(bundle(seated_face_cy_min=0.6, approach_ratio_min=1.2)).evaluate(rows, 2.9)
         self.assertEqual({t["name"]: t["status"] for t in rec["situation"]["tags"]},
                          {"seated_height": True, "face_approach": False, "user_changed": "unknown", "none_seen": False,
-                          "aid_use": "unknown"})
+                          "aid_use": "unknown", "phone_use": "unknown"})
         ext = rec["contract"]["extension"]["situation"]["tags"]
         self.assertEqual([t["name"] for t in ext], list(SCENE_TAGS))
         self.assertEqual((ext[0]["status"], ext[0]["unknown_reason"]), (True, None))
@@ -1762,7 +1955,7 @@ class WindowJudgeTests(unittest.TestCase):
         self.assertEqual(WindowJudge(bundle(situation=False)).evaluate(rows, 2.9)["situation"]["tags"], [])
         self.assertEqual(set(SCENE_OF_TAG), set(TAGS) | set(SCENE_TAGS))
         self.assertEqual([SCENE_OF_TAG[n] for n in SCENE_TAGS],
-                         ["wheelchair", "lowvision", "newcustomer", "absence", "aid"])
+                         ["wheelchair", "lowvision", "newcustomer", "absence", "aid", "busy"])
 
     def test_the_window_record_lists_its_head_turns_with_the_loss_context(self):
         """'turns' = the window's look_back / yaw_sweep_offscreen events and their observations; the pre-loss head
@@ -2120,6 +2313,102 @@ class FrameChainTests(unittest.TestCase):
         tags = WindowJudge(bundle()).evaluate(rows, 0.2)["situation"]["tags"]
         self.assertEqual({t["name"]: t["unknown_reason"] for t in tags}["aid_use"], "column:aid_owner")
 
+    def test_the_phone_input_opens_the_3_2_wait_through_the_phone_path(self):
+        """The phone input is off by default (columns absent, phone_use unknown); with it, a phone in the main user's
+        hand in every segment while the user looks away from the screen, no touch and the body still make phone_use
+        true, and the rule table opens the 3-2 wait through that path. A touch in the window rules the path out, and so
+        does facing the screen. Looking down at the phone loses the face while the head box stays: away from the
+        screen, the wait opens; without the head box as well the direction cannot be told (unknown). A phone at the
+        head (a call) needs no direction, and its window is measurable with the face lost: the wait opens and keeps its
+        hold_timer there (the window stays not measurable for every other row)."""
+        import numpy as np
+        from app.inference.phone import Phones
+        from app.modules.vision.chain import FrameChain, WindowJudge
+        from app.modules.vision.columns import PHONE_COLUMNS
+        from app.modules.vision.params import PilotParams
+
+        def inference(yaw=40.0, face=True):                      # 40 deg: beyond offscreen_yaw_deg 30, looking away
+            inf = fake_inference(yaw=yaw, face=face)
+            inf.pose[0, :2] = (0.50, 0.40)                       # nose inside the fake head box
+            for k in (15, 17, 19, 21):
+                inf.pose[k, :2] = (0.45, 0.80)                   # one hand at the chest
+            return inf
+
+        def fake_phones(img):
+            return Phones(np.array([[0.40, 0.70, 0.48, 0.82]]), np.array([0.6]), (img.shape[1], img.shape[0]),
+                          {"infer": 0.0})
+        off = FrameChain(FakeModels([inference()]), PilotParams(), FakeHeads()).process(frames(1)[0])
+        self.assertFalse(set(PHONE_COLUMNS) & set(off))
+        chain = FrameChain(FakeModels([inference() for _ in range(60)]), PilotParams(phone_every=5), FakeHeads(),
+                           phones=fake_phones)
+        rows = [chain.process(f) for f in frames(60)]
+        self.assertEqual((rows[55]["phone_owner"], rows[55]["phone_at"]), ("yes", "hand"))   # phone_every 5: 0, 5, ...
+        self.assertGreaterEqual(rows[55]["ms_phones"], 0.0)
+        self.assertEqual(({rows[k]["phone_owner"] for k in (56, 57, 58, 59)}, rows[59]["ms_phones"]), ({None}, None))
+        every = FrameChain(FakeModels([inference() for _ in range(3)]), PilotParams(phone_every=1), FakeHeads(),
+                           phones=fake_phones)
+        self.assertEqual([every.process(f)["phone_owner"] for f in frames(3)], ["yes"] * 3)
+
+        def rival(img):     # meets the main user's head box (0.38-0.62) but overlaps the head behind (0.10-0.16) more
+            return Phones(np.array([[0.12, 0.21, 0.40, 0.30]]), np.array([0.6]), (img.shape[1], img.shape[0]),
+                          {"infer": 0.0})
+        row = FrameChain(FakeModels([inference()]), PilotParams(), FakeHeads(behind=True), phones=rival).process(
+            frames(1)[0])
+        self.assertEqual((len(row["head_boxes"]), row["phone_owner"]), (2, "no"))   # the chain passes every head box
+
+        def phone_tag(rec):
+            return {t["name"]: (t["status"], t["unknown_reason"]) for t in rec["situation"]["tags"]}["phone_use"]
+
+        def quiet(rows):
+            return [dict(r, tap_count=0, miss_tap_count=0) for r in rows]
+        rec = WindowJudge(bundle()).evaluate(rows, 5.9)
+        self.assertEqual(phone_tag(rec), ("unknown", "column:tap_count"))   # no touch count: cannot tell
+        still = quiet(rows)
+        rec = WindowJudge(bundle()).evaluate(still, 5.9)
+        self.assertEqual(phone_tag(rec), (True, None))
+        self.assertEqual((rec["decision"]["support"], rec["decision"]["transition"]), ("wait_hold_timer", "open"))
+        self.assertEqual(rec["decision"]["cues"]["path"], "phone_use")
+        self.assertEqual(rec["decision"]["session_signal"], {"name": "hold_timer"})
+        still[55]["tap_count"] = 1
+        self.assertEqual(phone_tag(WindowJudge(bundle()).evaluate(still, 5.9)), (False, None))
+
+        def run(schedule, phones=fake_phones):
+            chain = FrameChain(FakeModels(schedule), PilotParams(), FakeHeads(), phones=phones)
+            return quiet([chain.process(f) for f in frames(len(schedule))])
+        facing = run([inference(yaw=0.0) for _ in range(60)])     # holding the phone while reading the screen
+        rec = WindowJudge(bundle()).evaluate(facing, 5.9)
+        self.assertEqual((phone_tag(rec), rec["decision"]["support"]), ((False, None), None))
+        lost = run([inference(face=k < 45) for k in range(60)])  # looking down: the face lost from 4.5 s, head kept
+        rec = WindowJudge(bundle()).evaluate(lost, 5.9)
+        self.assertEqual((phone_tag(rec), rec["decision"]["support"]), ((True, None), "wait_hold_timer"))
+        chain = FrameChain(FakeModels([inference(face=k < 45) for k in range(60)]), PilotParams(),
+                           ScheduledHeads([[[0.38, 0.22, 0.62, 0.58]]] * 50 + [[]] * 10), phones=fake_phones)
+        no_head = quiet([chain.process(f) for f in frames(60)])  # the head box missing too in the last segment
+        self.assertEqual(phone_tag(WindowJudge(bundle()).evaluate(no_head, 5.9)), ("unknown", "gaze_unknown"))
+        missed = run([inference(yaw=0.0, face=k != 59) for k in range(60)])   # reading; one face frame missed
+        rec = WindowJudge(bundle()).evaluate(missed, 5.9)
+        self.assertEqual((phone_tag(rec), rec["decision"]["support"]), ((False, None), None))
+
+        def call(img):                                           # a phone at the main user's head box (a call)
+            return Phones(np.array([[0.55, 0.30, 0.66, 0.45]]), np.array([0.6]), (img.shape[1], img.shape[0]),
+                          {"infer": 0.0})
+        on_call = run([inference(face=k < 45) for k in range(60)], call)
+        self.assertEqual(on_call[50]["phone_at"], "head")
+        rec = WindowJudge(bundle()).evaluate(on_call, 5.9)       # no face in the last segment (4.9, 5.9]
+        self.assertEqual((phone_tag(rec), rec["measurable"]), ((True, None), False))   # placeholder: not measurable
+        self.assertEqual((rec["decision"]["support"], rec["decision"]["transition"]), ("wait_hold_timer", "open"))
+        self.assertIn("phone_use", rec["contract"]["extension"]["measurement"]["basis"])
+        judge = WindowJudge(bundle())
+        first, second = judge.evaluate(on_call, 4.9), judge.evaluate(on_call, 5.9)   # open with the face, then lost
+        self.assertEqual((first["decision"]["transition"], second["decision"]["transition"]), ("open", "keep"))
+        self.assertEqual(second["decision"]["session_signal"], {"name": "hold_timer"})   # the hold timer stays held
+        gone = [dict(r) for r in on_call]
+        for r in gone[20:]:                                     # two of six segments with the phone: < 3
+            r.update(dict.fromkeys(PHONE_COLUMNS), phone_owner="no")   # the phone is no longer seen
+        rec = WindowJudge(bundle()).evaluate(gone, 5.9)
+        self.assertEqual((rec["measurable"], rec["decision"]["transition"]), (False, "none"))   # placeholder again
+        self.assertNotIn("phone_use", rec["contract"]["extension"]["measurement"]["basis"])
+
     def test_the_aid_input_is_off_by_default_and_fills_its_columns_when_given(self):
         import numpy as np
         from app.inference.aid import Aids
@@ -2467,6 +2756,46 @@ class ReplayWithFakePerceptionTests(unittest.TestCase):
             again = judge.evaluate(back, rec["t"], segment_s=(rec.get("partial") or {}).get("segment_s"))
             self.assertEqual([(t["name"], t["status"], t["unknown_reason"]) for t in again["situation"]["tags"]],
                              [(t["name"], t["status"], t["unknown_reason"]) for t in rec["situation"]["tags"]], rec["t"])
+
+    def test_rows_csv_read_back_keeps_the_phone_columns_and_events(self):
+        """With the phone input, rows.csv read back gives the same phone_use tag and phone events as the windows the
+        replay judged in memory: every phone column is written (a missing phone_at would keep the 'yes' states and lose
+        every phone event)."""
+        import numpy as np
+        from app.inference.phone import Phones
+        from app.modules.vision.chain import WindowJudge
+        from app.modules.vision.replay import run_replay
+        from app.modules.vision.tools.companion_eval import row_from_csv
+
+        def inference():
+            inf = fake_inference(yaw=40.0)
+            inf.pose[0, :2] = (0.50, 0.40)                       # nose inside the fake head box
+            for k in (15, 17, 19, 21):
+                inf.pose[k, :2] = (0.45, 0.80)                   # one hand at the chest
+            return inf
+
+        def fake_phones(img):
+            return Phones(np.array([[0.40, 0.70, 0.48, 0.82]]), np.array([0.6]), (img.shape[1], img.shape[0]),
+                          {"infer": 0.0})
+        folder = tempfile.mkdtemp()
+        out = os.path.join(folder, "out")
+        b = bundle()
+        run_replay(frames(30), out, b, models=FakeModels([inference() for _ in range(30)]), detector=FakeHeads(),
+                   phones=fake_phones, session_id="t")
+        with open(os.path.join(out, "windows.jsonl"), encoding="utf-8") as f:
+            recs = [json.loads(line) for line in f]
+        with open(os.path.join(out, "rows.csv"), encoding="utf-8-sig", newline="") as f:
+            back = [row_from_csv(r) for r in csv.DictReader(f)]
+        self.assertEqual({(r["phone_owner"], r["phone_at"]) for r in back}, {("yes", "hand")})
+
+        def phone(rec):
+            tag = {t["name"]: t for t in rec["situation"]["tags"]}["phone_use"]
+            return tag["status"], tag["unknown_reason"], sorted(e["event_id"] for e in tag["evidence"])
+        self.assertTrue(any(phone(rec)[2] for rec in recs))      # the in-memory windows hold phone events
+        judge = WindowJudge(b)
+        for rec in recs:
+            again = judge.evaluate(back, rec["t"], segment_s=(rec.get("partial") or {}).get("segment_s"))
+            self.assertEqual(phone(again), phone(rec), rec["t"])
 
     def test_load_aids_is_off_without_a_file_and_names_a_missing_one(self):
         from app.modules.vision.params import PilotParams

@@ -187,8 +187,9 @@ CHANGE_COLUMNS = ("main_user_prev_track", "main_user_gap_s", "main_user_body_kep
                   "main_user_new_h", "main_user_h_ratio", "main_user_new_was_role", "main_user_new_rel_dist",
                   "main_user_new_growth", "main_user_reacquired", "main_user_prev_settled", "main_user_new_start_s",
                   "main_user_start_shift", "main_user_start_size", "main_user_stitched", "main_user_body_gap_s")
-OPTIONAL_COLUMNS = HEAD_COLUMNS + CHANGE_COLUMNS + AID_COLUMNS + ("shoulder_cx", "shoulder_cy", "mouth_motion", "iod_ratio_user",
-                                                                   "head_ratio_user", "dpitch_user_deg")
+PHONE_COLUMNS = ("phone_owner", "phone_at", "phone_score", "phone_box", "phone_count")
+OPTIONAL_COLUMNS = HEAD_COLUMNS + CHANGE_COLUMNS + AID_COLUMNS + PHONE_COLUMNS + (
+    "shoulder_cx", "shoulder_cy", "mouth_motion", "iod_ratio_user", "head_ratio_user", "dpitch_user_deg")
 # features.COLUMNS that the Face Landmarker's face gives (its position, size, angles and the face box's image
 # statistics): blanked where that face is not the main user's (face_in_primary False). face_state, the face detector's
 # columns (face_count, face_det_score, det_box_w_frac) and the run counters stay.
@@ -495,6 +496,11 @@ def _track_id(value):
 
 SIZE_STEP_PX = 0.1   # storage step of FaceSizeRef, not a decision value: sizes are counted per 0.1 px, so a median
                      # read from the counts is within half a step (0.05 px) of the exact one (test on a long run)
+
+
+def blank_box(box) -> bool:
+    """A primary_box cell without a box: None, or the empty cell of a rows.csv read back."""
+    return box is None or box == ""
 
 
 def main_user_face(row: dict) -> bool:
@@ -875,6 +881,82 @@ def aid_columns(aids, pose, primary_box, head_detector: bool = False, person_min
                else "standing",
                aid_box=tuple(float(v) for v in aids.boxes[k]))
     return out
+
+
+NOSE = 0                                         # pose point 0 (nose) in the 33-point map [D3]
+HANDS = ((15, 17, 19, 21), (16, 18, 20, 22))     # left / right wrist, pinky, index, thumb [D3]
+
+
+def _meet(a, b) -> bool:
+    """Whether two boxes (x0, y0, x1, y1) share a point, edges included."""
+    return bool(a[0] <= b[2] and b[0] <= a[2] and a[1] <= b[3] and b[1] <= a[3])
+
+
+def _hand_boxes(pose, head) -> list | None:
+    """The main user's hand boxes (the box spanned by each hand's four points) when the pose is the main user's (its
+    nose lies in the main user's head box); None when there is no pose, it is someone else's, or no hand point of it is
+    finite (no hand could be checked)."""
+    if pose is None:
+        return None
+    pts = np.asarray(pose, dtype=np.float64)[:, :2]
+    if not np.isfinite(pts[NOSE]).all() or not inside(pts[NOSE], head):
+        return None
+    out = []
+    for hand in HANDS:
+        p = pts[list(hand)]
+        p = p[np.isfinite(p).all(axis=1)]
+        if len(p):
+            out.append((p[:, 0].min(), p[:, 1].min(), p[:, 0].max(), p[:, 1].max()))
+    return out or None                           # no finite hand point: the hands cannot be checked
+
+
+def phone_columns(phones, pose, primary_box, head_boxes=None) -> dict:
+    """PHONE_COLUMNS of one frame. phones = app.inference.phone.Phones; pose = the pose points (33 x 4) or None;
+    primary_box = the main user's head box or None; head_boxes = the frame's head_boxes entries (head_columns; None or
+    [] = no other head). A phone at a head belongs to the head box that holds the larger share of the phone box (the
+    intersection area over the phone box's area; a tie goes to the main user): it is the main user's ('head', at the
+    ear or in front of the face) when its box meets the main user's head box and no other head box holds more of it,
+    and another person's when another head box holds more of it, or holds some of it while it does not meet the main
+    user's head box. A phone at no head is the main user's when it meets a box spanned by one hand's pose points of the
+    main user ('hand'; the pose is the main user's when its nose lies in that head box). phone_owner 'yes' = such a phone; 'no' = the
+    head box is there and no phone box is in the frame, or every phone box was checked against the heads and the hands
+    ('no' also when the detector missed a phone it should have seen: it says 'no box at the main user', not that the
+    user has no phone); 'unknown' = no head box, or a phone away from the heads while the hands are not the main user's
+    or cannot be checked. phone_score / phone_box = the best such phone (the head first); phone_count = phone boxes in
+    the frame."""
+    out = dict.fromkeys(PHONE_COLUMNS)
+    out["phone_count"] = len(phones)
+    if primary_box is None:
+        out["phone_owner"] = "unknown"
+        return out
+    head = tuple(float(v) for v in primary_box)
+    others = [b for b in (_listed_box(h) for h in _head_boxes({"head_boxes": head_boxes}) if h.get("role") != "primary")
+              if b is not None]
+    at_head, away = [], []
+    for i in range(len(phones)):
+        box = tuple(float(v) for v in phones.boxes[i])
+        meets_main = _meet(box, head)
+        rival = max((_inter_area(box, o) for o in others), default=0.0)   # the same phone area divides every share
+        if meets_main and rival <= _inter_area(box, head):
+            at_head.append(i)                    # the main user's head holds the larger share (or ties)
+        elif not meets_main and rival <= 0.0:
+            away.append(i)                       # at no head: tried against the hands
+        # otherwise another person's head holds more of it: not the main user's
+    hands = _hand_boxes(pose, head)
+    in_hand = [] if hands is None else [i for i in away if any(_meet(phones.boxes[i], h) for h in hands)]
+    for where, chosen in (("head", at_head), ("hand", in_hand)):
+        if chosen:
+            k = max(chosen, key=lambda i: float(phones.scores[i]))
+            out.update(phone_owner="yes", phone_at=where, phone_score=float(phones.scores[k]),
+                       phone_box=tuple(float(v) for v in phones.boxes[k]))
+            return out
+    out["phone_owner"] = "no" if (not away or hands is not None) else "unknown"
+    return out
+
+
+def _inter_area(a, b) -> float:
+    """The intersection area of two boxes (x0, y0, x1, y1); 0 when they share no area."""
+    return max(0.0, min(a[2], b[2]) - max(a[0], b[0])) * max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
 
 
 def _box_area(box) -> float:

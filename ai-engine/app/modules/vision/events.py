@@ -104,7 +104,8 @@ class PilotParams:
     mouth_motion_min: float       # mouth_motion from which a frame counts as mouth moving
     body_still_max: float         # largest spread of the shoulder midpoint on either axis (fraction of width or
                                   # height): 'body still'
-    min_events: int               # k: a tag with fewer supporting events is 'unknown' (sem section 4, check rule 2)
+    min_events: int               # k: a tag with fewer supporting events is 'unknown' (sem section 4, check rule 2);
+                                  # situation.phone_use reuses it as the number of segment_s segments with the phone
     face_visible_min: float       # face-visible ratio below which the cues that need the face are missing
     track_conf_min: float         # body-tracked ratio below which the window counts as a sensor failure ('unknown')
 
@@ -451,7 +452,8 @@ def detect_events(rows: list, params: PilotParams, *, landmarker_num_faces: int,
 
 
 # --- the scene tags' measurements (situation.py SCENE_TAGS; 2026-11-22) ------------------------------------------
-SCENE_KINDS = ("face_height", "face_size", "main_user_changed", "nothing_seen", "aid_score")
+SCENE_KINDS = ("face_height", "face_size", "main_user_changed", "nothing_seen", "aid_score", "phone_at_head",
+               "phone_in_hand")
 
 
 def _main_face(row: dict) -> bool:
@@ -533,16 +535,20 @@ class SceneCues:
     aid_measured: bool = False   # every row carries aid_owner: the walking-aid detector ran
     aid_anchor_rows: int = 0     # rows where the main user's anchor (shoulders or head box) was known
     head_near_rows: int = 0      # main-user head-box rows left out of head_height as grown beyond head_approach_ratio_min
+    phone_measured: bool = False  # every row carries phone_owner: the phone detector ran
+    phone_segments: tuple = ()    # 'yes' | 'no' | 'unknown' per segment_s bin of the window (_phone_segments)
+    phone_head_segments: tuple = ()  # the same per bin for the phone at the main user's head only
 
     def of(self, *kinds: str) -> list:
         return [e for e in self.events if e["kind"] in kinds]
 
 
 def observe_scene(rows: list, window: tuple, approach_ratio_min: float | None = None,
-                  head_approach_ratio_min: float | None = None) -> SceneCues:
+                  head_approach_ratio_min: float | None = None, segment_s: float | None = None) -> SceneCues:
     """SceneCues of window = (t0, t1) from the rows inside it (rows after t1 are never read). approach_ratio_min = the
     face-approach boundary of the bundle, or None (then no row is left out of face_height); head_approach_ratio_min =
-    the head-box boundary, or None (then no row is left out of head_height)."""
+    the head-box boundary, or None (then no row is left out of head_height). segment_s = the runners' window step
+    (params.segment_s): the phone events are counted per segment; None = no phone segments."""
     rows, first = _split(rows, window)
     inside = rows[first:]
     events = []
@@ -600,6 +606,10 @@ def observe_scene(rows: list, window: tuple, approach_ratio_min: float | None = 
                              {"aid_any_median": statistics.median(_num(inside[i], "aid_any_score") for i in aid),
                               "rows": len(aid),
                               "owner_yes_rows": sum(inside[i].get("aid_owner") == "yes" for i in aid)}))
+    segments, head_segments = [], []
+    if segment_s is not None and inside:
+        segments, head_segments, phone_events = _phone_segments(inside, window, segment_s)
+        events += phone_events
     if inside and all(not _face(r) and not _body(r) and not (_num(r, "head_count") or 0) > 0
                       and not (_num(r, "aid_person_count") or 0) > 0 and not (_num(r, "face_count") or 0) > 0
                       for r in inside):
@@ -614,7 +624,40 @@ def observe_scene(rows: list, window: tuple, approach_ratio_min: float | None = 
                      head_measured=bool(inside) and all(_num(r, "head_count") is not None for r in inside),
                      aid_anchor_rows=sum(r.get("aid_owner") in ("yes", "no") for r in inside),
                      near_rows=sum(n and _face(r) and _num(r, "face_cy") is not None for n, r in zip(near, inside)),
-                     head_near_rows=len(boxed) - len(head))
+                     head_near_rows=len(boxed) - len(head),
+                     phone_measured=bool(inside) and all("phone_owner" in r for r in inside),
+                     phone_segments=tuple(segments), phone_head_segments=tuple(head_segments))
+
+
+def _phone_segments(inside: list, window: tuple, segment_s: float) -> tuple:
+    """(state per segment, head-only state per segment, phone events) of the window's segment_s bins
+    (t1 - (k+1) segment_s, t1 - k segment_s], newest first, as many as window_s / segment_s (rounded; the runners'
+    windows end on the segment grid, and every value bundle has window_s a whole multiple of segment_s: 3 s / 1 s; a
+    bundle that is not would get round(window_s / segment_s) bins). Only the rows the detector ran on count (a blank
+    phone_owner: not run on that frame, params.phone_every). 'yes' = such a row with the phone at the main user
+    (phone_owner 'yes'), 'no' = such rows and every one 'no', 'unknown' otherwise (no such row, or a row that cannot
+    tell). The head-only state reads the same rows for the phone at the head: 'yes' = such a row with phone_at 'head',
+    'no' = such rows, none at the head and every one known ('no', or 'yes' in the hand), 'unknown' otherwise. One event
+    per bin and place with such rows: phone_at_head (the box meets the head box: a call or the phone at the face),
+    phone_in_hand (the box meets a hand of the main user: looking at it below the face): rows, score_max."""
+    t0, t1 = window
+    states, head_states, events = [], [], []
+    for k in range(round((t1 - t0) / segment_s)):            # window_s / segment_s segments (3 s / 1 s: three)
+        lo, hi = t1 - (k + 1) * segment_s, t1 - k * segment_s
+        part = [i for i, r in enumerate(inside) if lo < _t(r) <= hi]
+        ran = [i for i in part if not _blank(inside[i].get("phone_owner"))]                    # rows it ran on
+        owners = [inside[i].get("phone_owner") for i in ran]
+        states.append("yes" if "yes" in owners else ("no" if owners and all(o == "no" for o in owners)
+                                                     else "unknown"))
+        at_head = [inside[i].get("phone_owner") == "yes" and inside[i].get("phone_at") == "head" for i in ran]
+        head_states.append("yes" if any(at_head) else ("no" if owners and all(o in ("yes", "no") for o in owners)
+                                                       else "unknown"))
+        for kind, where in (("phone_at_head", "head"), ("phone_in_hand", "hand")):
+            rows = [i for i in part if inside[i].get("phone_owner") == "yes" and inside[i].get("phone_at") == where]
+            if rows:
+                events.append(_event(kind, inside, rows, {"rows": len(rows), "score_max": max(
+                    (v for v in (_num(inside[i], "phone_score") for i in rows) if v is not None), default=None)}))
+    return states, head_states, events
 
 
 # --- what the rules read for one window --------------------------------------------------------------------------

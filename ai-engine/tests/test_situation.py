@@ -779,9 +779,11 @@ class SceneTagTests(unittest.TestCase):
         self.assertEqual(self.tags(out), {"seated_height": (UNKNOWN, "no_value_for_camera"),
                                           "face_approach": (UNKNOWN, "no_value"),
                                           "user_changed": (UNKNOWN, "column:primary_track"),
-                                          "none_seen": (False, None), "aid_use": (UNKNOWN, "column:aid_owner")})
+                                          "none_seen": (False, None), "aid_use": (UNKNOWN, "column:aid_owner"),
+                                          "phone_use": (UNKNOWN, "column:phone_owner")})
         self.assertEqual([t["display_text"] for t in out["tags"]],
-                         ["앉은 높이", "얼굴 접근", "사용자 교체 가능성", "카메라에 사람이 안 보임", "보조기구 사용 중"])
+                         ["앉은 높이", "얼굴 접근", "사용자 교체 가능성", "카메라에 사람이 안 보임", "보조기구 사용 중",
+                          "잠시 딴 일 중(휴대폰)"])
         self.assertEqual(check_output(out, events, P), [])
 
     def test_seated_height_and_face_approach_compare_window_medians(self):
@@ -848,7 +850,7 @@ class SceneTagTests(unittest.TestCase):
             self.assertEqual({k: v for k, v in out.items() if k != "tags"},
                              {k: v for k, v in plain.items() if k != "tags"})
             self.assertEqual(events, plain_events)
-            self.assertEqual([t["status"] for t in out["tags"]], [True, False, True, False, True])
+            self.assertEqual([t["status"] for t in out["tags"]], [True, False, True, False, True, UNKNOWN])
 
     def test_aid_use_reads_the_main_users_box_only_when_the_detector_ran(self):
         from app.modules.vision.situation import assess
@@ -889,6 +891,53 @@ class SceneTagTests(unittest.TestCase):
         self.assertEqual(self.tags(run(rows)[0])["user_changed"], (True, None))
         put(rows, 5, 5, main_user_stitched=True, main_user_reacquired=True)   # both: the stitch's time bound decides
         self.assertEqual(self.tags(run(rows)[0])["user_changed"], (False, None))
+
+    def test_phone_use_needs_the_phone_in_min_events_segments_no_touch_and_a_still_body(self):
+        """phone_use (3-2's phone path): the phone at the main user in at least min_events (3 here) of the window's
+        segment_s segments, no touch in the window, the body still; three-valued like the tags. The phone in the hand
+        counts only while the main user does not face the screen (away True); the phone at the head counts whatever
+        the head direction."""
+        from app.modules.vision.situation import assess
+        rows = rows_of(face(40), extra={**OPTIONAL, "phone_owner": "no", "phone_at": None, "phone_score": None})
+        t = rows[-1]["t_s"]                                      # 3.9 s; window 20 s holds four 1-s segments
+
+        def tag(rows, window_s=4.0, away=True):
+            out, _ = assess(rows, t, dataclasses.replace(P, window_s=window_s), landmarker_num_faces=1,
+                            segment_s=1.0, away=away)           # assess runs check_output with the scene events
+            return self.tags(out)["phone_use"], {t["name"]: t for t in out["tags"]}["phone_use"]["evidence"]
+        self.assertEqual(tag(rows)[0], (False, None))
+        put(rows, 5, 5, phone_owner="yes", phone_at="hand", phone_score=0.4)       # segment (-0.1, 0.9]
+        put(rows, 15, 15, phone_owner="yes", phone_at="head", phone_score=0.5)     # (0.9, 1.9]
+        self.assertEqual(tag(rows)[0], (False, None))            # two of four segments, < 3
+        put(rows, 25, 25, phone_owner="yes", phone_at="hand", phone_score=0.6)     # (1.9, 2.9]
+        status, evidence = tag(rows)
+        self.assertEqual(status, (True, None))
+        kinds = {round(e["t"], 1): e["event_id"].split("@")[0] for e in evidence}
+        self.assertEqual(kinds, {0.5: "phone_in_hand", 1.5: "phone_at_head", 2.5: "phone_in_hand"})   # per segment
+        self.assertEqual(tag(rows, away=False)[0], (False, None))   # facing the screen: the hand rows do not count
+        self.assertEqual(tag(rows, away=None)[0], (UNKNOWN, "gaze_unknown"))   # the hand path needs the direction
+        at_head = put([dict(r) for r in rows], 5, 25, phone_at="head")
+        self.assertEqual(tag(at_head, away=False)[0], (True, None))   # a call: the head path reads no direction
+        self.assertEqual(tag(at_head, away=None)[0], (True, None))
+        self.assertEqual(tag(put([dict(r) for r in rows], 33, 33, tap_count=1))[0], (False, None))   # a touch
+        self.assertEqual(tag(put([dict(r) for r in rows], 30, 39, shoulder_cx=0.9))[0], (False, None))   # moved
+        strided = put([dict(r) for r in rows], 0, 39, phone_owner=None)        # the detector did not run there ...
+        for k in (5, 15, 25, 30, 35):
+            strided[k].update(rows[k])                                         # ... except on these rows
+        self.assertEqual(tag(strided)[0], (True, None))          # blank rows are skipped, not 'cannot tell'
+        two = put([dict(r) for r in strided], 25, 25, phone_owner="no")        # two 'yes', the rest 'no' and blank
+        self.assertEqual(tag(two)[0], (False, None))             # the blank rows add no 'cannot tell' segment
+        self.assertEqual(tag(put(strided, 25, 39, phone_owner=None))[0], (UNKNOWN, "phone_owner_unknown"))   # 2 yes, 2 not run
+        unsure = put([dict(r) for r in rows], 20, 29, phone_owner="unknown")   # segment 3 cannot tell
+        self.assertEqual(tag(unsure)[0], (UNKNOWN, "phone_owner_unknown"))
+        self.assertEqual(tag(put([dict(r) for r in rows], 0, 39, tap_count=None))[0], (UNKNOWN, "column:tap_count"))
+        edges = put(rows_of(face(40), extra={**OPTIONAL, "phone_owner": "no", "phone_at": None}), 19, 19,
+                    phone_owner="yes", phone_at="head")                        # t 1.9: the end of (0.9, 1.9]
+        put(edges, 29, 29, phone_owner="yes", phone_at="head")                 # t 2.9: the end of (1.9, 2.9]
+        put(edges, 39, 39, phone_owner="yes", phone_at="head")                 # t 3.9: the end of (2.9, 3.9]
+        self.assertEqual(tag(edges)[0], (True, None))            # a row on a segment's end belongs to that segment
+        out, _ = assess(rows, t, dataclasses.replace(P, window_s=4.0), landmarker_num_faces=1)   # no segment_s
+        self.assertEqual(self.tags(out)["phone_use"], (UNKNOWN, "no_segments"))
 
     def test_reacquisition_unknown_reasons_and_frames_first(self):
         from app.modules.vision.events import observe_scene

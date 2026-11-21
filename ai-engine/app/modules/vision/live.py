@@ -28,7 +28,8 @@ from collections import deque
 
 from .chain import SOURCE_KIND, FrameChain, WindowJudge, history_s
 from .params import load_bundle
-from .replay import MODELS_DIR, add_frame_counts, environment, jsonable, load_aids, load_perception, timing_summary
+from .replay import (MODELS_DIR, add_frame_counts, environment, jsonable, load_aids, load_perception, load_phones,
+                     timing_summary)
 
 WINDOW = "vision chain live (q = stop)"   # ASCII: OpenCV window titles may not show Korean on Windows
 
@@ -70,10 +71,10 @@ def _draw(img, row: dict, text: str):
 
 def run_live(source, bundle, *, models, detector=None, direction=None, show_window: bool = False,
              out_dir: str | None = None, blendshapes: bool = False, print_fn=print, aids=None,
-             model_info: dict | None = None) -> dict:
+             model_info: dict | None = None, phones=None) -> dict:
     """Run the chain on a live frame source (sources.LiveCameraSource or any iterable of sources.Frame)."""
     chain = FrameChain(models, bundle.chain, detector, direction, None, blendshapes=blendshapes,
-                       source_kind=SOURCE_KIND.get(getattr(source, "kind", ""), ""), aids=aids)
+                       source_kind=SOURCE_KIND.get(getattr(source, "kind", ""), ""), aids=aids, phones=phones)
     judge = WindowJudge(bundle, None, session_id="live")
     keep_s = history_s(bundle) + bundle.chain.segment_s
     buf, all_ms, records = deque(), [], []
@@ -165,6 +166,10 @@ def parse_args(argv=None):
     ap.add_argument("--no-heads", action="store_true")
     ap.add_argument("--aid-model", default=None,
                     help="walking-aid detector ONNX (optional; off unless given, weights not in the repository)")
+    ap.add_argument("--phone-model", default=None,
+                    help="COCO YOLOX-Nano ONNX for the phone (optional; off unless given, weights not in the "
+                         "repository; live has no touch log, so the 3-2 phone path stays unknown (column:tap_count): "
+                         "it needs the touch counts, as the companion path does)")
     a = ap.parse_args(argv)
     if a.no_window and a.seconds is None:
         print("창 없이 돌리면 Ctrl+C로만 멈춥니다(--seconds로 시간을 정할 수 있습니다).", file=sys.stderr)
@@ -188,13 +193,15 @@ def main(argv=None) -> int:
     detector, direction, info = load_perception(a.models, bundle.chain, a.threads, not a.no_heads, print)
     aids, aid_info = load_aids(a.aid_model, bundle.chain, a.threads, print)
     info.update(aid_info)                        # every model file in meta.json, as replay.py writes it
+    phones, phone_info = load_phones(a.phone_model, bundle.chain, a.threads, print)
+    info.update(phone_info)
     models = MediaPipeModels(a.models, blendshapes=a.blendshapes)
     try:
         source = LiveCameraSource(a.camera, a.cam_width, a.cam_height, a.backend, a.fps, a.seconds)
         print(f"카메라 {a.camera} 시작 — 창마다 한 줄씩 나옵니다", flush=True)
         meta = run_live(source, bundle, models=models, detector=detector, direction=direction,
                         show_window=not a.no_window, out_dir=a.out, blendshapes=a.blendshapes, aids=aids,
-                        model_info=info)
+                        model_info=info, phones=phones)
     finally:
         models.close()
     print(f"끝: 프레임 {meta['frames']}장 · 창 {meta['windows']}개 · 멈춘 이유 {meta['stop_reason']}", flush=True)

@@ -64,13 +64,16 @@ class FrameChain:
     timing (ms_heads, ms_head_dir, ms_chain = wall time of this whole step, cpu_ms_chain = process CPU time)."""
 
     def __init__(self, models, params, heads=None, direction=None, timeline=None, blendshapes: bool = False,
-                 source_kind: str = "", aids=None):
+                 source_kind: str = "", aids=None, phones=None):
         from .features import Observer          # OpenCV; imported here so the window part loads without it
         self.capture = _Capture(models)
         self.observer = Observer(self.capture)
         self.p = params
         self.heads, self.direction, self.timeline = heads, direction, timeline
         self.aids = aids                        # walking-aid detector (app/inference/aid.py) or None: columns absent
+        self.phones = phones                    # phone detector (app/inference/phone.py) or None: columns absent
+        self.phone_k = 0                        # processed frames since the start: the detector runs every
+                                                # params.phone_every-th of them
         self.blendshapes = bool(blendshapes)
         self.source_kind = source_kind
         self.mouth = C.MouthMotion(params.mouth_dials, params.mouth_baseline_s)
@@ -132,6 +135,16 @@ class FrameChain:
             row.update(C.aid_columns(aids, inf.pose if inf is not None else None, row.get("primary_box"),
                                      self.heads is not None, self.p.aid_person_min))
             row["ms_aids"] = sum(aids.ms.values())
+        if self.phones is not None:             # the main user's phone: the head box and the pose's hands
+            if self.phone_k % self.p.phone_every == 0:
+                phones = self.phones(frame.image)
+                row.update(C.phone_columns(phones, inf.pose if inf is not None else None, row.get("primary_box"),
+                                           row.get("head_boxes")))
+                row["ms_phones"] = sum(phones.ms.values())
+            else:                               # not run on this frame: the columns blank (the events skip them)
+                row.update(dict.fromkeys(C.PHONE_COLUMNS))
+                row["ms_phones"] = None
+            self.phone_k += 1
         face_seen = row.get("face_state") == SEEN and row.get("face_in_primary") is not False
         scores = inf.blendshapes if (self.blendshapes and face_seen and inf is not None) else None
         row["mouth_motion"] = self.mouth.update(t, scores)
@@ -261,6 +274,22 @@ def facing(seg_rows: list, sp) -> bool | None:
     return None
 
 
+def away_from_screen(seg_rows: list, sp) -> bool | None:
+    """phone_use's hand path: the main user not facing the screen in the segment. True when the gaze gate says so
+    (facing False), or when the segment has rows with the main user's head box and none of them shows the main user's
+    face (columns.main_user_face; the camera sits above the screen: a head seen without its face is not turned to the
+    screen); False when the gaze gate says facing, or a row with the head box shows the main user's face; None
+    otherwise (no row with the head box and the gate cannot tell, or no situation values)."""
+    if sp is None:
+        return None
+    gaze = facing(seg_rows, sp)
+    boxed = [r for r in seg_rows if not C.blank_box(r.get("primary_box"))]
+    face_in_box = any(C.main_user_face(r) for r in boxed)
+    if gaze is False or (boxed and not face_in_box):
+        return True
+    return False if (gaze is True or face_in_box) else None
+
+
 def _ids(evidence: list) -> list:
     seen = []
     for item in evidence:
@@ -340,6 +369,8 @@ class WindowJudge:
             rows = [r for r in rows if float(r["t_s"]) >= session_start]
         seg_rows = [r for r in rows if t_end - seg_len < float(r["t_s"]) <= t_end]
         turns = None                                   # head turns of the window (observation only)
+        gaze = facing(seg_rows, sp)                    # the rule table's gaze gate
+        away = away_from_screen(seg_rows, sp)          # phone_use's hand path
         if sp is None:
             out, reasons = None, [{"code": "no_value_bundle"}]
         else:
@@ -347,7 +378,8 @@ class WindowJudge:
                                  baseline_s=p.mouth_baseline_s, seated_face_cy_min=p.seated_face_cy_min,
                                  approach_ratio_min=p.approach_ratio_min, aid_use_min=p.aid_use_min,
                                  seated_head_cy_min=p.seated_head_cy_min, head_down_pitch_min=p.head_down_pitch_min,
-                                 head_approach_ratio_min=p.head_approach_ratio_min)
+                                 head_approach_ratio_min=p.head_approach_ratio_min, segment_s=p.segment_s,
+                                 away=away)
             reasons = unknown_reasons(rows, t_end, sp) if out["name"] == UNKNOWN else []
             turns = [{"event_id": e["event_id"], "kind": e["kind"], "t_start": e["t_start"], "t_end": e["t_end"],
                       "obs": e["obs"]} for e in events if e["kind"] in TURN_KINDS]
@@ -355,8 +387,9 @@ class WindowJudge:
         seg, recent, screen, progress, _ = self._touch(t_end, seg_len)
         face_seen = any(r.get("face_state") == SEEN for r in seg_rows)
         has_touch = seg is not None and (seg["tap_count"] > 0 or seg["back_count"] > 0)
+        # the team placeholder (a press or a back, or a face seen in the segment). The scene tag phone_use true counts
+        # for the 3-2 row and its hold only, in the rule table (rule_table_v0.decide 0''), never for the other rows
         measurable = bool(has_touch or face_seen)
-        gaze = facing(seg_rows, sp)
         self.state, expired = R.tick(self.state, t_end, p)
         held_before = self.state.held.decision_id if self.state.held else None
         inp = R.WindowInput(t=t_end, measurable=measurable, situation=out, screen=screen["name"],

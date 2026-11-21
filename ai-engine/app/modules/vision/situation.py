@@ -23,22 +23,25 @@ Output for one window (sem section 4: dec section 3's output line plus quality, 
                 supporting events, quality_ok = no cue of the rule was left out as missing
   alternatives  the other tags that no measured cue ruled out and that have supporting events, most events first;
                 one with fewer than min_events supporting events has confidence "unknown"
-  tags          the five scene tags (SCENE_TAGS, 2026-11-22), each judged on its own and never competing with name:
+  tags          the six scene tags (SCENE_TAGS, 2026-11-22), each judged on its own and never competing with name:
                 seated_height (1-2; window median of the main user's head-box centre > seated_head_cy_min with the
                 head detector, else of the main user's face_cy > seated_face_cy_min), face_approach
                 (2-1; window median of iod_ratio_user > approach_ratio_min), user_changed (2-2; a new main-user
                 track starts in the window, not the same user found again or stitched back), none_seen (the absence node; no face, body, head box or aid-detector
                 person box on any row),
                 aid_use (1-1; window median of aid_any_score of the main user's person box > aid_use_min; only
-                when the walking-aid detector ran).
+                when the walking-aid detector ran), phone_use (3-2's phone path: the phone at the main user's head in
+                min_events of the window's segment_s segments, or at the main user (head or hand) in min_events
+                segments while not facing the screen; no touch, body still; only with the phone detector).
                 status True | False | "unknown"; unknown_reason a code exactly when "unknown" (no_frames,
                 no_value_for_camera, no_value, no_main_user_face, no_main_user_box, face_near, head_near, no_reference,
                 too_few_rows (the rows
                 behind a median are fewer than face_visible_min of the window), reacquired_same_place,
-                column:primary_track, column:head_count, column:aid_owner, no_anchor, no_user_box); evidence points into the
+                column:primary_track, column:head_count, column:aid_owner, no_anchor, no_user_box, column:phone_owner,
+                no_segments, phone_owner_unknown, gaze_unknown, column:tap_count, body_position_missing); evidence points into the
                 window's scene events (events.observe_scene). The two boundaries are params.SCENE_BOUNDARIES (bundle
                 values; None = unknown). Touch and duration (2-2's no-input trigger, the absence warning) are the
-                judgment layer's, not these tags'.
+                judgment layer's, not these tags' - except phone_use, a whole path of the 3-2 row.
 
 How a window is decided. From sem section 4: fewer than min_events supporting events -> "unknown"; quality per cue
 (a face turned away is not a sensor failure: face loss is the look_back cue, and only the cues that need the face -
@@ -210,6 +213,7 @@ SCENE_DISPLAY_TEXT = {                             # the scenario tree's terms (
     "user_changed": "사용자 교체 가능성",            # 2-2 new customer: a new main-user track
     "none_seen": "카메라에 사람이 안 보임",          # the absence node (nothing seen; not 'nobody')
     "aid_use": "보조기구 사용 중",                   # 1-1 aid (a wheelchair: 1-2, by aid_kind): the main user's box
+    "phone_use": "잠시 딴 일 중(휴대폰)",            # 3-2 busy, the path besides the companion (table 3-가 3-2)
 }
 SCENE_TAGS = tuple(SCENE_DISPLAY_TEXT)
 TAG_KEYS = ("name", "display_text", "status", "evidence", "unknown_reason")
@@ -339,16 +343,71 @@ def aid_use(sc: SceneCues, aid_use_min: float | None, min_share: float | None = 
     return event["obs"]["aid_any_median"] > aid_use_min, scores, None
 
 
+def _any(*conditions):
+    """Three-valued OR: True if any condition is True, else None if any is None, else False."""
+    if any(c is True for c in conditions):
+        return True
+    if any(c is None for c in conditions):
+        return None
+    return False
+
+
+def _segments_reach(states: tuple, min_events: int):
+    """True when at least min_events segments are 'yes', False when even the 'unknown' ones could not make
+    min_events, else None."""
+    yes = states.count("yes")
+    return True if yes >= min_events else (False if yes + states.count("unknown") < min_events else None)
+
+
+def phone_use(sc: SceneCues, c: Cues | None, min_events: int | None, away: bool | None = None) -> tuple:
+    """(status, events, unknown reason): 3-2's path besides the companion (tree table 3-가 3-2: the companion path or
+    the second camera path, with no touch in the window). Two places of the phone: at the head (phone_at_head: the box
+    meets the head box, a call) in at least min_events of the window's segment_s segments; or at the main user, head or
+    hand (phone_in_hand: it meets a hand of the main user), in at least min_events segments while the main user is not
+    facing the screen (away True, chain.away_from_screen: the gaze gate says away, or the main user's head box is seen
+    without a face in it; tree 3-2 excludes a user who looks down at the screen, which is 4-2's pause). min_events is the value bundle's situation.min_events, reused ([파일럿]: the bundle
+    marks the value so, and counting a segment with the phone as one supporting event is this path's own reading): the
+    three situation tags ask that many supporting events (the detector misses frames, so the phone counts per segment,
+    not per frame). Then no touch in the window and the body still -
+    the touch and body conditions of consulting_companion and looking_around. Unlike the other scene tags this one is a
+    whole path of the judgment layer's 3-2 row (rule_table_v0), so it reads the touch counts and the head direction.
+    Unknown: no frames, the detector did not run (column:phone_owner), no segment_s given (no_segments), too many
+    segments that cannot tell (phone_owner_unknown), the hand path needs the head direction and neither the gaze gate
+    nor the head box tells it (gaze_unknown), no
+    touch count on every row (column:tap_count), the shoulders not seen enough (body_position_missing)."""
+    if not sc.frames:
+        return None, [], "no_frames"
+    if not sc.phone_measured or c is None or min_events is None:
+        return None, [], "column:phone_owner"
+    if not sc.phone_segments:
+        return None, [], "no_segments"                       # assess was given no segment_s: nothing to count
+    events = sc.of("phone_at_head", "phone_in_hand")
+    head = _segments_reach(sc.phone_head_segments, min_events)
+    anywhere = _segments_reach(sc.phone_segments, min_events)
+    phone = _any(head, _all(anywhere, away))
+    status = _all(phone, _no_touch(c), c.body_still)
+    if status is not None:
+        return status, events, None
+    if phone is None:
+        reason = "phone_owner_unknown" if (head is None or anywhere is None) else "gaze_unknown"
+    else:
+        reason = "column:tap_count" if _no_touch(c) is None else "body_position_missing"
+    return None, events, reason
+
+
 def scene_tags(sc: SceneCues, *, seated_face_cy_min: float | None = None, seated_head_cy_min: float | None = None,
                head_down_pitch_min: float | None = None,
                approach_ratio_min: float | None = None, aid_use_min: float | None = None,
-               min_share: float | None = None) -> list:
+               min_share: float | None = None, cues: Cues | None = None, min_events: int | None = None,
+               away: bool | None = None) -> list:
     """The `tags` list of one window, in SCENE_TAGS order. min_share = the share of the window's frames a median must
-    stand on (assess passes params.face_visible_min)."""
+    stand on (assess passes params.face_visible_min); cues / min_events / away = the window's Cues, params.min_events
+    and whether the main user is not facing the screen at the segment end (chain.away_from_screen; None = cannot
+    tell) for phone_use."""
     verdicts = {"seated_height": seated_height(sc, seated_face_cy_min, min_share, seated_head_cy_min),
                 "face_approach": face_approach(sc, approach_ratio_min, min_share, head_down_pitch_min),
                 "user_changed": user_changed(sc), "none_seen": none_seen(sc),
-                "aid_use": aid_use(sc, aid_use_min, min_share)}
+                "aid_use": aid_use(sc, aid_use_min, min_share), "phone_use": phone_use(sc, cues, min_events, away)}
     return [{"name": name, "display_text": SCENE_DISPLAY_TEXT[name],
              "status": UNKNOWN if status is None else status, "evidence": _evidence(events),
              "unknown_reason": reason}
@@ -396,7 +455,8 @@ def assess(rows: list, t_end: float, params: PilotParams, *, landmarker_num_face
            baseline_s: float | None = None, seated_face_cy_min: float | None = None,
            approach_ratio_min: float | None = None, aid_use_min: float | None = None,
            seated_head_cy_min: float | None = None, head_down_pitch_min: float | None = None,
-           head_approach_ratio_min: float | None = None) -> tuple:
+           head_approach_ratio_min: float | None = None, segment_s: float | None = None,
+           away: bool | None = None) -> tuple:
     """(output, events) for the window [t_end - window_s, t_end] of the observation rows (features.COLUMNS plus the
     optional columns of events.py). Events come from all rows up to t_end and are kept when their time (end) lies in
     the window; the evidence ids point into the returned events. The output passes check_output, or this raises
@@ -407,11 +467,13 @@ def assess(rows: list, t_end: float, params: PilotParams, *, landmarker_num_face
     seated_face_cy_min, approach_ratio_min, aid_use_min, seated_head_cy_min = the scene-tag boundaries of the bundle
     (params.SCENE_BOUNDARIES, AID_BOUNDARIES; None = no value: the tag says unknown, and for seated_head_cy_min the
     face decides alone); head_down_pitch_min, head_approach_ratio_min = the gates of face_approach and of the head-box
-    path (None = not applied). The scene tags' evidence points into their own events (output['tags'], not in
+    path (None = not applied). segment_s = the runners' segment (phone_use counts the phone per segment; None = no
+    segments); away = the main user not facing the screen at the segment end (chain.away_from_screen; None =
+    cannot tell), read by phone_use's hand path only. The scene tags' evidence points into their own events (output['tags'], not in
     the returned events); the other keys of the output do not depend on them."""
     window = (t_end - params.window_s, t_end)
     cues = observe_window(rows, window, params, landmarker_num_faces=landmarker_num_faces, baseline_s=baseline_s)
-    scene = observe_scene(rows, window, approach_ratio_min, head_approach_ratio_min)
+    scene = observe_scene(rows, window, approach_ratio_min, head_approach_ratio_min, segment_s)
     verdicts = {name: rule(cues, params) for name, rule in RULES.items()}
     name, alternatives = _decide(cues, verdicts, params)
     chosen = verdicts.get(name)
@@ -429,7 +491,8 @@ def assess(rows: list, t_end: float, params: PilotParams, *, landmarker_num_face
         "tags": scene_tags(scene, seated_face_cy_min=seated_face_cy_min, seated_head_cy_min=seated_head_cy_min,
                            head_down_pitch_min=head_down_pitch_min,
                            approach_ratio_min=approach_ratio_min,
-                           aid_use_min=aid_use_min, min_share=params.face_visible_min),
+                           aid_use_min=aid_use_min, min_share=params.face_visible_min, cues=cues,
+                           min_events=params.min_events, away=away),
     }
     problems = check_output(out, cues.events, params, scene_events=scene.events)
     if problems:
