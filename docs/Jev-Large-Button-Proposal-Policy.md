@@ -1,11 +1,11 @@
 # Jev 큰 버튼 제안의 유효기간과 적용 기준
 
-이 문서는 메뉴 이용 중 “버튼을 크게 바꿀까요?”라고 묻는 큰 버튼 제안을 다룬다. 사용자 수락 뒤 버튼을 크게 표시한다. 2026-11-20 기준 프론트·비전·AI 담당자는 바로 다음 연속 창까지 한 번 전달하는 B안을 검토 방향으로 지지했고, 적용 임계값은 보류하고 그림자 모드를 유지하자는 의견을 남겼다. 시간 상한과 세부 전달 규칙은 파일럿 자료와 계약 검토를 거쳐 확정한다. [프론트 리뷰](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/95#pullrequestreview-5989459301) · [비전 리뷰](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/95#pullrequestreview-5979172342) · [AI 리뷰](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/95#pullrequestreview-5979372284)
+이 문서는 메뉴 이용 중 “버튼을 크게 바꿀까요?”라고 묻는 큰 버튼 제안을 다룬다. 사용자 수락 뒤 버튼을 크게 표시한다. 2026-11-20 기준 프론트·비전·AI 담당자는 바로 다음 연속 창까지 한 번 전달하는 B안을 검토 방향으로 지지했고, 적용 임계값은 보류하고 그림자 모드를 유지하자는 의견을 남겼다. #97에서 비전 담당자는 Jev 답이 없을 때 현재 창의 규칙표를 따르는 안을 제안했다. 아래 표를 결정 기록으로 사용한다. [프론트 리뷰](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/95#pullrequestreview-5989459301) · [비전 리뷰](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/95#pullrequestreview-5979172342) · [AI 리뷰](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/95#pullrequestreview-5979372284) · [비전 후속 의견](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/97#issuecomment-7043157007)
 
 ## 현재 구현과 검증 범위
 
 - 공용 계약의 `SupportDecision.preset`은 `large_button`을 허용한다. 현재 백엔드의 실제 지원 응답은 `none`이다. 큰 버튼 제안을 수락하는 프론트 흐름은 #70으로 병합됐다. [공용 계약](../contract/frontend-backend.openapi.yaml) · [백엔드 응답 모델](../backend/app/modules/sessions/schemas.py) · [PR #70](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/70)
-- #77의 `JEV_STAGES`와 판단 기록은 그림자 단계다. Jev 답을 기다리는 동안 원래 창의 `/features` 응답을 보낼 수 있다. 현재 백엔드 입력에는 4-1에 필요한 `fixes_recent`, 시선 및 비전 상황이 들어오지 않는다. [PR #77](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/77) · [Jev 연동 설계](Jev-Integration.md) · [터치 후속 과업](Jev-Touch-Features.md)
+- #77이 병합되면서 백엔드가 창마다 규칙표를 실행하고, 설정한 Jev 단계의 답을 백그라운드에서 기록하는 그림자 단계가 들어왔다. `JEV_STAGES` 기본값은 `off`다. 백엔드는 Jev 답을 기다리는 동안 원래 창의 `/features` 응답을 보낼 수 있다. 현재 백엔드 입력에는 4-1에 필요한 `fixes_recent`, 시선 및 비전 상황이 들어오지 않는다. [PR #77](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/77) · [병합 시점의 판단 층 설명](https://github.com/knu-capstone-design-06/Capstone-design-project/blob/2dbb1549c3caeef55c731fdad820adbdf1bf9d7e/docs/Jev-Integration.md#10-판단-층-backend-구현-현황-2026-11-04) · [터치 후속 과업](Jev-Touch-Features.md)
 - #95 이전 독립 검사는 백엔드 21개·Edge 25개 사례에서 수락 전 크기 유지, 수락 후 확대, 세션 전환·장애 시 화면 유지를 확인했다. 사용한 사본은 #77 `2aeb780`, 당시 #87 `25df409`이고 관측과 Jev 답은 모의 입력이었다. 그때 사용한 `support_choice`와 `0.75`는 화면 응답 분기를 시험하기 위한 입력이다. [PR #95 검증 범위](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/95)
 
 ## 결정 1. 같은 방문의 다음 연속 창까지 전달
@@ -25,19 +25,25 @@
 ## 결정 2. `proposal_fits.noul` 평가 후 임계값 결정
 
 1. **판정값**. #77의 큰 버튼 4-1이 자체 질문을 만드는 경우, `state_scores` 단계에 포함된 `proposal_fits`의 `noul`(0~1)을 사용한다는 AI 담당 제안에 맞춘다. `support_choice`의 `confidence`와 `probabilities.large_button`은 다단계 실험의 비교 기록에 둔다. [AI 리뷰](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/95#pullrequestreview-5979372284)
-2. **답이 없는 경우**. 큰 버튼은 승인 질문이므로 유효한 답이 없거나 오류·기한 경과·근거 부족이면 새 제안을 내보내지 않는 안을 검토한다. 이는 화면을 유지하는 기존 공통 동작을 따른다. 기존 규칙표 결과 유지 원칙에 대한 **큰 버튼 제안의 예외안**이므로, 비전·AI 담당자와 확정한 뒤 연동 설계에도 기록한다. 현재 4-1은 시선 또는 상황을 모르는 경우 Jev 질문 없이 열릴 수 있어 적용 경계를 함께 결정한다. [Jev 연동 설계](Jev-Integration.md) · [AI 리뷰](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/95#pullrequestreview-5979372284)
-3. **후보 기준과 파일럿**. AI 담당자가 출처(표준·관행·문헌)와 함께 후보 기준을 제안하고, 비전·프론트 담당자가 큰 버튼 제안이 적절했는지 라벨을 확인한다. 파일럿에서 적절한 제안·불필요한 제안·놓친 제안과 같은 방문에서 반복해 묻는 수를 비교한다. 요청했어야 했으나 측정이나 호출이 빠진 사례도 따로 센다. 파일럿 촬영분과 최종 평가분은 분리한다. 그림자 기록에는 실제 수락률이 없다.
+2. **답이 없는 경우**. 파일럿 비교의 기준은 비전 담당이 제안한 **전달 시점의 규칙표 결과 유지**로 둔다. 제때 유효한 답이 없으면 늦은 답은 폐기하고, 현재 창에서 4-1의 근거와 방문·문맥 조건을 충족할 때에만 제안하는 안이다. 관측 근거 자체가 부족하면 Jev 상태와 무관하게 새 제안을 생략한다. AI 담당이 #95에서 찬성한 **큰 버튼에 한해 제때 유효한 Jev 답을 요구하는 예외안**을 같은 입력으로 비교한다. 시선·상황을 알 수 없어 4-1을 Jev 질문 없이 여는 경우도 별도로 센다. 두 안에서 크기 변경은 사용자 수락 후 적용한다. [비전 후속 의견](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/97#issuecomment-7043157007) · [AI 리뷰](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/95#pullrequestreview-5979372284)
+3. **후보 기준과 파일럿**. AI 담당자가 출처(표준·관행·문헌)와 함께 후보 기준을 제안하고, 비전·프론트 담당자가 큰 버튼 제안이 적절했는지 라벨을 확인한다. 같은 창 묶음에서 규칙표 유지안과 Jev 답 필수안을 비교한다. 적절한 제안·불필요한 제안·놓친 제안, 같은 방문에서 반복해 묻는 수를 집계하고 제때 유효 답을 얻은 창, 답이 없거나 기한을 넘긴 창, 관측 부족 창을 나눠 본다. 파일럿 촬영분과 최종 평가분은 분리한다. 그림자 기록에는 실제 수락률이 없다.
 4. **보류 해제**. 사용 모델·질문 버전, 사용한 라벨과 결과, 기준값의 출처와 적용 날짜를 남긴다. 근거가 확보될 때까지 임계값 적용을 보류한다.
 
 ## 백엔드가 준비할 파일럿 기록
 
 - **입력과 식별**. 창 N과 N+1의 세션·방문·순번 및 관측 구간, 분석 가능 여부, 시선·상황과 `fixes_recent`의 결측 여부, 원래 판단과 제안 ID를 기록한다. 실제 입력 연결은 터치 T06·T07과 비전 전달 합의 뒤 진행한다.
-- **응답 시각과 폐기 이유**. N·N+1 요청 수신 및 응답 종료, Jev 시작과 답 도착 시각을 같은 백엔드 시계 기준으로 연결한다. 모노토닉 시간으로 지연을 계산하고, G10 관측 종료 시각과 비교할 때는 장비 간 시계 기준부터 확인한다. 질문을 보내지 않음·호출 중·기한 만료·답 형식 오류·현재 후보 제외를 구분한다. 세션별 기록 내보내기는 #77의 저장소 구조와 함께 검토한다.
+- **응답 시각과 폐기 이유**. #77은 `WindowRecord.received_at`, `JevRecord.answered_at`와 `latency_ms`를 기록하고, 답이 없으면 `reason`을 `unavailable`·`mismatch`·`build_error`로 구분한다. 파일럿에서는 N·N+1의 HTTP 응답 종료와 대기·만료·현재 근거 부족으로 인한 폐기 이유를 함께 기록하고 세션별 기록을 내보낼 수 있어야 한다. 경과 시간 측정에는 백엔드의 모노토닉 시계를 사용하고, G10 관측 종료 시각과 비교할 때는 장비 간 시계 기준부터 확인한다. [병합된 창·Jev 기록 정의](https://github.com/knu-capstone-design-06/Capstone-design-project/blob/2dbb1549c3caeef55c731fdad820adbdf1bf9d7e/backend/app/modules/decision/schemas.py#L201)
 - **비교 방법**. 대기 없는 같은 기록에 A와 B를 대입해 전달 가능한 건수, N+1에서 조건을 잃은 건수, 응답 지연 p50·p95를 비교한다. A에 서버 대기를 추가할 때의 요청 지연은 별도로 잰다. 발화 원문·카메라 프레임은 평가 기록에 넣지 않는다.
-- **확보한 자료**. 기존 비교 자료 E5_C와 `window_cells.csv`를 `window_id`로 대조한 결과, `proposal_fits`가 있는 127개 창 중 16개가 큰 버튼 4-1의 `open`이었다. 이 자료는 합성 터치와 잠정 라벨을 활용해 채점 절차를 준비하는 데 쓸 수 있다. 참조 답 파일에는 창별 Jev 답 도착·HTTP 응답 종료 시각이 없어 이 자료만으로 A/B 전달률이나 실시간 상한은 산출할 수 없다. [기존 실험 자료 설명](../experiments/eval_jev_raw_2026-11-08/README.md)
-- **코드 대조**. #77 `2aeb780`의 규칙표를 합성 창으로 실행했다. 4-1이 열린 뒤 같은 방문의 정상 창·시선 `false` 창·측정 불가 창에서 모두 같은 `decision_id`로 `keep`을 반환했고, 새 후보 목록에는 큰 버튼이 없었다. 현재 `/features` 요청에서 만든 판단 입력의 `fixes_recent`와 시선도 미입력 상태임을 확인했다. 이 결과를 후속 재검사·입력 연결의 회귀 사례로 사용한다.
+- **자료와 재현 절차**. 비전 담당 작업 폴더의 평가 키트 `llm_eval_kit_2026-11-08`에서 `reference_answers/E5_C.jsonl`의 `state_scores.proposal_fits`가 있는 행만 골라 `labels/window_cells.csv`와 `window_id`로 연결한다. 중복 ID와 연결 실패가 없음을 확인한 뒤 `rule_transition=open`인 행을 `rule_support`로 집계하면 127개 중 `large_button` 16개, `highlight_next_action` 111개다. 참조 답에는 창별 답 도착·HTTP 응답 종료 시각이 없어 채점 절차 확인에 사용한다. [평가 키트 위치와 구성](../experiments/eval_llm_2026-11-09/README.md#실행)
+- **기존 비교의 범위**. 비전 담당이 인용한 두 실험은 Jev 호출 시간과 지원 전체의 결과를 기록했다. 후보 내 비교 137건의 규칙표와 Jev 집계는 각각 TP/FP/FN/TN 52/5/15/65, 51/5/16/65다. 합성 터치와 잠정 라벨을 사용한 집계이므로, 큰 버튼 전용 정확도와 G10의 N+1 전달 기한은 위 파일럿에서 별도로 확인한다. [11월 9일 비교와 시간 측정 한계](../experiments/eval_llm_2026-11-09/README.md) · [11월 12일 비교](../experiments/eval_llm_2026-11-12_rA/README.md)
+- **코드 대조**. 큰 버튼 4-1이 열린 뒤 정상 창·시선 `false` 창·측정 불가 창에 모두 같은 `decision_id`의 `keep`이 반환되고 새 후보에는 큰 버튼이 없었다. 이 순서를 후속 재검사의 회귀 사례로 사용한다. [프론트 검증](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/97#pullrequestreview-5992461450) · [비전 검증](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/97#pullrequestreview-5992556128)
+
+## 결정 기록과 후속 구현
 
 | 항목 | 상태 | 근거 확인일 |
 |---|---|---|
 | 1. 창 유효범위 | B안에 담당자 의견 일치. 방문·창 식별, 문맥 변경, 실제 시간 상한과 재제안 규칙은 미결 | 2026-11-20 · 프론트·비전·AI 리뷰 |
 | 2. 적용 기준 | `proposal_fits.noul` 평가안을 기록. 수치 적용 보류와 그림자 모드 유지에 담당자 의견 일치 | 2026-11-20 · 프론트·비전·AI 리뷰 |
+| 3. 제때 유효한 답이 없을 때 | 규칙표 유지안을 파일럿 비교 기준으로 제안. Jev 답 필수안과 비교한 뒤 적용 정책을 결정 | #95 AI 의견 · #97 비전 후속 의견 |
+
+백엔드는 방문·창 식별과 기록 내보내기를, 프론트·비전 담당은 관측 입력과 큰 버튼 적합 라벨을, AI 담당은 기준값의 출처와 답의 해석을 검토한다. 파일럿 뒤 채택안, 결정 날짜·확인자, 근거 링크를 이 표에 기록한다. 이후 계약·구현 PR에 결정 기록과 회귀 테스트를 함께 반영한다. 검증할 경계는 늦거나 중복된 답, 방문·문맥 변경, 현재 관측 부족, 유효한 Jev 답이 없는 창, 사용자가 수락하기 전의 화면 유지다.
