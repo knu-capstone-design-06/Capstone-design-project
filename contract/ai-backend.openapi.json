@@ -1,0 +1,186 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "AI engine → Backend API",
+    "version": "0.1.0",
+    "description": "AI 엔진의 실시간 실행기(ai-engine/app/modules/vision/live.py --backend-url, tag_sender.py)가 판단한 창마다 상황 태그를 backend로 보내는 명세입니다. 팀 논문 그림 1의 'AI 엔진 → backend: 상황 태그' 연결이며 한 방향입니다. backend는 받은 창을 같은 세션의 /features 창 가운데 짝 짓기 구간(아래 POST 설명의 식) 안에 그 창의 끝이 드는 창과 짝지어 판단 층에 넘기고(backend/README.md 'AI 엔진 창 입구'), 답은 받음 확인뿐입니다. 원본 영상·얼굴 좌표·이미지는 싣지 않습니다. 다른 계약 파일과 달리 JSON으로 적었습니다. 보내는 쪽과 받는 쪽의 테스트가 표준 라이브러리만으로 아래 예시를 읽게 하려는 것입니다."
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:8000",
+      "description": "docker compose가 게시한 backend 주소. 실행기의 --backend-url"
+    }
+  ],
+  "paths": {
+    "/api/v1/sessions/{session_id}/vision-windows": {
+      "post": {
+        "summary": "AI 엔진 창 하나(상황 · 시선 · 얼굴 · 장면 태그) 전달",
+        "operationId": "postVisionWindow",
+        "x-backend-status": "implemented",
+        "description": "실행기는 터치 창이 알린 세션 안에서 끝난 창만 보냅니다. 창 하나의 구간은 실행기의 segment_s(params.py 기본 1.0초, [파일럿])이고, 그 구간의 터치 창이 도착한 뒤에 판단해 보냅니다(기다림의 한도: 비전 README). 터치 창 하나가 함께 풀어 준 창들은 칸 하나짜리 우편함에 한 묶음으로 들어가 시간 순서로 하나씩 보내지고(아직 보내기 시작하지 않은 묶음은 새 묶음이 통째로 바꿈), 2xx가 아니거나 제한 시간(segment_s)을 넘긴 보내기는 다시 보내지 않습니다. 404(모르는 세션)나 410(주문을 마친 세션)을 받으면 새 세션 ID의 창이 올 때까지 그 세션의 창은 보내지 않습니다(실패와 따로 셈). 시각은 모두 키오스크 PC의 벽시계(주문 화면의 /features 창과 같은 시계)입니다. backend는 /features 창마다 touch_start - (touch_end - touch_start) < 이 창의 window_end <= touch_end인 창들을 읽습니다. 시선과 얼굴은 그 가운데 가장 늦은 창에서, 상황 태그는 태그 이름이 있는 가장 늦은 창에서 읽습니다. 시연 스위치(DECISION_SEND_SUPPORT)를 켜면 누름 · 뒤로가기가 없는 /features 창은 가장 늦은 창이나 상황 태그를 준 창 가운데 하나라도 얼굴을 보았거나, 누름 · 뒤로가기가 있는 같은 세션의 앞 /features 창이 같은 구간(touch_start - (touch_end - touch_start) 뒤) 안에 끝났으면 측정 가능입니다.",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "backend가 만든 세션 ID. 주문 화면이 터치 창에 실어 실행기에 알립니다"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/VisionWindowRequest" },
+              "example": {
+                "session_id": "s1",
+                "window_start": "2027-01-15T08:00:01.700Z",
+                "window_end": "2027-01-15T08:00:02.700Z",
+                "situation": {
+                  "name": "looking_around",
+                  "evidence": [
+                    { "event_id": "dwell_no_touch@0", "obs": "no_touch_s", "value": 2.7, "t": 2.7 },
+                    { "event_id": "yaw_sweep_offscreen@5", "obs": "yaw_deg", "value": 55.0, "t": 0.9 }
+                  ],
+                  "confidence": { "events": 3, "quality_ok": true }
+                },
+                "observations": {
+                  "gaze": true,
+                  "face_seen": true,
+                  "scene_tags": [
+                    { "name": "seated_height", "status": "unknown", "unknown_reason": "no_value_for_camera", "evidence": [] },
+                    { "name": "phone_use", "status": "unknown", "unknown_reason": "column:phone_owner", "evidence": [] }
+                  ]
+                },
+                "model_version": "vision-situation-rules_v1+rule_table_v0-shadow"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "받음. 같은 세션의 /features 창 가운데 짝 짓기 구간 안에 이 창의 끝이 드는 창이 읽습니다",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/VisionWindowAccepted" } }
+            }
+          },
+          "404": {
+            "description": "없는 세션 ({detail: session not found})",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "410": {
+            "description": "주문을 마친 세션 ({detail: session_expired}). /features와 같은 거절입니다",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "422": {
+            "description": "본문 형식 오류(FastAPI 검증 오류 본문), 또는 경로와 다른 본문 session_id ({detail: session_id does not match the path})"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "VisionWindowRequest": {
+        "type": "object",
+        "description": "실행기 창 기록의 한 구간. 예시는 비전 README '나가는 것: 상황 태그'의 본문(테스트 합성 줄의 실제 출력)에서 근거 2개와 장면 태그 2개만 남긴 것입니다",
+        "required": ["window_start", "window_end", "situation", "observations", "model_version"],
+        "properties": {
+          "session_id": { "type": "string", "description": "경로의 세션과 같아야 합니다. 없어도 됩니다" },
+          "window_start": { "type": "string", "format": "date-time", "description": "시간대가 있는 ISO 8601 시각(실행기는 밀리초까지의 UTC)" },
+          "window_end": { "type": "string", "format": "date-time", "description": "window_start보다 뒤" },
+          "situation": { "$ref": "#/components/schemas/VisionSituation" },
+          "observations": { "$ref": "#/components/schemas/VisionObservations" },
+          "model_version": { "type": "string", "description": "창 결과의 버전 표시(ai-engine contract_view.MODEL_VERSION)" }
+        }
+      },
+      "VisionSituation": {
+        "type": "object",
+        "description": "판단 층 규칙표가 읽는 모양(backend WindowInput.situation, ai-engine contract_view.decision_situation)",
+        "required": ["name", "confidence"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "looking_back_with_people_behind(3-1), consulting_companion(3-2), looking_around(4-2의 낮춘 멈춤), none(태그 없음), unknown(판단 못 함)"
+          },
+          "evidence": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/VisionEvidence" },
+            "description": "규칙표는 event_id의 종류별 개수만 읽습니다"
+          },
+          "confidence": {
+            "oneOf": [
+              { "$ref": "#/components/schemas/VisionConfidence" },
+              { "type": "string", "const": "unknown" }
+            ]
+          }
+        }
+      },
+      "VisionEvidence": {
+        "type": "object",
+        "required": ["event_id"],
+        "properties": {
+          "event_id": { "type": "string", "minLength": 1, "description": "종류@번호" },
+          "obs": { "type": ["string", "null"], "description": "관측값 이름" },
+          "value": { "description": "관측값(JSON 값)" },
+          "t": { "type": ["number", "null"], "description": "사건 끝 시각(실행기 기준 초)" }
+        }
+      },
+      "VisionConfidence": {
+        "type": "object",
+        "required": ["events", "quality_ok"],
+        "properties": {
+          "events": { "type": "integer", "minimum": 0, "description": "태그를 받친 사건 수" },
+          "quality_ok": { "type": "boolean", "description": "관측 품질이 기준을 넘었는지" }
+        }
+      },
+      "VisionObservations": {
+        "type": "object",
+        "required": ["face_seen"],
+        "properties": {
+          "gaze": { "type": ["boolean", "null"], "description": "구간 끝에 화면을 향함. null은 카메라가 가릴 수 없음" },
+          "face_seen": { "type": "boolean", "description": "구간에 얼굴이 보인 줄이 있음(ai-engine contract_view.observations). 누름 · 뒤로가기가 없는 창의 측정 가능 근거(ai-engine 자리표시자의 규칙)" },
+          "scene_tags": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/SceneTag" },
+            "description": "장면 태그. backend는 창 기록에 남기기만 하고 규칙표 v0는 읽지 않습니다"
+          }
+        }
+      },
+      "SceneTag": {
+        "type": "object",
+        "required": ["name", "status"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "status": {
+            "oneOf": [
+              { "type": "boolean" },
+              { "type": "string", "const": "unknown" }
+            ]
+          },
+          "unknown_reason": { "type": ["string", "null"] },
+          "evidence": { "type": "array", "items": { "$ref": "#/components/schemas/VisionEvidence" } }
+        }
+      },
+      "VisionWindowAccepted": {
+        "type": "object",
+        "required": ["status"],
+        "properties": {
+          "status": { "type": "string", "const": "accepted" }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "required": ["detail"],
+        "properties": {
+          "detail": { "type": "string" }
+        }
+      }
+    }
+  }
+}

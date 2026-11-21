@@ -769,6 +769,21 @@ def _body_still(rows: list, p: PilotParams):
     return None
 
 
+def _any_tap(inside: list, measured: frozenset) -> bool | None:
+    """Cues.any_tap: True = a touch on a row of the window, False = no touch and a count on every row (measured), None
+    = cannot tell (no touch seen and a row without a count)."""
+    taps = [_count_value(r, "tap_count") for r in inside]
+    return True if any(t is not None and t > 0 for t in taps) else (False if "tap_count" in measured else None)
+
+
+def window_any_tap(rows: list, window: tuple) -> bool | None:
+    """The window's touch cue as observe_window reads it (Cues.any_tap) for window = (t0, t1), without the events: the
+    live runner's record says with it whether the window's touch was known to the rules."""
+    rows, first = _split(rows, window)
+    inside = rows[first:]
+    return _any_tap(inside, measured_columns(inside))
+
+
 def observe_window(rows: list, window: tuple, params: PilotParams, *, landmarker_num_faces: int,
                    baseline_s: float | None = None) -> Cues:
     """Events and window-level checks for window = (t0, t1): rows after t1 are never read; detect_events says which
@@ -786,8 +801,7 @@ def observe_window(rows: list, window: tuple, params: PilotParams, *, landmarker
     measured = measured_columns(inside)
     face_ratio = sum(map(_face, own)) / n if n else None
     face_ok = face_ratio is not None and face_ratio >= params.face_visible_min
-    taps = [_count_value(r, "tap_count") for r in inside]
-    any_tap = True if any(t is not None and t > 0 for t in taps) else (False if "tap_count" in measured else None)
+    any_tap = _any_tap(inside, measured)
     undetermined = companion_sides(user, params)[1][at:]
     broken = _head_turn_scan(user, params)[1]
     return Cues(

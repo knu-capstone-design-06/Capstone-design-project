@@ -11,7 +11,7 @@ states when measurable=true. Sensor measurability and the pipeline version are p
   support           {preset, requires_confirmation, decided_by}: UIPreset and the confirmation flag of the rule table's
                     support (JP 2-5 table); decided_by 'rule_placeholder' (shadow mode: Jev never changes the screen)
   extension         {measurement: {measurable, basis}, model_version, detectors, situation: {...},
-                    decision_meta: {...}};
+                    decision_meta: {...}, decision_situation: {...}, observations: {...}};
                     measurement follows the team placeholder (a tap or back in the segment, or a face); in a window
                     that is not measurable with the scene tag phone_use true (3-2's phone path, only with the phone
                     detector) basis adds that the 3-2 wait alone may open or keep its hold_timer in the window (a
@@ -21,6 +21,10 @@ states when measurable=true. Sensor measurability and the pipeline version are p
                     situation.tags carries the scene tags (name, status, unknown_reason, evidence ids).
                     decision_meta also carries the execution fields of
                     JP 2-5 (steps_left, target_id, message_id) and session_signal ({name: hold_timer} on the 3-2 wait)
+  decision_situation  the situation in the keys the backend's decision layer reads (decision_situation below);
+                    situation keeps its own keys (tag, evidence_ids) for the replay tools
+  observations      an optional block beside it (observations below): the gaze and the face seen of the segment,
+                    and the scene tags, which compete with no tag (rule table v0 reads only phone_use, 3-2's wait)
 """
 from __future__ import annotations
 
@@ -30,6 +34,26 @@ BASIS = "A tap or back in the segment, or a face seen in the segment (team place
 BASIS_PHONE = ("A tap or back in the segment, or a face seen in the segment (team placeholder). The scene tag "
                "phone_use is true (the main user's phone seen, no touch, body still): the 3-2 wait alone may open or "
                "keep its hold_timer in this window.")
+
+
+def decision_situation(sit: dict) -> dict:
+    """The window's situation in the keys backend/app/modules/decision reads from WindowInput.situation: 'name'
+    (rule_table.situation_known), 'evidence' with an 'event_id' per item (rule_table.evidence_counts) and
+    'confidence' with 'quality_ok' (rule_table.jev_state). The evidence items are those of situation.assess
+    (event_id, obs, value, t). sit = a window record's situation (chain.situation_view)."""
+    return {"name": sit["name"], "evidence": [dict(item) for item in sit["evidence"]],
+            "confidence": sit["confidence"]}
+
+
+def observations(sit: dict, vision: dict) -> dict:
+    """The optional block beside decision_situation. gaze = vision.facing_screen (chain.facing; the decision layer's
+    WindowInput.gaze); face_seen = a face on a row of the segment (the team placeholder's basis of measurable,
+    app/inference/placeholder.py, read with vision.face_detected there); scene_tags = the scene tags of
+    situation.tags (status True, False or 'unknown', unknown_reason, evidence items as assess gives them), [] without
+    a value bundle. vision = a window record's vision (chain.vision_summary)."""
+    return {"gaze": vision["facing_screen"], "face_seen": bool(vision["face_seen_ratio"]),
+            "scene_tags": [{"name": t["name"], "status": t["status"], "unknown_reason": t["unknown_reason"],
+                            "evidence": [dict(item) for item in t["evidence"]]} for t in sit.get("tags", [])]}
 
 
 def to_contract(record: dict, session_id: str) -> dict:
@@ -57,5 +81,7 @@ def to_contract(record: dict, session_id: str) -> dict:
                              | {"jev_kind": (record.get("jev") or {}).get("kind"),
                                 "jev": None if not record.get("jev") else {"shadow": True, "applied": False,
                                                                            "answer": None}},
+            "decision_situation": decision_situation(sit),
+            "observations": observations(sit, record["vision"]),
         },
     }

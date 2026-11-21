@@ -3,7 +3,8 @@
 Per frame (FrameChain.process): features.Observer row (MediaPipe face / face detector / pose, plus blendshapes when
 on) -> H1 head boxes (app/inference/head.py) -> head tracks, the main user as a track, companion and people behind
 from the tracks' cues, and the main user's P1 direction (columns.py HeadPeople; its state lives as long as the
-FrameChain and starts again when the touch log's sessionId changes, as does the Observer's session-start reference
+FrameChain and starts again when the touch log's sessionId changes - with the live runner's touch entry also when
+its first session arrives, since the runner was tracking before any order session - as does the Observer's session-start reference
 of iod_ratio_start / dyaw_start_deg / dpitch_start_deg) -> the face values blanked where the tracked face
 is someone else's (columns.FACE_VALUE_COLUMNS, face_in_primary False) -> shoulders, mouth_motion -> the main user's
 face size against the running reference (iod_ratio_user, columns.FaceSizeRef; it starts again with a new main-user
@@ -92,7 +93,11 @@ class FrameChain:
         t = round(frame.t_s, 4)                 # = the row's t_s (features.Observer)
         if self.timeline is not None:           # tree section 4 ①: a new session is judged from the start
             session = self.timeline.session_at(t)
-            if session is not None and self.session is not None and session != self.session:
+            # A change of session resets the per-session state. The first known session resets it too when the
+            # timeline says the frames before it belong to no session (FIRST_SESSION_RESETS: the live runner's touch
+            # entry, touch_entry.LiveTouch); a replay's touch log starts with its first session, so nothing changes.
+            first = self.session is None and getattr(self.timeline, "FIRST_SESSION_RESETS", False)
+            if session is not None and session != self.session and (self.session is not None or first):
                 self.observer.reset_reference()  # the start-relative columns (iod_ratio_start, d*_start_deg)
                 self.people.reset()
                 self.size_ref.reset()
