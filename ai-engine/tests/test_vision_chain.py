@@ -122,6 +122,23 @@ class ParamsTests(unittest.TestCase):   # plain Python: runs with the server pac
         with self.assertRaises(ValueError):
             PilotParams(track_iou_min=1.2)
 
+    def test_scene_boundaries_have_no_value_and_say_how_to_get_one(self):
+        from app.modules.vision.params import SCENE_BOUNDARIES, SCENE_METHOD, UNDECIDED, Bundle, PilotParams
+        p = PilotParams()
+        self.assertEqual(SCENE_BOUNDARIES[:2], ("seated_face_cy_min", "approach_ratio_min"))
+        for name in SCENE_BOUNDARIES:
+            self.assertIsNone(getattr(p, name), name)
+            source = PilotParams.sources()[name]
+            self.assertTrue(source.startswith(UNDECIDED), name)
+            self.assertIn(SCENE_METHOD, source)
+            self.assertNotIn(name, PilotParams.pilot_fields())
+            self.assertEqual(Bundle(p, None).to_dict()["chain"][name]["origin"], "default")
+            ok = 1.2 if name in ("approach_ratio_min", "head_approach_ratio_min") else 0.6
+            for bad in (0, -0.5, float("nan"), float("inf"), str(ok), True):
+                with self.assertRaises(ValueError, msg=f"{name}={bad!r}"):
+                    PilotParams(**{name: bad})
+            self.assertEqual(getattr(PilotParams(**{name: ok}), name), ok)
+
     def test_values_are_checked(self):
         from app.modules.vision.params import PilotParams
         for bad in ({"segment_s": 0}, {"head_score_min": 1.5}, {"tremor_miss_min": 0}, {"tremor_miss_min": 2.5},
@@ -921,6 +938,21 @@ class WindowJudgeTests(unittest.TestCase):
         self.assertEqual((screen_at(3.0)["name"], screen_at(3.0)["pause_s"]), ("review", None))   # a new visit
         events.append((3500, "options_open", "review", {"productId": "1"}))
         self.assertEqual((screen_at(3.0)["options_open"], screen_at(3.9)["options_open"]), (False, True))
+
+    def test_the_window_record_and_the_contract_view_carry_the_scene_tags(self):
+        from app.modules.vision.chain import WindowJudge
+        from app.modules.vision.judgment.rule_table_v0 import SCENE_OF_TAG
+        from app.modules.vision.situation import SCENE_TAGS, TAGS
+        rows = rows_of(facing(30))
+        rec = WindowJudge(bundle()).evaluate(rows, 2.9)
+        self.assertIs({t["name"]: t["status"] for t in rec["situation"]["tags"]}["none_seen"], False)
+        ext = rec["contract"]["extension"]["situation"]["tags"]
+        self.assertEqual([t["name"] for t in ext], list(SCENE_TAGS))
+        (none,) = [t for t in ext if t["name"] == "none_seen"]
+        self.assertEqual((none["status"], none["unknown_reason"], none["evidence_ids"]), (False, None, []))
+        self.assertEqual(WindowJudge(bundle(situation=False)).evaluate(rows, 2.9)["situation"]["tags"], [])
+        self.assertEqual(set(SCENE_OF_TAG), set(TAGS) | set(SCENE_TAGS))
+        self.assertEqual(SCENE_OF_TAG["none_seen"], "absence")
 
     def test_the_window_record_lists_its_head_turns_with_the_loss_context(self):
         """'turns' = the window's look_back / yaw_sweep_offscreen events and their observations; the pre-loss head

@@ -7,7 +7,9 @@ Two kinds live here:
   source: it is a start value to be replaced from sources or public data before the 2026-10-28 recording, or reported
   per value bundle (decision list 2026-10-13, items 3 and 19). The three role boundaries (ROLE_BOUNDARIES) have no
   value at all (None, source UNDECIDED): the roles they decide stay 'unknown' until a bundle gives a value, and the
-  cues behind them are still written every frame (columns.py).
+  cues behind them are still written every frame (columns.py). The two scene-tag boundaries (SCENE_BOUNDARIES) are
+  the same: their method is fixed (SCENE_METHOD), their value depends on the camera and comes from a bundle; without
+  one the tags seated_height and face_approach say 'unknown' (situation.py).
 - events.PilotParams (re-exported here as SituationParams): the 13 values of the events and situation rules. They keep
   NO defaults on purpose (vision README '상황 층'; tests/test_situation.py checks it), so they only come from a value
   bundle file (load_bundle). Without one the runners still run and the situation output is 'unknown'.
@@ -47,6 +49,9 @@ MOUTH_AND_JAW_DIALS = (
 PRIMARY_RULES = ("face_then_largest", "largest")
 UNDECIDED = "정할 수 없음(결정 3 · 19): 값 묶음 곡선으로 보고"
 ROLE_BOUNDARIES = ("companion_rel_dist_max", "companion_lateral_min", "behind_rel_dist_min")   # None = no value yet
+SCENE_BOUNDARIES = ("seated_face_cy_min", "approach_ratio_min")   # None = no value yet (situation.py scene tags)
+SCENE_METHOD = ("정하는 방법 = 그 카메라 앞에서 서서 보통으로 쓰는 녹화(평가 촬영본과 따로 찍은 것)의 창 중앙값(창 길이 = "
+                "값 묶음의 window_s)으로 기준선 평균 + 2 SD(Wu 외, W4A 2021의 기준선 ± 2 SD; 조사 22 §2-1 · §2-11)")
 
 
 def _p(default, source: str, unit: str = ""):
@@ -99,6 +104,16 @@ class PilotParams:
               "작은 상자', 값과 상관없이 늘 봄) 동행자가 아님. 값이 없으면 주 사용자보다 작은 머리가 뒤 사람인지 모름",
         "primary head height / head height")
 
+    # --- scene tags of situation.py (seated height 1-2, face approach 2-1; 2026-11-22) ------------------------
+    seated_face_cy_min: float | None = _p(
+        None, f"{UNDECIDED}. 카메라마다 다름: 앉은 높이(seated_height) = 창 안 주 사용자 얼굴 중심의 세로 위치(face_cy) "
+              f"중앙값이 이 값보다 큼(트리 표 3-가 1-2 '얼굴 높이 낮음'). {SCENE_METHOD}. 값이 없으면 앉은 높이는 모름",
+        "face_cy (0 = top, 1 = bottom)")
+    approach_ratio_min: float | None = _p(
+        None, f"{UNDECIDED}. 얼굴 접근(face_approach) = 창 안 iod_ratio_user(주 사용자의 눈 사이 거리 ÷ 기준점부터의 "
+              f"중앙값) 중앙값이 이 값보다 큼(트리 표 3-가 2-1 '시작 대비 눈 사이 거리 비 커짐'). {SCENE_METHOD}. 값이 "
+              "없으면 얼굴 접근은 모름", "iod_px / reference iod_px")
+
     # --- runners (replay.py, live.py) -------------------------------------------------------------------------
     segment_s: float = _p(
         1.0, f"계약 sendFeatureWindow의 '1~3초 구간' 안에서 고른 {PILOT} 값: 창 결과 한 줄의 간격이자 터치 횟수 · "
@@ -135,7 +150,7 @@ class PilotParams:
             if f.name == "primary_rule":
                 if value not in PRIMARY_RULES:
                     raise ValueError(f"PilotParams.primary_rule must be one of {PRIMARY_RULES}, got {value!r}")
-            elif f.name in ROLE_BOUNDARIES:
+            elif f.name in ROLE_BOUNDARIES + SCENE_BOUNDARIES:
                 if value is not None and (isinstance(value, bool) or not isinstance(value, numbers.Real)
                                           or not math.isfinite(value) or value <= 0):
                     raise ValueError(f"PilotParams.{f.name} must be None (no value yet) or a finite number > 0, "

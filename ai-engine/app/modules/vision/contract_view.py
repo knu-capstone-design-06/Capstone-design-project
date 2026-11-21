@@ -12,6 +12,7 @@ states when measurable=true. Sensor measurability and the pipeline version are p
                     support (JP 2-5 table); decided_by 'rule_placeholder' (shadow mode: Jev never changes the screen)
   extension         {measurement: {measurable, basis}, model_version, situation: {...}, decision_meta: {...}};
                     measurement follows the team placeholder (a tap or back in the segment, or a face).
+                    situation.tags carries the scene tags (name, status, unknown_reason, evidence ids).
                     decision_meta also carries the execution fields of
                     JP 2-5 (steps_left, target_id, message_id) and session_signal ({name: hold_timer} on the 3-2 wait)
 """
@@ -33,7 +34,10 @@ def to_contract(record: dict, session_id: str) -> dict:
             "model_version": MODEL_VERSION,
             "situation": {"tag": sit["name"], "display_text": sit["display_text"], "evidence_ids": sit["evidence_ids"],
                           "confidence": sit["confidence"], "alternatives": sit["alternatives"],
-                          "unknown_reason": sit["unknown_reason"], "quality": sit["quality"], "source": sit["source"]},
+                          "unknown_reason": sit["unknown_reason"], "quality": sit["quality"], "source": sit["source"],
+                          "tags": [{"name": t["name"], "status": t["status"], "unknown_reason": t["unknown_reason"],
+                                    "evidence_ids": sorted({e["event_id"] for e in t["evidence"]})}
+                                   for t in sit.get("tags", [])]},
             "decision_meta": {k: d[k] for k in ("decision_id", "withdrawn_id", "support", "scene", "action",
                                                 "intervention", "transition", "scope", "rank", "withdraw_on",
                                                 "policy", "meta", "steps_left", "target_id", "message_id",

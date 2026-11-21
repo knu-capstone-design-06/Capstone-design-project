@@ -22,6 +22,9 @@ incremental version.
 Every window, count, angle and floor is a pilot value ([파일럿]): PilotParams has no defaults and this file sets
 none (dec section 3: '모든 창 길이 · 횟수 · 각도는 [파일럿]', set from the distribution in the team's self-recording).
 
+The scene tags of situation.py (nothing seen; 2026-11-22) read a second,
+separate set of measurement events (observe_scene, SCENE_KINDS); they do not change the events above.
+
 Input: one dict per frame.
 - columns features.py writes: frame_idx, t_s, face_state, body_state, yaw_deg, face_cx, pose_vis_shoulders
 - optional columns that no code in this repository writes yet. Events come from wherever a column has values; a cue
@@ -445,6 +448,40 @@ def detect_events(rows: list, params: PilotParams, *, landmarker_num_faces: int,
                           lambda run, s: {"miss_tap_count": sum(misses[i] for i in run)})
 
     return sorted(events, key=lambda e: (e["t_start"], e["kind"]))
+
+
+# --- the scene tags' measurements (situation.py SCENE_TAGS; 2026-11-22) ------------------------------------------
+SCENE_KINDS = ("nothing_seen",)
+
+
+@dataclass(frozen=True)
+class SceneCues:
+    """What the scene tags read for one window. Their events are measurements of the window's rows:
+      nothing_seen       one over the whole window when no row sees a face (landmarks or a face-detector box), a body
+                         or a head box: unseen_s = min(face_unseen_s, body_unseen_s) at the window's last row
+    No value is compared here."""
+    events: list
+    frames: int                  # rows inside the window
+    head_measured: bool = False  # every row carries head_count: 'no head box' can be concluded
+
+    def of(self, *kinds: str) -> list:
+        return [e for e in self.events if e["kind"] in kinds]
+
+
+def observe_scene(rows: list, window: tuple) -> SceneCues:
+    """SceneCues of window = (t0, t1) from the rows inside it (rows after t1 are never read)."""
+    rows, first = _split(rows, window)
+    inside = rows[first:]
+    events = []
+    if inside and all(not _face(r) and not _body(r) and not (_num(r, "head_count") or 0) > 0
+                      and not (_num(r, "face_count") or 0) > 0
+                      for r in inside):
+        last = inside[-1]
+        unseen = [v for v in (_num(last, "face_unseen_s"), _num(last, "body_unseen_s")) if v is not None]
+        events.append(_event("nothing_seen", inside, list(range(len(inside))),
+                             {"unseen_s": min(unseen) if unseen else None}))
+    return SceneCues(events=sorted(events, key=lambda e: (e["t_start"], e["kind"])), frames=len(inside),
+                     head_measured=bool(inside) and all(_num(r, "head_count") is not None for r in inside))
 
 
 # --- what the rules read for one window --------------------------------------------------------------------------

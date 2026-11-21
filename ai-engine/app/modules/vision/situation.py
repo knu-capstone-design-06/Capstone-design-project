@@ -13,7 +13,8 @@ output reaches the other services (contract/) go to the team meeting of 2026-10-
 Output for one window (sem section 4: dec section 3's output line plus quality, confidence, alternatives, event ids):
     {name, display_text, window_s: [t0, t1], evidence: [{event_id, obs, value, t}],
      quality: {face_visible_ratio, track_conf}, confidence: "unknown" | {events, quality_ok},
-     alternatives: [{name, display_text, evidence, confidence}], source: "rules_v1"}
+     alternatives: [{name, display_text, evidence, confidence}], source: "rules_v1",
+     tags: [{name, display_text, status, evidence, unknown_reason}]}
   name          a tag; "unknown" = cannot tell; "none" = an observed cue rules every tag out
   display_text  the fixed text of the name (DISPLAY_TEXT), never free text; "" for unknown and none
   evidence      one item per observation of each supporting event, whose observation rows all lie inside the window
@@ -22,6 +23,11 @@ Output for one window (sem section 4: dec section 3's output line plus quality, 
                 supporting events, quality_ok = no cue of the rule was left out as missing
   alternatives  the other tags that no measured cue ruled out and that have supporting events, most events first;
                 one with fewer than min_events supporting events has confidence "unknown"
+  tags          the scene tags (SCENE_TAGS, 2026-11-22), each judged on its own and never competing with name:
+                none_seen (the absence node; no face, body or head box on any row).
+                status True | False | "unknown"; unknown_reason a code exactly when "unknown" (no_frames,
+                column:head_count); evidence points into the window's scene events (events.observe_scene). Touch and
+                duration (the absence warning) are the judgment layer's, not these tags'.
 
 How a window is decided. From sem section 4: fewer than min_events supporting events -> "unknown"; quality per cue
 (a face turned away is not a sensor failure: face loss is the look_back cue, and only the cues that need the face -
@@ -48,7 +54,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .events import Cues, PilotParams, is_number, is_ratio, observe_window
+from .events import Cues, PilotParams, SceneCues, is_number, is_ratio, observe_scene, observe_window
 
 SOURCE = "rules_v1"
 UNKNOWN, NONE = "unknown", "none"
@@ -59,7 +65,8 @@ DISPLAY_TEXT = {                                   # dec section 3 table, '표�
     UNKNOWN: "",
     NONE: "",
 }
-OUTPUT_KEYS = ("name", "display_text", "window_s", "evidence", "quality", "confidence", "alternatives", "source")
+OUTPUT_KEYS = ("name", "display_text", "window_s", "evidence", "quality", "confidence", "alternatives", "source",
+               "tags")
 QUALITY_KEYS = ("face_visible_ratio", "track_conf")
 EVIDENCE_KEYS = ("event_id", "obs", "value", "t")
 
@@ -183,6 +190,36 @@ RULES = {
 TAGS = tuple(RULES)
 
 
+# --- the scene tags: a second list, judged one by one (2026-11-22) -----------------------------------------------
+# They do not compete with the three tags above: a seated user can also look back at a queue, so each scene tag has
+# its own status in `tags` and the single `name` is decided as before, without them.
+SCENE_DISPLAY_TEXT = {                             # the scenario tree's terms (table 3-가)
+    "none_seen": "카메라에 사람이 안 보임",          # the absence node (nothing seen; not 'nobody')
+}
+SCENE_TAGS = tuple(SCENE_DISPLAY_TEXT)
+TAG_KEYS = ("name", "display_text", "status", "evidence", "unknown_reason")
+
+
+def none_seen(sc: SceneCues) -> tuple:
+    """(status, events, unknown reason): no row of the window sees a face, a body or a head box (nothing_seen). That no
+    head box was there needs head_count on every row (the head detector ran); otherwise unknown (column:head_count)."""
+    if not sc.frames:
+        return None, [], "no_frames"
+    nothing = sc.of("nothing_seen")
+    if nothing and not sc.head_measured:
+        return None, nothing, "column:head_count"
+    return bool(nothing), nothing, None
+
+
+def scene_tags(sc: SceneCues) -> list:
+    """The `tags` list of one window, in SCENE_TAGS order."""
+    verdicts = {"none_seen": none_seen(sc)}
+    return [{"name": name, "display_text": SCENE_DISPLAY_TEXT[name],
+             "status": UNKNOWN if status is None else status, "evidence": _evidence(events),
+             "unknown_reason": reason}
+            for name, (status, events, reason) in ((n, verdicts[n]) for n in SCENE_TAGS)]
+
+
 # --- output -----------------------------------------------------------------------------------------------------
 def _ordered(events: list) -> list:
     return sorted(events, key=lambda e: (e["t_start"], e["kind"]))
@@ -228,9 +265,12 @@ def assess(rows: list, t_end: float, params: PilotParams, *, landmarker_num_face
     ValueError.
 
     landmarker_num_faces = the num_faces setting of the Face Landmarker behind the rows (app/inference/vision.py: 1).
-    baseline_s = the window of a look_back's pre-loss head pose (events._loss_context; observation only)."""
+    baseline_s = the window of a look_back's pre-loss head pose (events._loss_context; observation only).
+    The scene tags' evidence points into their own events (output['tags'], not in
+    the returned events); the other keys of the output do not depend on them."""
     window = (t_end - params.window_s, t_end)
     cues = observe_window(rows, window, params, landmarker_num_faces=landmarker_num_faces, baseline_s=baseline_s)
+    scene = observe_scene(rows, window)
     verdicts = {name: rule(cues, params) for name, rule in RULES.items()}
     name, alternatives = _decide(cues, verdicts, params)
     chosen = verdicts.get(name)
@@ -245,8 +285,9 @@ def assess(rows: list, t_end: float, params: PilotParams, *, landmarker_num_face
                        else {"events": len(support), "quality_ok": not (chosen and chosen.skipped)}),
         "alternatives": [_entry(n, verdicts[n], params) for n in alternatives],
         "source": SOURCE,
+        "tags": scene_tags(scene),
     }
-    problems = check_output(out, cues.events, params)
+    problems = check_output(out, cues.events, params, scene_events=scene.events)
     if problems:
         raise ValueError("situation output breaks the check rules: " + "; ".join(problems))
     return out, cues.events
@@ -262,16 +303,9 @@ def _window(value):
     return (t0, t1) if is_number(t0) and is_number(t1) and t0 <= t1 else None
 
 
-def _check_entry(entry: dict, by_id: dict, t0: float, t1: float, params: PilotParams) -> tuple:
-    """(problems, event ids) of the output or of one alternative: display text, evidence, the min_events floor."""
-    name = entry.get("name")
-    problems = []
-    if entry.get("display_text") != DISPLAY_TEXT.get(name):
-        problems.append(f"{name}: display_text {entry.get('display_text')!r} is not the fixed text of the name")
-    evidence = entry.get("evidence", [])
-    if not isinstance(evidence, list):
-        return problems + [f"{name}: evidence {evidence!r} is not a list"], set()
-    ids = set()
+def _check_evidence(name: str, evidence: list, by_id: dict, t0: float, t1: float) -> tuple:
+    """(problems, event ids) of a list of evidence items against the events of the window."""
+    problems, ids = [], set()
     for item in evidence:
         if not isinstance(item, dict) or set(item) != set(EVIDENCE_KEYS):
             problems.append(f"{name}: evidence item {item!r} does not have the keys {EVIDENCE_KEYS}")
@@ -287,6 +321,46 @@ def _check_entry(entry: dict, by_id: dict, t0: float, t1: float, params: PilotPa
             problems.append(f"{name}: {item['obs']}={item['value']!r} is not an observation of {item['event_id']}")
         if item["t"] != event["t_end"]:
             problems.append(f"{name}: t {item['t']!r} is not the end of {item['event_id']}")
+    return problems, ids
+
+
+def _check_tags(tags, by_id: dict, t0: float, t1: float) -> list:
+    """Problems of the scene-tag list: every SCENE_TAGS name once, in order, with its fixed display text; status
+    True, False or 'unknown'; a reason exactly when unknown; evidence linked to this window's events."""
+    if not isinstance(tags, list) or not all(isinstance(t, dict) and set(t) == set(TAG_KEYS) for t in tags):
+        return [f"tags {tags!r} is not a list of entries with the keys {TAG_KEYS}"]
+    if tuple(t["name"] for t in tags) != SCENE_TAGS:
+        return [f"tags {[t['name'] for t in tags]} are not the scene tags {list(SCENE_TAGS)} in order"]
+    problems = []
+    for tag in tags:
+        name, status, reason = tag["name"], tag["status"], tag["unknown_reason"]
+        if tag["display_text"] != SCENE_DISPLAY_TEXT[name]:
+            problems.append(f"{name}: display_text {tag['display_text']!r} is not the fixed text of the tag")
+        if not (type(status) is bool or status == UNKNOWN):
+            problems.append(f"{name}: status {status!r} is not true, false or {UNKNOWN!r}")
+        if status == UNKNOWN and not (isinstance(reason, str) and reason):
+            problems.append(f"{name}: status {UNKNOWN!r} needs a non-empty reason, got {reason!r}")
+        elif status != UNKNOWN and reason is not None:
+            problems.append(f"{name}: status {status!r} with unknown_reason {reason!r}: a definite status has none")
+        if not isinstance(tag["evidence"], list):
+            problems.append(f"{name}: evidence {tag['evidence']!r} is not a list")
+            continue
+        tag_problems, _ = _check_evidence(name, tag["evidence"], by_id, t0, t1)
+        problems += tag_problems
+    return problems
+
+
+def _check_entry(entry: dict, by_id: dict, t0: float, t1: float, params: PilotParams) -> tuple:
+    """(problems, event ids) of the output or of one alternative: display text, evidence, the min_events floor."""
+    name = entry.get("name")
+    problems = []
+    if entry.get("display_text") != DISPLAY_TEXT.get(name):
+        problems.append(f"{name}: display_text {entry.get('display_text')!r} is not the fixed text of the name")
+    evidence = entry.get("evidence", [])
+    if not isinstance(evidence, list):
+        return problems + [f"{name}: evidence {evidence!r} is not a list"], set()
+    evidence_problems, ids = _check_evidence(name, evidence, by_id, t0, t1)
+    problems += evidence_problems
     confidence = entry.get("confidence")
     if isinstance(confidence, dict):
         count = confidence.get("events")
@@ -301,7 +375,7 @@ def _check_entry(entry: dict, by_id: dict, t0: float, t1: float, params: PilotPa
     return problems, ids
 
 
-def check_output(out: dict, events: list, params: PilotParams) -> list:
+def check_output(out: dict, events: list, params: PilotParams, scene_events: list | None = None) -> list:
     """Problems of one output against the events of its window; [] = it passes (a malformed output gives problems,
     not an exception). The check rules as code:
     - form: window_s is [start, end] with finite start <= end; quality has face_visible_ratio and track_conf, each a
@@ -313,7 +387,9 @@ def check_output(out: dict, events: list, params: PilotParams) -> list:
     - rule 2, 'unknown' (sem section 4): name "unknown" if and only if confidence "unknown"; the name and every
       alternative with a {events, quality_ok} confidence have at least min_events supporting events and come from a
       window that met track_conf_min; "unknown" and "none" carry no evidence of their own, "none" no alternatives,
-      and every alternative at least one event of this window."""
+      and every alternative at least one event of this window;
+    - scene tags (`tags`, _check_tags): their evidence names events of this window too, from events or scene_events
+      (the scene tags' own measurement events, events.observe_scene)."""
     if not isinstance(out, dict):
         return [f"output {out!r} is not a dict"]
     missing = [k for k in OUTPUT_KEYS if k not in out]
@@ -368,4 +444,5 @@ def check_output(out: dict, events: list, params: PilotParams) -> list:
         if isinstance(alt.get("confidence"), dict) and not track_ok:
             problems.append(f"alternative {alt_name}: a definite confidence, but track_conf {track!r} is below "
                             f"track_conf_min")
+    problems += _check_tags(out["tags"], {**by_id, **{e["event_id"]: e for e in scene_events or []}}, t0, t1)
     return problems

@@ -237,17 +237,17 @@ def _ids(evidence: list) -> list:
 
 def situation_view(out: dict | None, reasons: list) -> dict:
     """The situation part of a window record: the assess output with its evidence ids listed apart; alternatives keep
-    name, confidence and evidence ids."""
+    name, confidence and evidence ids; tags = the scene tags as assess gives them (no value bundle: no window, [])."""
     if out is None:
         return {"name": UNKNOWN, "display_text": "", "evidence_ids": [], "evidence": [], "confidence": UNKNOWN,
                 "alternatives": [],
-                "quality": None, "unknown_reason": reasons, "window_s": None, "source": None}
+                "quality": None, "unknown_reason": reasons, "window_s": None, "source": None, "tags": []}
     return {"name": out["name"], "display_text": out["display_text"], "evidence_ids": _ids(out["evidence"]),
             "evidence": out["evidence"], "confidence": out["confidence"],
             "alternatives": [{"name": a["name"], "confidence": a["confidence"], "evidence_ids": _ids(a["evidence"])}
                              for a in out["alternatives"]],
             "quality": out["quality"], "unknown_reason": reasons, "window_s": out["window_s"],
-            "source": out["source"]}
+            "source": out["source"], "tags": out["tags"]}
 
 
 class WindowJudge:

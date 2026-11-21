@@ -88,6 +88,23 @@ def around_window(drop=()):
     return rows_of(face(5), sweep(+1), face(5), sweep(-1), face(5), drop=drop)
 
 
+def golden_windows():
+    """(name, rows, PilotParams overrides, landmarker num_faces) of the windows whose three-tag output is pinned to the
+    code before the scene tags (tests/data/situation_golden_main.json, made from origin/main)."""
+    return [
+        ("behind", put(rows_of(face(5), look_back(), face(5), look_back(), face(5)), 0, 30, people_behind_count=1),
+         {}, 1),
+        ("companion", companion_window(sweep(+1)), {}, 1),
+        ("companion_two_faces", companion_window(sweep(+1)), {}, 2),
+        ("around", around_window(), {}, 1),
+        ("around_min_events_4", around_window(), {"min_events": 4}, 1),
+        ("around_no_companion_column", around_window(drop=("companion_box",)), {}, 1),
+        ("facing", rows_of(face(10)), {}, 1),
+        ("gone", rows_of(face(5), [(10, GONE)], face(5)), {}, 1),
+        ("short_window", companion_window(sweep(+1)), {"window_s": 1.9}, 1),
+    ]
+
+
 def run(rows, params=P, num_faces=1):
     return assess(rows, rows[-1]["t_s"], params, landmarker_num_faces=num_faces)
 
@@ -609,6 +626,112 @@ class LookingAroundTests(unittest.TestCase):
         out, _ = run(rows)
         self.assertEqual(out["name"], UNKNOWN)
         self.assertEqual([a["name"] for a in out["alternatives"]], [AROUND])
+
+
+class SceneCueTests(unittest.TestCase):
+    """events.observe_scene: the measurements of the scene tags (values made for these frames)."""
+
+    def test_a_window_with_nobody_seen(self):
+        from app.modules.vision.events import observe_scene
+        rows = rows_of(face(4), [(6, GONE)], face(4), extra={**OPTIONAL, "head_count": 1})
+        put(rows, 4, 9, head_count=0)
+        c = observe_scene(rows, (0.0, 1.3))
+        self.assertEqual(c.of("nothing_seen"), [])                     # people seen in part of the window
+        (nothing,) = observe_scene(rows, (0.4, 0.9)).of("nothing_seen")
+        self.assertEqual((nothing["t_start"], nothing["t_end"]), (0.4, 0.9))
+        put(rows, 6, 6, head_count=1)                                  # a head box: somebody is there
+        self.assertEqual(observe_scene(rows, (0.4, 0.9)).of("nothing_seen"), [])
+        put(rows, 6, 6, head_count=0, face_count=1)                    # a face-detector box only: somebody
+        self.assertEqual(observe_scene(rows, (0.4, 0.9)).of("nothing_seen"), [])
+        put(rows, 6, 6, face_count=0)
+        self.assertEqual(len(observe_scene(rows, (0.4, 0.9)).of("nothing_seen")), 1)
+        out, _ = assess(rows, 0.9, dataclasses.replace(P, window_s=0.5), landmarker_num_faces=1)
+        self.assertEqual(self.tags(out)["none_seen"], (True, None))        # 0.4 .. 0.9 s: nothing seen
+        nohead = rows_of([(10, GONE)])                                       # nobody seen, no head detector
+        self.assertEqual(self.tags(run(nohead)[0])["none_seen"], (UNKNOWN, "column:head_count"))
+        from app.modules.vision.situation import scene_tags
+        self.assertEqual({t["unknown_reason"] for t in scene_tags(observe_scene(rows, (5.0, 6.0)))}, {"no_frames"})
+
+    @staticmethod
+    def tags(out):
+        return {t["name"]: (t["status"], t["unknown_reason"]) for t in out["tags"]}
+
+
+class SceneTagTests(unittest.TestCase):
+    """The second list `tags` of situation.assess (values made for these frames, not proposals)."""
+
+    @staticmethod
+    def tags(out):
+        return {t["name"]: (t["status"], t["unknown_reason"]) for t in out["tags"]}
+
+    def test_without_values_or_columns_the_tags_say_why_they_cannot_tell(self):
+        from app.modules.vision.situation import SCENE_TAGS
+        out, events = run(rows_of(face(10)))
+        self.assertEqual([t["name"] for t in out["tags"]], list(SCENE_TAGS))
+        self.assertEqual(self.tags(out)["none_seen"], (False, None))
+        self.assertEqual({t["name"]: t["display_text"] for t in out["tags"]}["none_seen"], "카메라에 사람이 안 보임")
+        self.assertEqual(check_output(out, events, P), [])
+
+    def test_the_scene_columns_do_not_leak_into_the_three_tags(self):
+        from app.modules.vision.situation import assess
+        windows = [put(rows_of(face(5), look_back(), face(5), look_back(), face(5)), 0, 30, people_behind_count=1),
+                   companion_window(sweep(+1)), around_window(), rows_of(face(10))]
+        for rows in windows:
+            t = rows[-1]["t_s"]
+            plain, plain_events = assess(rows, t, P, landmarker_num_faces=1)
+            marked = [dict(r) for r in rows]
+            for r in marked:                        # scene columns that move the scene tags
+                r.update(head_count=1)
+            out, events = assess(marked, t, P, landmarker_num_faces=1)
+            self.assertEqual({k: v for k, v in out.items() if k != "tags"},
+                             {k: v for k, v in plain.items() if k != "tags"})
+            self.assertEqual(events, plain_events)
+            self.assertIs(self.tags(out)["none_seen"][0], False)
+
+    def test_check_rules_for_the_tags(self):
+        rows = rows_of(face(10))
+        out, events = assess(rows, rows[-1]["t_s"], P, landmarker_num_faces=1)
+        self.assertEqual(check_output(out, events, P), [])
+        k = [t["name"] for t in out["tags"]].index("none_seen")
+
+        def broken(**over):
+            tags = [dict(t) for t in out["tags"]]
+            tags[k].update(over)
+            return check_output({**out, "tags": tags}, events, P)
+        self.assertTrue(broken(status="maybe"))
+        self.assertTrue(broken(status=1))
+        self.assertTrue(broken(status=1.0))                                     # equal to True, but not a bool
+        self.assertTrue(broken(display_text="휠체어"))
+        self.assertTrue(broken(unknown_reason="no_value"))                 # a reason with a definite status
+        self.assertTrue(broken(status=UNKNOWN, unknown_reason=None))
+        self.assertTrue(broken(unknown_reason={}))                         # any reason with a definite status
+        self.assertTrue(broken(status=UNKNOWN, unknown_reason=""))         # unknown needs a non-empty text
+        self.assertTrue(broken(status=UNKNOWN, unknown_reason={}))
+        self.assertTrue(broken(evidence={}))                               # evidence must be a list
+        self.assertTrue(check_output({**out, "tags": []}, events, P))
+        self.assertTrue(check_output({k: v for k, v in out.items() if k != "tags"}, events, P))
+
+
+class GoldenOutputTests(unittest.TestCase):
+    """The three tags' output against the code before the scene tags: tests/data/situation_golden_main.json was made
+    by origin/main's events.py and situation.py (a3143a5) on golden_windows(). Here the new code runs on the same windows with
+    every scene column set and every scene value given, and must give the same output outside `tags`."""
+
+    def test_the_three_tags_match_the_code_before_the_scene_tags(self):
+        import json
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "situation_golden_main.json")
+        with open(path, encoding="utf-8") as f:
+            golden = json.load(f)
+        windows = golden_windows()
+        self.assertEqual(sorted(golden), sorted(name for name, *_ in windows))
+        for name, rows, over, faces in windows:
+            marked = [dict(r, face_cy=0.9, iod_ratio_user=1.5, primary_track=1 + (i >= len(rows) // 2), head_count=1,
+                           aid_owner="yes", aid_any_score=0.8, aid_count=1) for i, r in enumerate(rows)]
+            marked[len(rows) // 2].update(main_user_prev_track=1, main_user_gap_s=0.1, main_user_body_kept=True)
+            out, events = assess(marked, rows[-1]["t_s"], dataclasses.replace(P, **over), landmarker_num_faces=faces)
+            out = json.loads(json.dumps({k: v for k, v in out.items() if k != "tags"}))
+            self.assertEqual(out, golden[name]["output"], name)
+            self.assertEqual([e["event_id"] for e in events], golden[name]["event_ids"], name)
 
 
 class UnknownAndAlternativesTests(unittest.TestCase):
