@@ -20,6 +20,26 @@ Columns (names = the ones events.py reads, then observation-only columns no rule
                         unbroken face run (decision list 2026-10-10 §16: the person's baseline subtracted, change
                         only). None while the face is not seen, while the run is shorter than mouth_baseline_s, and
                         when blendshapes are off.
+  iod_ratio_user        the main user's inter-ocular distance (iod_px) over a reference of the same user's face rows
+                        before this one (FaceSizeRef; tree table 3-가 2-1 '시작 대비 눈 사이 거리 비'). Anchor = the
+                        start of the current main-user track (primary_track changes) and of the touch-log session.
+                        The person may still be walking up after either anchor (a first press can come while the user
+                        is stepping in), so the reference is the median of the upper half of the rows so far (the
+                        smaller walk-up sizes drop out). With a touch log the reference collects only from the
+                        session's first press and leaves out the rows whose ratio is above params.approach_ratio_min,
+                        so a user who leans in and stays close keeps the ratio. Without a touch log (live.py today,
+                        replays of recordings without one) the lean enters the reference and a long lean fades.
+                        A user already close at the anchor has that close size as the reference. None while the face is
+                        not the main user's (its iod_px is blank), before the reference has a row, and before the first
+                        press. Without the head detector the reference starts again when nobody has been seen for
+                        longer than params.track_max_gap_s.
+  dpitch_user_deg       the main user's head pitch (pitch_deg, + = down) minus the pitch of the same user's first face
+                        row after the anchor (PitchRef): the anchors of iod_ratio_user (a new main-user track that is
+                        not a reacquisition in the same place, the touch-log session and its first press, and without
+                        the head detector nobody seen for longer than params.track_max_gap_s). None while the face is
+                        not the main user's, without a pitch and before the first press. The session-start
+                        dpitch_start_deg of features.py stays as an observation column; this is the one face_approach's
+                        head-down gate reads.
   head_count, primary_box, primary_score, primary_from   all kept head boxes; the main user's box, its H1 score and how
                         it was chosen ('track' = the main user's track from earlier frames, 'face' | 'largest' = chosen
                         anew at this frame); observation only. primary_box is None while the main user's track is alive
@@ -75,6 +95,7 @@ The three boundaries have no value (params.UNDECIDED): until a value bundle give
 """
 from __future__ import annotations
 
+import bisect
 import math
 from collections import deque
 from dataclasses import dataclass
@@ -89,7 +110,7 @@ SHOULDERS = (11, 12)   # left / right shoulder in the 33-point pose map [D3]; = 
 DIR_COLUMNS = tuple(f"head_dir_{k}" for k in DIR_KEYS)
 HEAD_COLUMNS = ("people_behind_count", "companion_box", "head_count", "primary_box", "primary_score",
                 "primary_from", "primary_track", "face_in_primary", "face_track") + DIR_COLUMNS + ("head_boxes",)
-OPTIONAL_COLUMNS = HEAD_COLUMNS + ("shoulder_cx", "shoulder_cy", "mouth_motion")
+OPTIONAL_COLUMNS = HEAD_COLUMNS + ("shoulder_cx", "shoulder_cy", "mouth_motion", "iod_ratio_user", "dpitch_user_deg")
 # features.COLUMNS that the Face Landmarker's face gives (its position, size, angles and the face box's image
 # statistics): blanked where that face is not the main user's (face_in_primary False). face_state, the face detector's
 # columns (face_count, face_det_score, det_box_w_frac) and the run counters stay.
@@ -380,6 +401,184 @@ class MouthMotion:
             value = float(np.max(np.abs(vec - baseline)))
         self.buffer.append((t, vec))
         return value
+
+
+def _track_id(value):
+    """A track id as an int where it is one: rows.csv gives "2" where the head_boxes JSON cell gives 2. None for a
+    blank cell (None, "", NaN)."""
+    if value is None or value == "" or (isinstance(value, float) and math.isnan(value)):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return value
+    return int(number) if math.isfinite(number) and number.is_integer() else value
+
+
+SIZE_STEP_PX = 0.1   # storage step of FaceSizeRef, not a decision value: sizes are counted per 0.1 px, so a median
+                     # read from the counts is within half a step (0.05 px) of the exact one (test on a long run)
+
+
+def main_user_face(row: dict) -> bool:
+    """The row's face is the main user's: seen, and - when the head detector ran (the face_in_primary key is there) -
+    matched to the main user's head box (face_in_primary True; also 'True' read back from rows.csv)."""
+    if row.get("face_state") != SEEN:
+        return False
+    return "face_in_primary" not in row or row["face_in_primary"] is True or row["face_in_primary"] == "True"
+
+
+class _UserAnchor:
+    """The anchor shared by FaceSizeRef and PitchRef: a row whose primary_track differs from the track so far starts
+    the reference again (reset), unless it marks a reacquisition in the same place (main_user_reacquired); rows
+    without that column (no head detector) start it again when neither face nor body has been seen for longer than
+    max_gap_s. Subclasses define reset() and keep self.track and self.max_gap_s."""
+
+    def _follow(self, row: dict):
+        track = _track_id(row.get("primary_track"))
+        if track is not None and track != self.track:
+            if self.track is None or row.get("main_user_reacquired") not in (True, "True"):
+                self.reset()                         # a new main user; the same person found again keeps it
+            self.track = track
+        elif "primary_track" not in row and self.max_gap_s is not None:
+            unseen = [v for v in (_finite(row.get("face_unseen_s")), _finite(row.get("body_unseen_s"))) if v is not None]
+            if len(unseen) == 2 and min(unseen) > self.max_gap_s:
+                self.reset()                         # nobody seen longer than a track lives: the next person
+
+
+class FaceSizeRef(_UserAnchor):
+    """iod_ratio_user per frame (module docstring). The reference is the median of the upper half of the main user's
+    iod_px rows since the anchor, so the smaller sizes of walking up drop out, whether the anchor came before or after
+    the user arrived. With a press anchor (a touch log: the session's first press, which may come while the user is
+    still stepping up) the rows whose ratio is above near_min (the face-approach boundary of the bundle) stay out of
+    it, so the lean does not raise its own reference. Without a press anchor (no touch log: the anchor is the start of
+    the main-user track) the lean enters the reference and a long lean fades. A row whose primary_track differs from
+    the track so far starts the reference again, unless it marks a reacquisition in the same place
+    (main_user_reacquired, MainUserChange: the same person found again after a cap or a camera stall), which keeps
+    it. A stitched track break (main_user_stitched) starts it again: most stitches fall in the walk-up, whose smaller
+    sizes would stay in the reference (company camera 150: 3 of the 4 stitched breaks came before the user settled).
+    Rows without that column (no head detector) start it again when neither face nor body has been seen for
+    longer than max_gap_s (params.track_max_gap_s, the gap after which a head track ends).
+
+    Only the main user's face counts: with the head detector, a row whose face is not matched to the main user's box
+    (face_in_primary not True) is no face here. The sizes are kept as counts per 0.1 px (SIZE_STEP_PX), so a session of
+    any length keeps a bounded state; a median read from them is off by at most half a step."""
+
+    def __init__(self, near_min: float | None = None, max_gap_s: float | None = None):
+        self.near_min, self.max_gap_s = near_min, max_gap_s
+        self.reset()
+
+    def reset(self):
+        self.counts = {}           # iod_px of the main user's face rows since the anchor, counted per SIZE_STEP_PX
+        self.keys = []             # the counted sizes, sorted
+        self.n = 0
+        self.track = None
+
+    def _add(self, value: float):
+        key = round(value / SIZE_STEP_PX) * SIZE_STEP_PX
+        if key <= 0:                                 # below half a step: no size to compare with
+            return
+        if key not in self.counts:
+            bisect.insort(self.keys, key)
+            self.counts[key] = 0
+        self.counts[key] += 1
+        self.n += 1
+
+    def _kth(self, k: int) -> float:
+        """The k-th smallest stored size (0-based)."""
+        for key in self.keys:
+            k -= self.counts[key]
+            if k < 0:
+                return key
+        raise IndexError(k)
+
+    def _median_from(self, start: int) -> float | None:
+        """The median of the stored sizes from rank start on."""
+        m = self.n - start
+        if m <= 0:
+            return None
+        lo, hi = self._kth(start + (m - 1) // 2), self._kth(start + m // 2)
+        return (lo + hi) / 2.0
+
+    def median(self) -> float | None:
+        return self._median_from(0)
+
+    def reference(self) -> float | None:
+        """The median of the upper half of the rows so far (the rows at or above their median): the smaller rows of
+        walking up drop out of it, whichever anchor started it (the main-user track, or the session's first press,
+        which may come while the user is still stepping up to the kiosk)."""
+        median = self.median()
+        if median is None:
+            return None
+        below = sum(self.counts[key] for key in self.keys if key < median)
+        return self._median_from(below)
+
+    def _value(self, row: dict) -> float | None:
+        """The size this reference follows: the main user's iod_px."""
+        return _finite(row.get("iod_px")) if main_user_face(row) else None
+
+    def update(self, row: dict, collect: bool = True, press_anchor: bool = False) -> float | None:
+        """iod_ratio_user of this row. collect False (a touch log without a press in this session yet): nothing is
+        compared or collected. press_anchor True (a touch log: the reference starts at the session's first press):
+        rows above near_min stay out of the reference, so the lean does not raise it; the reference itself is the
+        same upper-half median with either anchor."""
+        self._follow(row)
+        iod = self._value(row)
+        if not collect or iod is None or iod <= 0:
+            return None
+        reference = self.reference()
+        ratio = None if reference is None else iod / reference
+        if not (press_anchor and self.near_min is not None and ratio is not None and ratio > self.near_min):
+            self._add(iod)
+        return ratio
+
+
+class PitchRef(_UserAnchor):
+    """dpitch_user_deg per frame (module docstring): the main user's pitch_deg minus the pitch of that user's first
+    face row after the anchor - the session-start pitch change of features.py, taken per main user. The anchors are
+    FaceSizeRef's (_UserAnchor; a touch-log session change is the chain's reset()). collect False (a touch log without
+    a press in this session yet): no reference is taken and the value is None, as for iod_ratio_user."""
+
+    def __init__(self, max_gap_s: float | None = None):
+        self.max_gap_s = max_gap_s
+        self.reset()
+
+    def reset(self):
+        self.ref = None            # pitch_deg of the main user's first face row since the anchor
+        self.track = None
+
+    def update(self, row: dict, collect: bool = True) -> float | None:
+        self._follow(row)
+        pitch = _finite(row.get("pitch_deg")) if main_user_face(row) else None
+        if not collect or pitch is None:
+            return None
+        if self.ref is None:
+            self.ref = pitch
+        return pitch - self.ref
+
+
+def add_face_size_ratio(rows: list, params=None) -> list:
+    """iod_ratio_user written into recorded rows (rows.csv of an earlier replay), in time order, with the anchor of a
+    run without a touch log (the main-user track). params = params.PilotParams (default values when None): its
+    approach_ratio_min keeps the lean out of the reference. Returns the rows."""
+    if params is None:
+        from .params import PilotParams
+        params = PilotParams()
+    ref = FaceSizeRef(params.approach_ratio_min, params.track_max_gap_s)
+    for row in sorted(rows, key=lambda r: float(r["t_s"])):
+        row["iod_ratio_user"] = ref.update(row)
+    return rows
+
+
+def add_pitch_user(rows: list, params=None) -> list:
+    """dpitch_user_deg written into recorded rows, in time order, as a run without a touch log writes it (PitchRef:
+    the main-user track, or without the head detector the unseen gap, as the anchor). Returns the rows."""
+    if params is None:
+        from .params import PilotParams
+        params = PilotParams()
+    ref = PitchRef(params.track_max_gap_s)
+    for row in sorted(rows, key=lambda r: float(r["t_s"])):
+        row["dpitch_user_deg"] = ref.update(row)
+    return rows
 
 
 def face_xy(row: dict):

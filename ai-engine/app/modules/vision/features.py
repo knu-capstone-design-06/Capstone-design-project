@@ -144,6 +144,12 @@ class Observer:
         self.face_cont = Continuity()
         self.body_cont = Continuity()
 
+    def reset_reference(self):
+        """Take the reference for 'ratio to the session start' (iod_ratio_start, dyaw_start_deg, dpitch_start_deg)
+        again from the next frame with a face; the run counters and the frame-to-frame values keep going. The runtime
+        chain calls it when the touch log's sessionId changes (chain.FrameChain)."""
+        self.ref = None
+
     def process(self, frame, source_kind: str = "", syn_phase: str = ""):
         """Return (row, draw) for one Frame: row = CSV values, draw = geometry for the overlay."""
         t_start = time.perf_counter()

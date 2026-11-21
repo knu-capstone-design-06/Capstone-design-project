@@ -41,6 +41,7 @@ SKIP = "vision packages not installed (pip install -r app/modules/vision/require
 SEEN, NOT_SEEN = "보임", "못 봄"
 NAN = float("nan")
 DT = 0.1
+PITCH_TEST = 20.0   # head_down_pitch_min of these tests: an arbitrary round value, not a calibration
 SIT_VALUES = dict(window_s=6.0, gap_s=0.25, offscreen_yaw_deg=30.0, shoulder_vis_min=0.5, look_back_min_count=2,
                   sweep_min_count=2, stay_min_s=1.0, dwell_min_s=1.0, mouth_motion_min=0.2, body_still_max=0.05,
                   min_events=3, face_visible_min=0.6, track_conf_min=0.6)   # test values for the synthetic rows
@@ -486,6 +487,128 @@ class ColumnsTests(unittest.TestCase):
         self.assertIsNone(m.update(0.5, {"jawOpen": 0.5, "mouthClose": 0.0}))
         with self.assertRaises(KeyError):
             m.update(0.6, {"jawOpen": 0.5})
+
+    def test_face_size_ratio_is_against_the_running_median_and_restarts_with_a_new_track(self):
+        from app.modules.vision.columns import FaceSizeRef
+        ref = FaceSizeRef()
+
+        def row(iod, track=1, face=SEEN):
+            return {"face_state": face, "iod_px": iod, "primary_track": track}
+        got = [ref.update(row(v)) for v in (40.0, 40.0, 40.0, 52.0)]
+        self.assertEqual(got[:3], [None, 1.0, 1.0])               # the first face row has no reference yet
+        self.assertAlmostEqual(got[3], 1.3)
+        self.assertIsNone(ref.update(row(None)))                  # someone else's face: iod_px blank
+        self.assertIsNone(ref.update(row(40.0, face=NOT_SEEN)))
+        self.assertIsNone(ref.update(row(40.0), collect=False))   # before the session's first press
+        self.assertEqual(ref.n, 4)                                # nothing collected from those three rows
+        self.assertIsNone(ref.update(row(80.0, track=2)))         # a new main-user track: a new reference
+        self.assertEqual(ref.update(row(80.0, track=2)), 1.0)
+        self.assertEqual(ref.update({"face_state": SEEN, "iod_px": 80.0}), 1.0)   # no track column: same reference
+
+    def test_face_size_reference_keeps_a_bounded_state_on_a_long_run(self):
+        """A live run of any length: the sizes are counted per 0.1 px, so 12,000 rows of one track keep at most one
+        entry per step, and the medians stay within half a step of the exact ones."""
+        import bisect
+        import statistics
+        from app.modules.vision.columns import FaceSizeRef
+        sizes = [30 + (i * 37 % 100) / 10 for i in range(12000)]       # 30.0 .. 39.9 px in a scattered order
+        ref = FaceSizeRef()
+        for v in sizes:
+            ref.update({"face_state": SEEN, "iod_px": v, "primary_track": 1})
+        self.assertEqual(ref.n, 12000)
+        self.assertLessEqual(len(ref.keys), 100)
+        exact = sorted(sizes)
+        self.assertAlmostEqual(ref.median(), statistics.median(exact), delta=0.05)
+        upper = exact[bisect.bisect_left(exact, statistics.median(exact)):]
+        self.assertAlmostEqual(ref.reference(), statistics.median(upper), delta=0.05)
+
+    def test_face_size_reference_skips_a_size_below_the_storage_step(self):
+        """A positive iod_px under half a step (0.04 px) rounds to 0: it is not stored, so the next normal row has no
+        zero reference to divide by."""
+        from app.modules.vision.columns import FaceSizeRef
+        ref = FaceSizeRef()
+        self.assertIsNone(ref.update({"face_state": SEEN, "iod_px": 0.04, "primary_track": 1}))
+        self.assertIsNone(ref.update({"face_state": SEEN, "iod_px": 32.0, "primary_track": 1}))
+        self.assertEqual(ref.update({"face_state": SEEN, "iod_px": 32.0, "primary_track": 1}), 1.0)
+
+    def test_face_size_reference_takes_only_the_main_users_face(self):
+        """With the head detector a face matched to no box while the main user's track lives may be someone else's:
+        no ratio, nothing collected. Without the head detector (no face_in_primary column) a seen face counts."""
+        from app.modules.vision.columns import FaceSizeRef
+        ref = FaceSizeRef()
+
+        def row(iod, matched):
+            return {"face_state": SEEN, "iod_px": iod, "primary_track": 1, "face_in_primary": matched}
+        for _ in range(3):
+            ref.update(row(30.0, True))
+        self.assertIsNone(ref.update(row(55.0, None)))
+        self.assertEqual(ref.n, 3)
+        self.assertEqual(ref.update(row(30.0, "True")), 1.0)                # read back from rows.csv
+
+    def test_face_size_reference_keeps_the_lean_out(self):
+        """Rows whose ratio already reached the face-approach boundary stay out of the reference, so a user who leans
+        in and stays close keeps the ratio; without the boundary the running median drifts up to the close size."""
+        from app.modules.vision.columns import FaceSizeRef
+        sizes = [40.0] * 5 + [52.0] * 20
+        kept = FaceSizeRef(near_min=1.2)                  # a press anchor (touch log): the lean stays out
+        got = [kept.update({"face_state": SEEN, "iod_px": v, "primary_track": 1}, press_anchor=True) for v in sizes]
+        self.assertAlmostEqual(got[5], 1.3)                       # leaning in: 52 against the median 40
+        self.assertAlmostEqual(got[-1], 1.3)                      # 20 close rows later: still against 40
+        drift = FaceSizeRef()
+        got = [drift.update({"face_state": SEEN, "iod_px": v, "primary_track": 1}, press_anchor=True) for v in sizes]
+        self.assertEqual(got[-1], 1.0)                            # no boundary: the median becomes 52 itself
+        walk = FaceSizeRef(near_min=1.2)                  # no touch log: the upper-half reference takes the lean in
+        got = [walk.update({"face_state": SEEN, "iod_px": v, "primary_track": 1}) for v in sizes]
+        self.assertAlmostEqual(got[5], 1.3)
+        self.assertEqual(got[-1], 1.0)
+
+    def test_face_size_reference_without_head_tracks_restarts_after_nobody_is_seen(self):
+        from app.modules.vision.columns import FaceSizeRef
+        ref = FaceSizeRef(max_gap_s=1.0)
+
+        def row(iod, face_unseen=NAN, body_unseen=NAN):
+            return {"face_state": SEEN if iod else NOT_SEEN, "iod_px": iod, "face_unseen_s": face_unseen,
+                    "body_unseen_s": body_unseen}
+        self.assertEqual([ref.update(row(40.0)) for _ in range(2)], [None, 1.0])
+        ref.update(row(None, face_unseen=1.5, body_unseen=0.5))   # the body is still seen: same person
+        self.assertEqual(ref.update(row(40.0)), 1.0)
+        ref.update(row(None, face_unseen=1.5, body_unseen=1.2))   # nobody for 1.2 s > 1.0 s: the next person
+        self.assertIsNone(ref.update(row(80.0)))
+        self.assertEqual(ref.update(row(80.0)), 1.0)
+
+    def test_head_pitch_reference_is_the_main_users_own_first_face(self):
+        """dpitch_user_deg: pitch against the same main user's first face after the anchor. User A walks in looking up
+        (-15 deg); user B, a new main-user track in the same session, operates level (+10 deg) and reads 0, not 25.
+        A reacquisition in the same place keeps the reference; without the head detector nobody seen for longer than
+        max_gap_s starts it again; before the first press (collect False) nothing is read."""
+        from app.modules.vision.columns import PitchRef, add_pitch_user
+        ref = PitchRef(max_gap_s=1.0)
+
+        def row(track, pitch, **kw):
+            return {"face_state": SEEN, "pitch_deg": pitch, "primary_track": track, **kw}
+        self.assertEqual([ref.update(row(1, p)) for p in (-15.0, -15.0, 0.0)], [0.0, 0.0, 15.0])
+        self.assertEqual([ref.update(row(2, p)) for p in (10.0, 10.0, 40.0)], [0.0, 0.0, 30.0])   # B's own first face
+        self.assertEqual(ref.update(row(3, 30.0, main_user_reacquired="True")), 20.0)        # B found again
+        self.assertIsNone(ref.update(row(3, 30.0, face_in_primary=False)))                  # not the main user's face
+        self.assertIsNone(ref.update({"face_state": NOT_SEEN, "pitch_deg": NAN, "primary_track": 3}))
+        gap = PitchRef(max_gap_s=1.0)                        # no head detector: the unseen gap is the anchor
+        self.assertEqual(gap.update({"face_state": SEEN, "pitch_deg": -15.0}), 0.0)
+        gap.update({"face_state": NOT_SEEN, "pitch_deg": NAN, "face_unseen_s": 1.5, "body_unseen_s": 1.2})
+        self.assertEqual(gap.update({"face_state": SEEN, "pitch_deg": 10.0}), 0.0)
+        waiting = PitchRef()
+        self.assertIsNone(waiting.update(row(1, -15.0), collect=False))                      # before the first press
+        self.assertEqual(waiting.update(row(1, 5.0)), 0.0)                                   # the press: its reference
+        rows = add_pitch_user([{"t_s": t, "face_state": SEEN, "pitch_deg": p, "primary_track": k}
+                               for t, p, k in ((0.1, -15.0, "1"), (0.0, -15.0, "1"), (0.2, 10.0, "2"),
+                                               (0.3, 12.0, "2"))])
+        self.assertEqual([r["dpitch_user_deg"] for r in rows], [0.0, 0.0, 0.0, 2.0])
+
+    def test_add_face_size_ratio_fills_recorded_rows_in_time_order(self):
+        from app.modules.vision.columns import add_face_size_ratio
+        rows = [{"t_s": t, "face_state": SEEN, "iod_px": v, "primary_track": "1"} for t, v in
+                ((0.2, 60.0), (0.0, 40.0), (0.1, 40.0))]
+        add_face_size_ratio(rows)
+        self.assertEqual([r["iod_ratio_user"] for r in rows], [1.5, None, 1.0])
 
 
 def _iso(ms):
@@ -1182,6 +1305,80 @@ class FrameChainTests(unittest.TestCase):
         self.assertEqual([x["miss_tap_count"] for x in rows[4:10]], [0, 1, 0, 0, None, 0])   # 0.8 s: no target field
         for key in ("ms_heads", "ms_head_dir", "ms_chain", "cpu_ms_chain", "ms_total"):
             self.assertGreaterEqual(r[key], 0.0, key)
+
+    def test_the_head_pitch_reference_follows_the_main_user_and_the_press(self):
+        """dpitch_user_deg in the chain: with a touch log None before the session's first press, then pitch against
+        the first main-user face after it (the walk-up rows look 10 deg up); a new touch-log session without a press
+        yet is None again. Without a touch log (live.py) it is written from the main-user track's first face."""
+        from app.modules.vision.chain import FrameChain
+        from app.modules.vision.params import PilotParams
+        from app.modules.vision.touch import load_timeline
+
+        def pitched(deg):
+            inf = fake_inference()
+            a = math.radians(deg)
+            inf.face_matrix[:3, :3] = [[1, 0, 0], [0, math.cos(a), -math.sin(a)], [0, math.sin(a), math.cos(a)]]
+            return inf
+        folder = tempfile.mkdtemp()
+        video = os.path.join(folder, "take.mp4")
+        tl = load_timeline(touch_log(folder, MENU_EVENTS, video), video)   # first press at 0.5 s, session s2 from 8.1 s
+        schedule = [pitched(-10.0 if k < 5 else 0.0 if k < 82 else 7.0) for k in range(86)]
+        chain = FrameChain(FakeModels(schedule), PilotParams(), FakeHeads(), None, tl)
+        got = [chain.process(f)["dpitch_user_deg"] for f in frames(86)]
+        self.assertEqual(got[:5], [None] * 5)                                  # walking up, before the press
+        self.assertAlmostEqual(got[5], 0.0)
+        self.assertAlmostEqual(got[80], 0.0)
+        self.assertEqual(got[81:], [None] * 5)                                 # s2 from 8.1 s: waits for its press
+        live = FrameChain(FakeModels([pitched(-10.0), pitched(0.0)]), PilotParams(), FakeHeads())
+        got = [live.process(f)["dpitch_user_deg"] for f in frames(2)]
+        self.assertAlmostEqual(got[0], 0.0)
+        self.assertAlmostEqual(got[1], 10.0)
+        press = {"target": {"id": "product:1", "kind": "button", "disabled": False}}
+        events = [(-1000, "session_start", "menu", None), (500, "pointer_start", "menu", press),
+                  (2900, "session_end", "menu", {"reason": "server_session_change"}),
+                  (3000, "session_start", "menu", {"reason": "server_session_change"}, "s2"),
+                  (3200, "pointer_start", "menu", press, "s2")]
+        tl2 = load_timeline(touch_log(tempfile.mkdtemp(), events, video), video)
+        no_heads = FrameChain(FakeModels([pitched(0.0 if k < 30 else 10.0) for k in range(36)]), PilotParams(), None,
+                              None, tl2)                     # no head detector: the touch-log session is the anchor
+        got = [no_heads.process(f)["dpitch_user_deg"] for f in frames(36)]
+        self.assertAlmostEqual(got[29], 0.0)
+        self.assertAlmostEqual(got[35], 0.0)                 # the next session's user against its own first face
+
+    def test_without_a_touch_log_the_walk_up_does_not_read_as_face_approach(self):
+        """No touch log: the reference starts with the main-user track while the person still walks up (eyes 20 to 40
+        px). The upper half of the sizes so far is the reference, so standing at 40 px reads near 1, and a lean to 52
+        px still reads above it."""
+        from app.modules.vision.columns import FaceSizeRef
+        ref = FaceSizeRef(near_min=1.2)
+        walk = [20.0, 24.0, 28.0, 32.0, 36.0, 40.0] + [40.0] * 6
+        got = [ref.update({"face_state": SEEN, "iod_px": v, "primary_track": 1}) for v in walk]
+        self.assertLess(got[-1], 1.2)
+        self.assertGreater(ref.update({"face_state": SEEN, "iod_px": 52.0, "primary_track": 1}), 1.2)
+
+    def test_a_first_press_during_the_walk_up_does_not_read_the_arrival_as_face_approach(self):
+        """Touch log: the session's first press comes while the user is still stepping up (eyes 20 to 40 px over 30
+        rows after the press). The reference is the same upper-half median as without a log, so standing at 40 px reads
+        1.0 with either anchor; a lean to 52 px reads 1.3, and after the press it stays out of the reference. The plain
+        median of the same rows would leave the arrival out as a lean and read standing still as an approach."""
+        from app.modules.vision.columns import FaceSizeRef
+        walk = [20.0 + 20.0 * k / 29 for k in range(30)] + [40.0] * 30
+        lean = [52.0] * 20
+        for press in (True, False):
+            ref = FaceSizeRef(near_min=1.2)
+            got = [ref.update({"face_state": SEEN, "iod_px": v, "primary_track": 1}, press_anchor=press)
+                   for v in walk + lean]
+            self.assertLess(got[29], 1.2, press)                      # arriving: below the boundary
+            self.assertEqual(got[len(walk) - 1], 1.0, press)          # standing at the kiosk
+            self.assertAlmostEqual(got[len(walk)], 1.3, msg=press)    # leaning in
+            self.assertAlmostEqual(got[-1], 1.3, msg=press)
+        kept = FaceSizeRef(near_min=1.2)                  # after the press a long lean stays out of the reference
+        got = [kept.update({"face_state": SEEN, "iod_px": v, "primary_track": 1}, press_anchor=True)
+               for v in walk + lean * 4]
+        self.assertAlmostEqual(got[-1], 1.3)
+        faded = FaceSizeRef(near_min=1.2)                 # without a log the same long lean enters it and fades
+        got = [faded.update({"face_state": SEEN, "iod_px": v, "primary_track": 1}) for v in walk + lean * 4]
+        self.assertLess(got[-1], 1.2)
 
     def test_a_face_outside_the_main_user_box_is_missing(self):
         """The main user's track is a head box left of the face (chosen while it was the only box); a box around the

@@ -49,7 +49,8 @@ MOUTH_AND_JAW_DIALS = (
 PRIMARY_RULES = ("face_then_largest", "largest")
 UNDECIDED = "정할 수 없음(결정 3 · 19): 값 묶음 곡선으로 보고"
 ROLE_BOUNDARIES = ("companion_rel_dist_max", "companion_lateral_min", "behind_rel_dist_min")   # None = no value yet
-SCENE_BOUNDARIES = ("seated_face_cy_min", "approach_ratio_min")   # None = no value yet (situation.py scene tags)
+SCENE_BOUNDARIES = ("seated_face_cy_min", "approach_ratio_min", "head_down_pitch_min")   # None = no value yet
+                    # (situation.py scene tags)
 SCENE_METHOD = ("정하는 방법 = 그 카메라 앞에서 서서 보통으로 쓰는 녹화(평가 촬영본과 따로 찍은 것)의 창 중앙값(창 길이 = "
                 "값 묶음의 window_s)으로 기준선 평균 + 2 SD(Wu 외, W4A 2021의 기준선 ± 2 SD; 조사 22 §2-1 · §2-11)")
 
@@ -109,6 +110,14 @@ class PilotParams:
         None, f"{UNDECIDED}. 카메라마다 다름: 앉은 높이(seated_height) = 창 안 주 사용자 얼굴 중심의 세로 위치(face_cy) "
               f"중앙값이 이 값보다 큼(트리 표 3-가 1-2 '얼굴 높이 낮음'). {SCENE_METHOD}. 값이 없으면 앉은 높이는 모름",
         "face_cy (0 = top, 1 = bottom)")
+    head_down_pitch_min: float | None = _p(
+        None, f"{UNDECIDED}. 카메라마다 다름: 얼굴 접근(face_approach)에서 고개 숙임을 빼는 경계. 창 안 주 사용자 "
+              f"dpitch_user_deg(같은 주 사용자의 첫 얼굴 대비 고개 숙임, + = 아래: 부호는 features.head_angles_deg의 pitch, "
+              f"비전 README 'CSV 열'의 고개 방향 줄; columns.PitchRef, iod_ratio_user와 같은 기준점) "
+              f"중앙값(창 프레임의 face_visible_min 이상의 줄에서 낸 것)이 "
+              f"이 값보다 크면 그 창은 얼굴 접근으로 세지 "
+              f"않음(휴대폰 · 카운터를 보려고 숙인 것은 화면을 읽으려고 다가간 것이 아님). {SCENE_METHOD}. 값이 없으면 거르지 않음",
+        "deg (+ = down)")
     approach_ratio_min: float | None = _p(
         None, f"{UNDECIDED}. 얼굴 접근(face_approach) = 창 안 iod_ratio_user(주 사용자의 눈 사이 거리 ÷ 기준점부터의 "
               f"중앙값) 중앙값이 이 값보다 큼(트리 표 3-가 2-1 '시작 대비 눈 사이 거리 비 커짐'). {SCENE_METHOD}. 값이 "
@@ -155,6 +164,9 @@ class PilotParams:
                                           or not math.isfinite(value) or value <= 0):
                     raise ValueError(f"PilotParams.{f.name} must be None (no value yet) or a finite number > 0, "
                                      f"got {value!r}")
+                if f.name == "approach_ratio_min" and value is not None and value <= 1:
+                    raise ValueError(f"PilotParams.{f.name} is a size ratio to the user's own reference (1 = "
+                                     f"the same size) and must be above 1, got {value!r}")
             elif f.name == "mouth_dials":
                 if not value or not all(isinstance(v, str) and v for v in value):
                     raise ValueError(f"PilotParams.mouth_dials must be a non-empty list of blendshape names, got {value!r}")

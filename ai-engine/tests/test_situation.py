@@ -18,6 +18,7 @@ from app.modules.vision.situation import DISPLAY_TEXT, NONE, TAGS, UNKNOWN, asse
 
 NAN = float("nan")
 DT = 0.1                                     # synthetic frame interval (s)
+PITCH_TEST = 20.0   # head_down_pitch_min of these tests: an arbitrary round value, not a calibration
 SEEN, NOT_SEEN = "보임", "못 봄"
 SITUATION_PY = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                             "app", "modules", "vision", "situation.py")
@@ -655,6 +656,34 @@ class SceneCueTests(unittest.TestCase):
     @staticmethod
     def tags(out):
         return {t["name"]: (t["status"], t["unknown_reason"]) for t in out["tags"]}
+
+    def test_face_approach_does_not_count_a_bowed_head(self):
+        """A larger face while the head is pitched down beyond the camera's head-down boundary is bowing (a phone,
+        the counter), not leaning in to read: the window is judged False (as the company-video check counted it);
+        facing the screen it is an approach."""
+        from app.modules.vision.events import observe_scene
+        from app.modules.vision.situation import face_approach
+        rows = rows_of(face(10), extra={**OPTIONAL, "iod_ratio_user": 1.4, "dpitch_user_deg": 30.0})
+        sc = observe_scene(rows, (0.0, 0.9))
+        status, events, reason = face_approach(sc, 1.2, 0.5, head_down_pitch_min=PITCH_TEST)
+        self.assertEqual((status, reason), (False, None))
+        self.assertEqual(sorted(e["kind"] for e in events), ["face_size", "head_pitch"])
+        unchanged = observe_scene(rows_of(face(10), extra={**OPTIONAL, "iod_ratio_user": 1.0,   # bowed, not grown
+                                                           "dpitch_user_deg": 30.0}), (0.0, 0.9))
+        self.assertEqual(face_approach(unchanged, 1.2, 0.5, head_down_pitch_min=PITCH_TEST)[::2], (False, None))
+        self.assertIs(face_approach(sc, 1.2, 0.5)[0], True)                        # no head-down value: not gated
+        level = observe_scene(put(rows, 0, 9, dpitch_user_deg=5.0), (0.0, 0.9))
+        self.assertIs(face_approach(level, 1.2, 0.5, head_down_pitch_min=PITCH_TEST)[0], True)
+
+    def test_the_head_down_gate_needs_the_share_of_the_window(self):
+        """The head-down gate reads a pitch median only when it stands on face_visible_min of the window's frames, as
+        the boundary was calibrated: two bowed face rows before the landmarker loses the leaning face do not hide the
+        approach (True asks no share)."""
+        from app.modules.vision.events import observe_scene
+        from app.modules.vision.situation import face_approach
+        rows = rows_of(face(2), [(8, GONE)], extra={**OPTIONAL, "iod_ratio_user": 1.4, "dpitch_user_deg": 30.0})
+        sc = observe_scene(rows, (0.0, 0.9))
+        self.assertEqual(face_approach(sc, 1.2, 0.5, head_down_pitch_min=PITCH_TEST)[::2], (True, None))
 
 
 class SceneTagTests(unittest.TestCase):

@@ -3,9 +3,12 @@
 Per frame (FrameChain.process): features.Observer row (MediaPipe face / face detector / pose, plus blendshapes when
 on) -> H1 head boxes (app/inference/head.py) -> head tracks, the main user as a track, companion and people behind
 from the tracks' cues, and the main user's P1 direction (columns.py HeadPeople; its state lives as long as the
-FrameChain and starts again when the touch log's sessionId changes) -> the face values blanked where the tracked face
-is someone else's (columns.FACE_VALUE_COLUMNS, face_in_primary False) -> shoulders, mouth_motion ->
-touch counts since the previous row (touch.py). Each part that is not
+FrameChain and starts again when the touch log's sessionId changes, as does the Observer's session-start reference
+of iod_ratio_start / dyaw_start_deg / dpitch_start_deg) -> the face values blanked where the tracked face
+is someone else's (columns.FACE_VALUE_COLUMNS, face_in_primary False) -> shoulders, mouth_motion -> the main user's
+face size against the running reference (iod_ratio_user, columns.FaceSizeRef; it starts again with a new main-user
+track and a new touch-log session) -> the main user's head pitch against that user's first face after the same
+anchors (dpitch_user_deg, columns.PitchRef; the gate of face_approach reads it) -> touch counts since the previous row (touch.py). Each part that is not
 available (no ONNX model, blendshapes off, no touch log) leaves its columns blank or absent, so the events layer treats
 the cue as missing ('모름'), never as 'absent'.
 
@@ -71,20 +74,26 @@ class FrameChain:
         self.source_kind = source_kind
         self.mouth = C.MouthMotion(params.mouth_dials, params.mouth_baseline_s)
         self.people = C.HeadPeople(params)
+        self.size_ref = C.FaceSizeRef(params.approach_ratio_min, params.track_max_gap_s)   # iod_ratio_user
+        self.pitch_ref = C.PitchRef(params.track_max_gap_s)                                  # dpitch_user_deg
         self.session = None                     # the touch log's sessionId at the previous row
         self.prev_t = None
 
     def process(self, frame) -> dict:
         wall0, cpu0 = time.perf_counter(), time.process_time()
-        row, _ = self.observer.process(frame, source_kind=self.source_kind)
-        inf = self.capture.last
-        t = float(row["t_s"])
+        t = round(frame.t_s, 4)                 # = the row's t_s (features.Observer)
         if self.timeline is not None:           # tree section 4 ①: a new session is judged from the start
             session = self.timeline.session_at(t)
             if session is not None and self.session is not None and session != self.session:
+                self.observer.reset_reference()  # the start-relative columns (iod_ratio_start, d*_start_deg)
                 self.people.reset()
+                self.size_ref.reset()
+                self.pitch_ref.reset()
             if session is not None:
                 self.session = session
+        row, _ = self.observer.process(frame, source_kind=self.source_kind)
+        inf = self.capture.last
+        t = float(row["t_s"])
         if self.heads is not None:
             heads = self.heads(frame.image)
             face = C.face_xy(row)
@@ -113,6 +122,8 @@ class FrameChain:
         face_seen = row.get("face_state") == SEEN and row.get("face_in_primary") is not False
         scores = inf.blendshapes if (self.blendshapes and face_seen and inf is not None) else None
         row["mouth_motion"] = self.mouth.update(t, scores)
+        row["iod_ratio_user"] = self.size_ref.update(row, self._pressed(t), self.timeline is not None)
+        row["dpitch_user_deg"] = self.pitch_ref.update(row, self._pressed(t))
         if self.timeline is not None:
             counts = self.timeline.counts(self.prev_t, t)
             row["tap_count"] = None if counts is None else counts["tap_count"]
@@ -121,6 +132,14 @@ class FrameChain:
         row["ms_chain"] = (time.perf_counter() - wall0) * 1000.0
         row["cpu_ms_chain"] = (time.process_time() - cpu0) * 1000.0
         return row
+
+    def _pressed(self, t: float) -> bool:
+        """Whether the face-size reference collects at t: always without a touch log; with one, once the touch-log
+        session at t has had a press (its first press anchors the reference, so walking up is left out)."""
+        if self.timeline is None:
+            return True
+        press, since = self.timeline.last_press(t), self.timeline.session_since(t)
+        return press is not None and (since is None or press >= since)
 
 
 # --- why a window is 'unknown' (mirrors the rules of situation.py; tests check it against assess) ------------------
@@ -310,7 +329,8 @@ class WindowJudge:
             out, reasons = None, [{"code": "no_value_bundle"}]
         else:
             out, events = assess(rows, t_end, sp, landmarker_num_faces=LANDMARKER_NUM_FACES,
-                                 baseline_s=p.mouth_baseline_s)
+                                 baseline_s=p.mouth_baseline_s, approach_ratio_min=p.approach_ratio_min,
+                                 head_down_pitch_min=p.head_down_pitch_min)
             reasons = unknown_reasons(rows, t_end, sp) if out["name"] == UNKNOWN else []
             turns = [{"event_id": e["event_id"], "kind": e["kind"], "t_start": e["t_start"], "t_end": e["t_end"],
                       "obs": e["obs"]} for e in events if e["kind"] in TURN_KINDS]

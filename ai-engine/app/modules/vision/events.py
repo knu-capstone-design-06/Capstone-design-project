@@ -22,7 +22,7 @@ incremental version.
 Every window, count, angle and floor is a pilot value ([파일럿]): PilotParams has no defaults and this file sets
 none (dec section 3: '모든 창 길이 · 횟수 · 각도는 [파일럿]', set from the distribution in the team's self-recording).
 
-The scene tags of situation.py (nothing seen; 2026-11-22) read a second,
+The scene tags of situation.py (face approach, nothing seen; 2026-11-22) read a second,
 separate set of measurement events (observe_scene, SCENE_KINDS); they do not change the events above.
 
 Input: one dict per frame.
@@ -451,17 +451,29 @@ def detect_events(rows: list, params: PilotParams, *, landmarker_num_faces: int,
 
 
 # --- the scene tags' measurements (situation.py SCENE_TAGS; 2026-11-22) ------------------------------------------
-SCENE_KINDS = ("nothing_seen",)
+SCENE_KINDS = ("face_size", "nothing_seen")
+
+
+def _main_face(row: dict) -> bool:
+    """The row's face is the main user's: seen, and matched to the main user's head box when the head detector ran
+    (face_in_primary True; the key is absent without it). = columns.main_user_face (columns imports numpy)."""
+    if not _face(row):
+        return False
+    return "face_in_primary" not in row or row["face_in_primary"] is True or row["face_in_primary"] == "True"
 
 
 @dataclass(frozen=True)
 class SceneCues:
     """What the scene tags read for one window. Their events are measurements of the window's rows:
+      head_pitch         the main user's face rows with a dpitch_user_deg (pitch against the same main user's first
+                         face, columns.PitchRef; + = down): dpitch_median, rows
+      face_size          the main user's face rows with an iod_ratio_user (columns.FaceSizeRef): iod_ratio_median, rows
       nothing_seen       one over the whole window when no row sees a face (landmarks or a face-detector box), a body
                          or a head box: unseen_s = min(face_unseen_s, body_unseen_s) at the window's last row
-    No value is compared here."""
+    No value is compared here; situation.py compares the medians with the camera's boundaries."""
     events: list
     frames: int                  # rows inside the window
+    face_rows: int = 0           # rows with the main user's face (face values not blanked)
     head_measured: bool = False  # every row carries head_count: 'no head box' can be concluded
 
     def of(self, *kinds: str) -> list:
@@ -473,6 +485,17 @@ def observe_scene(rows: list, window: tuple) -> SceneCues:
     rows, first = _split(rows, window)
     inside = rows[first:]
     events = []
+    own = [_main_face(r) for r in inside]
+    ratios = [_num(r, "iod_ratio_user") if own[i] else None for i, r in enumerate(inside)]
+    pitched = [i for i, r in enumerate(inside) if own[i] and _num(r, "dpitch_user_deg") is not None]
+    if pitched:
+        events.append(_event("head_pitch", inside, pitched,
+                             {"dpitch_median": statistics.median(_num(inside[i], "dpitch_user_deg") for i in pitched),
+                              "rows": len(pitched)}))
+    sized = [i for i, q in enumerate(ratios) if q is not None]
+    if sized:
+        events.append(_event("face_size", inside, sized,
+                             {"iod_ratio_median": statistics.median(ratios[i] for i in sized), "rows": len(sized)}))
     if inside and all(not _face(r) and not _body(r) and not (_num(r, "head_count") or 0) > 0
                       and not (_num(r, "face_count") or 0) > 0
                       for r in inside):
@@ -481,6 +504,7 @@ def observe_scene(rows: list, window: tuple) -> SceneCues:
         events.append(_event("nothing_seen", inside, list(range(len(inside))),
                              {"unseen_s": min(unseen) if unseen else None}))
     return SceneCues(events=sorted(events, key=lambda e: (e["t_start"], e["kind"])), frames=len(inside),
+                     face_rows=sum(own[i] and _num(r, "face_cy") is not None for i, r in enumerate(inside)),
                      head_measured=bool(inside) and all(_num(r, "head_count") is not None for r in inside))
 
 
