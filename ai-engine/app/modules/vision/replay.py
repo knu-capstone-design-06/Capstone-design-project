@@ -46,7 +46,7 @@ MODELS_DIR = os.path.join(CODE_DIR, "models")
 H1_ONNX = "h1_head_yolox_nano_416.onnx"
 P1_ONNX = "p1_head_direction_resnet18_56.onnx"
 TOUCH_ROW_COLUMNS = ("tap_count", "miss_tap_count")
-TIMING_COLUMNS = ("ms_heads", "ms_head_dir", "ms_chain", "cpu_ms_chain")
+TIMING_COLUMNS = ("ms_heads", "ms_head_dir", "ms_aids", "ms_chain", "cpu_ms_chain")
 
 
 def sha256(path: str) -> str:
@@ -128,6 +128,21 @@ def load_perception(models_dir: str, params, threads: int, heads_on: bool, log) 
     return detector, direction, info
 
 
+def load_aids(path: str | None, params, threads: int, log):
+    """The walking-aid detector of --aid-model, or None (off unless a file is given; the weights are not in this
+    repository). Returns (detector or None, {file: info})."""
+    if not path:
+        return None, {}
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"--aid-model: no file {path}")
+    from app.inference.aid import AidDetector
+    detector = AidDetector(path, params.aid_score_min, params.aid_nms_iou, threads)
+    log(f"보조기구 탐지기 켬: 클래스 {', '.join(detector.classes)}. 키오스크 시점 정확도는 재지 않았습니다")
+    return detector, {os.path.basename(path): {"bytes": os.path.getsize(path), "sha256": sha256(path),
+                                               "licence": detector.meta.get("licence"),
+                                               "attribution": detector.meta.get("attribution")}}
+
+
 def environment() -> dict:
     env = {"python": platform.python_version(), "platform": platform.platform(), "cpu_count": os.cpu_count()}
     for mod in ("numpy", "cv2", "mediapipe", "onnxruntime"):
@@ -163,13 +178,13 @@ def write_rows(path: str, rows: list):
 
 def run_replay(source, out_dir: str, bundle, *, timeline=None, models=None, detector=None, direction=None,
                blendshapes: bool = False, max_seconds: float | None = None, session_id: str = "replay",
-               model_info: dict | None = None, settings: dict | None = None, log=print) -> dict:
+               model_info: dict | None = None, settings: dict | None = None, log=print, aids=None) -> dict:
     """Run the chain over a frame source (sources.VideoFileSource or any iterable of sources.Frame) and write the
     outputs. models = MediaPipe models (or a fake with .infer(frame)); detector / direction = perception models or
     None. Returns the meta dict (also written to meta.json)."""
     os.makedirs(out_dir, exist_ok=True)
     chain = FrameChain(models, bundle.chain, detector, direction, timeline, blendshapes=blendshapes,
-                       source_kind=SOURCE_KIND.get(getattr(source, "kind", ""), ""))
+                       source_kind=SOURCE_KIND.get(getattr(source, "kind", ""), ""), aids=aids)
     judge = WindowJudge(bundle, timeline, session_id=session_id)
     keep_s = history_s(bundle)
     rows, recent, records = [], deque(), []
@@ -259,6 +274,8 @@ def main(argv=None) -> int:
     ap.add_argument("--blendshapes", action="store_true",
                     help="blendshapes on (default off, decision list 2026-10-10 §16); off: mouth_motion stays blank")
     ap.add_argument("--no-heads", action="store_true", help="no H1 / P1: head columns stay missing")
+    ap.add_argument("--aid-model", default=None,
+                    help="walking-aid detector ONNX (optional; off unless given, weights not in the repository)")
     ap.add_argument("--overwrite", action="store_true")
     a = ap.parse_args(argv)
     if os.path.isfile(os.path.join(a.out, "windows.jsonl")) and not a.overwrite:
@@ -280,9 +297,11 @@ def main(argv=None) -> int:
         p = os.path.join(a.models, name)
         if os.path.isfile(p):
             info[name] = {"bytes": os.path.getsize(p), "sha256": sha256(p)}
+    aids, aid_info = load_aids(a.aid_model, bundle.chain, a.threads, print)
+    info.update(aid_info)
     models = MediaPipeModels(a.models, blendshapes=a.blendshapes)
     settings = {"step": a.step, "width": a.width, "threads": a.threads, "blendshapes": a.blendshapes,
-                "heads": detector is not None, "head_direction": direction is not None,
+                "heads": detector is not None, "head_direction": direction is not None, "aids": aids is not None,
                 "face_landmarker": "VIDEO, num_faces=1, transformation matrix on, blendshapes "
                                    + ("on" if a.blendshapes else "off"),
                 "touch_log": a.touch_log, "start_offset_s": a.start_offset, "params_file": a.params}
@@ -291,7 +310,7 @@ def main(argv=None) -> int:
         meta = run_replay(source, a.out, bundle, timeline=timeline, models=models, detector=detector,
                           direction=direction, blendshapes=a.blendshapes, max_seconds=a.max_seconds,
                           session_id=a.session_id or os.path.splitext(os.path.basename(a.video))[0],
-                          model_info=info, settings=settings)
+                          model_info=info, settings=settings, aids=aids)
     finally:
         models.close()
     tm = meta["timing_ms"].get("ms_chain") or {}

@@ -20,6 +20,28 @@ Columns (names = the ones events.py reads, then observation-only columns no rule
                         unbroken face run (decision list 2026-10-10 §16: the person's baseline subtracted, change
                         only). None while the face is not seen, while the run is shorter than mouth_baseline_s, and
                         when blendshapes are off.
+  aid_owner, aid_top_class, aid_any_score, aid_wheelchair_score, aid_kind, aid_class_scores, aid_box, aid_count   the
+                        walking-aid detector's person boxes for the main user (aid_columns; app/inference/aid.py, an
+                        optional input that runs only when its ONNX file is given; absent otherwise). The detector's
+                        classes are person-level (a person with a crutch, cane, walker or wheelchair, or none): it gives
+                        no position of the aid itself, so the shoulder line is used to find the main user's person box,
+                        not to judge how the aid is held. The anchor is the main user's head-box centre when the
+                        head detector ran (no box in the frame: no anchor), else the pose's two shoulder points. The
+                        user's box = among the person boxes holding the anchor, the one whose top edge is nearest the
+                        head box's top edge (the box that starts at this person's head; the smallest without a head
+                        box). Its class scores (aid_class_scores, {class: objectness x
+                        class score}), its best class (aid_top_class), aid_any_score = the largest of its crutch,
+                        cane, walker and wheelchair scores ('uses an assistive device', the owner's decision),
+                        aid_wheelchair_score, aid_kind ('wheelchair' when the wheelchair score is above the largest of
+                        the crutch, cane and walker scores, else 'standing': which scene the judgment layer routes to,
+                        1-2 or 1-1) and aid_box come from that one box. aid_owner: 'yes' = its best class is one of the
+                        four aids;
+                        'no' = the anchor is known and its best class is another one, or no box holds the anchor (an
+                        aid seen on someone else is 'no'); 'unknown' = no anchor. aid_count = person boxes in the frame
+                        at or above params.aid_score_min (the recording floor); aid_person_count = those above
+                        params.aid_person_min (the detector's person operating point), the only ones that count as a
+                        person seen and that can be the main user's box (None without the value). No threshold of
+                        'uses an aid' is applied here: that yes / no is the tag aid_use (situation.py).
   iod_ratio_user        the main user's inter-ocular distance (iod_px) over a reference of the same user's face rows
                         before this one (FaceSizeRef; tree table 3-가 2-1 '시작 대비 눈 사이 거리 비'). Anchor = the
                         start of the current main-user track (primary_track changes) and of the touch-log session.
@@ -159,12 +181,14 @@ SHOULDERS = (11, 12)   # left / right shoulder in the 33-point pose map [D3]; = 
 DIR_COLUMNS = tuple(f"head_dir_{k}" for k in DIR_KEYS)
 HEAD_COLUMNS = ("people_behind_count", "companion_box", "head_count", "primary_box", "primary_score",
                 "primary_from", "primary_track", "face_in_primary", "face_track") + DIR_COLUMNS + ("head_boxes",)
+AID_COLUMNS = ("aid_owner", "aid_top_class", "aid_any_score", "aid_wheelchair_score", "aid_kind", "aid_class_scores",
+               "aid_box", "aid_count", "aid_person_count")
 CHANGE_COLUMNS = ("main_user_prev_track", "main_user_gap_s", "main_user_body_kept", "main_user_prev_h",
                   "main_user_new_h", "main_user_h_ratio", "main_user_new_was_role", "main_user_new_rel_dist",
                   "main_user_new_growth", "main_user_reacquired", "main_user_prev_settled", "main_user_new_start_s",
                   "main_user_start_shift", "main_user_start_size", "main_user_stitched", "main_user_body_gap_s")
-OPTIONAL_COLUMNS = HEAD_COLUMNS + CHANGE_COLUMNS + ("shoulder_cx", "shoulder_cy", "mouth_motion", "iod_ratio_user",
-                                                  "head_ratio_user", "dpitch_user_deg")
+OPTIONAL_COLUMNS = HEAD_COLUMNS + CHANGE_COLUMNS + AID_COLUMNS + ("shoulder_cx", "shoulder_cy", "mouth_motion", "iod_ratio_user",
+                                                                   "head_ratio_user", "dpitch_user_deg")
 # features.COLUMNS that the Face Landmarker's face gives (its position, size, angles and the face box's image
 # statistics): blanked where that face is not the main user's (face_in_primary False). face_state, the face detector's
 # columns (face_count, face_det_score, det_box_w_frac) and the run counters stay.
@@ -798,6 +822,63 @@ def _break(last_t, last_box, first_t, first_box) -> tuple:
     if not all(math.isfinite(v) for v in (w0, h0, h1, dx, dy)) or w0 <= 0 or h0 <= 0 or h1 <= 0:
         return start_s, None, None
     return start_s, math.hypot(dx / w0, dy / h0), abs(math.log(h1 / h0))
+
+
+def _contains(box, points) -> bool:
+    return all(box[0] <= x <= box[2] and box[1] <= y <= box[3] for x, y in points)
+
+
+def aid_columns(aids, pose, primary_box, head_detector: bool = False, person_min: float | None = None) -> dict:
+    """AID_COLUMNS of one frame (module docstring). aids = app.inference.aid.Aids; pose = the pose points (33 x 4:
+    x, y as fractions, visibility, presence) or None; primary_box = the main user's head box or None; head_detector =
+    the head detector ran on this frame. The pose follows one person, not always the main user: with the head
+    detector the main user's head-box centre alone is the anchor, and a frame without that box has no anchor (aid_owner
+    unknown). Without the head detector the pose's two shoulders are the anchor, as for the shoulder columns.
+    person_min (params.aid_person_min): only boxes above it are people (aid_person_count, the user's box); None: every
+    box."""
+    from app.inference.aid import AID_CLASSES, STANDING_AIDS, WHEELCHAIR
+    out = dict.fromkeys(AID_COLUMNS)
+    out["aid_count"] = len(aids)
+    people = [i for i in range(len(aids)) if person_min is None or float(aids.scores[i]) > person_min]
+    out["aid_person_count"] = None if person_min is None else len(people)
+    head = None if primary_box is None else tuple(float(v) for v in primary_box)
+    head_centre = None if head is None else ((head[0] + head[2]) / 2.0, (head[1] + head[3]) / 2.0)
+    shoulders = None
+    if pose is not None and head is None and not head_detector:
+        pts = np.asarray(pose, dtype=np.float64)[list(SHOULDERS), :2]
+        if np.isfinite(pts).all():
+            shoulders = [tuple(p) for p in pts]
+    # with the main user's head box the box is chosen by the head alone: the one pose may be someone else's, and a
+    # companion's shoulders around the user's head would push the user's own box out; without the head detector the
+    # pose's person (its two shoulders) is the main user, as for the shoulder columns
+    anchor = [head_centre] if head_centre is not None else (shoulders or [])
+    if not anchor:
+        out["aid_owner"] = "unknown"
+        return out
+    classes = list(aids.classes)
+    aid_idx = [classes.index(c) for c in AID_CLASSES]
+    around = [i for i in people if _contains(aids.boxes[i], anchor)]
+    if not around:
+        out["aid_owner"] = "no"
+        return out
+    if head is not None:                     # the box that starts at this person's head
+        k = min(around, key=lambda i: (abs(float(aids.boxes[i][1]) - head[1]), _box_area(aids.boxes[i])))
+    else:
+        k = min(around, key=lambda i: _box_area(aids.boxes[i]))
+    cs = aids.class_scores[k]
+    top = classes[int(np.argmax(cs))]
+    out.update(aid_owner="yes" if top in AID_CLASSES else "no", aid_top_class=top,
+               aid_class_scores={c: float(cs[j]) for j, c in enumerate(classes)},
+               aid_any_score=float(max(cs[j] for j in aid_idx)),
+               aid_wheelchair_score=float(cs[classes.index(WHEELCHAIR)]),
+               aid_kind="wheelchair" if cs[classes.index(WHEELCHAIR)] > max(cs[classes.index(c)] for c in STANDING_AIDS)
+               else "standing",
+               aid_box=tuple(float(v) for v in aids.boxes[k]))
+    return out
+
+
+def _box_area(box) -> float:
+    return max(0.0, float(box[2]) - float(box[0])) * max(0.0, float(box[3]) - float(box[1]))
 
 
 def _box_height(box) -> float | None:

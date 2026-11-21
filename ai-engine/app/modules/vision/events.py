@@ -22,7 +22,7 @@ incremental version.
 Every window, count, angle and floor is a pilot value ([파일럿]): PilotParams has no defaults and this file sets
 none (dec section 3: '모든 창 길이 · 횟수 · 각도는 [파일럿]', set from the distribution in the team's self-recording).
 
-The scene tags of situation.py (seated height, face approach, user change, nothing seen; 2026-11-22) read a second,
+The scene tags of situation.py (seated height, face approach, user change, nothing seen, aid use; 2026-11-22) read a second,
 separate set of measurement events (observe_scene, SCENE_KINDS); they do not change the events above.
 
 Input: one dict per frame.
@@ -451,7 +451,7 @@ def detect_events(rows: list, params: PilotParams, *, landmarker_num_faces: int,
 
 
 # --- the scene tags' measurements (situation.py SCENE_TAGS; 2026-11-22) ------------------------------------------
-SCENE_KINDS = ("face_height", "face_size", "main_user_changed", "nothing_seen")
+SCENE_KINDS = ("face_height", "face_size", "main_user_changed", "nothing_seen", "aid_score")
 
 
 def _main_face(row: dict) -> bool:
@@ -516,8 +516,12 @@ class SceneCues:
                          break stitched by start time, place and size: not a new user), the break measures new_start_s,
                          start_shift, start_size and the size evidence previous_h, new_h, h_ratio, new_was_role,
                          new_rel_dist, new_growth (observation only)
-      nothing_seen       one over the whole window when no row sees a face (landmarks or a face-detector box), a body
-                         or a head box: unseen_s = min(face_unseen_s, body_unseen_s) at the window's last row
+      nothing_seen       one over the whole window when no row sees a face (landmarks or a face-detector box), a body,
+                         a head box or a person box of the walking-aid detector above its person operating point
+                         (aid_person_count, when it ran; its recording-floor boxes do not count): unseen_s =
+                         min(face_unseen_s, body_unseen_s) at the window's last row
+      aid_score          the rows with an aid_any_score (the walking-aid detector's box of the main user,
+                         columns.aid_columns): aid_any_median, rows, owner_yes_rows
     No value is compared here except the two size boundaries that mark near rows (face: approach_ratio_min, head box:
     head_approach_ratio_min); situation.py compares the medians with the camera's boundaries."""
     events: list
@@ -526,6 +530,8 @@ class SceneCues:
     near_rows: int               # face rows left out of face_height as closer than approach_ratio_min
     face_rows: int = 0           # rows with the main user's face (face values not blanked)
     head_measured: bool = False  # every row carries head_count: 'no head box' can be concluded
+    aid_measured: bool = False   # every row carries aid_owner: the walking-aid detector ran
+    aid_anchor_rows: int = 0     # rows where the main user's anchor (shoulders or head box) was known
     head_near_rows: int = 0      # main-user head-box rows left out of head_height as grown beyond head_approach_ratio_min
 
     def of(self, *kinds: str) -> list:
@@ -588,8 +594,14 @@ def observe_scene(rows: list, window: tuple, approach_ratio_min: float | None = 
                                   "new_start_s": _num(r, "main_user_new_start_s"),
                                   "start_shift": _num(r, "main_user_start_shift"),
                                   "start_size": _num(r, "main_user_start_size")}))
+    aid = [i for i, r in enumerate(inside) if _num(r, "aid_any_score") is not None]
+    if aid:
+        events.append(_event("aid_score", inside, aid,
+                             {"aid_any_median": statistics.median(_num(inside[i], "aid_any_score") for i in aid),
+                              "rows": len(aid),
+                              "owner_yes_rows": sum(inside[i].get("aid_owner") == "yes" for i in aid)}))
     if inside and all(not _face(r) and not _body(r) and not (_num(r, "head_count") or 0) > 0
-                      and not (_num(r, "face_count") or 0) > 0
+                      and not (_num(r, "aid_person_count") or 0) > 0 and not (_num(r, "face_count") or 0) > 0
                       for r in inside):
         last = inside[-1]
         unseen = [v for v in (_num(last, "face_unseen_s"), _num(last, "body_unseen_s")) if v is not None]
@@ -597,8 +609,10 @@ def observe_scene(rows: list, window: tuple, approach_ratio_min: float | None = 
                              {"unseen_s": min(unseen) if unseen else None}))
     return SceneCues(events=sorted(events, key=lambda e: (e["t_start"], e["kind"])), frames=len(inside),
                      track_measured=bool(inside) and all("primary_track" in r for r in inside),
+                     aid_measured=bool(inside) and all("aid_owner" in r for r in inside),
                      face_rows=sum(own[i] and _num(r, "face_cy") is not None for i, r in enumerate(inside)),
                      head_measured=bool(inside) and all(_num(r, "head_count") is not None for r in inside),
+                     aid_anchor_rows=sum(r.get("aid_owner") in ("yes", "no") for r in inside),
                      near_rows=sum(n and _face(r) and _num(r, "face_cy") is not None for n, r in zip(near, inside)),
                      head_near_rows=len(boxed) - len(head))
 

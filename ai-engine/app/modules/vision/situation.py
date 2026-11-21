@@ -23,19 +23,22 @@ Output for one window (sem section 4: dec section 3's output line plus quality, 
                 supporting events, quality_ok = no cue of the rule was left out as missing
   alternatives  the other tags that no measured cue ruled out and that have supporting events, most events first;
                 one with fewer than min_events supporting events has confidence "unknown"
-  tags          the scene tags (SCENE_TAGS, 2026-11-22), each judged on its own and never competing with name:
+  tags          the five scene tags (SCENE_TAGS, 2026-11-22), each judged on its own and never competing with name:
                 seated_height (1-2; window median of the main user's head-box centre > seated_head_cy_min with the
                 head detector, else of the main user's face_cy > seated_face_cy_min), face_approach
                 (2-1; window median of iod_ratio_user > approach_ratio_min), user_changed (2-2; a new main-user
-                track starts in the window, not the same user found again or stitched back), none_seen (the absence
-                node; no face, body or head box on any row).
+                track starts in the window, not the same user found again or stitched back), none_seen (the absence node; no face, body, head box or aid-detector
+                person box on any row),
+                aid_use (1-1; window median of aid_any_score of the main user's person box > aid_use_min; only
+                when the walking-aid detector ran).
                 status True | False | "unknown"; unknown_reason a code exactly when "unknown" (no_frames,
                 no_value_for_camera, no_value, no_main_user_face, no_main_user_box, face_near, head_near, no_reference,
-                too_few_rows (the rows behind a median are fewer than face_visible_min of the window),
-                reacquired_same_place, column:primary_track, column:head_count); evidence points into the window's
-                scene events (events.observe_scene). The boundaries are params.SCENE_BOUNDARIES (bundle values; None =
-                unknown). Touch and duration (2-2's no-input trigger, the absence warning) are the judgment layer's,
-                not these tags'.
+                too_few_rows (the rows
+                behind a median are fewer than face_visible_min of the window), reacquired_same_place,
+                column:primary_track, column:head_count, column:aid_owner, no_anchor, no_user_box); evidence points into the
+                window's scene events (events.observe_scene). The two boundaries are params.SCENE_BOUNDARIES (bundle
+                values; None = unknown). Touch and duration (2-2's no-input trigger, the absence warning) are the
+                judgment layer's, not these tags'.
 
 How a window is decided. From sem section 4: fewer than min_events supporting events -> "unknown"; quality per cue
 (a face turned away is not a sensor failure: face loss is the look_back cue, and only the cues that need the face -
@@ -206,6 +209,7 @@ SCENE_DISPLAY_TEXT = {                             # the scenario tree's terms (
     "face_approach": "얼굴 접근",                   # 2-1 low vision: the face grown against the user's reference
     "user_changed": "사용자 교체 가능성",            # 2-2 new customer: a new main-user track
     "none_seen": "카메라에 사람이 안 보임",          # the absence node (nothing seen; not 'nobody')
+    "aid_use": "보조기구 사용 중",                   # 1-1 aid (a wheelchair: 1-2, by aid_kind): the main user's box
 }
 SCENE_TAGS = tuple(SCENE_DISPLAY_TEXT)
 TAG_KEYS = ("name", "display_text", "status", "evidence", "unknown_reason")
@@ -305,7 +309,8 @@ def user_changed(sc: SceneCues) -> tuple:
 
 
 def none_seen(sc: SceneCues) -> tuple:
-    """(status, events, unknown reason): no row of the window sees a face, a body or a head box (nothing_seen). That no
+    """(status, events, unknown reason): no row of the window sees a face, a body, a head box or a person box of the
+    aid detector above its person point (nothing_seen). That no
     head box was there needs head_count on every row (the head detector ran); otherwise unknown (column:head_count)."""
     if not sc.frames:
         return None, [], "no_frames"
@@ -315,14 +320,35 @@ def none_seen(sc: SceneCues) -> tuple:
     return bool(nothing), nothing, None
 
 
+def aid_use(sc: SceneCues, aid_use_min: float | None, min_share: float | None = None) -> tuple:
+    """(status, events, unknown reason): the median aid_any_score of the main user's person box (aid_score)
+    above the boundary. The detector not run, no value, no anchor for the main user, no box around it or too few rows
+    behind the median: unknown."""
+    if not sc.frames:
+        return None, [], "no_frames"
+    if not sc.aid_measured:
+        return None, [], "column:aid_owner"
+    if aid_use_min is None:
+        return None, [], "no_value"
+    scores = sc.of("aid_score")
+    if not scores:
+        return None, [], "no_user_box" if sc.aid_anchor_rows else "no_anchor"
+    (event,) = scores
+    if not _enough(sc, event["obs"]["rows"], min_share):
+        return None, scores, "too_few_rows"
+    return event["obs"]["aid_any_median"] > aid_use_min, scores, None
+
+
 def scene_tags(sc: SceneCues, *, seated_face_cy_min: float | None = None, seated_head_cy_min: float | None = None,
                head_down_pitch_min: float | None = None,
-               approach_ratio_min: float | None = None, min_share: float | None = None) -> list:
+               approach_ratio_min: float | None = None, aid_use_min: float | None = None,
+               min_share: float | None = None) -> list:
     """The `tags` list of one window, in SCENE_TAGS order. min_share = the share of the window's frames a median must
     stand on (assess passes params.face_visible_min)."""
     verdicts = {"seated_height": seated_height(sc, seated_face_cy_min, min_share, seated_head_cy_min),
                 "face_approach": face_approach(sc, approach_ratio_min, min_share, head_down_pitch_min),
-                "user_changed": user_changed(sc), "none_seen": none_seen(sc)}
+                "user_changed": user_changed(sc), "none_seen": none_seen(sc),
+                "aid_use": aid_use(sc, aid_use_min, min_share)}
     return [{"name": name, "display_text": SCENE_DISPLAY_TEXT[name],
              "status": UNKNOWN if status is None else status, "evidence": _evidence(events),
              "unknown_reason": reason}
@@ -368,7 +394,7 @@ def _decide(c: Cues, verdicts: dict, p: PilotParams) -> tuple:
 
 def assess(rows: list, t_end: float, params: PilotParams, *, landmarker_num_faces: int,
            baseline_s: float | None = None, seated_face_cy_min: float | None = None,
-           approach_ratio_min: float | None = None,
+           approach_ratio_min: float | None = None, aid_use_min: float | None = None,
            seated_head_cy_min: float | None = None, head_down_pitch_min: float | None = None,
            head_approach_ratio_min: float | None = None) -> tuple:
     """(output, events) for the window [t_end - window_s, t_end] of the observation rows (features.COLUMNS plus the
@@ -378,8 +404,8 @@ def assess(rows: list, t_end: float, params: PilotParams, *, landmarker_num_face
 
     landmarker_num_faces = the num_faces setting of the Face Landmarker behind the rows (app/inference/vision.py: 1).
     baseline_s = the window of a look_back's pre-loss head pose (events._loss_context; observation only).
-    seated_face_cy_min, approach_ratio_min, seated_head_cy_min = the scene-tag boundaries of the bundle
-    (params.SCENE_BOUNDARIES; None = no value: the tag says unknown, and for seated_head_cy_min the
+    seated_face_cy_min, approach_ratio_min, aid_use_min, seated_head_cy_min = the scene-tag boundaries of the bundle
+    (params.SCENE_BOUNDARIES, AID_BOUNDARIES; None = no value: the tag says unknown, and for seated_head_cy_min the
     face decides alone); head_down_pitch_min, head_approach_ratio_min = the gates of face_approach and of the head-box
     path (None = not applied). The scene tags' evidence points into their own events (output['tags'], not in
     the returned events); the other keys of the output do not depend on them."""
@@ -402,7 +428,8 @@ def assess(rows: list, t_end: float, params: PilotParams, *, landmarker_num_face
         "source": SOURCE,
         "tags": scene_tags(scene, seated_face_cy_min=seated_face_cy_min, seated_head_cy_min=seated_head_cy_min,
                            head_down_pitch_min=head_down_pitch_min,
-                           approach_ratio_min=approach_ratio_min, min_share=params.face_visible_min),
+                           approach_ratio_min=approach_ratio_min,
+                           aid_use_min=aid_use_min, min_share=params.face_visible_min),
     }
     problems = check_output(out, cues.events, params, scene_events=scene.events)
     if problems:

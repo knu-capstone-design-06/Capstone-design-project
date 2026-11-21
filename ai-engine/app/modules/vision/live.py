@@ -28,7 +28,7 @@ from collections import deque
 
 from .chain import SOURCE_KIND, FrameChain, WindowJudge, history_s
 from .params import load_bundle
-from .replay import MODELS_DIR, add_frame_counts, environment, jsonable, load_perception, timing_summary
+from .replay import MODELS_DIR, add_frame_counts, environment, jsonable, load_aids, load_perception, timing_summary
 
 WINDOW = "vision chain live (q = stop)"   # ASCII: OpenCV window titles may not show Korean on Windows
 
@@ -69,10 +69,11 @@ def _draw(img, row: dict, text: str):
 
 
 def run_live(source, bundle, *, models, detector=None, direction=None, show_window: bool = False,
-             out_dir: str | None = None, blendshapes: bool = False, print_fn=print) -> dict:
+             out_dir: str | None = None, blendshapes: bool = False, print_fn=print, aids=None,
+             model_info: dict | None = None) -> dict:
     """Run the chain on a live frame source (sources.LiveCameraSource or any iterable of sources.Frame)."""
     chain = FrameChain(models, bundle.chain, detector, direction, None, blendshapes=blendshapes,
-                       source_kind=SOURCE_KIND.get(getattr(source, "kind", ""), ""))
+                       source_kind=SOURCE_KIND.get(getattr(source, "kind", ""), ""), aids=aids)
     judge = WindowJudge(bundle, None, session_id="live")
     keep_s = history_s(bundle) + bundle.chain.segment_s
     buf, all_ms, records = deque(), [], []
@@ -138,7 +139,7 @@ def run_live(source, bundle, *, models, detector=None, direction=None, show_wind
     meta = {"created": time.strftime("%Y-%m-%d %H:%M:%S"), "frames": len(all_ms), "windows": len(records),
             "stop_reason": stop_reason, "bundle": bundle.to_dict(), "environment": environment(),
             "timing_ms": timing_summary(all_ms, records), "window_shown": bool(show_window),
-            "counts": {"frames": frame_counts},
+            "counts": {"frames": frame_counts}, "models": model_info or {},
             "last_window_partial_s": None if partial_s is None else round(partial_s, 4)}
     if out_dir:
         with open(os.path.join(out_dir, "meta.json"), "w", encoding="utf-8") as f:
@@ -162,6 +163,8 @@ def parse_args(argv=None):
     ap.add_argument("--blendshapes", action="store_true",
                     help="blendshapes on (default off, decision list 2026-10-10 §16); off: mouth_motion stays blank")
     ap.add_argument("--no-heads", action="store_true")
+    ap.add_argument("--aid-model", default=None,
+                    help="walking-aid detector ONNX (optional; off unless given, weights not in the repository)")
     a = ap.parse_args(argv)
     if a.no_window and a.seconds is None:
         print("창 없이 돌리면 Ctrl+C로만 멈춥니다(--seconds로 시간을 정할 수 있습니다).", file=sys.stderr)
@@ -182,13 +185,16 @@ def main(argv=None) -> int:
     cv2.setNumThreads(1)
     from app.inference.vision import MediaPipeModels
     from .sources import LiveCameraSource
-    detector, direction, _ = load_perception(a.models, bundle.chain, a.threads, not a.no_heads, print)
+    detector, direction, info = load_perception(a.models, bundle.chain, a.threads, not a.no_heads, print)
+    aids, aid_info = load_aids(a.aid_model, bundle.chain, a.threads, print)
+    info.update(aid_info)                        # every model file in meta.json, as replay.py writes it
     models = MediaPipeModels(a.models, blendshapes=a.blendshapes)
     try:
         source = LiveCameraSource(a.camera, a.cam_width, a.cam_height, a.backend, a.fps, a.seconds)
         print(f"카메라 {a.camera} 시작 — 창마다 한 줄씩 나옵니다", flush=True)
         meta = run_live(source, bundle, models=models, detector=detector, direction=direction,
-                        show_window=not a.no_window, out_dir=a.out, blendshapes=a.blendshapes)
+                        show_window=not a.no_window, out_dir=a.out, blendshapes=a.blendshapes, aids=aids,
+                        model_info=info)
     finally:
         models.close()
     print(f"끝: 프레임 {meta['frames']}장 · 창 {meta['windows']}개 · 멈춘 이유 {meta['stop_reason']}", flush=True)

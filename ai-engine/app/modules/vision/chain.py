@@ -64,12 +64,13 @@ class FrameChain:
     timing (ms_heads, ms_head_dir, ms_chain = wall time of this whole step, cpu_ms_chain = process CPU time)."""
 
     def __init__(self, models, params, heads=None, direction=None, timeline=None, blendshapes: bool = False,
-                 source_kind: str = ""):
+                 source_kind: str = "", aids=None):
         from .features import Observer          # OpenCV; imported here so the window part loads without it
         self.capture = _Capture(models)
         self.observer = Observer(self.capture)
         self.p = params
         self.heads, self.direction, self.timeline = heads, direction, timeline
+        self.aids = aids                        # walking-aid detector (app/inference/aid.py) or None: columns absent
         self.blendshapes = bool(blendshapes)
         self.source_kind = source_kind
         self.mouth = C.MouthMotion(params.mouth_dials, params.mouth_baseline_s)
@@ -126,6 +127,11 @@ class FrameChain:
             row.update(self.change.update(row))
             row["ms_heads"] = sum(heads.ms.values())
         row.update(C.shoulder_columns(inf.pose if inf is not None else None))
+        if self.aids is not None:
+            aids = self.aids(frame.image)
+            row.update(C.aid_columns(aids, inf.pose if inf is not None else None, row.get("primary_box"),
+                                     self.heads is not None, self.p.aid_person_min))
+            row["ms_aids"] = sum(aids.ms.values())
         face_seen = row.get("face_state") == SEEN and row.get("face_in_primary") is not False
         scores = inf.blendshapes if (self.blendshapes and face_seen and inf is not None) else None
         row["mouth_motion"] = self.mouth.update(t, scores)
@@ -339,7 +345,7 @@ class WindowJudge:
         else:
             out, events = assess(rows, t_end, sp, landmarker_num_faces=LANDMARKER_NUM_FACES,
                                  baseline_s=p.mouth_baseline_s, seated_face_cy_min=p.seated_face_cy_min,
-                                 approach_ratio_min=p.approach_ratio_min,
+                                 approach_ratio_min=p.approach_ratio_min, aid_use_min=p.aid_use_min,
                                  seated_head_cy_min=p.seated_head_cy_min, head_down_pitch_min=p.head_down_pitch_min,
                                  head_approach_ratio_min=p.head_approach_ratio_min)
             reasons = unknown_reasons(rows, t_end, sp) if out["name"] == UNKNOWN else []

@@ -53,6 +53,7 @@ UNDECIDED = "정할 수 없음(결정 3 · 19): 값 묶음 곡선으로 보고"
 ROLE_BOUNDARIES = ("companion_rel_dist_max", "companion_lateral_min", "behind_rel_dist_min")   # None = no value yet
 SCENE_BOUNDARIES = ("seated_face_cy_min", "approach_ratio_min", "seated_head_cy_min", "head_down_pitch_min",
                     "head_approach_ratio_min")   # None = no value yet (situation.py scene tags)
+AID_BOUNDARIES = ("aid_use_min", "aid_person_min")   # None allowed (no value); defaults: [파일럿] values from a public set
 STITCH_BOUNDARIES = ("stitch_shift_max", "stitch_size_max")   # None = no value yet (columns.MainUserChange: no stitch)
 SCENE_METHOD = ("정하는 방법 = 그 카메라 앞에서 서서 보통으로 쓰는 녹화(평가 촬영본과 따로 찍은 것)의 창 중앙값(창 길이 = "
                 "값 묶음의 window_s)으로 기준선 평균 + 2 SD(Wu 외, W4A 2021의 기준선 ± 2 SD; 조사 22 §2-1 · §2-11), "
@@ -152,6 +153,29 @@ class PilotParams:
               "높이 ÷ 앞 트랙 마지막 상자 높이의 자연로그 절댓값(R-CNN 상자 변화량 th, Girshick 외 CVPR 2014 부록 C)이 "
               f"이 값 이하. {STITCH_METHOD}. 값이 없으면 잇지 않음", "|ln(height / height)|")
 
+    # --- walking-aid detector (app/inference/aid.py; optional input, off unless its ONNX file is given) ----------
+    aid_score_min: float = _p(
+        0.01, "관행값: 보조기구 탐지기 평가 설정의 점수 하한(YOLOX 평가 conf 0.01, ONNX 메타데이터 postprocess). 상자와 "
+              "클래스 점수를 기록하려는 하한이고, 쓴다 · 안 쓴다를 가르는 값이 아님", "score 0~1")
+    aid_nms_iou: float = _p(
+        0.65, "관행값: YOLOX 6ddff48 yolox/exp/yolox_base.py nmsthre 기본값(보조기구 탐지기 평가와 같은 IoU). 사람 하나에 "
+              "상자 하나를 남기려고 클래스를 가리지 않고 적용", "IoU 0~1")
+    aid_use_min: float | None = _p(
+        0.350, f"{PILOT} 시작값, 공개 자료에서 잰 값: 보조기구 사용(aid_use) = 창 안 주 사용자 사람 상자의 보조기구 "
+               "점수(aid_any_score: 목발 · 지팡이 · 보행기 · 휠체어의 objectness x 클래스 점수 가운데 가장 큰 값, "
+               "'보조기구를 쓰는 사람') 중앙값이 이 값 초과(트리 표 3-가 1-1, 휠체어는 aid_kind로 1-2). 값 = TU Graz "
+               "Crossroad Camera Dataset - Mobility Aid Users v1.0 검증 분할에서 F1이 가장 큰 점수 기준 0.3501(같은 점수 "
+               "규칙 '보조기구 전체, 최댓값'; 모델 aid_det joint_416, 입력 416). 시험 분할에 그대로 적용하면 정밀도 "
+               "0.698 · 재현율 0.736(사람 상자 3,966개). 그 공개 자료의 보조기구 사용자 비율에 맞춘 값이고(PMMA 검증 "
+               "분할은 0.480), 키오스크 시점 값이 아님", "score 0~1")
+    aid_person_min: float | None = _p(
+        0.390, f"{PILOT} 시작값, 공개 자료에서 잰 값: 보조기구 탐지기의 사람 상자를 사람으로 세는 점수(objectness x "
+               "가장 큰 클래스 점수)의 하한. 이 값을 넘는 상자만 '사람이 보임'(none_seen)과 주 사용자 상자 고르기에 "
+               "쓰고, 그 아래 상자(aid_score_min까지)는 기록만 함. 값 = TU Graz Crossroad Camera Dataset - Mobility Aid "
+               "Users v1.0 검증 분할의 '사람 아무나' 과제에서 F1이 가장 큰 점수 기준 0.38998(F1 0.813, 정밀도 0.841, "
+               "재현율 0.786; 모델 aid_det joint_416, 입력 416). PMMA 검증 분할은 0.479, 키오스크 시점 값이 아님",
+        "score 0~1")
+
     # --- runners (replay.py, live.py) -------------------------------------------------------------------------
     segment_s: float = _p(
         1.0, f"계약 sendFeatureWindow의 '1~3초 구간' 안에서 고른 {PILOT} 값: 창 결과 한 줄의 간격이자 터치 횟수 · "
@@ -188,11 +212,13 @@ class PilotParams:
             if f.name == "primary_rule":
                 if value not in PRIMARY_RULES:
                     raise ValueError(f"PilotParams.primary_rule must be one of {PRIMARY_RULES}, got {value!r}")
-            elif f.name in ROLE_BOUNDARIES + SCENE_BOUNDARIES + STITCH_BOUNDARIES:
+            elif f.name in ROLE_BOUNDARIES + SCENE_BOUNDARIES + AID_BOUNDARIES + STITCH_BOUNDARIES:
                 if value is not None and (isinstance(value, bool) or not isinstance(value, numbers.Real)
                                           or not math.isfinite(value) or value <= 0):
                     raise ValueError(f"PilotParams.{f.name} must be None (no value yet) or a finite number > 0, "
                                      f"got {value!r}")
+                if f.name in AID_BOUNDARIES and value is not None and value > 1:
+                    raise ValueError(f"PilotParams.{f.name} is a score and must be at most 1, got {value!r}")
                 if f.name in ("approach_ratio_min", "head_approach_ratio_min") and value is not None and value <= 1:
                     raise ValueError(f"PilotParams.{f.name} is a size ratio to the user's own reference (1 = "
                                      f"the same size) and must be above 1, got {value!r}")
@@ -209,7 +235,8 @@ class PilotParams:
                 if isinstance(value, bool) or not isinstance(value, numbers.Real) or not math.isfinite(value) \
                         or value <= 0:
                     raise ValueError(f"PilotParams.{f.name} must be a finite number > 0, got {value!r}")
-                if f.name in ("head_score_min", "head_nms_iou", "track_iou_min") and value > 1:
+                if f.name in ("head_score_min", "head_nms_iou", "track_iou_min", "aid_score_min",
+                              "aid_nms_iou", "aid_use_min") and value > 1:
                     raise ValueError(f"PilotParams.{f.name} is a score / IoU and must be at most 1, got {value!r}")
 
     @staticmethod

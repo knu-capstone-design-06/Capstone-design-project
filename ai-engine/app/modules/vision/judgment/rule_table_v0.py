@@ -60,7 +60,8 @@ from .jev_stub import JEV_MODEL
 QUEUE, BUSY, AROUND = "looking_back_with_people_behind", "consulting_companion", "looking_around"
 SCENE_OF_TAG = {QUEUE: "queue", BUSY: "busy", AROUND: "lost",   # tree 5-1 index 1 (looking_around: 4-2's aid)
                 "seated_height": "wheelchair", "face_approach": "lowvision",   # situation.SCENE_TAGS: no rule row
-                "user_changed": "newcustomer", "none_seen": "absence"}        # reads them yet (1-2, 2-1, 2-2, absence)
+                "user_changed": "newcustomer", "none_seen": "absence",        # reads them yet (1-2, 2-1, 2-2, absence,
+                "aid_use": "aid"}                                             # 1-1)
 WAIT, NOTICE, DELAY, BIG, HIGHLIGHT = ("wait_hold_timer", "remaining_steps_notice", "delay_responsibility_notice",
                                        "large_button", "highlight_next_action")
 # DELAY is the encouragement message (격려 메시지); the code name delay_responsibility_notice is kept because the
