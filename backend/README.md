@@ -131,7 +131,7 @@ async def analyze_window(ai: AiEngineClient, window: AnalyzeRequest):
   세부 특징과 터치 통계 계산 기준에는 팀 검토 항목이 남아 있습니다.
   연결 API는 `modules/sessions/schemas.py`에서 입력 필드와 반환 점수 5개·범위·타입을 검증합니다.
   내부 전송 클라이언트의 `JsonObject`는 그대로 유지하므로 직접 사용하는 다른 호출자는 별도의 의미 검증이 필요합니다.
-  현재 AI는 dummy 모델이고 지원 선택 기준도 미정이므로 검증된 점수라도 자동 UI 결정에는 사용하지 않습니다.
+  내부 `/v1/analyze`는 명세의 예시 점수를 반환합니다. 백엔드 판단 층(`app/modules/decision/`)은 유효한 특징 창에 규칙표 v0를 적용해 세션 판단 상태를 갱신합니다. 그림자 모드에서 판단 결과를 기록하고, 화면에는 `preset: none`과 `decided_by: rule_placeholder`를 반환합니다. 판단 결과를 화면 지원으로 전달하는 연결은 팀 통합에서 진행합니다.
 
 `ai-engine` 호스트 이름은 동일 Docker 네트워크에서 해석됩니다. 루트 Compose는
 ai-engine의 호스트 포트를 공개하지 않습니다. 두 서버를
