@@ -670,6 +670,52 @@ test('긴 주문 내역 아래에서 실패해도 안내와 재확인 버튼을 
   } finally { await browser.close(); }
 });
 
+test('1080×1920 큰 글씨·큰 버튼·낮은 화면에서 장바구니 총액과 버튼이 겹치지 않는다', async () => {
+  const browser = await chromium.launch(launchOptions);
+  try {
+    const session = 'cart-total-large-low';
+    const steps = bootstrap(session);
+    steps[2].body = cartResponse(session, 1, [iced(20)]);
+    const { page, errors, fixture } = await open(browser, steps);
+    await ready(page);
+    await click(page, 'support-toggle');
+    await click(page, 'support:largeText');
+    await click(page, 'support:largeButton');
+    await click(page, 'support:lowScreen');
+    await click(page, 'support-close');
+    await page.locator('.kiosk.large-text.large-button.low-screen').waitFor();
+
+    await click(page, 'cart-sheet-open');
+    const sheet = page.locator('dialog.cart-sheet[open]');
+    assert.equal(await sheet.locator('.sheet-total .amount').innerText(), '70,000원');
+    await page.evaluate(async () => { await document.fonts.ready; });
+    const { amount, close, review, dialog } = await sheet.evaluate(element => {
+      // 요소의 상자보다 금액 글자가 더 길게 그려질 수 있어서 실제 텍스트 경계를 잽니다.
+      const range = document.createRange();
+      range.selectNodeContents(element.querySelector('.sheet-total .amount'));
+      return {
+        amount: range.getBoundingClientRect().toJSON(),
+        close: element.querySelector('[data-log-target="cart-sheet-close"]').getBoundingClientRect().toJSON(),
+        review: element.querySelector('[data-log-target="cart-sheet-review"]').getBoundingClientRect().toJSON(),
+        dialog: element.getBoundingClientRect().toJSON(),
+      };
+    });
+    for (const button of [close, review]) {
+      assert(amount.right <= button.left || button.right <= amount.left ||
+        amount.bottom <= button.top || button.bottom <= amount.top, '금액 글자가 버튼과 겹치지 않음');
+    }
+    assert(amount.left >= dialog.left && amount.right <= dialog.right, '금액 글자가 창 안에 모두 보임');
+    assert(dialog.top >= 768 && dialog.bottom <= 1920, '장바구니 창이 낮은 화면 영역 안에 있음');
+    await screenshot(page, 'cart-total-large-low-1080x1920');
+    await click(page, 'cart-sheet-close');
+    await sheet.waitFor({ state: 'hidden' });
+    await click(page, 'cart-sheet-open');
+    await click(page, 'cart-sheet-review');
+    await page.locator('.review-block').waitFor();
+    fixture.verify(); assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
 // PR #87 리뷰(2026-11-18)의 재현: 응답 지연 60 ms의 모의 backend에서 같은 좌표를 250 ms 간격으로 누릅니다.
 const centerOf = box => [box.x + box.width / 2, box.y + box.height / 2];
 const targetAt = (page, point) => page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest('[data-log-target]')?.dataset.logTarget ?? null, point);
@@ -692,32 +738,49 @@ test('옵션 창의 [취소] 자리를 연달아 눌러도 처음으로 확인 �
   } finally { await browser.close(); }
 });
 
-test('옵션 창의 [담기] 자리를 250 ms 간격으로 네 번 눌러도 한 번만 담고 주문 확인·주문으로 넘어가지 않는다', async () => {
+test('옵션 창의 [담기] 자리를 250 ms 간격으로 네 번 눌러도 한 번만 담고 주문 확인·주문으로 넘어가지 않는다', async t => {
   const browser = await chromium.launch(launchOptions);
   try {
-    const session = 'repeat-add';
-    const { page, errors, fixture } = await open(browser, [...bootstrap(session), mutation(session, '/cart/items', cartResponse(session, 1, [iced()]))]);
-    await ready(page);
-    await page.route('**/cart/items', async route => { await new Promise(resolve => setTimeout(resolve, 60)); await route.fallback(); });
-    await click(page, 'product:americano');
-    const point = centerOf(await page.locator('[data-log-target="cart-add"]').boundingBox());
-    await page.mouse.click(...point);
-    await page.waitForTimeout(250);
-    await page.mouse.click(...point);
-    await page.waitForTimeout(250);
-    await page.mouse.click(...point);
-    await page.waitForTimeout(250);
-    await page.mouse.click(...point);
-    assert.equal(await targetAt(page, point), 'review-open', '창이 닫힌 뒤 같은 자리에는 [주문 확인]이 섬');
-    await page.locator('[data-log-target="review-open"][data-armed="true"]').waitFor();
-    assert.equal(fixture.requests.filter(request => request.method === 'POST' && request.path.endsWith('/cart/items')).length, 1, '한 번만 담음');
-    assert.equal(await page.locator('[data-log-target="simulate-payment"]').count(), 0, '주문 확인 화면으로 넘어가지 않음');
-    assert.equal(fixture.requests.filter(request => request.path.endsWith('/orders')).length, 0, '주문 요청이 없음');
-    // 두 번 클릭 간격이 지나면 키보드로도 누를 수 있습니다.
-    await page.locator('[data-log-target="review-open"]').focus();
-    await page.keyboard.press('Enter');
-    await page.locator('[data-log-target="simulate-payment"]').waitFor();
-    fixture.verify(); assert.deepEqual(errors, []);
+    for (const enlarged of [false, true]) {
+      await t.test(enlarged ? '큰 글씨·큰 버튼·낮은 화면' : '기본', async () => {
+        const session = 'repeat-add';
+        const { page, errors, fixture } = await open(browser, [...bootstrap(session), mutation(session, '/cart/items', cartResponse(session, 1, [iced()]))]);
+        try {
+          await ready(page);
+          if (enlarged) {
+            await click(page, 'support-toggle');
+            for (const setting of ['largeText', 'largeButton', 'lowScreen']) await click(page, `support:${setting}`);
+            await click(page, 'support-close');
+          }
+          await page.route('**/cart/items', async route => { await new Promise(resolve => setTimeout(resolve, 60)); await route.fallback(); });
+          await click(page, 'product:americano');
+          const point = centerOf(await page.locator('[data-log-target="cart-add"]').boundingBox());
+
+          // 브라우저 시계를 고정해 테스트 실행 속도와 상관없이 터치 간격을 250 ms로 유지합니다.
+          await page.clock.install();
+          await page.clock.pauseAt(new Date(Date.now() + 5_000));
+          const cartSaved = page.waitForResponse(response => response.url().endsWith('/cart/items') && response.ok());
+          await page.touchscreen.tap(...point);
+          await cartSaved;
+          await page.clock.runFor(250);
+          assert.equal(await targetAt(page, point), 'review-open', '창이 닫힌 뒤 같은 자리에는 [주문 확인]이 섬');
+          for (let repeat = 0; repeat < 3; repeat++) {
+            await page.touchscreen.tap(...point);
+            await page.clock.runFor(250);
+          }
+          assert.equal(fixture.requests.filter(request => request.method === 'POST' && request.path.endsWith('/cart/items')).length, 1, '한 번만 담음');
+          assert.equal(await page.locator('[data-log-target="simulate-payment"]').count(), 0, '주문 확인 화면으로 넘어가지 않음');
+          assert.equal(fixture.requests.filter(request => request.path.endsWith('/orders')).length, 0, '주문 요청이 없음');
+          await page.clock.resume();
+          // 두 번 클릭 간격이 지나면 키보드로도 누를 수 있습니다.
+          const review = page.locator('[data-log-target="review-open"][data-armed="true"]');
+          await review.focus();
+          await page.keyboard.press('Enter');
+          await page.locator('[data-log-target="simulate-payment"]').waitFor();
+          fixture.verify(); assert.deepEqual(errors, []);
+        } finally { await page.close(); }
+      });
+    }
   } finally { await browser.close(); }
 });
 
