@@ -138,7 +138,7 @@ if ($LASTEXITCODE -ne 0) { throw 'migration history restore failed' }
 
    SQL 검사 후에는 주문 API에서 응답을 재생합니다. 백업에 포함된 합성 주문의 기준 자료를 사용합니다.
 
-   1. 격리 복원 DB의 `kiosk_backend` 역할로 연결한 검증용 백엔드를 시작합니다. 실행 전에 `DATABASE_URL`이 해당 복원 DB를 가리키는지 확인하고, 필요하면 복원 DB에서만 역할 비밀번호를 설정합니다. [백엔드 실행 안내](../backend/README.md#로컬-실행-powershell)를 참고합니다.
+   1. 격리 복원 DB가 검증용 백엔드에서 접근 가능하고 TLS 연결을 받는지 확인합니다. 백엔드는 `sslmode=require`로 연결하므로, TLS를 지원하는 격리 Supabase 프로젝트에 복원하거나 로컬 PostgreSQL 컨테이너에 TLS를 설정합니다. 검증용 `DATABASE_URL`이 해당 복원 DB를 가리키는지 확인하고 `kiosk_backend` 역할로 접속합니다. 필요하면 복원 DB에서만 역할 비밀번호를 설정합니다. 연결한 세션에서 `SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid();`가 `true`인지 확인한 뒤 검증용 백엔드를 시작합니다. [백엔드 실행 안내](../backend/README.md#로컬-실행-powershell)를 참고합니다.
    2. 복원 DB에서 합성 주문 세션의 `kiosk.orders` 행 수를 기록합니다. 검증용 백엔드의 `POST /api/v1/sessions/{session_id}/orders`로 최초와 같은 `Idempotency-Key`와 JSON 요청 본문을 보냅니다. 본문의 `expected_version`에는 처음 주문할 때 보낸 값을 사용합니다.
    3. **HTTP `201`, 최초와 동일한 응답 JSON과 주문번호, 재전송 전후 해당 세션의 주문 1건 유지**를 모두 확인합니다. JSON은 키 순서나 공백의 차이를 제외하고 값 전체를 비교합니다. 각 결과를 운영 기록에 남깁니다.
 
