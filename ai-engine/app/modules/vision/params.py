@@ -7,9 +7,13 @@ Two kinds live here:
   source: it is a start value to be replaced from sources or public data before the 2026-10-28 recording, or reported
   per value bundle (decision list 2026-10-13, items 3 and 19). The three role boundaries (ROLE_BOUNDARIES) have no
   value at all (None, source UNDECIDED): the roles they decide stay 'unknown' until a bundle gives a value, and the
-  cues behind them are still written every frame (columns.py). The two scene-tag boundaries (SCENE_BOUNDARIES) are
-  the same: their method is fixed (SCENE_METHOD), their value depends on the camera and comes from a bundle; without
-  one the tags seated_height and face_approach say 'unknown' (situation.py). The two stitch boundaries of the user
+  cues behind them are still written every frame (columns.py). The five scene-tag boundaries (SCENE_BOUNDARIES) are
+  the same: their method is fixed (SCENE_METHOD), their value depends on the camera and comes from a bundle. A None
+  value leaves its part unjudged (situation.py): without approach_ratio_min face_approach says 'unknown'; seated_height
+  has a face part (seated_face_cy_min) and a head-box part (seated_head_cy_min, with the head detector), either decides
+  alone when the other is None, and it says 'unknown' only when both are None or the face value is None without the
+  head detector; the two gates head_down_pitch_min and head_approach_ratio_min are not applied when None. The two
+  stitch boundaries of the user
   change (STITCH_BOUNDARIES, columns.MainUserChange) are the same kind: method STITCH_METHOD, value per camera from a
   bundle; without one a broken main-user track is never stitched (the behaviour before 2026-11-22).
 - events.PilotParams (re-exported here as SituationParams): the 13 values of the events and situation rules. They keep
@@ -117,12 +121,15 @@ class PilotParams:
     # --- scene tags of situation.py (seated height 1-2, face approach 2-1; 2026-11-22) ------------------------
     seated_face_cy_min: float | None = _p(
         None, f"{UNDECIDED}. 카메라마다 다름: 앉은 높이(seated_height) = 창 안 주 사용자 얼굴 중심의 세로 위치(face_cy) "
-              f"중앙값이 이 값보다 큼(트리 표 3-가 1-2 '얼굴 높이 낮음'). {SCENE_METHOD}. 값이 없으면 앉은 높이는 모름",
+              f"중앙값이 이 값보다 큼(트리 표 3-가 1-2 '얼굴 높이 낮음'). {SCENE_METHOD}. 값이 없으면 얼굴 높이로는 "
+              f"판정하지 않음(머리 탐지기를 켜고 seated_head_cy_min이 있으면 머리 상자로 판정, 그 밖에는 앉은 높이는 모름)",
         "face_cy (0 = top, 1 = bottom)")
     seated_head_cy_min: float | None = _p(
         None, f"{UNDECIDED}. 카메라마다 다름: 앉은 높이(seated_height) = 창 안 주 사용자 머리 상자(H1)의 세로 가운데 "
-              f"중앙값이 이 값보다 큼(트리 표 3-가 1-2, 얼굴을 못 봐도 읽음). 머리 탐지기를 켠 실행은 이 값이 있으면 얼굴 "
-              f"높이 대신 씀. {SCENE_METHOD}. 값이 없거나 머리 탐지기가 없으면 얼굴 높이(seated_face_cy_min)로 판정",
+              f"중앙값이 이 값보다 큼(트리 표 3-가 1-2, 얼굴을 못 봐도 읽음). 얼굴 높이(seated_face_cy_min)가 먼저 판정하고, "
+              f"얼굴 높이로 판정하지 못한 창(seated_face_cy_min이 없음, 주 사용자 얼굴 줄이 없음, 얼굴 줄이 모두 가까움으로 "
+              f"빠짐, 줄이 적음)만 머리 탐지기를 켜고 이 값이 있으면 머리 상자로 판정. {SCENE_METHOD}. 값이 없거나 머리 "
+              f"탐지기가 없으면 얼굴 높이로만 판정",
         "head-box centre y (0 = top, 1 = bottom)")
     head_down_pitch_min: float | None = _p(
         None, f"{UNDECIDED}. 카메라마다 다름: 얼굴 접근(face_approach)에서 고개 숙임을 빼는 경계. 창 안 주 사용자 "

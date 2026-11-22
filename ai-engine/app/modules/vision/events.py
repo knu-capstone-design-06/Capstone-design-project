@@ -514,10 +514,12 @@ class SceneCues:
                          head_cy_median (the box's vertical centre), rows
       face_size          the main user's face rows with an iod_ratio_user (columns.FaceSizeRef): iod_ratio_median, rows
       main_user_changed  one per row that starts a new main-user track (columns.MainUserChange): track,
-                         previous_track, gap_s, body_kept, reacquired (the same place: not a new user), stitched (a
-                         break stitched by start time, place and size: not a new user), the break measures new_start_s,
-                         start_shift, start_size and the size evidence previous_h, new_h, h_ratio, new_was_role,
-                         new_rel_dist, new_growth (observation only)
+                         previous_track, gap_s, body_kept, body_gap_s (the longest stretch with neither the ended
+                         track's box nor a body, which decides reacquired), reacquired (the same place: not a new
+                         user), previous_settled (the earlier main user had settled; False = the first approach: not a
+                         change), stitched (a break stitched by start time, place and size: not a new user), the break
+                         measures new_start_s, start_shift, start_size and the size evidence previous_h, new_h, h_ratio,
+                         new_was_role, new_rel_dist, new_growth (observation only)
       nothing_seen       one over the whole window when no row sees a face (landmarks or a face-detector box), a body,
                          a head box or a person box of the walking-aid detector above its person operating point
                          (aid_person_count, when it ran; its recording-floor boxes do not count): unseen_s =
@@ -588,6 +590,7 @@ def observe_scene(rows: list, window: tuple, approach_ratio_min: float | None = 
                                  {"track": _track_value(r.get("primary_track")),
                                   "previous_track": _track_value(r["main_user_prev_track"]),
                                   "gap_s": _num(r, "main_user_gap_s"), "body_kept": _flag(r.get("main_user_body_kept")),
+                                  "body_gap_s": _num(r, "main_user_body_gap_s"),
                                   "previous_h": _num(r, "main_user_prev_h"), "new_h": _num(r, "main_user_new_h"),
                                   "h_ratio": _num(r, "main_user_h_ratio"),
                                   "new_was_role": None if _blank(r.get("main_user_new_was_role"))

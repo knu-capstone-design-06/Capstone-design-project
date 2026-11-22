@@ -294,8 +294,9 @@ def main(argv=None) -> int:
                     help="walking-aid detector ONNX (optional; off unless given, weights not in the repository)")
     ap.add_argument("--phone-model", default=None,
                     help="COCO YOLOX-Nano ONNX for the phone (optional; off unless given, weights not in the "
-                         "repository; without --touch-log the 3-2 phone path stays unknown (column:tap_count): "
-                         "it needs the touch counts, as the companion path does)")
+                         "repository; without --touch-log phone_use is never true, as the companion "
+                         "path needs the touch counts too: false where the phone part or the body-still part is "
+                         "false, otherwise unknown (column:tap_count when the phone part holds))")
     ap.add_argument("--overwrite", action="store_true")
     a = ap.parse_args(argv)
     if os.path.isfile(os.path.join(a.out, "windows.jsonl")) and not a.overwrite:

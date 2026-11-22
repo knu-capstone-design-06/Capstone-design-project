@@ -62,7 +62,8 @@ Columns (names = the ones events.py reads, then observation-only columns no rule
   dpitch_user_deg       the main user's head pitch (pitch_deg, + = down) minus the pitch of the same user's first face
                         row after the anchor (PitchRef): the anchors of iod_ratio_user (a new main-user track that is
                         not a reacquisition in the same place, the touch-log session and its first press, and without
-                        the head detector nobody seen for longer than params.track_max_gap_s). None while the face is
+                        the head detector nobody seen for longer than params.track_max_gap_s), except that a stitched
+                        track break (main_user_stitched) keeps this reference (PitchRef). None while the face is
                         not the main user's, without a pitch and before the first press. The session-start
                         dpitch_start_deg of features.py stays as an observation column; this is the one face_approach's
                         head-down gate reads.
@@ -100,7 +101,8 @@ Columns (names = the ones events.py reads, then observation-only columns no rule
                         a track survives) with shift <= params.stitch_shift_max and size <= params.stitch_size_max: the
                         same user whose track broke in place (a cap, a deep bow); False otherwise; None when a boundary
                         has no value or a box is missing. The tag user_changed does not count a stitch as a change;
-                        the size references (iod_ratio_user, head_ratio_user) still start again there (FaceSizeRef).
+                        the size references (iod_ratio_user, head_ratio_user) still start again there (FaceSizeRef);
+                        the pitch reference (dpitch_user_deg) goes on (PitchRef).
   main_user_prev_h, main_user_new_h, main_user_h_ratio, main_user_new_was_role, main_user_new_rel_dist,
   main_user_new_growth  size evidence on the same row, observation only (no threshold): the head-box height (fraction
                         of the frame) of the earlier main user's last box and of the new main user's box, new / earlier;
@@ -552,14 +554,16 @@ class Settle:
 
 class _UserAnchor:
     """The anchor shared by FaceSizeRef and PitchRef: a row whose primary_track differs from the track so far starts
-    the reference again (reset), unless it marks a reacquisition in the same place (main_user_reacquired); rows
-    without that column (no head detector) start it again when neither face nor body has been seen for longer than
-    max_gap_s. Subclasses define reset() and keep self.track and self.max_gap_s."""
+    the reference again (reset), unless it carries one of the marks in KEEP (the same user: main_user_reacquired, a
+    reacquisition in the same place; PitchRef also main_user_stitched); rows without that column (no head detector)
+    start it again when neither face nor body has been seen for longer than max_gap_s. Subclasses define reset() and
+    keep self.track and self.max_gap_s."""
+    KEEP = ("main_user_reacquired",)   # MainUserChange marks on a new track's first row that keep the reference
 
     def _follow(self, row: dict):
         track = _track_id(row.get("primary_track"))
         if track is not None and track != self.track:
-            if self.track is None or row.get("main_user_reacquired") not in (True, "True"):
+            if self.track is None or not any(row.get(k) in (True, "True") for k in self.KEEP):
                 self.reset()                         # a new main user; the same person found again keeps it
             self.track = track
         elif "primary_track" not in row and self.max_gap_s is not None:
@@ -669,8 +673,14 @@ class HeadSizeRef(FaceSizeRef):
 class PitchRef(_UserAnchor):
     """dpitch_user_deg per frame (module docstring): the main user's pitch_deg minus the pitch of that user's first
     face row after the anchor - the session-start pitch change of features.py, taken per main user. The anchors are
-    FaceSizeRef's (_UserAnchor; a touch-log session change is the chain's reset()). collect False (a touch log without
-    a press in this session yet): no reference is taken and the value is None, as for iod_ratio_user."""
+    FaceSizeRef's (_UserAnchor; a touch-log session change is the chain's reset()), except that a stitched track break
+    (main_user_stitched) keeps the reference: the stitch says the track of the same user broke in place, as in a deep
+    bow, and the first face row of the new track can be that bowed pitch, which would then be the user's level for the
+    rest of the session and hide later bowing from the head-down gate. The size references start again at a stitch
+    because a median of sizes would keep the walk-up's smaller sizes; this reference is one row, so keeping it gives
+    the value an unbroken track gives. collect False (a touch log without a press in this session yet): no reference
+    is taken and the value is None, as for iod_ratio_user."""
+    KEEP = ("main_user_reacquired", "main_user_stitched")
 
     def __init__(self, max_gap_s: float | None = None):
         self.max_gap_s = max_gap_s
@@ -1002,7 +1012,12 @@ def stitch_motion(rows: list, max_gap_s: float | None) -> list:
     from the rows of one recording (primary_track and primary_box, e.g. a replay with the head detector): every main-user
     box paired with the last box of the same track at most max_gap_s later, measured as a break is (_break: centre shift
     in box widths and heights, |ln height ratio|). The distribution stitch_shift_max and stitch_size_max are calibrated
-    from (params.STITCH_METHOD). [] when max_gap_s is None."""
+    from (params.STITCH_METHOD). [] when max_gap_s is None.
+    Most pairs therefore span about max_gap_s (only the last max_gap_s of a track gives shorter ones), so the bounds
+    fit the longest break the stitch bridges and are looser for the short breaks it mostly meets (a box lost for 0.1 s).
+    The pairing admits max_gap_s + 1e-9 so that a pair at exactly max_gap_s is kept whatever the float rounding of the
+    times (1.6 - 0.6 = 1.0000000000000002); the stitch rule (MainUserChange) and HeadTracker compare with a plain <=,
+    so a break whose float interval rounds above max_gap_s is not stitched."""
     if max_gap_s is None:
         return []
     tracks = {}

@@ -257,34 +257,49 @@ def history_s(bundle) -> float:
     return sp.window_s + 2.0 * sp.gap_s
 
 
-def facing(seg_rows: list, sp) -> bool | None:
+def facing(seg_rows: list, sp, main_only: bool = False) -> bool | None:
     """The rule table's gaze gate (JP 0-2 '고개 방향이 화면 안'): at the last frame of the segment that saw the face or
     the body - True = face seen with |yaw| below offscreen_yaw_deg, False = face seen with |yaw| at or beyond it;
     None = that frame saw the body without the face (the head direction cannot be measured: covered, turned beyond
     the landmarker's range, or lost), no such frame, no yaw, or no situation values. A None window takes the raised
-    criterion of the tap rows (tree section 4 ⑦), not the 'looking away' path."""
+    criterion of the tap rows (tree section 4 ⑦), not the 'looking away' path. main_only (phone_use's hand path): a
+    face counts only when it is the main user's (columns.main_user_face: with the head detector, matched to the main
+    user's head box), and a frame whose face is not confirmed as the main user's is skipped as no direction evidence
+    (the gate goes back to the frame before it)."""
     if sp is None:
         return None
     for r in reversed(seg_rows):
-        if r.get("face_state") == SEEN:
+        if r.get("face_state") == SEEN and (not main_only or C.main_user_face(r)):
             yaw = finite(r.get("yaw_deg"))
             return None if yaw is None else abs(yaw) < sp.offscreen_yaw_deg
+        if main_only and r.get("face_state") == SEEN:
+            continue                                   # a face not confirmed as the main user's: no direction evidence
         if r.get("body_state") == SEEN:
             return None
     return None
 
 
+def _toward_screen(row: dict, sp) -> bool:
+    """The row's face is not turned off the screen: |yaw| below offscreen_yaw_deg (facing's criterion), or no yaw."""
+    yaw = finite(row.get("yaw_deg"))
+    return yaw is None or abs(yaw) < sp.offscreen_yaw_deg
+
+
 def away_from_screen(seg_rows: list, sp) -> bool | None:
-    """phone_use's hand path: the main user not facing the screen in the segment. True when the gaze gate says so
-    (facing False), or when the segment has rows with the main user's head box and none of them shows the main user's
-    face (columns.main_user_face; the camera sits above the screen: a head seen without its face is not turned to the
-    screen); False when the gaze gate says facing, or a row with the head box shows the main user's face; None
-    otherwise (no row with the head box and the gate cannot tell, or no situation values)."""
+    """phone_use's hand path: the main user not facing the screen in the segment. The gaze gate here reads only the
+    main user's face (facing with main_only: with the head detector, a face not matched to the main user's head box,
+    face_in_primary None or False, is no direction evidence). True when that gate says so (facing False), or when the
+    segment has rows with the main user's head box and none of them shows the main user's face turned to the screen
+    (columns.main_user_face with |yaw| below offscreen_yaw_deg, the gate's own criterion, or no yaw; the camera sits
+    above the screen: a head seen without its face is not turned to the screen, and a face seen only turned beyond
+    offscreen_yaw_deg is not either) - checked first, so it holds even when the gate says facing; otherwise False when
+    the gate says facing, or a row with the head box shows the main user's face turned to the screen; None otherwise
+    (no row with the head box and the gate cannot tell, or no situation values)."""
     if sp is None:
         return None
-    gaze = facing(seg_rows, sp)
+    gaze = facing(seg_rows, sp, main_only=True)
     boxed = [r for r in seg_rows if not C.blank_box(r.get("primary_box"))]
-    face_in_box = any(C.main_user_face(r) for r in boxed)
+    face_in_box = any(C.main_user_face(r) and _toward_screen(r, sp) for r in boxed)
     if gaze is False or (boxed and not face_in_box):
         return True
     return False if (gaze is True or face_in_box) else None

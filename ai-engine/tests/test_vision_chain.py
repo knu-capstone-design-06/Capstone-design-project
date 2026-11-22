@@ -719,7 +719,8 @@ class ColumnsTests(unittest.TestCase):
     def test_head_pitch_reference_is_the_main_users_own_first_face(self):
         """dpitch_user_deg: pitch against the same main user's first face after the anchor. User A walks in looking up
         (-15 deg); user B, a new main-user track in the same session, operates level (+10 deg) and reads 0, not 25.
-        A reacquisition in the same place keeps the reference; without the head detector nobody seen for longer than
+        A reacquisition in the same place and a stitched track break (B bows deeply, the track breaks in place and the
+        new track's first face is bowed) keep the reference; without the head detector nobody seen for longer than
         max_gap_s starts it again; before the first press (collect False) nothing is read."""
         from app.modules.vision.columns import PitchRef, add_pitch_user
         ref = PitchRef(max_gap_s=1.0)
@@ -729,6 +730,9 @@ class ColumnsTests(unittest.TestCase):
         self.assertEqual([ref.update(row(1, p)) for p in (-15.0, -15.0, 0.0)], [0.0, 0.0, 15.0])
         self.assertEqual([ref.update(row(2, p)) for p in (10.0, 10.0, 40.0)], [0.0, 0.0, 30.0])   # B's own first face
         self.assertEqual(ref.update(row(3, 30.0, main_user_reacquired="True")), 20.0)        # B found again
+        self.assertEqual(ref.update(row(5, 35.0, main_user_stitched=True)), 25.0)            # B bowed: stitched
+        self.assertEqual(ref.update(row(6, 35.0, main_user_stitched="True")), 25.0)          # read back from rows.csv
+        self.assertEqual(ref.update(row(7, 35.0, main_user_stitched=False)), 0.0)            # a new main user
         self.assertIsNone(ref.update(row(3, 30.0, face_in_primary=False)))                  # not the main user's face
         self.assertIsNone(ref.update({"face_state": NOT_SEEN, "pitch_deg": NAN, "primary_track": 3}))
         gap = PitchRef(max_gap_s=1.0)                        # no head detector: the unseen gap is the anchor
@@ -742,6 +746,9 @@ class ColumnsTests(unittest.TestCase):
                                for t, p, k in ((0.1, -15.0, "1"), (0.0, -15.0, "1"), (0.2, 10.0, "2"),
                                                (0.3, 12.0, "2"))])
         self.assertEqual([r["dpitch_user_deg"] for r in rows], [0.0, 0.0, 0.0, 2.0])
+        rows.append({"t_s": 0.4, "face_state": SEEN, "pitch_deg": 30.0, "primary_track": "3",
+                     "main_user_stitched": "True"})
+        self.assertEqual(add_pitch_user(rows)[-1]["dpitch_user_deg"], 20.0)                 # stitched: track 2's level
 
     def test_main_user_change_marks_the_first_row_of_a_new_track(self):
         from app.modules.vision.columns import MainUserChange, add_main_user_change
@@ -1287,6 +1294,22 @@ class ColumnsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             PilotParams(approach_ratio_min=1.0)
 
+    def test_calibration_writes_no_approach_value_for_an_exactly_constant_distance(self):
+        """An exactly constant distance gives the ratio 1.0 on every row: the window medians do not vary (SD 0), so
+        mean + 2 SD is the reference size itself and no approach_ratio_min is written; the face-height pass keeps
+        every row and still writes its value."""
+        from app.modules.vision.tools.calibrate_scene import calibrate, no_value_reason, snippet
+        recordings = [[{"frame_idx": i, "t_s": round(i * DT, 6), "face_state": SEEN, "body_state": SEEN,
+                        "face_cy": 0.4 + k * 0.05, "iod_ratio_user": 1.0} for i in range(30)] for k in range(3)]
+        result = calibrate(recordings, 1.0, 1.0)
+        windows = result["approach_ratio_min"]["windows"]
+        self.assertEqual((windows["n"], windows["sd"]), (9, 0.0))
+        self.assertEqual(no_value_reason("approach_ratio_min", result["approach_ratio_min"]),
+                         "the window medians do not vary")
+        self.assertIsNone(result["approach_used"])
+        self.assertEqual(result["seated_face_cy_min"]["windows"]["n"], 9)   # every row kept
+        self.assertEqual(sorted(snippet(result, 1.0, 1.0, "")["chain"]), ["seated_face_cy_min"])
+
     def test_calibration_takes_the_stitch_values_from_the_same_heads_motion(self):
         """stitch_shift_max / stitch_size_max = mean + 2 SD of how far the same main-user box moves within
         track_max_gap_s: each box against the last box of the same track at most that much later (a new track is a
@@ -1644,8 +1667,9 @@ class RuleTableTests(unittest.TestCase):   # plain Python: runs with the server 
 
     def test_3_2_phone_path_counts_for_the_wait_only_in_a_window_that_is_not_measurable(self):
         """A window not measurable by the placeholder (no touch, no face) with phone_use true opens or keeps the 3-2
-        wait (hold_timer) and nothing else: with the wait refused, a 9-s pause after choosing opens no 4-2 there; a
-        true scene tag other than phone_use changes nothing."""
+        wait (hold_timer) and nothing else: with the wait refused, a 9-s pause after choosing opens no 4-2 there, and a
+        4-2 opened in a measurable window is kept there (without hold_timer); a true scene tag other than phone_use
+        changes nothing."""
         R = self.R
 
         def phone(status=True, name="phone_use"):
@@ -1660,8 +1684,11 @@ class RuleTableTests(unittest.TestCase):   # plain Python: runs with the server 
         self.assertIn("wait_hold_timer", state.refused)
         (d3,), _ = self.run_windows([win(20.0, measurable=False, situation=phone(), **pause)], state)
         self.assertEqual((d3.transition, d3.support), ("none", None))       # no 4-2 in a phone-only window
-        (d4,), _ = self.run_windows([win(20.0, measurable=True, situation=phone(), **pause)], state)
+        (d4, d6), _ = self.run_windows([win(20.0, measurable=True, situation=phone(), **pause),
+                                        win(21.0, measurable=False, situation=phone(), **pause)], state)
         self.assertEqual((d4.transition, d4.scene), ("open", "4-2"))         # measurable: the 4-2 row runs
+        self.assertEqual((d6.transition, d6.scene, d6.decision_id, d6.session_signal),
+                         ("keep", "4-2", d4.decision_id, None))  # phone-only window, wait refused: the 4-2 stays
         (h, k), _ = self.run_windows([win(5.0, measurable=True, situation=phone()),
                                       win(6.0, measurable=False, situation=phone(True, "aid_use"))])
         self.assertEqual((k.transition, k.session_signal), ("keep", None))   # another tag: not measurable
@@ -1912,6 +1939,17 @@ class WindowJudgeTests(unittest.TestCase):
         self.assertFalse(away(rows_of([(3, {"yaw_deg": 10.0, "primary_box": box})], [(1, head_only)]), sp))
         missed = rows_of([(9, {"yaw_deg": 0.0, "primary_box": box})], [(1, {**face_lost, "primary_box": box})])
         self.assertFalse(away(missed, sp))                          # one missed face frame while reading the screen
+        stray = {"yaw_deg": 40.0, "primary_box": None, "face_in_primary": None}   # head box dropped, face unmatched
+        self.assertFalse(away(rows_of([(9, {"yaw_deg": 0.0, "primary_box": box, "face_in_primary": True})],
+                                      [(1, stray)]), sp))           # no direction evidence: the boxed face decides
+        looked_away = [(9, {"yaw_deg": 40.0, "primary_box": box, "face_in_primary": True})]
+        turned = {"yaw_deg": 0.0, "primary_box": None, "face_in_primary": None}   # the mirror: unmatched, toward the screen
+        self.assertTrue(away(rows_of(looked_away, [(1, turned)]), sp))   # skipped: the confirmed face before it decides
+        from app.modules.vision.chain import facing as gate
+        self.assertTrue(gate(rows_of(looked_away, [(1, turned)]), sp))   # the rule table's gate reads every face
+        self.assertIs(gate(rows_of(looked_away, [(1, turned)]), sp, main_only=True), False)
+        lost_in_box = {**face_lost, "primary_box": box}           # turning further: the face lost, the head box kept
+        self.assertTrue(away(rows_of(looked_away, [(1, lost_in_box)]), sp))   # boxed faces only turned away: away
         self.assertIsNone(away(rows_of(facing(3)), None))                                  # no situation values
 
     def test_pause_counts_only_after_a_press_on_this_screen_visit(self):
@@ -2318,13 +2356,17 @@ class FrameChainTests(unittest.TestCase):
         hand in every segment while the user looks away from the screen, no touch and the body still make phone_use
         true, and the rule table opens the 3-2 wait through that path. A touch in the window rules the path out, and so
         does facing the screen. Looking down at the phone loses the face while the head box stays: away from the
-        screen, the wait opens; without the head box as well the direction cannot be told (unknown). A phone at the
+        screen, the wait opens; without the head box as well the direction cannot be told (unknown). A face not matched
+        to the main user (head box dropped on the last row, face_in_primary None, turned away) is no direction evidence:
+        phone_use stays false (review of 2026-11-22 on PR #98). A phone at the
         head (a call) needs no direction, and its window is measurable with the face lost: the wait opens and keeps its
-        hold_timer there (the window stays not measurable for every other row)."""
+        hold_timer there (the window stays not measurable for every other row). The contract basis names the phone path
+        in that window only: a call with the face in view is measurable, every row runs, and the basis stays plain."""
         import numpy as np
         from app.inference.phone import Phones
         from app.modules.vision.chain import FrameChain, WindowJudge
         from app.modules.vision.columns import PHONE_COLUMNS
+        from app.modules.vision.contract_view import BASIS, BASIS_PHONE
         from app.modules.vision.params import PilotParams
 
         def inference(yaw=40.0, face=True):                      # 40 deg: beyond offscreen_yaw_deg 30, looking away
@@ -2378,6 +2420,16 @@ class FrameChainTests(unittest.TestCase):
         facing = run([inference(yaw=0.0) for _ in range(60)])     # holding the phone while reading the screen
         rec = WindowJudge(bundle()).evaluate(facing, 5.9)
         self.assertEqual((phone_tag(rec), rec["decision"]["support"]), ((False, None), None))
+        stray = [dict(r) for r in facing]                        # the last row: head box dropped, an unmatched face
+        stray[-1].update(primary_box=None, face_in_primary=None, yaw_deg=40.0)
+        rec = WindowJudge(bundle()).evaluate(stray, 5.9)
+        self.assertEqual((phone_tag(rec), rec["decision"]["support"]), ((False, None), None))
+        away_run = run([inference(yaw=40.0) for _ in range(60)])     # the mirror: looking away, phone in hand
+        turned = [dict(r) for r in away_run]                     # the last row: head box dropped, an unmatched face
+        turned[-1].update(primary_box=None, face_in_primary=None, yaw_deg=0.0)   # turned to the screen
+        rec = WindowJudge(bundle()).evaluate(turned, 5.9)
+        self.assertEqual((phone_tag(rec), rec["decision"]["support"]), ((True, None), "wait_hold_timer"))
+        self.assertTrue(rec["vision"]["facing_screen"])           # the rule table's gaze gate still reads every face
         lost = run([inference(face=k < 45) for k in range(60)])  # looking down: the face lost from 4.5 s, head kept
         rec = WindowJudge(bundle()).evaluate(lost, 5.9)
         self.assertEqual((phone_tag(rec), rec["decision"]["support"]), ((True, None), "wait_hold_timer"))
@@ -2397,7 +2449,12 @@ class FrameChainTests(unittest.TestCase):
         rec = WindowJudge(bundle()).evaluate(on_call, 5.9)       # no face in the last segment (4.9, 5.9]
         self.assertEqual((phone_tag(rec), rec["measurable"]), ((True, None), False))   # placeholder: not measurable
         self.assertEqual((rec["decision"]["support"], rec["decision"]["transition"]), ("wait_hold_timer", "open"))
-        self.assertIn("phone_use", rec["contract"]["extension"]["measurement"]["basis"])
+        self.assertEqual(rec["contract"]["extension"]["measurement"]["basis"], BASIS_PHONE)
+        in_view = run([inference(yaw=0.0) for _ in range(60)], call)   # a call with the face in view
+        rec = WindowJudge(bundle()).evaluate(in_view, 5.9)
+        self.assertEqual((phone_tag(rec), rec["measurable"]), ((True, None), True))    # measurable: every row runs
+        self.assertEqual((rec["decision"]["support"], rec["decision"]["transition"]), ("wait_hold_timer", "open"))
+        self.assertEqual(rec["contract"]["extension"]["measurement"]["basis"], BASIS)
         judge = WindowJudge(bundle())
         first, second = judge.evaluate(on_call, 4.9), judge.evaluate(on_call, 5.9)   # open with the face, then lost
         self.assertEqual((first["decision"]["transition"], second["decision"]["transition"]), ("open", "keep"))
@@ -2864,10 +2921,14 @@ class ReplayWithFakePerceptionTests(unittest.TestCase):
                                  set(c["extension"]["decision_meta"]))
 
     def test_measurable_follows_the_team_placeholder(self):
+        from app.modules.vision.contract_view import BASIS
         sched = [fake_inference(face=False, body=True) for _ in range(30)]
         _, recs, _ = self.run_replay(sched)
         self.assertTrue(all(r["measurable"] is False for r in recs))      # no tap, no back, no face
         self.assertTrue(all(r["contract"]["extension"]["measurement"]["measurable"] is False for r in recs))
+        phone = {t["status"] for r in recs for t in r["situation"]["tags"] if t["name"] == "phone_use"}
+        self.assertEqual(phone, {"unknown"})                              # no phone detector
+        self.assertTrue(all(r["contract"]["extension"]["measurement"]["basis"] == BASIS for r in recs))   # not phone
         self.assertTrue(all("analyze_response" not in r["contract"] for r in recs))
         self.assertTrue(all(r["decision"]["transition"] == "none" for r in recs))
 

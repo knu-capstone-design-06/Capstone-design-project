@@ -652,11 +652,12 @@ class SceneCueTests(unittest.TestCase):
         rows = rows_of(face(4), [(6, GONE)], face(4), extra={**OPTIONAL, "primary_track": 1, "head_count": 1})
         put(rows, 4, 9, primary_track=None, head_count=0)
         put(rows, 10, 13, primary_track=2)
-        put(rows, 10, 10, main_user_prev_track=1, main_user_gap_s=0.7, main_user_body_kept="False")
+        put(rows, 10, 10, main_user_prev_track=1, main_user_gap_s=0.7, main_user_body_kept="False",
+            main_user_body_gap_s=0.6)
         c = observe_scene(rows, (0.0, 1.3))
         (change,) = c.of("main_user_changed")
         self.assertEqual(change["obs"], {"track": 2, "previous_track": 1, "gap_s": 0.7, "body_kept": False,
-                                         "previous_h": None, "new_h": None, "h_ratio": None, "new_was_role": None,
+                                         "body_gap_s": 0.6, "previous_h": None, "new_h": None, "h_ratio": None, "new_was_role": None,
                                          "new_rel_dist": None, "new_growth": None, "reacquired": None,
                                          "previous_settled": None, "stitched": None, "new_start_s": None,
                                          "start_shift": None, "start_size": None})

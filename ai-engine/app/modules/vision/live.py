@@ -168,8 +168,9 @@ def parse_args(argv=None):
                     help="walking-aid detector ONNX (optional; off unless given, weights not in the repository)")
     ap.add_argument("--phone-model", default=None,
                     help="COCO YOLOX-Nano ONNX for the phone (optional; off unless given, weights not in the "
-                         "repository; live has no touch log, so the 3-2 phone path stays unknown (column:tap_count): "
-                         "it needs the touch counts, as the companion path does)")
+                         "repository; live has no touch log, so phone_use is never true, as the companion "
+                         "path needs the touch counts too: false where the phone part or the body-still part is "
+                         "false, otherwise unknown (column:tap_count when the phone part holds))")
     a = ap.parse_args(argv)
     if a.no_window and a.seconds is None:
         print("창 없이 돌리면 Ctrl+C로만 멈춥니다(--seconds로 시간을 정할 수 있습니다).", file=sys.stderr)

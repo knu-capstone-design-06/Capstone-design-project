@@ -423,7 +423,9 @@ def decide(inp: WindowInput, state: SessionState, params) -> Decision:
 
 def _keep(held: Held, meta: dict, reason: str, measurable: bool) -> Decision:
     """The held decision again (JP 0-1 item 1): same id, support, scene, policy, cues and execution fields, no new
-    Jev question. A kept 3-2 wait carries {name: hold_timer} in a measurable window only (JP 0-1 item 3)."""
+    Jev question. A kept 3-2 wait carries {name: hold_timer} when measurable is passed true: in a measurable window,
+    and in a window that is not measurable when the phone path keeps the wait (decide 0'', phone_use true); a wait
+    kept in any other window that is not measurable carries none (JP 0-1 item 3)."""
     signal = {"name": HOLD_TIMER} if (held.action == "wait" and measurable) else None
     return replace(held.decision, transition="keep", meta=meta, reason=reason, jev_request=None,
                    session_signal=signal)

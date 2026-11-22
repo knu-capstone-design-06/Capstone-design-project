@@ -24,23 +24,31 @@ Output for one window (sem section 4: dec section 3's output line plus quality, 
   alternatives  the other tags that no measured cue ruled out and that have supporting events, most events first;
                 one with fewer than min_events supporting events has confidence "unknown"
   tags          the six scene tags (SCENE_TAGS, 2026-11-22), each judged on its own and never competing with name:
-                seated_height (1-2; window median of the main user's head-box centre > seated_head_cy_min with the
-                head detector, else of the main user's face_cy > seated_face_cy_min), face_approach
-                (2-1; window median of iod_ratio_user > approach_ratio_min), user_changed (2-2; a new main-user
+                seated_height (1-2; window median of the main user's face_cy > seated_face_cy_min; where the face
+                cannot tell (unknown), with the head detector, of the main user's head-box centre >
+                seated_head_cy_min), face_approach
+                (2-1; window median of iod_ratio_user > approach_ratio_min, not counted when the head is pitched
+                down beyond head_down_pitch_min), user_changed (2-2; a new main-user
                 track starts in the window, not the same user found again or stitched back), none_seen (the absence node; no face, body, head box or aid-detector
                 person box on any row),
                 aid_use (1-1; window median of aid_any_score of the main user's person box > aid_use_min; only
                 when the walking-aid detector ran), phone_use (3-2's phone path: the phone at the main user's head in
                 min_events of the window's segment_s segments, or at the main user (head or hand) in min_events
-                segments while not facing the screen; no touch, body still; only with the phone detector).
+                segments with the main user not facing the screen in the window's last segment; no touch, body
+                still; only with the phone detector).
                 status True | False | "unknown"; unknown_reason a code exactly when "unknown" (no_frames,
                 no_value_for_camera, no_value, no_main_user_face, no_main_user_box, face_near, head_near, no_reference,
                 too_few_rows (the rows
                 behind a median are fewer than face_visible_min of the window), reacquired_same_place,
                 column:primary_track, column:head_count, column:aid_owner, no_anchor, no_user_box, column:phone_owner,
                 no_segments, phone_owner_unknown, gaze_unknown, column:tap_count, body_position_missing); evidence points into the
-                window's scene events (events.observe_scene). The two boundaries are params.SCENE_BOUNDARIES (bundle
-                values; None = unknown). Touch and duration (2-2's no-input trigger, the absence warning) are the
+                window's scene events (events.observe_scene). The five scene-tag boundaries are
+                params.SCENE_BOUNDARIES (bundle values; None = that part is not judged: approach_ratio_min None ->
+                face_approach unknown (no_value); seated_height has a face part (seated_face_cy_min) and a head-box
+                part (seated_head_cy_min, with the head detector), either decides alone when the other is None, and
+                it is unknown (no_value_for_camera) only when both are None or the face value is None without the
+                head detector; head_down_pitch_min and head_approach_ratio_min None -> the gate is not applied).
+                Touch and duration (2-2's no-input trigger, the absence warning) are the
                 judgment layer's, not these tags' - except phone_use, a whole path of the 3-2 row.
 
 How a window is decided. From sem section 4: fewer than min_events supporting events -> "unknown"; quality per cue
@@ -363,9 +371,10 @@ def phone_use(sc: SceneCues, c: Cues | None, min_events: int | None, away: bool 
     """(status, events, unknown reason): 3-2's path besides the companion (tree table 3-가 3-2: the companion path or
     the second camera path, with no touch in the window). Two places of the phone: at the head (phone_at_head: the box
     meets the head box, a call) in at least min_events of the window's segment_s segments; or at the main user, head or
-    hand (phone_in_hand: it meets a hand of the main user), in at least min_events segments while the main user is not
-    facing the screen (away True, chain.away_from_screen: the gaze gate says away, or the main user's head box is seen
-    without a face in it; tree 3-2 excludes a user who looks down at the screen, which is 4-2's pause). min_events is the value bundle's situation.min_events, reused ([파일럿]: the bundle
+    hand (phone_in_hand: it meets a hand of the main user), in at least min_events segments, with the main user not
+    facing the screen in the window's last segment (away True, one value per window read from that segment's rows by
+    chain.away_from_screen: the gaze gate says away, or the main user's head box is seen without a face in it; tree
+    3-2 excludes a user who looks down at the screen, which is 4-2's pause). min_events is the value bundle's situation.min_events, reused ([파일럿]: the bundle
     marks the value so, and counting a segment with the phone as one supporting event is this path's own reading): the
     three situation tags ask that many supporting events (the detector misses frames, so the phone counts per segment,
     not per frame). Then no touch in the window and the body still -
