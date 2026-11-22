@@ -88,6 +88,32 @@ def build_messages(
     return messages
 
 
+# What the kiosk asks when the model's own question cannot be shown (service.py asks the same).
+ASK_MENU_REPLY = "어떤 메뉴를 주문할까요?"
+_REPLY_MAX = VoiceInterpretation.model_fields["reply_text"].metadata[0].max_length
+
+
+def tidy_output(result: dict) -> dict:
+    """Mend reply_text slips that do not touch what would run, so a good order is not failed for them.
+
+    The tool inputs are left as they are and still validated, and nothing here makes an order run
+    without the customer's yes that would not have run before. A proposal's sentence is always
+    rebuilt by the service from the tool inputs, so a missing or long one only needs a stand-in. A completed result that also carries a
+    sentence ("담았어요", or a question) contradicts itself: it is read back as a proposal instead of
+    run or failed. A question that is missing or too long to show becomes the plain menu question.
+    """
+    status, reply = result.get("status"), result.get("reply_text")
+    said = isinstance(reply, str) and bool(reply.strip())
+    usable = said and len(reply) <= _REPLY_MAX
+    if status == "completed" and said and result.get("tool_calls"):
+        return {**result, "status": "needs_confirmation", "reply_text": "?"}
+    if status == "needs_confirmation" and not usable:
+        return {**result, "reply_text": "?"}
+    if status == "needs_clarification" and not usable:
+        return {**result, "reply_text": ASK_MENU_REPLY}
+    return result
+
+
 class VoiceInterpreter(Protocol):
     async def interpret(
         self, request: VoiceRequestCreate, menu: list[MenuItem], history: list[VoiceTurn],
@@ -125,13 +151,28 @@ class OpenAiVoiceInterpreter:
         if result is None:
             return None
         try:
-            return VoiceInterpretation.model_validate(result)
+            return VoiceInterpretation.model_validate(tidy_output(result))
         except ValidationError:
             logger.warning("OpenAI voice interpretation rejected (invalid output)")
             return None
 
 
-def build_voice_interpreter(client: OpenAiClient | None) -> VoiceInterpreter:
+class UnavailableVoiceInterpreter:
+    """No key on a server set up for real use: every request fails as AI unavailable. Never calls OpenAI."""
+
+    async def interpret(
+        self, request: VoiceRequestCreate, menu: list[MenuItem], history: list[VoiceTurn],
+        cart: Sequence[CartLine] = (),
+    ) -> VoiceInterpretation | None:
+        return None
+
+
+def build_voice_interpreter(client: OpenAiClient | None, development: bool = True) -> VoiceInterpreter:
+    """development=False (the cart is changed by voice, or orders are stored in the database): without a
+    key the customer gets the outage reply, not the development sentence."""
+    if client is None and not development:
+        logger.error("OPENAI_API_KEY is not set; voice requests fail as AI unavailable")
+        return UnavailableVoiceInterpreter()
     if client is None:
         logger.warning("OPENAI_API_KEY is not set; voice requests use development stub results")
         return StubVoiceInterpreter()

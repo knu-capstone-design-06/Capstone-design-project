@@ -103,6 +103,8 @@ class JevClientTests(unittest.IsolatedAsyncioTestCase):
     async def test_malformed_answers_give_none(self):
         cases = {
             "not json": "not json",
+            # json.loads raises RecursionError on a body nested this deep (a reviewer's request, #77).
+            "nested too deep": "[" * 100_000 + "]" * 100_000,
             "no answers": {"model": "jev-1.13.0", "answers": {}, "usage": {"input_tokens": 1, "output_tokens": 0}},
             "probability out of range": {**RESPONSE, "answers": {"proposal_fits": {"type": "noul", "noul": 1.5}}},
             "unknown type": {**RESPONSE, "answers": {"proposal_fits": {"type": "guess", "noul": 0.5}}},
