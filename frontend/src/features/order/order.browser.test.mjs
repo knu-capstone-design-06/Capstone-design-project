@@ -698,17 +698,22 @@ test('옵션 창의 [담기] 자리를 250 ms 간격으로 네 번 눌러도 한
     const session = 'repeat-add';
     const { page, errors, fixture } = await open(browser, [...bootstrap(session), mutation(session, '/cart/items', cartResponse(session, 1, [iced()]))]);
     await ready(page);
+    // 동시 브라우저 실행 부하가 250ms 입력 간격을 늘리지 않도록 앱의 시간을 제어합니다.
+    await page.clock.install();
+    await page.clock.pauseAt(new Date(Date.now() + 1000));
     await page.route('**/cart/items', async route => { await new Promise(resolve => setTimeout(resolve, 60)); await route.fallback(); });
     await click(page, 'product:americano');
     const point = centerOf(await page.locator('[data-log-target="cart-add"]').boundingBox());
     await page.mouse.click(...point);
-    await page.waitForTimeout(250);
+    await page.locator('dialog[open]').waitFor({ state: 'hidden' });
+    await page.clock.runFor(250);
     await page.mouse.click(...point);
-    await page.waitForTimeout(250);
+    await page.clock.runFor(250);
     await page.mouse.click(...point);
-    await page.waitForTimeout(250);
+    await page.clock.runFor(250);
     await page.mouse.click(...point);
     assert.equal(await targetAt(page, point), 'review-open', '창이 닫힌 뒤 같은 자리에는 [주문 확인]이 섬');
+    await page.clock.runFor(501);
     await page.locator('[data-log-target="review-open"][data-armed="true"]').waitFor();
     assert.equal(fixture.requests.filter(request => request.method === 'POST' && request.path.endsWith('/cart/items')).length, 1, '한 번만 담음');
     assert.equal(await page.locator('[data-log-target="simulate-payment"]').count(), 0, '주문 확인 화면으로 넘어가지 않음');
