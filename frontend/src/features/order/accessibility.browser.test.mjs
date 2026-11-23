@@ -131,6 +131,7 @@ test('처음으로의 취소는 장바구니를 보존하고 확인하면 새 �
     await target(page, 'order-restart-confirm').click();
     await page.waitForFunction(() => window.kioskTouchLogDraft.read().serverSessionId === 'reset-after');
     assert.notEqual(await page.evaluate(() => window.kioskTouchLogDraft.read().sessionId), before);
+    await page.locator('.order-progress').waitFor({ state: 'hidden' });
     assert(await target(page, 'review-open').isDisabled());
     fixture.verify();
   } finally { await browser.close(); }
@@ -159,6 +160,7 @@ test('화면 읽기를 중단·다시 재생하고 화면 이동 때 이전 안�
     assert.match(await page.evaluate(() => window.__speechReview.texts[0]), /메뉴 선택/);
     await target(page, 'read-aloud-stop').click();
     assert(await target(page, 'read-aloud-stop').isDisabled());
+    assert.equal(await page.evaluate(() => window.__speechReview.cancelled), 1, '사용자 중단 시 재생 중인 안내를 취소');
     await target(page, 'read-aloud-replay').click();
     assert.equal(await page.evaluate(() => window.__speechReview.texts.length), 2);
     await target(page, 'support-close').click();
@@ -166,7 +168,7 @@ test('화면 읽기를 중단·다시 재생하고 화면 이동 때 이전 안�
     await target(page, 'review-open').click();
     await page.waitForFunction(() => window.__speechReview.texts.length === 3);
     assert.match(await page.evaluate(() => window.__speechReview.texts.at(-1)), /메뉴 더 고르기/);
-    assert(await page.evaluate(() => window.__speechReview.cancelled >= 3));
+    assert.equal(await page.evaluate(() => window.__speechReview.cancelled), 2, '화면 이동 시 이전 안내만 취소하고 빈 상태에서는 취소하지 않음');
     fixture.verify();
   } finally { await browser.close(); }
 });

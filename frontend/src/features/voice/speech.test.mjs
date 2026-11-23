@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createReplySpeaker } from './replySpeech.ts';
 import { createSpeechCapture, findRecognition, isSpeechSupported } from './speech.ts';
 import { FakeRecognition, factory, tick } from './voiceFakes.mjs';
 
@@ -13,6 +14,109 @@ function capture(options) {
   }, options);
   return { events, handle };
 }
+
+function synthesisFixture() {
+  const spoken = [];
+  const voices = [{ lang: 'en-US', localService: true }, { lang: 'ko-KR', localService: false }, { lang: 'ko-KR', localService: true }];
+  let cancellations = 0;
+  const scope = {
+    SpeechSynthesisUtterance: class { constructor(text) { this.text = text; } },
+    speechSynthesis: { getVoices: () => voices, speak: utterance => spoken.push(utterance), cancel: () => { cancellations++; } },
+  };
+  return { spoken, scope, voices, cancellations: () => cancellations };
+}
+
+function loadingSynthesisFixture() {
+  const f = synthesisFixture(), listeners = new Set();
+  f.voices.length = 0;
+  f.scope.speechSynthesis.addEventListener = (type, listener) => { if (type === 'voiceschanged') listeners.add(listener); };
+  f.scope.speechSynthesis.removeEventListener = (type, listener) => { if (type === 'voiceschanged') listeners.delete(listener); };
+  return { ...f, listeners, updateVoices: () => { for (const listener of [...listeners]) listener(); } };
+}
+
+test('응답 읽기는 한국어 로컬 음성을 우선 선택하고 완료를 기다린다', async () => {
+  const f = synthesisFixture();
+  const pending = createReplySpeaker(f.scope)(' 온도를 골라 주세요. ', new AbortController().signal);
+  assert.equal(f.spoken[0].text, '온도를 골라 주세요.');
+  assert.equal(f.spoken[0].lang, 'ko-KR');
+  assert.equal(f.spoken[0].voice, f.voices[2]);
+  f.spoken[0].onend();
+  assert.equal(await pending, true);
+  assert.equal(f.cancellations(), 0);
+});
+
+test('첫 안내는 늦게 도착한 음성 목록을 기다려 한국어 로컬 음성으로 한 번만 읽는다', async () => {
+  const f = loadingSynthesisFixture();
+  let reads = 0;
+  f.scope.speechSynthesis.getVoices = () => { reads++; return f.voices; };
+  const speaker = createReplySpeaker(f.scope);
+  assert.equal(reads, 1, '생성할 때 목록 로딩을 시작함');
+  const pending = speaker('아이스로 할까요?', new AbortController().signal);
+  assert.equal(f.spoken.length, 0);
+  f.updateVoices();
+  assert.equal(f.spoken.length, 0, '빈 목록 갱신만으로 재생하지 않음');
+  const lateUpdate = [...f.listeners][0];
+  const local = { lang: 'ko-KR', localService: true };
+  f.voices.push({ lang: 'ko-KR', localService: false }, local);
+  f.updateVoices();
+  lateUpdate();
+  assert.equal(f.spoken.length, 1);
+  assert.equal(f.spoken[0].voice, local);
+  assert.equal(f.listeners.size, 0);
+  f.spoken[0].onend();
+  assert.equal(await pending, true);
+});
+
+test('음성 목록 대기도 취소와 전체 시간 제한에 포함하고 늦은 목록으로 재생하지 않는다', async () => {
+  for (const cause of ['abort', 'timeout']) {
+    const f = loadingSynthesisFixture(), controller = new AbortController();
+    const pending = createReplySpeaker(f.scope, cause === 'timeout' ? 5 : 1000)('질문', controller.signal);
+    const lateUpdate = [...f.listeners][0];
+    if (cause === 'abort') controller.abort();
+    assert.equal(await pending, false);
+    f.voices.push({ lang: 'ko-KR', localService: true });
+    lateUpdate();
+    assert.equal(f.listeners.size, 0);
+    assert.equal(f.spoken.length, 0);
+  }
+});
+
+test('목록이 계속 비어 있으면 대기를 끝내고 브라우저 기본 한국어 설정으로 읽는다', async () => {
+  const f = loadingSynthesisFixture();
+  f.scope.speechSynthesis.speak = utterance => {
+    f.spoken.push(utterance);
+    queueMicrotask(() => utterance.onend?.());
+  };
+  assert.equal(await createReplySpeaker(f.scope, 2000)('질문', new AbortController().signal), true);
+  assert.equal(f.spoken.length, 1);
+  assert.equal(f.spoken[0].lang, 'ko-KR');
+  assert.equal(f.spoken[0].voice, undefined);
+  assert.equal(f.listeners.size, 0);
+});
+
+test('응답 읽기는 취소·재생 오류·시간 초과 뒤 늦은 완료를 무시한다', async () => {
+  for (const cause of ['abort', 'error', 'timeout']) {
+    const f = synthesisFixture(), controller = new AbortController();
+    const pending = createReplySpeaker(f.scope, cause === 'timeout' ? 5 : 1000)('아이스로 할까요?', controller.signal);
+    const lateEnd = f.spoken[0].onend;
+    if (cause === 'abort') controller.abort();
+    if (cause === 'error') f.spoken[0].onerror();
+    assert.equal(await pending, false, cause);
+    lateEnd();
+    assert.equal(f.cancellations(), 1);
+  }
+});
+
+test('음성 합성 미지원·빈 문장·취소된 요청·시작 실패는 읽기 실패로 반환한다', async () => {
+  assert.equal(await createReplySpeaker({})('질문', new AbortController().signal), false);
+  const f = synthesisFixture(), controller = new AbortController();
+  assert.equal(await createReplySpeaker(f.scope)(' ', controller.signal), false);
+  controller.abort();
+  assert.equal(await createReplySpeaker(f.scope)('질문', controller.signal), false);
+  assert.equal(f.spoken.length, 0);
+  f.scope.speechSynthesis.speak = () => { throw new Error('blocked'); };
+  assert.equal(await createReplySpeaker(f.scope)('질문', new AbortController().signal), false);
+});
 
 test('Chrome의 webkit 접두어 인식기를 찾고 없으면 지원하지 않는다', () => {
   class Webkit {}
