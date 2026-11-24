@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import './voiceSettings.test.mjs';
 import { categoryLabels, initialSettings, money, orderNumberText, readSettings, temperatureLabel, temperatureText } from './model.ts';
 import { ApiError } from '../../shared/api/client.ts';
 import { OrderController } from './orderController.ts';
