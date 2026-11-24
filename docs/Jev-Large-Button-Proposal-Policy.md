@@ -8,6 +8,22 @@
 - #77이 병합되면서 백엔드가 창마다 규칙표를 실행하고, 설정한 Jev 단계의 답을 백그라운드에서 기록하는 그림자 단계가 들어왔다. `JEV_STAGES` 기본값은 `off`다. 백엔드는 Jev 답을 기다리는 동안 원래 창의 `/features` 응답을 보낼 수 있다. 현재 백엔드 입력에는 4-1에 필요한 `fixes_recent`, 시선 및 비전 상황이 들어오지 않는다. [PR #77](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/77) · [병합 시점의 판단 층 설명](https://github.com/knu-capstone-design-06/Capstone-design-project/blob/2dbb1549c3caeef55c731fdad820adbdf1bf9d7e/docs/Jev-Integration.md#10-판단-층-backend-구현-현황-2026-11-04) · [터치 후속 과업](Jev-Touch-Features.md)
 - #95 이전 독립 검사는 백엔드 21개·Edge 25개 사례에서 수락 전 크기 유지, 수락 후 확대, 세션 전환·장애 시 화면 유지를 확인했다. 사용한 사본은 #77 `2aeb780`, 당시 #87 `25df409`이고 관측과 Jev 답은 모의 입력이었다. 그때 사용한 `support_choice`와 `0.75`는 화면 응답 분기를 시험하기 위한 입력이다. [PR #95 검증 범위](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/95)
 
+### 프론트·백엔드 로컬 연동 검증
+
+프론트의 `59b1829` 배포 빌드에서 확인 요청과 장바구니 유지가 모의 `/features` 응답으로 검증됐다. 같은 화면을 실제 세션·장바구니 API와 연결하기 위해 [로컬 테스트 서버](../backend/tests/serve_large_button_fixture.py)를 사용한다. 저장은 메모리에서 처리하고, 분석 요청에는 모의 응답을 반환한다. 장바구니에 상품이 담긴 뒤 같은 세션의 `menu` 창에서만 유효한 `/features` 요청에 `ai_available: true`, `support.preset: large_button`, `support.requires_confirmation: true`가 들어간다. 실제 Jev 답, 전달 기한, 적용 임계값은 별도 파일럿에서 검증한다. [프론트 확인 요청](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/97#issuecomment-7098636629) · [프론트 검증 결과](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/97#issuecomment-7098977350)
+
+1. PR 브랜치에서 백엔드 의존성을 설치한 Python 환경을 활성화하고, `frontend/`에서 `pnpm install --frozen-lockfile`과 `pnpm build`를 실행한다.
+2. 저장소 루트의 PowerShell에서 아래 명령으로 테스트 서버를 시작한다.
+
+   ```powershell
+   $env:PYTHONPATH = (Resolve-Path ./backend).Path
+   python -B ./backend/tests/serve_large_button_fixture.py ./frontend/dist
+   ```
+
+3. Edge에서 `http://127.0.0.1:18097/`을 열고 1080×1920, 확대율 100%로 설정한다. 큰 버튼 설정을 끈 채 아이스 아메리카노 2개와 에그 샌드위치 1개를 담는다. “버튼을 크게 바꿀까요?”가 표시되면 수락 전후의 주문 확인 버튼과 장바구니를 비교한다. 낮은 화면에서도 새 세션으로 반복한다.
+
+2026-11-24에 같은 배포 빌드를 로컬 테스트 서버에 연결해 Edge 기본 화면과 낮은 화면을 검증했다. 두 화면 모두 수락 후 주문 확인 버튼이 72px에서 88px로 커졌다. 실제 Cart API의 상품·수량·총액(12,500원)·버전은 수락 전후에 같았고, 수락이 추가 장바구니 변경 요청을 발생시키지 않았다. API에서 빈 장바구니와 주문 확인 화면의 `preset=none`, 잘못된 창의 422, 없는 세션의 404, 완료 세션의 410도 확인했다.
+
 ## 결정 1. 같은 방문의 다음 연속 창까지 전달
 
 | 선택지 | 전달 조건 | 검토 결과 |
