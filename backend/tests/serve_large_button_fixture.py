@@ -68,7 +68,7 @@ def create_fixture_app(frontend_dist: Path):
         payload["support"] = {
             "preset": "large_button",
             "requires_confirmation": True,
-            "decided_by": "jev",
+            "decided_by": "rule_placeholder",
         }
         return JSONResponse(payload)
 
@@ -82,5 +82,5 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=18097)
     args = parser.parse_args()
     if not (args.frontend_dist / "index.html").is_file():
-        parser.error("frontend_dist must contain index.html from npm run build")
+        parser.error("frontend_dist must contain index.html from pnpm build")
     uvicorn.run(create_fixture_app(args.frontend_dist), host="127.0.0.1", port=args.port)
