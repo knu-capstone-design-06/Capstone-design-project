@@ -1,18 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { VoiceController as LocalController } from '../voice/voiceController.ts';
+import { VoiceController } from '../voice/voiceController.ts';
 import { FakeRecognition, factory, tick } from '../voice/voiceFakes.mjs';
 import { createTouchLog } from './touchLog.ts';
 import { buildTouchFeatureWindow } from './interactionFeatures.ts';
 
-// #72 can run this against #79 without merging or modifying either remote branch.
-const VoiceController = process.env.TTS_VOICE_CONTROLLER_MODULE
-  ? (await import(process.env.TTS_VOICE_CONTROLLER_MODULE)).VoiceController : LocalController;
-
 for (const ending of ['complete', 'stop', 'failure', 'off', 'session', 'hidden']) {
-  test(`TTS controller → touch wait aggregation: ${ending}`, {
-    skip: typeof VoiceController.prototype.stopReply !== 'function' && '#79 controller is not yet integrated',
-  }, async () => {
+  test(`TTS controller → touch wait aggregation: ${ending}`, async t => {
     FakeRecognition.reset();
     let clock = 0, id = 0, finish;
     const recorder = createTouchLog(null, () => `v-${++id}`, () => clock);
@@ -53,13 +47,29 @@ for (const ending of ['complete', 'stop', 'failure', 'off', 'session', 'hidden']
       if (ending === 'stop') controller.stopReply();
       if (ending === 'off') controller.setEnabled(false);
       if (ending === 'session') controller.setContext({ sessionId: 'server-2', screenId: 'menu' });
-      if (ending === 'hidden') controller.setContext({ sessionId: 'server-1', screenId: 'menu', suspended: true });
-      finish(ending !== 'failure'); await tick();
+      // The pagehide handler switches voice mode off.
+      if (ending === 'hidden') controller.setEnabled(false);
+      t.mock.timers.enable({ apis: ['setTimeout'] });
+      finish(ending !== 'failure');
+      await Promise.resolve();
+      if (ending === 'complete') {
+        clock = 3399;
+        t.mock.timers.tick(399);
+        assert.equal(controller.getSnapshot().microphoneActive, false);
+        assert.equal(controller.getSnapshot().phase, 'speaking');
+        assert.equal(buildTouchFeatureWindow(recorder.read(), clock, 2).touch.interaction.voice_busy, true);
+        clock = 3400;
+        t.mock.timers.tick(1);
+      }
+      await Promise.resolve();
+      await Promise.resolve();
       assert.notEqual(controller.getSnapshot().phase, 'speaking');
       clock = 4000;
       extra = buildTouchFeatureWindow(recorder.read(), clock, 2).touch.interaction;
       assert.equal(extra.voice_busy, false);
-      assert.equal(extra.since_last_input_excluding_system_busy_ms, 1200);
+      assert.equal(extra.since_last_input_excluding_system_busy_ms, ending === 'complete' ? 800 : 1200);
+      assert.equal(FakeRecognition.instances.length, ending === 'complete' ? 2 : 1);
+      if (ending === 'hidden') assert.equal(controller.getSnapshot().enabled, false);
     } finally { unsubscribe(); controller.dispose(); }
   });
 }
