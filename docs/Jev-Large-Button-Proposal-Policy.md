@@ -12,7 +12,7 @@
 
 프론트의 `59b1829` 배포 빌드에서 확인 요청과 장바구니 유지가 모의 `/features` 응답으로 검증됐다. 같은 화면을 실제 세션·장바구니 API와 연결하기 위해 [로컬 테스트 서버](../backend/tests/serve_large_button_fixture.py)를 사용한다. 저장은 메모리에서 처리하고, 분석 요청에는 모의 응답을 반환한다. 장바구니에 상품이 담긴 뒤 같은 세션의 `menu` 창에서만 유효한 `/features` 요청에 `ai_available: true`, `support.preset: large_button`, `support.requires_confirmation: true`가 들어간다. 실제 Jev 답, 전달 기한, 적용 임계값은 별도 파일럿에서 검증한다. [프론트 확인 요청](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/97#issuecomment-7098636629) · [프론트 검증 결과](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/97#issuecomment-7098977350)
 
-1. PR 브랜치에서 백엔드 의존성을 설치한 Python 환경을 활성화하고, `frontend/`에서 `pnpm install --frozen-lockfile`과 `pnpm build`를 실행한다.
+1. 이 저장소에서 백엔드 의존성을 설치한 Python 환경을 활성화하고, `frontend/`에서 `pnpm install --frozen-lockfile`과 `pnpm build`를 실행한다.
 2. 저장소 루트의 PowerShell에서 아래 명령으로 테스트 서버를 시작한다.
 
    ```powershell
@@ -24,12 +24,14 @@
 
 2026-11-24에 같은 배포 빌드를 로컬 테스트 서버에 연결해 Edge 기본 화면과 낮은 화면을 검증했다. 두 화면 모두 수락 후 주문 확인 버튼이 72px에서 88px로 커졌다. 실제 Cart API의 상품·수량·총액(12,500원)·버전은 수락 전후에 같았고, 수락이 추가 장바구니 변경 요청을 발생시키지 않았다. API에서 빈 장바구니와 주문 확인 화면의 `preset=none`, 잘못된 창의 422, 없는 세션의 404, 완료 세션의 410도 확인했다.
 
+CI의 백엔드 테스트 탐색에서 로컬 테스트 서버의 `/backend` 요청 경로와 위 API 경계를 확인한다. 고정된 큰 버튼 응답은 `decided_by: rule_placeholder`로 표시한다. 개별 검사는 `backend/`에서 `python -m unittest discover -s tests -p test_large_button_fixture.py`로 실행할 수 있다.
+
 ## 결정 1. 같은 방문의 다음 연속 창까지 전달
 
 | 선택지 | 전달 조건 | 검토 결과 |
 |---|---|---|
 | A. 질문한 창까지만 | 같은 방문에서 원래 창 N의 응답을 아직 보낼 수 있을 때만 전달한다. | 현재 전송기는 요청 하나가 끝나야 다음 창을 보내고 5초 뒤 취소한다. 같은 요청에서 Jev까지 기다리는 구현은 후속 관측을 지연시킬 수 있어, 파일럿 비교 기준으로 둔다. |
-| B. 바로 다음 창까지 | 원래 창 N의 답을 같은 방문의 바로 다음 연속 창 N+1의 응답에 최대 한 번 싣는다. 응답 시점까지 Jev 답과 현재 관측 근거가 유효해야 한다. | 프론트·비전·AI 담당자가 선호한 안이다. 연속성 확인, 시간 상한, 상태 변경과 폐기 후 재제안 기준은 아래 조건과 파일럿을 통해 확정한다. |
+| B. 바로 다음 창까지 | 같은 방문의 바로 다음 연속 창 N+1의 응답에 원래 창 N에서 생긴 제안을 최대 한 번 싣는다. N+1의 관측 근거를 확인하고, Jev 답의 유효성과 답이 없는 경우는 결정 2의 두 안을 적용해 비교한다. | 프론트·비전·AI 담당자가 선호한 안이다. 연속성 확인, 시간 상한, 상태 변경과 폐기 후 재제안 기준은 아래 조건과 파일럿을 통해 확정한다. |
 
 ### 백엔드가 확인해야 할 조건
 
@@ -41,8 +43,12 @@
 ## 결정 2. `proposal_fits.noul` 평가 후 임계값 결정
 
 1. **판정값**. #77의 큰 버튼 4-1이 자체 질문을 만드는 경우, `state_scores` 단계에 포함된 `proposal_fits`의 `noul`(0~1)을 사용한다는 AI 담당 제안에 맞춘다. `support_choice`의 `confidence`와 `probabilities.large_button`은 다단계 실험의 비교 기록에 둔다. [AI 리뷰](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/95#pullrequestreview-5979372284)
-2. **답이 없는 경우**. 파일럿 비교의 기준은 비전 담당이 제안한 **전달 시점의 규칙표 결과 유지**로 둔다. 제때 유효한 답이 없으면 늦은 답은 폐기하고, 현재 창에서 4-1의 근거와 방문·문맥 조건을 충족할 때에만 제안하는 안이다. 관측 근거 자체가 부족하면 Jev 상태와 무관하게 새 제안을 생략한다. AI 담당이 #95에서 찬성한 **큰 버튼에 한해 제때 유효한 Jev 답을 요구하는 예외안**을 같은 입력으로 비교한다. 시선·상황을 알 수 없어 4-1을 Jev 질문 없이 여는 경우도 별도로 센다. 두 안에서 크기 변경은 사용자 수락 후 적용한다. [비전 후속 의견](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/97#issuecomment-7043157007) · [AI 리뷰](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/95#pullrequestreview-5979372284)
-3. **후보 기준과 파일럿**. AI 담당자가 출처(표준·관행·문헌)와 함께 후보 기준을 제안하고, 비전·프론트 담당자가 큰 버튼 제안이 적절했는지 라벨을 확인한다. 같은 창 묶음에서 규칙표 유지안과 Jev 답 필수안을 비교한다. 적절한 제안·불필요한 제안·놓친 제안, 같은 방문에서 반복해 묻는 수를 집계하고 제때 유효 답을 얻은 창, 답이 없거나 기한을 넘긴 창, 관측 부족 창을 나눠 본다. 파일럿 촬영분과 최종 평가분은 분리한다. 그림자 기록에는 실제 수락률이 없다.
+2. **답의 유효성과 답이 없는 경우**. N+1에서 사용할 Jev 답은 원래 창 N과 같은 `decision_id`의 `proposal_fits`에 연결되고, 전달 기한 안에 도착해야 한다. 두 안 모두 전달할 창의 관측과 방문·문맥 조건을 다시 검사한다. 파일럿에서 **관측 근거 부족**은 측정 불가 또는 `fixes_recent` 미수집인 창으로 집계한다. 이 창에서는 새 제안을 생략한다. 시선 `null`은 규칙표의 상향 기준을 충족하면 4-1 후보가 될 수 있고, 상황 `unknown`이면 4-1을 Jev 질문 없이 열 수 있다. [AI 후속 리뷰](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/97#discussion_r4677141498)
+
+   - **규칙표 유지안**. 제때 유효한 Jev 답이 없거나 원래 창에서 질문을 만들지 않은 경우, N+1에서 4-1의 근거와 방문·문맥 조건을 모두 충족하면 제안을 전달할 수 있다는 안이다. 도착 기한을 넘긴 답은 폐기한다. [비전 후속 의견](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/97#issuecomment-7043157007)
+   - **Jev 답 필수안**. 같은 전달 조건 아래에서 원래 판단의 유효한 Jev 답이 제때 있어야 제안을 전달한다. 같은 입력으로 비교하기 위해 4-1이 질문 없이 열린 창도 필수안의 집계에 포함하고 `제안 없음`으로 센다. 질문 생략은 호출 실패·기한 초과와 구분해 기록한다. 현재 백엔드의 상황 입력은 비어 있어 4-1이 열리는 경우 Jev 질문 없이 열리는 경로에 해당한다. 이 집계 방법은 파일럿 비교안이며 운영 적용은 후속 합의 대상이다. 두 안 모두 실제 크기 변경에는 사용자 수락이 필요하다. [AI 리뷰](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/95#pullrequestreview-5979372284)
+
+3. **후보 기준과 파일럿**. 후보 기준은 출처(표준·관행·문헌)와 함께 제안한다. 제안 담당은 미정이다. AI 담당은 출처와 답의 해석을 검토하고, 합의한 뒤 해당 `T_*` 값을 반영한다. 비전·프론트 담당은 큰 버튼 제안의 적합성 라벨을 확인한다. 같은 창 묶음에서 적절한 제안·불필요한 제안·놓친 제안과 같은 방문에서 반복해 묻는 수를 집계한다. 제때 유효 답을 얻은 창, 질문을 생략한 창, 답이 실패하거나 기한을 넘긴 창, 관측 근거 부족 창을 구분해 기록한다. 파일럿 촬영분과 최종 평가분은 분리한다. 그림자 기록에는 실제 수락률이 없다. [AI 후속 리뷰](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/97#discussion_r4677141511)
 4. **보류 해제**. 사용 모델·질문 버전, 사용한 라벨과 결과, 기준값의 출처와 적용 날짜를 남긴다. 근거가 확보될 때까지 임계값 적용을 보류한다.
 
 ## 백엔드가 준비할 파일럿 기록
@@ -60,6 +66,6 @@
 |---|---|---|
 | 1. 창 유효범위 | B안에 담당자 의견 일치. 방문·창 식별, 문맥 변경, 실제 시간 상한과 재제안 규칙은 미결 | 2026-11-20 · 프론트·비전·AI 리뷰 |
 | 2. 적용 기준 | `proposal_fits.noul` 평가안을 기록. 수치 적용 보류와 그림자 모드 유지에 담당자 의견 일치 | 2026-11-20 · 프론트·비전·AI 리뷰 |
-| 3. 제때 유효한 답이 없을 때 | 규칙표 유지안을 파일럿 비교 기준으로 제안. Jev 답 필수안과 비교한 뒤 적용 정책을 결정 | #95 AI 의견 · #97 비전 후속 의견 |
+| 3. 제때 유효한 답이 없을 때 | 같은 `decision_id`의 답은 유효할 때 사용하고, 답 없음·질문 생략은 위 두 안으로 비교한다. 운영 적용 정책은 미결 | [#95 AI 의견](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/95#pullrequestreview-5979372284) · [#97 비전 후속 의견](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/97#issuecomment-7043157007) · [#97 AI 후속 리뷰](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/97#discussion_r4677141498) |
 
 백엔드는 방문·창 식별과 기록 내보내기를, 프론트·비전 담당은 관측 입력과 큰 버튼 적합 라벨을, AI 담당은 기준값의 출처와 답의 해석을 검토한다. 파일럿 뒤 채택안, 결정 날짜·확인자, 근거 링크를 이 표에 기록한다. 이후 계약·구현 PR에 결정 기록과 회귀 테스트를 함께 반영한다. 검증할 경계는 늦거나 중복된 답, 방문·문맥 변경, 현재 관측 부족, 유효한 Jev 답이 없는 창, 사용자가 수락하기 전의 화면 유지다.
