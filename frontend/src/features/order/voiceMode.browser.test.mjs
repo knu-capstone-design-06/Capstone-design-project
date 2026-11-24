@@ -15,9 +15,9 @@ async function screenshot(page, name, clipHeight = null) {
     ...(clipHeight ? { clip: { x: 0, y: 0, width: 1080, height: clipHeight } } : {}) });
 }
 
-async function open(steps, pageUrl = url, manualSpeech = false) {
+async function open(steps, pageUrl = url, manualSpeech = false, hasTouch = false) {
   const browser = await chromium.launch({ headless: true, ...(channel === 'default' ? {} : { channel }) });
-  const page = await browser.newPage({ viewport: { width: 1080, height: 1920 } });
+  const page = await browser.newPage({ viewport: { width: 1080, height: 1920 }, hasTouch });
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.addInitScript(manual => {
@@ -715,15 +715,68 @@ for (const large of [false, true]) {
       assert(await finishSettings(page, { lowScreen: false }));
       await page.waitForFunction(() => !document.querySelector('.kiosk').classList.contains('low-screen'));
       assert.equal(await page.locator('.kiosk.large-text').count(), large ? 1 : 0, '높이 해제는 다른 음성 설정을 유지');
-      await page.locator('[data-log-target="support-undo"]').click();
+      const undo = page.locator('[data-log-target="support-undo"]');
+      assert.equal(await undo.count(), large ? 1 : 0, '음성으로 바꾼 설정이 남을 때만 복귀 버튼 표시');
+      if (large) await undo.click();
       await page.waitForFunction(() => !document.querySelector('.kiosk').classList.contains('large-text'));
-      assert.equal(await page.locator('[data-log-target="support-undo"]').count(), 0);
+      assert.equal(await undo.count(), 0);
       assert.equal(await page.locator('.cart-row').count(), 1);
       assert.match(await page.locator('.cart-row').innerText(), /아메리카노/);
       assert.equal(fixture.requests.filter(request => request.path.endsWith('/cart')).length, 1);
       assert.equal(fixture.requests.filter(request => request.method === 'POST' && /\/cart|\/orders/.test(request.path)).length, 0);
       const log = await page.evaluate(() => window.kioskTouchLogDraft.read());
       assert(log.events.some(event => event.kind === 'ui_settings_change' && event.data.after.lowScreen === true));
+      fixture.verify(); assert.deepEqual(errors, []);
+    } finally { await browser.close(); }
+  });
+}
+
+test('음성 설정 적용부: 서버 지원 수락은 같은 설정의 음성 끄기를 해제한다', async () => {
+  const session = 'voice-settings-support-accept';
+  const { browser, page, errors, fixture } = await open(bootstrap(session));
+  try {
+    await page.locator('[data-log-target="support-toggle"]').click();
+    await page.locator('[data-log-target="support:largeText"]').click();
+    await page.locator('[data-log-target="support-close"]').click();
+    await page.locator('.kiosk.large-text').waitFor();
+    await page.locator('[data-log-target="voice-mode-toggle"]').click();
+    assert(await prepareSettings(page));
+    assert(await finishSettings(page, { largeText: false, highContrast: true }));
+    await page.locator('.kiosk.high-contrast:not(.large-text)').waitFor();
+    await page.locator('[data-log-target="voice-mode-toggle"]').click();
+    assert(await page.evaluate(id => window.kioskSupportDraft.receive({ session_id: id, ai_available: true,
+      support: { preset: 'large_text', requires_confirmation: true, decided_by: 'rule_placeholder' },
+    }), session));
+    const offer = page.locator('.support-confirm-sheet');
+    await offer.getByRole('heading', { name: '글씨를 크게 바꿀까요?' }).waitFor();
+    await offer.locator('.support-confirm-actions[data-armed="true"]').waitFor();
+    await offer.locator('[data-log-target="support-confirm:accept"]').click();
+    await offer.waitFor({ state: 'hidden' });
+    assert.equal(await page.locator('.kiosk.large-text.high-contrast').count(), 1, '수락한 큰 글씨를 켜고 음성 고대비는 유지');
+    await page.locator('[data-log-target="support-undo"]').click();
+    await page.locator('.kiosk.large-text:not(.high-contrast)').waitFor();
+    fixture.verify(); assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
+for (const input of ['click', 'tap']) {
+  test(`음성 설정 적용부: 적용 안내 중 원래대로를 누르면 복귀 안내가 남는다 (${input})`, async () => {
+    const { browser, page, errors, fixture } = await open(bootstrap('voice-settings-undo-notice'), url, false, input === 'tap');
+    try {
+      const toggle = page.locator('[data-log-target="voice-mode-toggle"]');
+      await toggle[input]();
+      assert(await prepareSettings(page));
+      assert(await finishSettings(page, { largeText: true, largeButton: true }));
+      await page.getByText('화면 설정을 바꿨어요.', { exact: true }).waitFor();
+      await page.locator('[data-log-target="support-undo"]')[input]();
+      // pointerup이 예약한 안내 닫기가 실행된 뒤에도 새 안내는 남아야 합니다.
+      await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 0)));
+      const restored = page.getByText('음성으로 바꾸기 전 화면으로 돌아갔어요.', { exact: true });
+      assert.equal(await restored.count(), 1, '이전 안내를 닫는 터치가 복귀 안내를 지우지 않음');
+      assert.equal(await page.locator('.kiosk.large-text, .kiosk.large-button').count(), 0);
+      if (input === 'tap') await screenshot(page, 'voice-settings-undo-notice');
+      await toggle[input]();
+      await restored.waitFor({ state: 'hidden', timeout: 1000 });
       fixture.verify(); assert.deepEqual(errors, []);
     } finally { await browser.close(); }
   });
