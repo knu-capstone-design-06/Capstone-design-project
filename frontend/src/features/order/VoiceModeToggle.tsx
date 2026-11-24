@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { useVoiceInput } from '../voice/index.ts';
 import type { VoiceController, VoiceInputError, VoiceRequestStatus } from '../voice/index.ts';
@@ -17,12 +18,12 @@ const errorCopy: Record<VoiceInputError, string> = {
 
 function resultCopy(result: VoiceRequestStatus): string {
   switch (result.status) {
-    case 'completed': return result.actions.includes('cart_updated')
-      ? '음성 주문 결과를 장바구니에 반영하고 있어요.' : '말씀을 확인했어요.';
+    case 'completed': return result.reply_text?.trim() || (result.actions.includes('cart_updated')
+      ? '음성 주문 결과를 장바구니에 반영하고 있어요.' : '말씀을 확인했어요.');
     case 'needs_confirmation': return result.reply_text || '말씀하신 내용을 확인해 주세요.';
     case 'needs_clarification': return result.reply_text || '원하는 메뉴와 옵션을 다시 말씀해 주세요.';
     case 'ignored': return '';
-    case 'failed': return '음성을 처리하지 못했어요. 다시 말하거나 화면을 눌러 주문해 주세요.';
+    case 'failed': return result.reply_text?.trim() || '음성을 처리하지 못했어요. 다시 말하거나 화면을 눌러 주문해 주세요.';
     default: return '';
   }
 }
@@ -38,12 +39,19 @@ function useVoiceView(controller: VoiceController, sampleMode: boolean, ready = 
   const canUse = ready && voice.supported && (!sampleMode || recognitionTest);
   const result = voice.enabled && voice.lastResult;
   const question = result && (result.status === 'needs_confirmation' || result.status === 'needs_clarification');
-  const detail = voice.error ? errorCopy[voice.error]
+  const spokenReply = voice.phase === 'speaking' ? voice.lastReplyText : null;
+  const failure = spokenReply && question && spokenReply !== result.reply_text?.trim() ? spokenReply
+    : voice.error === 'request_failed' ? voice.failureReplyText || errorCopy.request_failed
+    : voice.error ? errorCopy[voice.error] : '';
+  const detail = spokenReply && !question ? spokenReply
+    : failure && !question ? failure
+    : failure && question ? resultCopy(result)
     : voice.phase === 'processing' ? '음성을 확인하고 있어요.'
+    : voice.phase === 'speaking' ? `${voice.lastReplyText || (result ? resultCopy(result) : '')} 안내를 읽고 있어요.`
     : question ? `${resultCopy(result)}${voice.phase === 'listening' ? (voice.partialText ? ` 듣는 중: ${voice.partialText}` : ' 답변을 듣고 있어요.') : ''}`
     : voice.phase === 'listening' ? (voice.partialText ? `듣는 중: ${voice.partialText}` : '듣고 있어요. 말씀해 주세요.')
     : result ? resultCopy(result) : '';
-  return { voice, recognitionTest, canUse, detail };
+  return { voice, recognitionTest, canUse, detail, question, failure };
 }
 
 /**
@@ -71,18 +79,30 @@ export function VoiceButton({ controller, ready, sampleMode }: { controller: Voi
  * 한 줄, 긴 문장은 끝부분), 질문·결과 문장(왼쪽, M 굵게), [다시 말하기]. 주문 안내는 다른 모드처럼 상품 목록 위의 자리에 뜹니다.
  */
 export function VoicePanel({ controller, sampleMode, messages = null }: { controller: VoiceController; sampleMode: boolean; messages?: ReactNode }) {
-  const { voice, detail } = useVoiceView(controller, sampleMode);
+  const { voice, detail, question, failure } = useVoiceView(controller, sampleMode);
+  const stopButton = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    if (voice.phase === 'speaking') stopButton.current?.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+  }, [voice.phase]);
   if (!voice.enabled) return null;
-  const state = voice.phase === 'listening' ? '듣고 있어요' : voice.phase === 'processing' ? '알아듣는 중이에요' : '마이크 꺼짐';
+  const canListen = voice.phase === 'idle' && voice.error !== 'session_expired';
+  const canReplay = Boolean(voice.lastReplyText) && (voice.phase === 'idle' || voice.phase === 'listening');
+  const speaking = voice.phase === 'speaking';
+  const state = voice.phase === 'listening' ? '듣고 있어요' : voice.phase === 'processing' ? '알아듣는 중이에요'
+    : voice.phase === 'speaking' ? '안내를 읽고 있어요' : '마이크 꺼짐';
   return <section className="voice-mode-control" data-enabled={voice.enabled} aria-label="말로 주문">
-    <p className="voice-state"><Icon name={voice.phase === 'idle' ? 'mic_off' : 'mic'} />{state}</p>
+    <p className="voice-state"><Icon name={speaking ? 'volume_up' : voice.phase === 'idle' ? 'mic_off' : 'mic'} />{state}</p>
     <div className="voice-text">
       {voice.lastTranscript && <p className="voice-mode-transcript"><span className="sr-only">인식한 말 </span><strong dir="rtl"><span dir="ltr">{voice.lastTranscript}</span></strong></p>}
       {messages}
       {detail && <p className="voice-mode-feedback" role="status" aria-live="polite">{detail}</p>}
+      {question && failure && <p className="voice-mode-failure" role="status" aria-live="polite">{failure}</p>}
+      {voice.replyAudioError && <p className="voice-mode-failure" role="status">음성 안내를 재생하지 못했어요. 화면을 확인하고 ‘다시 말하기’를 눌러 주세요.</p>}
     </div>
-    {voice.phase === 'idle' && voice.error !== 'session_expired' && <div className="voice-answers">
-      <button type="button" className="voice-mode-listen" data-log-target="voice-listen" onClick={() => controller.listen()}>다시 말하기</button>
+    {(canListen || speaking || canReplay) && <div className="voice-answers">
+      {canListen && <button type="button" className="voice-mode-listen" data-log-target="voice-listen" onClick={() => controller.listen()}>다시 말하기</button>}
+      {speaking && <button ref={stopButton} type="button" className="voice-mode-listen" data-log-target="voice-reply-stop" onClick={() => controller.stopReply()}>안내 중단</button>}
+      {canReplay && <button type="button" className="voice-mode-listen" data-log-target="voice-reply-replay" onClick={() => controller.replayReply()}>마지막 안내 다시 듣기</button>}
     </div>}
   </section>;
 }
