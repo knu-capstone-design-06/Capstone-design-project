@@ -23,6 +23,17 @@ export interface TouchFeatures {
   dwell_ms: number;
   /** Optional versioned interaction observations. Existing five-field clients remain valid. */
   interaction?: import('./interactionTypes.ts').InteractionFeatures | null;
+  /** Optional pilot block beside interaction (touch-scene-signals-pilot-v1), sent with the same pilot flag. */
+  scene_signals?: SceneSignals | null;
+}
+
+/** touch-scene-signals-pilot-v1: what the backend's scene rows read of this window. null = not observable or not known. */
+export interface SceneSignals {
+  schema_version: 'touch-scene-signals-pilot-v1';
+  near_miss_fix_count: number | null;
+  zoom_attempt_count: number | null;
+  /** Whether the order screen could show an ask when it built the window (its own gate, OrderPage canOfferSupport). */
+  can_offer: boolean | null;
 }
 
 export interface VisionFeatures {
@@ -65,6 +76,17 @@ export interface SupportDecision {
   preset: UIPreset;
   requires_confirmation: boolean;
   decided_by: 'rule_placeholder' | 'jev';
+  // 아래 다섯 값은 backend 시연 스위치(DECISION_SEND_SUPPORT)를 켰을 때만 오는 규칙표 결정의 선택 필드입니다. 값이 없으면 빠집니다.
+  /** 규칙표의 지원 이름. 예: highlight_next_action, remaining_steps_notice, wait_hold_timer */
+  name?: string;
+  /** 규칙표 결정의 ID. 유지되는 결정은 매 응답에 같은 값으로 옵니다. */
+  decision_id?: string;
+  /** 주문이 끝나기 전까지 남은 화면 수(0 이상의 정수) */
+  steps_left?: number;
+  /** 지원이 가리키는 대상(data-log-target). 예: cart-add, cart:*:decrease, cart_progress */
+  target_id?: string;
+  /** 안내 문구 ID. 예: steps_left_notice */
+  message_id?: string;
 }
 
 export interface FeatureWindowResponse {
