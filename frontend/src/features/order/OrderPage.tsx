@@ -1,8 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { backendApi } from '../../shared/api/index.ts';
 import type { CartItem, Product, Temperature } from '../../shared/api/index.ts';
-import { categoryLabels, initialSettings, MAX_QUANTITY, readSettings, settingsStorageKey, temperatureLabel } from './model.ts';
-import type { Settings } from './model.ts';
+import { categoryLabels, currentSettings, initialSettings, MAX_QUANTITY, readSettings, settingsStorageKey, temperatureLabel, withAutomatic, withoutAutomatic } from './model.ts';
+import type { AutomaticSettings, Settings } from './model.ts';
 import { OrderController } from './orderController.ts';
 import { hintCopy, orderCopy, supportCopy } from './copy.ts';
 import type { HintKind } from './copy.ts';
@@ -39,6 +39,9 @@ import { useEnlargementPreview, useSupportDraft } from './hook/useSupportOffer.t
 import { OfferCard } from './components/OfferCard.tsx';
 import { SupportConfirmSheet } from './components/SupportConfirmSheet.tsx';
 import { useBackendSupport } from './hook/useBackendSupport.ts';
+import { cardHoldsRestart, restartForDecision, voiceOrderAskable } from './backendSupport.ts';
+import { useSupportDecision } from './hook/useSupportDecision.ts';
+import { SupportStatusLine } from './components/SupportStatusLine.tsx';
 import { clampPage, menuColumns, menuPageSize, pageCount, pageItems, reviewPageSize } from './utils/paging.ts';
 
 const sampleMode = import.meta.env.DEV && import.meta.env.VITE_ORDER_SAMPLE === 'true';
@@ -70,10 +73,10 @@ export function OrderPage() {
     try { return readSettings(localStorage.getItem(settingsStorageKey) ?? localStorage.getItem('kiosk-sample-order-v1')); }
     catch { return { ...initialSettings }; }
   });
-  const [automaticSettings, setAutomaticSettings] = useState<{ sessionId: string; values: Partial<Settings> }>({ sessionId: '', values: {} });
+  const [automaticSettings, setAutomaticSettings] = useState<AutomaticSettings>({ sessionId: '', values: {} });
   const sessionId = state.session?.session_id ?? null;
   // 고객 설정만 저장합니다. 서버 제안으로 켠 설정은 새 세션·새로고침에서 끝납니다.
-  const settings = useMemo(() => ({ ...manualSettings, ...(automaticSettings.sessionId === sessionId ? automaticSettings.values : {}) }), [manualSettings, automaticSettings, sessionId]);
+  const settings = useMemo(() => currentSettings(manualSettings, automaticSettings, sessionId), [manualSettings, automaticSettings, sessionId]);
   const [screen, setScreen] = useState<'menu' | 'review' | 'complete'>('menu');
   const [category, setCategory] = useState<CategoryFilter>('all');
   const [menuPaging, setMenuPaging] = useState({ key: '', page: 0 });
@@ -84,6 +87,9 @@ export function OrderPage() {
   const [storageWarning, setStorageWarning] = useState(false);
   const [orderNumber, setOrderNumber] = useState('');
   const [restartOpen, setRestartOpen] = useState(false);
+  // [처음으로] 확인 창의 대답은 창이 뜬 뒤 두 번 클릭 간격 동안 누름을 받지 않고, 그동안 받지 않은 누름은 보호를 다시 시작합니다([처음으로]를 연달아 누른 손가락이 대답이 되지 않게, 하단 주문 바와 같은 방식).
+  const [restartOpens, setRestartOpens] = useState(0);
+  const restartArmed = useArmedAfter(restartOpens);
   const [cartSheetOpen, setCartSheetOpen] = useState(false);
   const [autoOffClosed, setAutoOffClosed] = useState(false);
   // 버튼 강조 힌트: 고리와 그 한 줄 안내는 그 조작을 쓰거나 화면이 바뀔 때까지 남습니다(안내는 누름을 받지 않음).
@@ -180,12 +186,17 @@ export function OrderPage() {
   const writeDisabled = state.status !== 'ready' || state.order !== null;
   const canOfferSupport = !writeDisabled && !selected && !supportOpen && !restartOpen && !cartSheetOpen
     && !voice.enabled && state.message === '' && !enlargementPreview.offer;
+  // 시연 스위치의 결정 중 묻지 않고 실행하는 것(강조·남은 단계 안내)은 제안 안내 바와 따로 받습니다.
+  const supportDecision = useSupportDecision({ sessionId, screen, root: touchLog.root, onRestart: openRestartForDecision });
   const backendSupport = useBackendSupport({
     sessionId, settings, transport: touchLog.transport, includeInteraction: touchPilotEnabled,
     contextKey: JSON.stringify([sessionId, screen, category, menuPaging, reviewPage, state.cart?.version, settings]),
     canSend: !sampleMode && screen !== 'complete' && !state.order && (state.status === 'ready' || state.status === 'saving'),
-    canOffer: canOfferSupport,
-    onApply: key => { if (sessionId) setAutomaticSettings(current => ({ sessionId, values: { ...(current.sessionId === sessionId ? current.values : {}), [key]: true } })); },
+    canOffer: canOfferSupport, voiceOrder: voiceOrderAskable(screen, voice),
+    onApply: key => { if (sessionId) setAutomaticSettings(current => withAutomatic(current, sessionId, key)); },
+    // 1-1 말로 주문 질문의 예: 마이크 버튼이 켤 때와 같은 호출입니다.
+    onVoiceOrder: () => { voiceController.setEnabled(true); },
+    onDecision: supportDecision.act, onTransportState: supportDecision.onTransportState,
   });
   const count = state.cart?.total_quantity ?? 0;
   const sum = state.cart?.total_amount ?? 0;
@@ -203,14 +214,22 @@ export function OrderPage() {
     clearAutomaticSettings(['largeText', 'largeButton']);
   }
   function clearAutomaticSettings(keys: (keyof Settings)[]) {
-    setAutomaticSettings(current => {
-      const values = { ...current.values };
-      for (const key of keys) delete values[key];
-      return { ...current, values };
-    });
+    setAutomaticSettings(current => withoutAutomatic(current, keys));
   }
   function closeOptions() { setSelected(null); opener.current?.focus(); }
   function closeRestart() { setRestartOpen(false); restartTrigger.current?.focus(); }
+  // [처음으로]의 처리: 말로 주문을 끄고 처음부터 주문할지 묻는 창을 엽니다. 2-2 결정이 여는 창도 이 처리라서, 닫힌 옵션 창을 누르던
+  // 손가락 아래에서 뜬 창도 같은 보호(restartArmed)를 받습니다.
+  function openRestart() { voiceController.setEnabled(false); setRestartOpens(count => count + 1); setRestartOpen(true); }
+  // 2-2 새 손님(continue_or_new_order): [처음으로]와 같은 처리로 같은 창을 엽니다. 옵션 창은 담지 않고 먼저 닫고, 다른 창이나 제안 카드가
+  // 열려 있거나 [처음으로]를 누를 수 없는 동안은 열지 않아(false) 같은 결정을 실은 다음 응답을 기다립니다. 처음으로 창이 이미 열려 있으면
+  // 연 것으로 칩니다(backendSupport.ts의 restartPlan·restartForDecision). 결정 ID로 연 카드는 이 결정을 실은 같은 응답이 내리므로
+  // 기다리게 하지 않습니다(cardHoldsRestart).
+  function openRestartForDecision() {
+    return restartForDecision({ options: selected !== null, help: supportOpen, cart: cartSheetOpen, restart: restartOpen,
+      ask: cardHoldsRestart(backendSupport.card, enlargementPreview.offer !== null), restartDisabled: screen === 'complete' || busy || state.status === 'uncertain' },
+    { closeOptions, openRestart });
+  }
   function closeCartSheet() { setCartSheetOpen(false); cartOpener.current?.focus(); }
   async function addSelected() {
     if (!selected) return;
@@ -281,7 +300,8 @@ export function OrderPage() {
   const autoOffShown = !voice.enabled && voice.autoOff !== null && !autoOffClosed;
   const appliedNotice = enlargementPreview.applied ? supportCopy.enlarge.applied : '';
   const hintLine = hint && !(hint === 'option-add' && selected) ? hintCopy[hint] : '';
-  const notice = screen === 'complete' ? '' : appliedNotice || hintLine || state.notice || (autoOffShown ? voiceAutoOffNotice : '');
+  // 시연 스위치의 남은 단계 안내는 상태가 끝날 때까지 남는 안내입니다. 고객이 한 일의 짧은 알림이 뜨면 그동안 그 아래에 남았다가 다시 보입니다.
+  const notice = screen === 'complete' ? '' : appliedNotice || hintLine || state.notice || supportDecision.notice || (autoOffShown ? voiceAutoOffNotice : '');
   const noticeIcon = appliedNotice ? 'check_circle' : hintLine ? 'pan_tool_alt' : null;
   useNextTouch((appliedNotice !== '' || state.notice !== '' || autoOffShown) && !feedback, touchLog.root, () => {
     controller.clearNotice(); setAutoOffClosed(true); enlargementPreview.closeApplied();
@@ -327,7 +347,7 @@ export function OrderPage() {
   // 키오스크의 제안은 시트가 열려 있거나 오류·처리 중 안내가 있는 동안 기다리고, 그 밖의 다음 터치에 닫힙니다.
   const offerCard = enlargementPreview.offer && !sheetOpen && !supportOpen && !restartOpen && !feedback ? <OfferCard onAccept={enlargementPreview.accept} onDecline={enlargementPreview.decline} /> : null;
   useNextTouch(offerCard !== null, touchLog.root, enlargementPreview.decline, '.offer-card');
-  const supportCard = backendSupport.preset ? <SupportConfirmSheet key={backendSupport.preset} preset={backendSupport.preset} onAccept={backendSupport.accept} onDecline={backendSupport.decline} onDismiss={backendSupport.dismiss} /> : null;
+  const supportCard = backendSupport.ask ? <SupportConfirmSheet key={backendSupport.ask} ask={backendSupport.ask} onAccept={backendSupport.accept} onDecline={backendSupport.decline} onDismiss={backendSupport.dismiss} /> : null;
   const messagePlace = <MessagePlace feedback={sheetOpen ? null : feedback} offer={null} notice={notice} kiosk={noticeIcon} standing={standingTop ? null : standing} />;
   const pageProducts = pageItems(menuProducts, menuPage, menuSize);
   // 메뉴 화면에는 비워 두는 안내 영역이 없습니다. 안내와 버튼이 있는 카드는 상품 목록 위에 뜨는 자리(쪽 넘김 줄 18 px 위)에 섭니다.
@@ -352,8 +372,9 @@ export function OrderPage() {
 
   return <><div ref={touchLog.root} data-order-mode={sampleMode ? 'sample' : 'api'} data-listening={voiceOn && voice.phase === 'listening' ? 'on' : undefined} className={`kiosk ${settings.largeText ? 'large-text' : ''} ${settings.largeButton ? 'large-button' : ''} ${settings.simpleScreen ? 'simple-screen' : ''} ${settings.lowScreen ? 'low-screen' : ''} ${settings.highContrast ? 'high-contrast' : ''}${largeView ? ' large-view' : ''}${voiceOn ? ' voice-on' : ''}`}>
     {settings.lowScreen && <div className="low-screen-banner">
-      {/* 낮은 화면의 비어 있는 위쪽 전체가 하나의 누름 자리입니다(화면 위로 올리기). 터치 기록에 남도록 주문 화면 안에 둡니다. */}
-      <button type="button" className="raise-area" data-log-target="screen-position-pad" onClick={() => setManualSettings(current => ({ ...current, lowScreen: false }))}>
+      {/* 낮은 화면의 비어 있는 위쪽 전체가 하나의 누름 자리입니다(화면 위로 올리기). 터치 기록에 남도록 주문 화면 안에 둡니다.
+          키오스크가 켠 낮은 화면(1-2 [내리기])도 끕니다. 키오스크가 켠 값이 남아 있으면 고객 설정을 덮어 화면이 올라가지 않기 때문입니다. */}
+      <button type="button" className="raise-area" data-log-target="screen-position-pad" onClick={() => { setManualSettings(current => ({ ...current, lowScreen: false })); clearAutomaticSettings(['lowScreen']); }}>
         <Icon name="arrow_upward" />화면 위로 올리기</button>
       <div className="banner-copy" aria-hidden="true"><p className="store-name">온기 카페</p><StepsBar screen={screen} /></div>
     </div>}
@@ -382,7 +403,7 @@ export function OrderPage() {
       {screen !== 'complete' && <div className="support-confirm-slot">{supportCard ?? offerCard}</div>}
       <ActionBar total={screen === 'complete' || lowMenu ? null : sum}
         cartButton={cartInBar ? { ref: cartOpener, amount: lowMenu ? sum : null, onClick: () => setCartSheetOpen(true) } : null}
-        restart={screen === 'complete' ? null : { ref: restartTrigger, disabled: busy || state.status === 'uncertain', onClick: () => { voiceController.setEnabled(false); setRestartOpen(true); } }}
+        restart={screen === 'complete' ? null : { ref: restartTrigger, disabled: busy || state.status === 'uncertain', onClick: openRestart }}
         primary={{ target: screen === 'complete' ? 'new-order' : screen === 'menu' ? 'review-open' : 'simulate-payment',
           label: screen === 'complete' ? '새 주문 시작' : screen === 'menu' ? '주문 확인' : '주문하기',
           disabled: screen === 'complete' ? busy : !count || writeDisabled,
@@ -405,8 +426,8 @@ export function OrderPage() {
     <dialog ref={restartDialog} className="options-dialog" aria-labelledby="restart-title" onCancel={event => { event.preventDefault(); closeRestart(); }}>
       <h2 id="restart-title">처음부터 주문할까요?</h2>
       <p>담은 메뉴를 비우고 새 주문을 시작합니다. 화면 도움 설정은 유지합니다.</p>
-      <div className="order-feedback-actions"><button data-log-target="order-restart-cancel" onClick={closeRestart}>계속 주문하기</button>
-        <button data-log-target="order-restart-confirm" disabled={busy || state.status === 'uncertain'} onClick={() => { setRestartOpen(false); void startNewOrder(true); }}>처음부터 주문하기</button></div>
+      <div className="order-feedback-actions"><button data-log-target="order-restart-cancel" data-armed={restartArmed} onClick={() => { if (restartArmed) closeRestart(); else setRestartOpens(count => count + 1); }}>계속 주문하기</button>
+        <button data-log-target="order-restart-confirm" data-armed={restartArmed} disabled={busy || state.status === 'uncertain'} onClick={() => { if (restartArmed) { setRestartOpen(false); void startNewOrder(true); } else setRestartOpens(count => count + 1); }}>처음부터 주문하기</button></div>
     </dialog>
-  </div><TouchLogPanel /></>;
+  </div><TouchLogPanel /><SupportStatusLine status={supportDecision.status} /></>;
 }
