@@ -28,7 +28,7 @@ PR #79의 `fb192f2`에서 새 화면의 자동 읽기·중단·다시 듣기·�
 
 ## API 연결
 
-`src/shared/api/`는 기존 네 API(상태 확인·연결 확인·세션 생성·특징 전송)와 신규 상품·장바구니·모의 주문 6개 API의 타입·호출 함수를 제공합니다. `contract/frontend-backend.openapi.yaml` 0.4.0에서도 이 형식을 유지합니다. 호출 함수가 있다는 것이 서버 구현 완료를 의미하지는 않습니다. 프론트엔드는 backend와만 통신합니다.
+`src/shared/api/`는 기존 네 API(상태 확인·연결 확인·세션 생성·특징 전송)와 신규 상품·장바구니·모의 주문 6개 API의 타입·호출 함수를 제공합니다. `contract/frontend-backend.openapi.yaml` 0.4.0에서도 이 형식을 유지합니다. 호출 함수가 있다는 것이 서버 구현 완료를 의미하지는 않습니다. 프론트엔드의 서버 요청은 backend로만 보냅니다. 예외는 하나입니다. `VITE_AI_ENGINE_URL`을 주면 주문 화면이 터치 창을 같은 키오스크 PC의 AI 엔진(비전 실시간 실행기의 터치 입구)에도 한 방향으로 보내며, 그 답은 읽지 않습니다([AI 엔진 연결](src/features/order/README.md#ai-엔진-연결과-시연-스위치-응답-2026-11-25)).
 
 ## 주문 API 명세 반영 상태
 
@@ -48,7 +48,7 @@ const api = createBackendApi('/backend');
 await api.getBackendHealth();
 await api.getConnectivity();
 const session = await api.createSession();
-// 주문 화면은 같은 API에 연속한 약 2초 구간의 통계를 전송합니다.
+// 주문 화면은 같은 API에 연속한 약 1초 구간의 통계를 전송합니다.
 const result = await api.sendFeatureWindow(session.session_id, {
   screen_id: 'menu',
   window_start: '2026-10-01T10:00:00Z',
