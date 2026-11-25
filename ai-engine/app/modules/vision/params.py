@@ -16,8 +16,8 @@ Two kinds live here:
   stitch boundaries of the user
   change (STITCH_BOUNDARIES, columns.MainUserChange) are the same kind: method STITCH_METHOD, value per camera from a
   bundle; without one a broken main-user track is never stitched (the behaviour before 2026-11-22). The hand-point
-  limit of the phone columns (HAND_BOUNDARIES, columns.phone_columns) has no value either: without one the hand
-  points' visibility is not read (the behaviour before 2026-11-25).
+  limit of the phone columns (HAND_BOUNDARIES, columns.phone_columns) has no value either: without one no hand box
+  is built and the phone path's hand half is held (a phone away from the heads is 'unknown'); the head half runs.
 - events.PilotParams (re-exported here as SituationParams): the 13 values of the events and situation rules. They keep
   NO defaults on purpose (vision README '상황 층'; tests/test_situation.py checks it), so they only come from a value
   bundle file (load_bundle). Without one the runners still run and the situation output is 'unknown'.
@@ -61,7 +61,7 @@ SCENE_BOUNDARIES = ("seated_face_cy_min", "approach_ratio_min", "seated_head_cy_
                     "head_approach_ratio_min")   # None = no value yet (situation.py scene tags)
 AID_BOUNDARIES = ("aid_use_min", "aid_person_min")   # None allowed (no value); defaults: [파일럿] values from a public set
 STITCH_BOUNDARIES = ("stitch_shift_max", "stitch_size_max")   # None = no value yet (columns.MainUserChange: no stitch)
-HAND_BOUNDARIES = ("hand_vis_min",)   # None = no value yet (columns.phone_columns: the hand points' visibility not read)
+HAND_BOUNDARIES = ("hand_vis_min",)   # None = no value yet (columns.phone_columns: no hand box, the hand path held)
 SCENE_METHOD = ("정하는 방법 = 그 카메라 앞에서 서서 보통으로 쓰는 녹화(평가 촬영본과 따로 찍은 것)의 창 중앙값(창 길이 = "
                 "값 묶음의 window_s)으로 기준선 평균 + 2 SD(Wu 외, W4A 2021의 기준선 ± 2 SD; 조사 22 §2-1 · §2-11), "
                 "tools/calibrate_scene.py")
@@ -203,8 +203,8 @@ class PilotParams:
     hand_vis_min: float | None = _p(
         None, f"{UNDECIDED}. 휴대폰 손 길의 손 점 하한: 주 사용자 몸 점(Pose Landmarker)의 손 점은 visibility(그 점이 "
               "가려지지 않고 화면 안에 보일 가능성, MediaPipe landmark.py)가 이 값 이상일 때만 손 상자에 넣음. 이 값이 "
-              "있으면 visibility가 없는 점(NaN)도 넣지 않음. 값이 없으면 visibility를 읽지 않음(2026-11-22까지의 동작: "
-              "가려지거나 화면 밖이라 위치를 추정한 손 점도 손 상자에 들어감)", "visibility 0~1")
+              "있으면 visibility가 없는 점(NaN)도 넣지 않음. 값이 없으면 손 점의 위치를 확인할 수 없어 손 상자를 만들지 "
+              "않음: 손 길은 판정하지 않고(머리에 걸치지 않은 휴대폰은 unknown) 머리 길은 그대로 돎", "visibility 0~1")
 
     # --- runners (replay.py, live.py) -------------------------------------------------------------------------
     segment_s: float = _p(

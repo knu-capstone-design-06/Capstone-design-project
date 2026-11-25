@@ -11,6 +11,8 @@ decide(window input, session state, params) is a pure function of its arguments 
 the held decision (open | replace | keep | withdraw | none), scope, rank, withdraw condition, policy values and, in
 shadow mode, the Jev question (jev_stub.ShadowJev records it; the screen follows the rule result). apply() / tick() /
 react() emulate the backend's part of JP 0-1 (held · active · refused · withdrawn) so a replay can run windows in a row.
+The 3-2 phone path (`phone_use`) and the exception that lets only that path through a window that is not
+measurable are not in the backend copy yet (backend/app/modules/decision/rule_table.py); integration work.
 
 Rows (JP scene table; rank = JP 0-3 rank table):
   scene  support                 output (intervention)  rank  opens when                                   Jev
@@ -381,6 +383,8 @@ def decide(inp: WindowInput, state: SessionState, params) -> Decision:
     held = state.held
     tag_scope = ("tag", tag, tag_since)
     screen_scope = ("screen", inp.screen, screen_since)
+    # The 3-2 phone path (`phone_use`) and the exception that lets only that path through a window that is not
+    # measurable are not in the backend copy yet (backend/app/modules/decision/rule_table.py); integration work.
     if not inp.measurable:                                                          # 0''
         # the phone path (phone_use true) is a camera observation of the main user, often with the face lost: it
         # counts for the 3-2 row and its hold only, never for the other rows

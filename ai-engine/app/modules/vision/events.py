@@ -382,17 +382,22 @@ def companion_sides(rows: list, p: PilotParams) -> tuple:
     return sides, undetermined
 
 
-def _companion_events(rows: list, sides: list, p: PilotParams) -> list:
-    """companion_present: the frames with a companion box (no minimum stay: the decision table asks none).
-    yaw_toward_companion: the face seen with its yaw on the companion's side at that frame (dec section 3: '주
+def _companion_present(rows: list, p: PilotParams) -> list:
+    """companion_present: the frames with a companion box (no minimum stay: the decision table asks none). A scene
+    cue: it reads every row of the window, also across a change of user."""
+    boxes = [_box(r) for r in rows]
+    return _run_events("companion_present", rows, [b is not None for b in boxes], p.gap_s, None,
+                       lambda run, s: {"companion_cx": statistics.median((boxes[i][0] + boxes[i][2]) / 2
+                                                                         for i in run),
+                                       "present_s": s})
+
+
+def _yaw_toward_companion(rows: list, sides: list, p: PilotParams) -> list:
+    """yaw_toward_companion: the face seen with its yaw on the companion's side at that frame (dec section 3: '주
     사용자 yaw가 일행 쪽'; the sign against the companion's position, any size), held over frames at most gap_s apart.
     A turn toward the companion that comes back is also a yaw_sweep_offscreen; that event is looking_around's cue,
-    this one consulting_companion's. sides = companion_sides(...)[0] for these rows."""
-    boxes = [_box(r) for r in rows]
-    companions = _run_events("companion_present", rows, [b is not None for b in boxes], p.gap_s, None,
-                             lambda run, s: {"companion_cx": statistics.median((boxes[i][0] + boxes[i][2]) / 2
-                                                                               for i in run),
-                                             "present_s": s})
+    this one consulting_companion's. rows = the main user's rows (detect_events), sides = companion_sides(...)[0] for
+    them."""
     yaws = [_num(r, "yaw_deg") if _face(r) else None for r in rows]
     toward = [y is not None and side is not None and _side(y) == side for y, side in zip(yaws, sides)]
 
@@ -400,7 +405,7 @@ def _companion_events(rows: list, sides: list, p: PilotParams) -> list:
         yaw = max((yaws[i] for i in run), key=abs)
         return {"yaw_deg": yaw, "side": _side(yaw), "toward_s": s}
 
-    return companions + _run_events("yaw_toward_companion", rows, toward, p.gap_s, None, toward_obs)
+    return _run_events("yaw_toward_companion", rows, toward, p.gap_s, None, toward_obs)
 
 
 # --- all events -----------------------------------------------------------------------------------------------------
@@ -420,27 +425,34 @@ def detect_events(rows: list, params: PilotParams, *, landmarker_num_faces: int,
     landmarker_num_faces = the num_faces setting of the Face Landmarker that produced the face columns. With more
     than one face it does not smooth [D1], so mouth_motion is not turned into events (dec section 3,
     consulting_companion exclusion: jitter is not counted as mouth motion). baseline_s = the window of a look_back's
-    pre-loss head pose (_loss_context); None leaves those two observations empty."""
+    pre-loss head pose (_loss_context); None leaves those two observations empty.
+
+    After a change of user inside the window (user_since) the main user's events - head turns, yaw toward the
+    companion, mouth motion, dwell - read only the rows from that change on, with no context before it (_user_rows);
+    the scene's events - companion present, people behind - and the touch misses read every row of the window."""
     p = params
     rows, first = _split(rows, window)
     inside = rows[first:]
+    user, at = _user_rows(rows, first)
+    own = user[at:]                              # the window's rows of its current main user
     t0 = _t(inside[0]) if inside else math.inf
-    events = [e for e in _head_turn_scan(rows, p, baseline_s)[0] if e["t_start"] >= t0]
-    events += _companion_events(inside, companion_sides(rows, p)[0][first:], p)
+    events = [e for e in _head_turn_scan(user, p, baseline_s)[0] if e["t_start"] >= t0]
+    events += _companion_present(inside, p)
+    events += _yaw_toward_companion(own, companion_sides(user, p)[0][at:], p)
 
     counts = [_count_value(r, "people_behind_count") for r in inside]
     events += _run_events("people_behind", inside, [c is not None and c > 0 for c in counts], p.gap_s, p.stay_min_s,
                           lambda run, s: {"people_behind_count": max(counts[i] for i in run), "stay_s": s})
 
     if landmarker_num_faces == SMOOTHED_NUM_FACES:
-        motion = [_num(r, "mouth_motion") if _face(r) else None for r in inside]
-        events += _run_events("mouth_moving", inside, [m is not None and m >= p.mouth_motion_min for m in motion],
+        motion = [_num(r, "mouth_motion") if _face(r) else None for r in own]
+        events += _run_events("mouth_moving", own, [m is not None and m >= p.mouth_motion_min for m in motion],
                               p.gap_s, None,
                               lambda run, s: {"mouth_motion": max(motion[i] for i in run), "moving_s": s})
 
-    taps = [_count_value(r, "tap_count") for r in inside]
-    present = [_face(r) or _body(r) for r in inside]
-    events += _run_events("dwell_no_touch", inside, [pr and t == 0 for pr, t in zip(present, taps)], p.gap_s,
+    taps = [_count_value(r, "tap_count") for r in own]
+    present = [_face(r) or _body(r) for r in own]
+    events += _run_events("dwell_no_touch", own, [pr and t == 0 for pr, t in zip(present, taps)], p.gap_s,
                           p.dwell_min_s, lambda run, s: {"no_touch_s": s},
                           breaks=[t is not None and t > 0 for t in taps])
 
@@ -532,14 +544,30 @@ def _change_obs(r: dict) -> dict:
             "start_size": _num(r, "main_user_start_size")}
 
 
-def user_since(rows: list) -> int:
+def user_since(rows: list) -> int | None:
     """The index of the newest row of rows that starts a new user (a main_user_changed row that new_user counts, as
-    situation.user_changed does), 0 when there is none. The per-user measures of a window (observe_scene) and the hand
-    path's last segment (chain.away_from_screen) read the rows from there on: the earlier user's rows do not decide
-    the new user's. A reacquired or stitched track, or a swap during the first approach, is no new user and keeps the
-    rows before it."""
+    situation.user_changed does), or None when there is none. 0 = the first row starts a new user: then the rows
+    before these rows (a window's context) are the earlier user's, which None does not say. The per-user measures of a
+    window (observe_scene, observe_window) and of a segment (chain) read the rows from there on: the earlier user's
+    rows do not decide the new user's. A reacquired or stitched track, or a swap during the first approach, is no new
+    user and keeps the rows before it."""
     return max((i for i, r in enumerate(rows) if not _blank(r.get("main_user_prev_track")) and new_user(_change_obs(r))),
-               default=0)
+               default=None)
+
+
+def new_user_rows(rows: list) -> list:
+    """rows from the newest new user's first row on (user_since); all of them when no row starts a new user."""
+    since = user_since(rows)
+    return rows if since is None else rows[since:]
+
+
+def _user_rows(rows: list, first: int) -> tuple:
+    """(the rows the main user's cues read, the index of the window's first row in them) for rows split at first
+    (_split): after a change of user inside the window (user_since), the rows from that change on, with no context
+    before it, also when the change is the window's first row; with no change, all rows, the context before the
+    window included (head turns, the companion's side)."""
+    since = user_since(rows[first:])
+    return (rows, first) if since is None else (rows[first + since:], 0)
 
 
 @dataclass(frozen=True)
@@ -602,7 +630,9 @@ def observe_scene(rows: list, window: tuple, approach_ratio_min: float | None = 
     swap during the first approach, keeps the rows before it."""
     rows, first = _split(rows, window)
     inside = rows[first:]
-    since = user_since(inside)              # the per-user measures read the rows from the newest new user on
+    since = user_since(inside) or 0         # the per-user measures read the rows from the newest new user on
+                                            # (only rows inside the window: no change and a change on the first
+                                            # row both read every one of them)
     events = [_event("main_user_changed", inside, [i], _change_obs(r)) for i, r in enumerate(inside)
               if not _blank(r.get("main_user_prev_track"))]
     own = [i >= since and _main_face(r) for i, r in enumerate(inside)]     # the window's current main user's face
@@ -742,31 +772,37 @@ def _body_still(rows: list, p: PilotParams):
 def observe_window(rows: list, window: tuple, params: PilotParams, *, landmarker_num_faces: int,
                    baseline_s: float | None = None) -> Cues:
     """Events and window-level checks for window = (t0, t1): rows after t1 are never read; detect_events says which
-    rows each event comes from; the checks read the rows inside the window."""
+    rows each event comes from; the checks read the rows inside the window. After a change of user inside the window
+    (user_since) the checks of the main user - face_visible_ratio, track_conf, yaw_ok, shoulders_ok, turns_unresolved,
+    mouth_observed, companion_side_unknown, body_still - read only the rows from that change on (_user_rows); the
+    ratios keep the window's frames as the denominator, as the scene tags' shares do. measured and any_tap (the
+    columns and the touch counts) read every row of the window."""
     t0, t1 = window
     rows, first = _split(rows, window)
     inside = rows[first:]
+    user, at = _user_rows(rows, first)
+    own = user[at:]                              # the window's rows of its current main user
     n = len(inside)
     measured = measured_columns(inside)
-    face_ratio = sum(map(_face, inside)) / n if n else None
+    face_ratio = sum(map(_face, own)) / n if n else None
     face_ok = face_ratio is not None and face_ratio >= params.face_visible_min
     taps = [_count_value(r, "tap_count") for r in inside]
     any_tap = True if any(t is not None and t > 0 for t in taps) else (False if "tap_count" in measured else None)
-    undetermined = companion_sides(rows, params)[1][first:]
-    broken = _head_turn_scan(rows, params)[1]
+    undetermined = companion_sides(user, params)[1][at:]
+    broken = _head_turn_scan(user, params)[1]
     return Cues(
         events=detect_events(rows, params, landmarker_num_faces=landmarker_num_faces, window=window,
                              baseline_s=baseline_s),
         face_visible_ratio=face_ratio,
-        track_conf=sum(map(_body, inside)) / n if n else None,
+        track_conf=sum(map(_body, own)) / n if n else None,
         measured=measured,
         face_ok=face_ok,
-        yaw_ok=_observed_on(inside, "yaw_deg", _face),
-        shoulders_ok=all(_num(r, "pose_vis_shoulders") is not None for r in inside if _body(r) and not _face(r)),
+        yaw_ok=_observed_on(own, "yaw_deg", _face),
+        shoulders_ok=all(_num(r, "pose_vis_shoulders") is not None for r in own if _body(r) and not _face(r)),
         turns_unresolved=any(t0 <= t <= t1 for t in broken),
         mouth_usable=landmarker_num_faces == SMOOTHED_NUM_FACES and face_ok,
-        mouth_observed=_observed_on(inside, "mouth_motion", _face),
+        mouth_observed=_observed_on(own, "mouth_motion", _face),
         companion_side_unknown=any(u and _face(r) and (_num(r, "yaw_deg") or 0) != 0
-                                   for r, u in zip(inside, undetermined)),
+                                   for r, u in zip(own, undetermined)),
         any_tap=any_tap,
-        body_still=_body_still(inside, params))
+        body_still=_body_still(own, params))

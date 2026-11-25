@@ -28,7 +28,7 @@ import time
 
 from . import columns as C
 from .contract_view import to_contract
-from .events import SEEN, observe_window, user_since
+from .events import SEEN, new_user_rows, observe_window
 from .judgment import rule_table_v0 as R
 from .judgment.jev_stub import ShadowJev
 from .situation import RULES, TAGS, UNKNOWN, assess
@@ -265,10 +265,11 @@ def facing(seg_rows: list, sp, main_only: bool = False) -> bool | None:
     criterion of the tap rows (tree section 4 ⑦), not the 'looking away' path. main_only (phone_use's hand path): a
     face counts only when it is the main user's (columns.main_user_face: with the head detector, matched to the main
     user's head box), and a frame whose face is not confirmed as the main user's is skipped as no direction evidence
-    (the gate goes back to the frame before it)."""
+    (the gate goes back to the frame before it). After a change of user inside the segment (events.user_since) only
+    the new user's rows are read: the gate never goes back to the earlier user's face."""
     if sp is None:
         return None
-    for r in reversed(seg_rows):
+    for r in reversed(new_user_rows(seg_rows)):
         if r.get("face_state") == SEEN and (not main_only or C.main_user_face(r)):
             yaw = finite(r.get("yaw_deg"))
             return None if yaw is None else abs(yaw) < sp.offscreen_yaw_deg
@@ -298,7 +299,7 @@ def away_from_screen(seg_rows: list, sp) -> bool | None:
     segment (events.user_since) only the new user's rows are read: the earlier user's do not decide the new user's."""
     if sp is None:
         return None
-    seg_rows = seg_rows[user_since(seg_rows):]
+    seg_rows = new_user_rows(seg_rows)
     gaze = facing(seg_rows, sp, main_only=True)
     boxed = [r for r in seg_rows if not C.blank_box(r.get("primary_box"))]
     face_in_box = any(C.main_user_face(r) and _toward_screen(r, sp) for r in boxed)
@@ -402,10 +403,11 @@ class WindowJudge:
                       "obs": e["obs"]} for e in events if e["kind"] in TURN_KINDS]
         situation = situation_view(out, reasons)
         seg, recent, screen, progress, _ = self._touch(t_end, seg_len)
-        face_seen = any(r.get("face_state") == SEEN for r in seg_rows)
+        face_seen = any(r.get("face_state") == SEEN for r in new_user_rows(seg_rows))
         has_touch = seg is not None and (seg["tap_count"] > 0 or seg["back_count"] > 0)
-        # the team placeholder (a press or a back, or a face seen in the segment). The scene tag phone_use true counts
-        # for the 3-2 row and its hold only, in the rule table (rule_table_v0.decide 0''), never for the other rows
+        # the team placeholder (a press or a back, or a face seen in the segment; after a change of user inside the
+        # segment, the new user's face: events.user_since). The scene tag phone_use true counts for the 3-2 row and its
+        # hold only, in the rule table (rule_table_v0.decide 0''), never for the other rows
         measurable = bool(has_touch or face_seen)
         self.state, expired = R.tick(self.state, t_end, p)
         held_before = self.state.held.decision_id if self.state.held else None
@@ -456,15 +458,19 @@ def detectors(seg_rows: list) -> dict:
 
 
 def vision_summary(seg_rows: list, gaze) -> dict:
-    """What the camera saw in the segment (observation only)."""
+    """What the camera saw in the segment (observation only). After a change of user inside the segment
+    (events.user_since) the main user's values - face_seen_ratio, body_seen_ratio, mouth_motion_max - read the new
+    user's rows (the ratios over all the segment's frames); frames and the scene's values - head_count_max,
+    people_behind_max, companion_frames - read every row."""
     n = len(seg_rows)
+    own = new_user_rows(seg_rows)
 
-    def mx(key):
-        vals = [v for v in (finite(r.get(key)) for r in seg_rows) if v is not None]
+    def mx(key, rows):
+        vals = [v for v in (finite(r.get(key)) for r in rows) if v is not None]
         return max(vals) if vals else None
     return {"frames": n,
-            "face_seen_ratio": sum(r.get("face_state") == SEEN for r in seg_rows) / n if n else None,
-            "body_seen_ratio": sum(r.get("body_state") == SEEN for r in seg_rows) / n if n else None,
-            "head_count_max": mx("head_count"), "people_behind_max": mx("people_behind_count"),
+            "face_seen_ratio": sum(r.get("face_state") == SEEN for r in own) / n if n else None,
+            "body_seen_ratio": sum(r.get("body_state") == SEEN for r in own) / n if n else None,
+            "head_count_max": mx("head_count", seg_rows), "people_behind_max": mx("people_behind_count", seg_rows),
             "companion_frames": sum(r.get("companion_box") is not None for r in seg_rows),
-            "mouth_motion_max": mx("mouth_motion"), "facing_screen": gaze}
+            "mouth_motion_max": mx("mouth_motion", own), "facing_screen": gaze}

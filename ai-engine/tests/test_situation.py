@@ -831,6 +831,61 @@ class SceneCueTests(unittest.TestCase):
         self.assertEqual(len(c.of("face_size")), 1)
 
 
+class UserChangeCueTests(unittest.TestCase):
+    """The three tags' cues of the main user after a change of user in the window (events.user_since): the earlier
+    user's behaviour does not reach the new user's tag; a reacquired or stitched track, or a swap before the earlier
+    user settled, keeps it (values made for these frames)."""
+    KEPT = ({"main_user_reacquired": True}, {"main_user_stitched": True}, {"main_user_prev_settled": False})
+
+    @staticmethod
+    def change_at(rows, k, **flags):
+        """Main-user track 1 before frame k, track 2 from it; frame k carries the change (settled, not reacquired, not
+        stitched; flags override)."""
+        put(rows, 0, len(rows) - 1, primary_track=1, head_count=1)
+        put(rows, k, len(rows) - 1, primary_track=2)
+        return put(rows, k, k, **{"main_user_prev_track": 1, "main_user_prev_settled": True,
+                                  "main_user_reacquired": False, "main_user_stitched": False, **flags})
+
+    def test_after_a_change_of_user_the_head_turns_read_the_new_user_only(self):
+        """The earlier user's two off-screen sweeps do not make the new user looking_around."""
+        def window(**flags):                     # 13 frames of the earlier user, then 27 of the new one
+            return self.change_at(rows_of(face(2), sweep(+1), face(2), sweep(-1), face(28)), 13, **flags)
+        out, events = run(window())
+        self.assertEqual((out["name"], set(kinds(events)) & {"yaw_sweep_offscreen", "look_back"}), (NONE, set()))
+        for flags in self.KEPT:
+            out, events = run(window(**flags))
+            self.assertEqual((out["name"], kinds(events).count("yaw_sweep_offscreen")), (AROUND, 2), flags)
+
+    def test_after_a_change_of_user_the_companion_cues_read_the_new_user_only(self):
+        """The earlier user's turn toward the companion and mouth motion do not make the new user consult the
+        companion; the companion box (a scene cue) still counts on every row."""
+        def window(**flags):
+            rows = companion_window(sweep(+1)) + rows_of(face(30), extra={**OPTIONAL, "companion_box": RIGHT_BOX})
+            for i, r in enumerate(rows):
+                r.update(frame_idx=i, t_s=round(i * DT, 6))
+            return self.change_at(rows, 19, **flags)
+        out, events = run(window())
+        self.assertEqual((out["name"], set(kinds(events)) & {"yaw_toward_companion", "mouth_moving"}), (NONE, set()))
+        self.assertIn("companion_present", kinds(events))
+        for flags in self.KEPT:
+            self.assertEqual(run(window(**flags))[0]["name"], COMPANION, flags)
+
+    def test_after_a_change_of_user_the_body_and_presence_checks_read_the_new_user_only(self):
+        """body_still (also phone_use's body condition), track_conf, face_visible_ratio and the dwell after a change:
+        the earlier user's moving shoulders do not make the new user move; the ratios count the new user's rows over
+        the window's frames."""
+        def window(**flags):
+            rows = rows_of(face(40))
+            for i in range(20):
+                rows[i]["shoulder_cx"] = 0.40 + 0.01 * i                  # the earlier user walks off
+            c = observe_window(self.change_at(rows, 20, **flags), (0.0, 3.9), P, landmarker_num_faces=1)
+            (dwell,) = c.of("dwell_no_touch")
+            return c.body_still, c.track_conf, c.face_visible_ratio, dwell["t_start"]
+        self.assertEqual(window(), (True, 0.5, 0.5, 2.0))
+        for flags in self.KEPT:
+            self.assertEqual(window(**flags), (False, 1.0, 1.0, 0.0), flags)
+
+
 class SceneTagTests(unittest.TestCase):
     """The second list `tags` of situation.assess (values made for these frames, not proposals)."""
 
@@ -900,9 +955,11 @@ class SceneTagTests(unittest.TestCase):
         self.assertEqual(self.tags(out)["user_changed"], (False, None))    # the column on every row, no change
 
     def test_the_scene_columns_do_not_leak_into_the_three_tags(self):
-        """Scene columns, with a change of user on the second row, leave the three tags, their evidence and their
-        events as they are. The scene tags follow the cut of a change: the earlier user's first row (standing, near,
-        no aid) is not read, and the new user's rows make seated_height, aid_use true and face_approach false."""
+        """Scene columns, with a track change on the second row that is not a new user (reacquired in the same place),
+        leave the three tags, their evidence and their events as they are. With the change counted as a new user the
+        scene tags follow its cut: the earlier user's first row (standing, near, no aid) is not read, and the new
+        user's rows make seated_height, aid_use true and face_approach false (the three tags then read the new user's
+        rows too: test_after_a_change_of_user_the_three_tags_read_the_new_user_only)."""
         from app.modules.vision.situation import assess
         windows = [put(rows_of(face(5), look_back(), face(5), look_back(), face(5)), 0, 30, people_behind_count=1),
                    companion_window(sweep(+1)), around_window(), rows_of(face(10))]
@@ -915,11 +972,15 @@ class SceneTagTests(unittest.TestCase):
                          head_count=1, aid_owner="yes", aid_any_score=0.8)
             marked[0].update(face_cy=0.3, iod_ratio_user=1.5, aid_owner="no", aid_any_score=0.1)   # the earlier user
             marked[1].update(main_user_prev_track=1, main_user_gap_s=0.1, main_user_body_kept=True)
+            same = [dict(r) for r in marked]
+            same[1].update(main_user_reacquired=True)   # the same user found again: no cut
+            kept, kept_events = assess(same, t, P, landmarker_num_faces=1, seated_face_cy_min=0.6,
+                                       approach_ratio_min=1.2, aid_use_min=0.5)
+            self.assertEqual({k: v for k, v in kept.items() if k != "tags"},
+                             {k: v for k, v in plain.items() if k != "tags"})
+            self.assertEqual(kept_events, plain_events)
             out, events = assess(marked, t, P, landmarker_num_faces=1, seated_face_cy_min=0.6,
                                  approach_ratio_min=1.2, aid_use_min=0.5)
-            self.assertEqual({k: v for k, v in out.items() if k != "tags"},
-                             {k: v for k, v in plain.items() if k != "tags"})
-            self.assertEqual(events, plain_events)
             self.assertEqual([t["status"] for t in out["tags"]], [True, False, True, False, True, UNKNOWN])
             scene = {t["name"]: {e["obs"]: e["value"] for e in t["evidence"]} for t in out["tags"]}
             self.assertEqual((scene["seated_height"]["face_cy_median"], scene["aid_use"]["aid_any_median"],
@@ -1072,7 +1133,9 @@ class SceneTagTests(unittest.TestCase):
 class GoldenOutputTests(unittest.TestCase):
     """The three tags' output against the code before the scene tags: tests/data/situation_golden_main.json was made
     by origin/main's events.py and situation.py (a3143a5) on golden_windows(). Here the new code runs on the same windows with
-    every scene column set and every scene value given, and must give the same output outside `tags`."""
+    every scene column set and every scene value given, and must give the same output outside `tags`. The track
+    change in the middle is marked reacquired: a change that brings a new user cuts the main user's cues by design
+    (events.user_since; SceneCueTests and the round-5 tests)."""
 
     def test_the_three_tags_match_the_code_before_the_scene_tags(self):
         import json
@@ -1084,7 +1147,8 @@ class GoldenOutputTests(unittest.TestCase):
         for name, rows, over, faces in windows:
             marked = [dict(r, face_cy=0.9, iod_ratio_user=1.5, primary_track=1 + (i >= len(rows) // 2), head_count=1,
                            aid_owner="yes", aid_any_score=0.8, aid_count=1) for i, r in enumerate(rows)]
-            marked[len(rows) // 2].update(main_user_prev_track=1, main_user_gap_s=0.1, main_user_body_kept=True)
+            marked[len(rows) // 2].update(main_user_prev_track=1, main_user_gap_s=0.1, main_user_body_kept=True,
+                                          main_user_reacquired=True)   # not a new user: the main user's cues stay
             out, events = assess(marked, rows[-1]["t_s"], dataclasses.replace(P, **over), landmarker_num_faces=faces,
                                  seated_face_cy_min=0.6, approach_ratio_min=1.2, aid_use_min=0.5)
             out = json.loads(json.dumps({k: v for k, v in out.items() if k != "tags"}))

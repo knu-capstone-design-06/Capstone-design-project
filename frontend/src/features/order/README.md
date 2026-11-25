@@ -148,7 +148,7 @@ node --test src/features/order/support.browser.test.mjs src/features/order/revie
 3. 프로덕션 검사는 `pnpm build` 뒤 `pnpm preview` 주소를 `$env:ORDER_PRODUCTION_URL`에 지정하고 같은 검사를 다시 실행합니다.
 4. 1080×1920 화면에서 기본·크게 보기·큰 글씨·큰 버튼·고대비·간편 화면·낮은 화면을 켜 보고, 메뉴 화면에 세로 스크롤이 없는지와 조작이 화면 밖으로 나가지 않는지 확인합니다. 개발 서버에서 `?support=large_text`로 큰 글씨 확인창을, `?preview=enlarge`로 일괄 확대 카드와 [원래대로]를, `?hint=cart-remove`로 버튼 강조를 확인합니다.
 
-2026-11-15 Windows Node.js 24.15.0과 Microsoft Edge headless에서 단위 테스트 107개, TypeScript·Vite 빌드가 통과했습니다. 샘플·프로덕션 URL을 모두 지정한 브라우저 검사 다섯 파일은 122개 가운데 120개가 통과하고 2개가 실패했습니다(생략 0개). 실패한 2개는 `voiceMode.browser.test.mjs`의 확인 질문 검사이며, 기준 커밋인 main `9b9828c`에서도 같은 2개가 실패합니다. 빌드 결과물에서 `kioskSupportDraft`·`URLSearchParams`·`rule_placeholder`를 찾지 못했습니다. 고정 API 응답과 개발 샘플을 썼으며 실제 시험 기기·서버 연결은 확인하지 않았습니다.
+2026-11-15 Windows Node.js 24.15.0과 Microsoft Edge headless에서 단위 테스트 107개, TypeScript·Vite 빌드가 통과했습니다. 샘플·프로덕션 URL을 모두 지정한 브라우저 검사 다섯 파일은 122개 가운데 120개가 통과하고 2개가 실패했습니다(생략 0개). 실패한 2개는 `voiceMode.browser.test.mjs`의 확인 질문 검사이며, 기준 커밋인 main `9b9828c`에서도 같은 2개가 실패합니다. 빌드 결과물에서 `kioskSupportDraft`·`URLSearchParams`·`rule_placeholder`를 찾지 못했습니다. 고정 API 응답과 개발 샘플을 썼으며 실제 G10·서버 연결은 확인하지 않았습니다.
 
 알려진 한계: 낮은 화면 + 말로 주문에서는 아래 조작 영역 안에서 스크롤합니다. 크게 보기 + 말로 주문에서는 한 줄의 그림이 150.8px로 주문 확인 사진(160px)보다 작습니다. 큰 글씨 + 말로 주문 영역의 새 배치, 창의 쪽 넘김(큰 글씨의 화면 도움 창은 스크롤), [처음으로] 확인 창의 새 모습은 아직 없습니다. 192px 주문번호는 8자 번호('DEMO-042')에서 두 줄이 됩니다.
 
