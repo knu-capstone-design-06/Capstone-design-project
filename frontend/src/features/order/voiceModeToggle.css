@@ -30,11 +30,14 @@
 /* 들은 말: 한 줄, 긴 문장은 끝부분을 보이고 앞에 "…" */
 .kiosk .voice-mode-transcript strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; font-size: var(--fs-m); font-weight: 400; line-height: var(--lh-heard); }
 .kiosk .voice-mode-feedback { margin: 0; font-size: var(--fs-m); font-weight: 700; line-height: var(--lh-q); overflow-wrap: anywhere; }
+.kiosk .voice-mode-failure { margin: 0; padding: var(--pad-1); border: 2px solid var(--ui-line); border-radius: var(--r-card); background: var(--ui-canvas); color: var(--ui-ink); font-size: var(--fs-m); line-height: var(--lh-q); overflow-wrap: anywhere; }
 .kiosk .voice-text .message-voice { display: grid; }
 .kiosk .voice-text .message-voice > * { grid-area: 1 / 1; }
 .kiosk .voice-text .cart-notice, .kiosk .voice-text .order-progress { min-height: 0; padding: 0; background: none; box-shadow: none; color: inherit; font-size: var(--fs-m); }
 .kiosk .voice-answers { display: grid; grid-template-columns: repeat(2, var(--w-answer)); gap: var(--gap-btn); }
 .kiosk .voice-mode-listen { min-height: var(--h-kiosk); font-size: var(--fs-m); color: var(--ui-ink); background: var(--ui-surface); border-color: var(--ui-line); }
+/* 문서 스크롤에서는 고정 주문 바도 피합니다. 낮은 화면의 내부 스크롤은 바 위에서 끝납니다. */
+.kiosk:not(.low-screen) [data-log-target="voice-reply-stop"] { scroll-margin-bottom: calc(var(--order-actions-space) + var(--between)); }
 .kiosk.high-contrast .voice-mode-listen { color: inherit; background: transparent; border-color: currentColor; }
 /* 큰 글씨: 높이는 내용을 따르고 대답은 한 줄에 하나(큰 글씨 말로 주문의 전체 배치는 넘김 목록) */
 .kiosk.large-text .voice-mode-control { min-height: 0; }
