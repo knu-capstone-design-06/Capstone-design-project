@@ -95,7 +95,10 @@ class Client:
                            "retries": retries, "temperature_0": self.use_temperature, "schema": self.use_schema,
                            "error": None}
                 except urllib.error.HTTPError as e:
-                    msg = e.read().decode("utf-8", "replace")
+                    try:
+                        msg = e.read().decode("utf-8", "replace")
+                    except Exception:  # the connection dropped while the error body was read: the status still stands
+                        msg = ""
                     tries.add(ms_since(t0), f"http {e.code}")
                     if e.code == 400 and "temperature" in msg and "temperature" in b:
                         tries.items[-1]["result"] += ", temperature refused"

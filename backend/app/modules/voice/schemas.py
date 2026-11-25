@@ -1,6 +1,6 @@
 from typing import Annotated, Literal, Self
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 Confidence = Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
 Quantity = Annotated[int, Field(strict=True, ge=1, le=20)]
@@ -28,13 +28,14 @@ class RecognitionAlternative(BaseModel):
 class VoiceRequestCreate(BaseModel):
     text: str = Field(min_length=1, max_length=500)
     alternatives: list[RecognitionAlternative] = Field(max_length=5)
-    screen_id: str
+    # A screen name, kept with each turn and sent to the model with it: bounded like the text.
+    screen_id: str = Field(min_length=1, max_length=64)
 
-    @field_validator("text")
+    @field_validator("text", "screen_id")
     @classmethod
-    def reject_blank(cls, value: str) -> str:
+    def reject_blank(cls, value: str, info) -> str:
         if not value.strip():
-            raise ValueError("text must not be blank")
+            raise ValueError(f"{info.field_name} must not be blank")
         return value
 
 
@@ -103,6 +104,10 @@ class VoiceInterpretation(BaseModel):
     tool_calls: list[ToolCall] = Field(max_length=10)
     # Short enough to read at a glance on the kiosk.
     reply_text: str | None = Field(max_length=60)
+    # The product a question the kiosk itself asked is about ("아메리카노, 따뜻한 것과 아이스 중?"). Set by the
+    # server only (a private attribute: never read from the model's output, never sent), so the answer
+    # ("아이스로요") goes to that product without finding its name again in the question's text.
+    _about: str | None = PrivateAttr(default=None)
 
     @model_validator(mode="after")
     def validate_status(self) -> Self:

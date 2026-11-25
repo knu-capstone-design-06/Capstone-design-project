@@ -114,24 +114,25 @@ GPT는 2026-11-09, Claude는 2026-11-10에 쟀고, Jev는 앞선 Jev 실험의 �
 AI 담당의 결과 표에 있는 모델 모두가 세 세트에서 값을 갖도록 모델 4개를 더 돌렸습니다. 세트는 novel(SUM 형식, 60건: 도움 28, 대기 32), heldout1(56건: 도움 28, 대기 28), heldout2(56건: 도움 32, 대기 24)입니다. 프롬프트는 AI 담당의 파일을 데이터로 읽어 그대로 재현했고, 그 코드는 실행하지 않았습니다. 선택지는 지원 9개 + none이고, 세트와 모델마다 3번 돌렸습니다.
 
 - 점수(균형 정확도, BA) = (도움 사례 가운데 고른 지원이 허용 목록에 든 비율 + 대기 사례 가운데 답이 null이 아니고 화면에 보이는 지원 7개도 아닌 비율) / 2. AI 담당 실험의 정의를 따랐습니다.
-- 같은 답에서 정밀도 · 재현율 · F1과 Macro-F1을 내는 도구는 `tools/score_scen_f1.py`와 `tools/score_scen_f1_macro.py`입니다. 아래 표는 AI 담당 실험의 값과 나란히 볼 수 있게 균형 정확도로 적었습니다.
+- 정밀도 · 재현율 · F1은 BA와 같은 사례 판정으로 계산합니다. 도움 사례는 고른 지원이 허용 목록에 들면 TP, 아니면 FN입니다. 대기 사례는 답이 null이거나 화면에 보이는 지원이면 FP, 아니면 TN입니다. 정밀도 = TP / (TP + FP), 재현율 = TP / (TP + FN), F1 = 2TP / (2TP + FP + FN)이고, 재현율은 BA의 도움 사례 비율과 같습니다. 아래 표는 고른 지원이 허용 목록에 들어야 TP로 세지만 AI 담당의 `paper_metrics.py`는 도움 사례의 답이 화면에 보이는 지원이면 무엇이든 TP로 세므로, 두 F1은 나란히 비교하지 않습니다.
+- 같은 답에서 정밀도 · 재현율 · F1과 Macro-F1을 내는 도구는 `tools/score_scen_f1.py`와 `tools/score_scen_f1_macro.py`입니다. 아래 표에는 AI 담당 실험의 값과 나란히 볼 수 있게 균형 정확도를 적었고, 정밀도 · 재현율 · F1도 함께 적었습니다.
 - 1초 변형: 답이 null이거나 1,000 ms보다 늦은 사례는 AI 담당의 규칙표 답으로 바꿉니다.
 - 확인: novel 4건을 gpt-4o-mini에 보내 프롬프트 토큰이 건마다 1,035개로 AI 담당의 기록과 같았습니다. AI 담당이 저장한 답을 `tools/score_scen.py verify`로 다시 채점한 값도 기록된 값과 같았습니다.
 
-| 모델 | 세트 | 실행 1 / 2 / 3 | 평균 BA | 도움 적중 | 대기 | 1초 평균 BA | 응답 시간 p50 ms(합침) | 1초 이내 비율 | 지출 |
-|---|---|---|---|---|---|---|---|---|---|
-| claude-haiku-5-5 | novel | 0.5714 / 0.5714 / 0.5893 | 0.5774 | 0.155 | 1.000 | 0.5774 | 993.2 | 0.517 | $0.0314 |
-| claude-sonnet-5-5 | novel | 0.7768 / 0.7946 / 0.7411 | 0.7708 | 0.667 | 0.875 | 0.5774 | 1,375.2 | 0.033 | $0.6312 |
-| gpt-4o-mini | heldout1 | 0.5536 / 0.5536 / 0.5179 | 0.5417 | 0.369 | 0.714 | 0.5357 | 950.2 (두 세트) | 0.640 | $0.0255 |
-| gpt-4o-mini | heldout2 | 0.3281 / 0.3021 / 0.3073 | 0.3125 | 0.042 | 0.583 | 0.4062 | | | $0.0291 |
-| gpt-5.4-mini | heldout1 | 0.5000 / 0.5357 / 0.5000 | 0.5119 | 0.464 | 0.560 | 0.4940 | 813.5 (두 세트) | 0.845 | $0.0999 |
-| gpt-5.4-mini | heldout2 | 0.4115 / 0.4427 / 0.4635 | 0.4392 | 0.448 | 0.431 | 0.4392 | | | $0.1247 |
-| claude-haiku-5-5 | heldout1 | 0.5714 / 0.5893 / 0.5714 | 0.5774 | 0.190 | 0.964 | 0.6012 | 1,030.0 (두 세트) | 0.423 | $0.0350 |
-| claude-haiku-5-5 | heldout2 | 0.5000 / 0.4792 / 0.5000 | 0.4931 | 0.125 | 0.861 | 0.5937 | | | $0.0372 |
-| claude-sonnet-5-5 | heldout1 | 0.8036 / 0.8393 / 0.8036 | 0.8155 | 0.905 | 0.726 | 0.5714 | 1,382.7 (두 세트) | 0.086 | $0.7016 |
-| claude-sonnet-5-5 | heldout2 | 0.6042 / 0.5885 / 0.5521 | 0.5816 | 0.344 | 0.819 | 0.5816 | | | $0.7443 |
+| 모델 | 세트 | 실행 1 / 2 / 3 | 평균 BA | 정밀도 | 재현율 | F1 | 대기 | 1초 평균 BA | 응답 시간 p50 ms(합침) | 1초 이내 비율 | 지출 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| claude-haiku-5-5 | novel | 0.5714 / 0.5714 / 0.5893 | 0.5774 | 1.000 | 0.155 | 0.268 | 1.000 | 0.5774 | 993.2 | 0.517 | $0.0314 |
+| claude-sonnet-5-5 | novel | 0.7768 / 0.7946 / 0.7411 | 0.7708 | 0.823 | 0.667 | 0.736 | 0.875 | 0.5774 | 1,375.2 | 0.033 | $0.6312 |
+| gpt-4o-mini | heldout1 | 0.5536 / 0.5536 / 0.5179 | 0.5417 | 0.562 | 0.369 | 0.445 | 0.714 | 0.5357 | 950.2 (두 세트) | 0.640 | $0.0255 |
+| gpt-4o-mini | heldout2 | 0.3281 / 0.3021 / 0.3073 | 0.3125 | 0.115 | 0.042 | 0.061 | 0.583 | 0.4062 | | | $0.0291 |
+| gpt-5.4-mini | heldout1 | 0.5000 / 0.5357 / 0.5000 | 0.5119 | 0.513 | 0.464 | 0.487 | 0.560 | 0.4940 | 813.5 (두 세트) | 0.845 | $0.0999 |
+| gpt-5.4-mini | heldout2 | 0.4115 / 0.4427 / 0.4635 | 0.4392 | 0.511 | 0.448 | 0.477 | 0.431 | 0.4392 | | | $0.1247 |
+| claude-haiku-5-5 | heldout1 | 0.5714 / 0.5893 / 0.5714 | 0.5774 | 0.841 | 0.190 | 0.310 | 0.964 | 0.6012 | 1,030.0 (두 세트) | 0.423 | $0.0350 |
+| claude-haiku-5-5 | heldout2 | 0.5000 / 0.4792 / 0.5000 | 0.4931 | 0.548 | 0.125 | 0.203 | 0.861 | 0.5937 | | | $0.0372 |
+| claude-sonnet-5-5 | heldout1 | 0.8036 / 0.8393 / 0.8036 | 0.8155 | 0.768 | 0.905 | 0.831 | 0.726 | 0.5714 | 1,382.7 (두 세트) | 0.086 | $0.7016 |
+| claude-sonnet-5-5 | heldout2 | 0.6042 / 0.5885 / 0.5521 | 0.5816 | 0.717 | 0.344 | 0.465 | 0.819 | 0.5816 | | | $0.7443 |
 
-- 도움 적중과 대기는 3번 실행의 평균이고, 응답 시간은 3번 실행(held-out은 두 세트까지)을 합친 값입니다.
+- 정밀도 · 재현율 · F1과 대기는 실행마다 구한 값을 3번 실행에 걸쳐 평균했고, 1초 변형은 적용하지 않았습니다. 응답 시간은 3번 실행(held-out은 두 세트까지)을 합친 값입니다.
 - held-out 두 세트의 평균 BA: gpt-4o-mini 0.4271, gpt-5.4-mini 0.4756, claude-haiku-5-5 0.5353, claude-sonnet-5-5 0.6986.
 - AI 담당이 저장한 답의 값(이 실험에서 다시 돌리지 않음): novel은 규칙표 0.5714, Jev 0.6317, gpt-6.1-sol 0.9382. heldout1 / heldout2는 규칙표 0.5357 / 0.5781(평균 0.5569), Jev(AI 담당의 v0 질문 문안) 0.6786 / 0.5972(평균 0.6379), gpt-6.1-sol 0.8929 / 0.7917(평균 0.8423, 실행 1회). held-out 두 세트의 Jev 값은 v0 문안의 값이고, AI 담당이 사전 등록한 설계는 v1입니다(v1의 저장된 답: heldout1 0.6369, heldout2 0.6076).
 
@@ -141,9 +142,17 @@ AI 담당의 결과 표에 있는 모델 모두가 세 세트에서 값을 갖�
 
 ## 실행
 
-입력인 평가 키트 `llm_eval_kit_2026-11-08`(창별 입력 `data/`, 질문 `questions.json`, 라벨, Jev 기준 답, 채점기 `score.py`), 앞선 Jev 실험의 기록 실행, AI 담당의 시나리오 재현 자료는 저장소에 없고 비전 담당 작업 폴더에 있습니다. GPT 실행기는 `--env`로 준 파일(`backend/.env`)의 `OPENAI_API_KEY`를, Claude 실행기는 `--env`로 준 파일의 `ANTHROPIC_API_KEY`를 읽습니다.
+도구는 저장소 루트에서 실행하고, 저장소에 없는 입력은 아래 표의 인자로 받습니다. 규칙표 응답 시간 도구 `time_rule_table.py`만 비전 담당 작업 폴더 위치를 `KIOSK_WORKSPACE`로 받습니다.
 
-도구는 비전 담당 작업 폴더의 배치를 기준으로 경로를 잡습니다. 그래서 저장소 안에서 바로 실행되지는 않고, 아래 명령은 실험 때 돌린 순서를 보여 줍니다.
+| 입력 | 인자 | 있는 곳 · 만드는 방법 |
+|---|---|---|
+| 평가 키트 `llm_eval_kit_2026-11-08`(창별 입력 `data/`, 질문 `questions.json`, 라벨 `labels/`, Jev 기준 답 `reference_answers/`) | `--kit`(`score.py`, `run_gpt.py`, `run_claude.py`), 첫째 인자(`cell_windows.py`), 둘째 인자(`one_second.py`) | 비전 담당 작업 폴더. `eval_llm_2026-11-12_rA/tools/build_kit_2026-11-08.py`로 만들었음 |
+| 모델 답(`answers.jsonl`) | `--answers`(`score.py`) | `run_gpt.py` · `run_claude.py`가 `--out` 폴더에 씀 |
+| 앞선 Jev 실험의 기록 실행(`stage2_3_J_b0_r0`, `stage2_1_swap_C_C0`가 든 폴더) | 셋째 인자(`one_second.py`) | 비전 담당 작업 폴더. Jev의 응답 시간을 이 기록에서 읽음 |
+| AI 담당의 시나리오 재현 자료 | `--repro`(`score_scen_f1.py`, `score_scen_f1_macro.py`: zip이나 푼 `jev_touch_experiment_repro` 폴더), 첫째 인자(`scen_prep.py`: 푼 `jev_touch_experiment_repro` 폴더) | AI 담당이 보낸 자료. 비전 담당 작업 폴더에 있음 |
+| 시나리오 세트 폴더 `runs/scenarios`(입력 `inputs/`와 실행 폴더) | `--runs`(`score_scen_f1.py`, `score_scen_f1_macro.py`), `--root`(`run_scenarios.py`), 경로 인자(`score_scen.py runs`, `score_scen_1s.py`) | `scen_prep.py`가 `inputs/`를, `run_scenarios.py`가 실행 폴더를 만듦 |
+
+GPT 실행기는 `--env`로 준 파일(`backend/.env`)의 `OPENAI_API_KEY`를, Claude 실행기는 `--env`로 준 파일의 `ANTHROPIC_API_KEY`를 읽습니다. 아래 명령은 실험 때 돌린 순서대로 적었습니다.
 
 ```powershell
 $P = "experiments\eval_llm_2026-11-09"
@@ -154,9 +163,10 @@ python "$P\tools\cell_windows.py" $K E5_J "$P\stage2_prep"
 python "$P\tools\run_gpt.py" --kit $K --arm E5_C0 --model gpt-4o-mini-2024-07-18 --env backend\.env --cache "$P\cache" --out "$P\runs\gpt-4o-mini-2024-07-18_E5_C0"
 python "$P\tools\run_gpt.py" --kit $K --arm E5_J --windows "$P\stage2_prep\E5_J_cell_windows.txt" --model gpt-4o-mini-2024-07-18 --env backend\.env --cache "$P\cache" --out "$P\runs\gpt-4o-mini-2024-07-18_E5_J_cells"
 python "$P\tools\run_claude.py" --kit $K --arm E5_C0 --model claude-haiku-5-5 --env <ANTHROPIC_API_KEY가 든 env 파일> --cache "$P\cache" --out "$P\runs\claude-haiku-5-5_E5_C0"
-# 1초 변형(호출 없음)과 채점(키트 폴더에서)
+# 1초 변형(호출 없음)과 채점
 python "$P\tools\one_second.py" $P $K "<앞선 Jev 실험의 기록 실행 폴더>"
-python score.py --data data/E5_J.jsonl --answers <runs 폴더>\gpt-4o-mini-2024-07-18_E5_J_cells\answers.jsonl
+python "$P\tools\score.py" --kit $K --data "$K\data\E5_J.jsonl" --answers "$P\runs\gpt-4o-mini-2024-07-18_E5_J_cells\answers.jsonl"
+python "$P\tools\score.py" --kit $K --check   # 키트의 Jev 기준 답을 다시 채점해 기록된 줄과 비교
 # 규칙표 응답 시간: 작업 폴더 위치를 KIOSK_WORKSPACE로 줌, 앞선 Jev 실험의 backend 가상환경(Python 3.12)
 $env:KIOSK_WORKSPACE = "<비전 담당 작업 폴더>"
 python "$P\tools\time_rule_table.py" "<PR #77 커밋 3c936ae의 backend 폴더>" "$P\stage2_prep\E5_J_cell_windows.txt" "$P\runs\rule_table_timing\timing.json"
@@ -165,6 +175,8 @@ python -I "$P\tools\scen_prep.py" "<AI 담당의 재현 폴더>" "$P\runs\scenar
 python "$P\tools\run_scenarios.py" --set novel --model claude-haiku-5-5 --run 1 --root "$P\runs\scenarios" --cache "$P\cache" --openai-env backend\.env --anthropic-env <ANTHROPIC_API_KEY가 든 env 파일>
 python -I "$P\tools\score_scen.py" runs "$P\runs\scenarios"
 python -I "$P\tools\score_scen_1s.py" "$P\runs\scenarios"
+python -I "$P\tools\score_scen_f1.py" --repro "<AI 담당의 재현 자료>" --runs "$P\runs\scenarios"
+python -I "$P\tools\score_scen_f1_macro.py" --repro "<AI 담당의 재현 자료>" --runs "$P\runs\scenarios"
 ```
 
 `run_gpt.py` 명령에 `--print-example`을 더하면 첫 창의 프롬프트를 출력합니다.
@@ -182,6 +194,7 @@ python -m unittest discover -s experiments\eval_llm_2026-11-09\tests -v
 | `tools/run_gpt.py` | GPT 실행기(`--windows`로 물을 창을 제한) |
 | `tools/run_claude.py` | Claude 실행기. 프롬프트와 출력 파일 형식은 `run_gpt.py`와 같음 |
 | `tools/run_gemini.py` | Gemini 실행기(REST, responseSchema enum, temperature 0). HTTP 403에서 더 가지 못함 |
+| `tools/score.py` | 평가 키트의 채점기. 키트의 `score.py`와 채점이 같고, 키트 폴더를 `--kit`로 받음 |
 | `tools/cell_windows.py` | 사례 창 목록과 Jev 기준 답의 제한본(제한해도 Jev 줄이 같은지 확인용) |
 | `tools/predict_cost.py` | E5_C0 실행의 토큰 사용량으로 E5_J 실행의 비용을 예측 |
 | `tools/one_second.py` | 1초 변형 답 파일(GPT, Claude, Jev) |

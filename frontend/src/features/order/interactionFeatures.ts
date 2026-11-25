@@ -1,6 +1,6 @@
 import type { FeatureWindowRequest, TouchFeatures } from '../../shared/api/types.ts';
-import type { LogEvent, SavedLog } from './touchLog.ts';
-import { measureTouchPilot } from './touchLogFeatures.ts';
+import type { FeatureLog, LogEvent } from './touchLog.ts';
+import { measureTouchPilot, touchPilotPolicy } from './touchLogFeatures.ts';
 import { observedWaitMs, voiceBusy, voicePhase } from './interactionWait.ts';
 
 const object = (value: unknown): Record<string, unknown> => value && typeof value === 'object' ? value as Record<string, unknown> : {};
@@ -8,15 +8,24 @@ const at = (event: LogEvent) => Date.parse(event.occurredAt);
 const data = (event: LogEvent) => object(event.data);
 const busy = (state: Record<string, unknown>) => state.status === 'loading' || state.status === 'saving';
 const last = (events: LogEvent[], predicate: (event: LogEvent) => boolean) => [...events].reverse().find(predicate);
+export const FEATURE_WINDOW_MS = 2000;
+
+export function featureInputLookbackStart(end: number) {
+  return end - FEATURE_WINDOW_MS - (touchPilotPolicy.repeatMs ?? 0);
+}
+
+export function hasFeatureHistory(saved: FeatureLog, end: number) {
+  return saved.discardedThrough === undefined || saved.discardedThrough <= featureInputLookbackStart(end);
+}
 
 /** Existing local pilot policy, with observable interaction counts. No discomfort labels. */
-export function buildTouchFeatureWindow(saved: SavedLog, now: number, sequence: number): FeatureWindowRequest | null {
-  if (!saved.serverSessionId) return null;
-  const pilot = measureTouchPilot(saved, now);
+export function buildTouchFeatureWindow(saved: FeatureLog, now: number, sequence: number, observedAt = now): FeatureWindowRequest | null {
+  if (!saved.serverSessionId || !hasFeatureHistory(saved, now)) return null;
+  const pilot = measureTouchPilot(saved, now, FEATURE_WINDOW_MS, undefined, observedAt);
   // The existing five required integer fields cannot represent unobserved values.
   if (!pilot.observed || Object.values(pilot.features).some(value => value === null)) return null;
   const events = saved.events.filter(e => e.sessionId === saved.sessionId && e.serverSessionId === saved.serverSessionId && at(e) <= now);
-  const current = events.at(-1);
+  const current = last(events, e => e.kind === 'screen_enter');
   if (!current || current.screen === 'complete') return null;
   const window = events.filter(e => at(e) > pilot.from);
   const count = (kind: string) => window.filter(e => e.kind === kind).length;
@@ -35,7 +44,8 @@ export function buildTouchFeatureWindow(saved: SavedLog, now: number, sequence: 
   const lastInput = pilot.sinceLastInputMs;
   const systemWait = lastInput === null ? null : observedWaitMs(events, now - lastInput, now, true);
   const selectionEvent = last(events, e => e.kind === 'selection_state_change');
-  const settings = object(current.settings);
+  const settingsEvent = last(events, e => e.kind === 'ui_settings_change' || e.kind === 'screen_enter');
+  const settings = object(settingsEvent?.kind === 'ui_settings_change' ? data(settingsEvent).after : settingsEvent?.settings);
 
   // Integrate the observed UI busy state, including a request already pending at window start.
   const baseline = last(events, e => e.kind === 'order_state_change' && at(e) <= pilot.from);

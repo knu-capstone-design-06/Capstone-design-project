@@ -1,0 +1,38 @@
+/* 안내 영역: 기본 크기에서 216 px = 카드 152 + 위아래 32. 층들은 한 칸에 겹쳐 두고 맨 위 층만 보이므로,
+   다음 터치로 알림이 닫혀 늘 서 있는 줄이 다시 보여도 자리 높이가 바뀌지 않아 손가락 아래의 조작이 움직이지 않습니다. */
+.kiosk .message-place { flex: 1 0 auto; display: grid; align-content: start; min-height: var(--h-place); padding: var(--between) 0; }
+.kiosk .message-place > * { grid-area: 1 / 1; }
+.kiosk .message-place > .is-behind { visibility: hidden; }
+
+/* 떠 있는 카드: 안쪽 여백 32, 모서리 24, 그림자 하나, 152 px 높이, M 글자. 알림·처리 중·단계별 안내는 옅은 중립 바탕 */
+.kiosk .cart-notice, .kiosk .order-progress, .kiosk .guide, .kiosk .order-feedback {
+  display: flex; flex-direction: column; justify-content: center; gap: var(--in); min-height: var(--h-message); margin: 0;
+  padding: var(--between); border: 0; border-radius: var(--r-float); box-shadow: var(--shadow-float);
+  background: var(--ui-canvas); color: var(--ui-ink); font-size: var(--fs-m); font-weight: 400; line-height: var(--lh);
+}
+.kiosk .cart-notice[hidden] { display: none; }
+.kiosk .guide { gap: 0; }
+.kiosk .guide p, .kiosk .order-feedback p { margin: 0; color: inherit; font-size: inherit; line-height: var(--lh); }
+
+/* 오류 카드: 오류 바탕과 그 글자색. 버튼(키오스크 버튼 88)은 카드 안 아래에 섭니다. 긴 안내는 카드 안에서 스크롤하고 버튼은 남습니다. */
+.kiosk .order-feedback { background: var(--ui-error); color: var(--ui-on-error); max-height: var(--order-feedback-space, 50dvh); overflow-y: auto; }
+.kiosk .order-feedback-actions { display: flex; flex-wrap: wrap; gap: var(--gap-btn); position: sticky; bottom: 0; background: inherit; }
+.kiosk .order-feedback button { min-height: var(--h-kiosk); padding: 0 var(--in); font-size: var(--fs-m); line-height: var(--lh);
+  color: var(--ui-ink); background: var(--ui-surface); border-color: var(--ui-line); }
+.kiosk.high-contrast .order-feedback button:enabled { color: inherit; background: transparent; border-color: currentColor; }
+
+/* 메뉴의 뜨는 자리: 한 층만 보입니다. 한 줄 안내는 마지막 줄 카드의 글자 칸만큼 높아(글자 칸 + 카드 아래 테두리, 기본 122) 위 끝이
+   그림과 글자 칸의 경계에 서고, 글은 카드의 글자 열(테두리 2 + 24 안쪽)에서 시작합니다. 누름은 받지 않습니다. 버튼이 있는 카드(제안·오류)는
+   내용 높이로 서서 누름을 받고, 목록 영역보다 길면 카드 안에서 스크롤합니다. 글자 줄 목록(간편 화면·큰 글씨)에서는 한 줄 높이입니다. */
+.kiosk .message-popup { display: grid; max-height: 100%; min-height: 0; }
+.kiosk .message-popup > * { grid-area: 1 / 1; align-self: end; }
+.kiosk .message-popup > .cart-notice, .kiosk .message-popup > .order-progress { flex-direction: row; align-items: center; justify-content: flex-start;
+  min-height: calc(var(--h-card-text) + var(--bw)); padding: var(--pad-1) calc(var(--pad-3) + var(--bw)); pointer-events: none; }
+.kiosk .grid-area:has(> .as-rows) .message-popup > :is(.cart-notice, .order-progress) { min-height: var(--h-text-row); }
+.kiosk .message-popup > .offer-card, .kiosk .message-popup > .order-feedback { max-height: 100%; overflow-y: auto; pointer-events: auto; }
+/* 단계별 안내: 큰 글씨에서는 단계 표시 아래 읽는 자리, 기본 글자 크기의 메뉴에서는 담은 메뉴 바로 위 한 줄 자리 */
+.kiosk .guide.guide-lines, .kiosk .guide.guide-row { min-height: 0; margin-top: var(--between); padding: 0; background: none; box-shadow: none; gap: var(--in); line-height: 1.1; }
+.kiosk .guide.guide-row { gap: 0; line-height: var(--lh); }
+/* 메뉴의 담은 메뉴: 쪽 넘김 줄(또는 단계별 안내 줄)과 묶음 사이 32(말로 주문 중에도). 말로 주문 영역은 담은 메뉴 바로 아래에 붙습니다. */
+.kiosk .menu-section ~ .cart-panel { margin-top: var(--between); }
+.kiosk.large-text .message-place { min-height: 0; padding-bottom: 0; }

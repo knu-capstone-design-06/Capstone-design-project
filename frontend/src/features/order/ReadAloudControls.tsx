@@ -2,15 +2,18 @@ import { useEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import { useVoiceInput } from '../voice/index.ts';
 import type { VoiceController } from '../voice/index.ts';
+import { Icon } from './components/icons.tsx';
+import { SettingTile } from './components/HelpSheet.tsx';
 
 function screenText(root: HTMLElement): string {
-  const scope = root.querySelector('dialog[open]') ?? root;
+  // 화면 도움 시트는 읽기 도구가 있는 곳이라 읽지 않고, 그 뒤의 화면(또는 열린 옵션·장바구니 창)을 읽습니다.
+  const scope = root.querySelector('dialog[open]:not(.help-sheet)') ?? root;
   const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
   const parts: string[] = [];
   const buttons = new Set<Element>();
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
     const element = node.parentElement;
-    if (!element || element.closest('[aria-hidden="true"], [hidden], dialog:not([open]), [data-read-aloud-tools], .voice-mode-control')
+    if (!element || element.closest('[aria-hidden="true"], [hidden], dialog:not([open]), .help-sheet, [data-read-aloud-tools], .voice-mode-control, .voice-entry')
       || !element.getClientRects().length || getComputedStyle(element).visibility !== 'visible') continue;
     const button = element.closest('button, a[href]');
     if (button) {
@@ -37,8 +40,9 @@ export function ReadAloudControls({ root, screenKey, voiceController }: {
   const soundSupported = typeof window.AudioContext !== 'undefined';
 
   function stop() {
+    const owned = utterance.current !== null;
     utterance.current = null;
-    if (supported) window.speechSynthesis.cancel();
+    if (supported && owned) window.speechSynthesis.cancel();
     setReading(false);
   }
   function stopSounds() {
@@ -83,8 +87,7 @@ export function ReadAloudControls({ root, screenKey, voiceController }: {
     return () => {
       document.removeEventListener('visibilitychange', hide);
       window.removeEventListener('pagehide', suspend);
-      utterance.current = null;
-      if (supported) window.speechSynthesis.cancel();
+      stop();
       stopSounds();
       if (audio.current && audio.current.state !== 'closed') void audio.current.close();
       audio.current = null;
@@ -112,14 +115,13 @@ export function ReadAloudControls({ root, screenKey, voiceController }: {
     document.addEventListener('click', click, true);
     return () => document.removeEventListener('click', click, true);
   }, [sound, soundSupported, voiceController, root]);
+  // 화면 도움 시트의 '음성 안내' 묶음: 화면 읽기·누름 소리 타일과 [읽기 중단] [다시 읽기]. 동작과 대상 이름은 그대로입니다.
   return <section data-read-aloud-tools aria-label="음성 안내와 누름 소리" className="read-aloud-tools">
-    <h3>음성 안내</h3>
-    <p>음성 입력을 켜면 화면 읽기는 멈춥니다.</p>
-    <div className="support-options">
-      <button data-log-target="read-aloud-toggle" type="button" aria-pressed={enabled} disabled={!supported} onClick={() => { voiceController.setEnabled(false); setEnabled(current => !current); }}>화면 읽기 {enabled ? '켜짐' : '꺼짐'}</button>
-      <button data-log-target="read-aloud-stop" type="button" disabled={!reading} onClick={stop}>읽기 중단</button>
-      <button data-log-target="read-aloud-replay" type="button" disabled={!supported || !enabled || voice.enabled || voice.microphoneActive} onClick={read}>다시 읽기</button>
-      <button data-log-target="touch-sound-toggle" type="button" aria-pressed={sound} disabled={!soundSupported} onClick={() => {
+    <h3 className="group-title">음성 안내</h3>
+    <div className="support-options cols2">
+      <SettingTile target="read-aloud-toggle" icon="record_voice_over" label="화면 읽기" on={enabled} disabled={!supported}
+        onClick={() => { voiceController.setEnabled(false); setEnabled(current => !current); }} />
+      <SettingTile target="touch-sound-toggle" icon="volume_up" label="누름 소리" on={sound} disabled={!soundSupported} onClick={() => {
         try {
           if (!sound) {
             if (!audio.current || audio.current.state === 'closed') audio.current = new AudioContext();
@@ -127,9 +129,14 @@ export function ReadAloudControls({ root, screenKey, voiceController }: {
           }
           setSound(current => !current);
         } catch { setSound(false); setMessage('누름 소리를 켜지 못했어요.'); }
-      }}>누름 소리 {sound ? '켜짐' : '꺼짐'}</button>
+      }} />
     </div>
-    {!supported && <p>이 브라우저에서는 음성 안내를 사용할 수 없습니다.</p>}
-    {message && <p role="status">{message}</p>}
+    <div className="cols">
+      <button data-log-target="read-aloud-stop" type="button" disabled={!reading} onClick={stop}><Icon name="stop" />읽기 중단</button>
+      <button data-log-target="read-aloud-replay" type="button" disabled={!supported || !enabled || voice.enabled || voice.microphoneActive} onClick={read}><Icon name="replay" />다시 읽기</button>
+    </div>
+    <p className="sheet-desc">말로 주문을 켜면 화면 읽기는 멈춰요.</p>
+    {!supported && <p className="sheet-desc">이 브라우저에서는 음성 안내를 사용할 수 없습니다.</p>}
+    {message && <p className="sheet-status" role="status">{message}</p>}
   </section>;
 }

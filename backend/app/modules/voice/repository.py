@@ -21,10 +21,18 @@ class Proposal:
 
     tool_calls: list[ToolCall]
     cart: list[CartLine] = field(default_factory=list)
+    made_at: datetime | None = None
+
+
 # Proposed value: recent exchanges per session passed to the interpreter as context.
 HISTORY_TURNS = 10
 # Proposed value: requests, idempotency keys and idle session context are dropped after this.
 RETENTION = timedelta(hours=1)
+# Proposed value: an offer nobody answered lapses after this. Nothing ends a session when a customer
+# walks away, so without it the next person's "좋아요" would add the last customer's offer.
+PROPOSAL_TTL = timedelta(minutes=2)
+# The kiosk's questions: the last turn of the context with one of these reads as still open.
+QUESTION_STATUSES = ("needs_confirmation", "needs_clarification")
 
 
 def utc_now() -> datetime:
@@ -85,6 +93,12 @@ class VoiceRepository:
             self._history.pop(session_id, None)
             self._proposals.pop(session_id, None)
             self._reconfirm.discard(session_id)
+        # An offer or a reconfirm mark whose turn was never stored (the store failed) has no turn time:
+        # it goes once the session has no request left either.
+        active = {r.session_id for r in self._records.values()}
+        for session_id in (set(self._proposals) | self._reconfirm) - set(self._last_turn_at) - active:
+            self._proposals.pop(session_id, None)
+            self._reconfirm.discard(session_id)
 
     def accept(
         self, session_id: str, key: UUID, fingerprint: str,
@@ -137,6 +151,27 @@ class VoiceRepository:
             record.actions = list(actions or [])
             record.error = error
 
+    def fail_unfinished(self, request_id: str, reply_text: str, error: VoiceErrorResponse) -> bool:
+        """Close a request still accepted or processing as failed; True when it was. Finished ones are kept."""
+        with self._lock:
+            record = self._records.get(request_id)
+            if record is None or record.status not in ACTIVE_STATUSES:
+                return False
+            record.status, record.reply_text, record.error = "failed", reply_text, error
+            record.tool_calls, record.actions = [], []
+            return True
+
+    def finish_unfinished(self, request_id: str, status: VoiceStatus, reply_text: str | None,
+                          tool_calls: list[ToolCall], actions: list[VoiceAction]) -> bool:
+        """Close a request still accepted or processing as what happened; True when it was."""
+        with self._lock:
+            record = self._records.get(request_id)
+            if record is None or record.status not in ACTIVE_STATUSES:
+                return False
+            record.status, record.reply_text, record.error = status, reply_text, None
+            record.tool_calls, record.actions = list(tool_calls), list(actions)
+            return True
+
     def history(self, session_id: str) -> list[VoiceTurn]:
         with self._lock:
             return list(self._history.get(session_id, ()))
@@ -147,14 +182,28 @@ class VoiceRepository:
             self._last_turn_at[session_id] = self._clock()
 
     def take_proposal(self, session_id: str) -> Proposal | None:
-        """Return and clear the pending proposal: it answers one utterance only."""
+        """Return and clear the pending proposal: it answers one utterance only.
+
+        An offer older than PROPOSAL_TTL has lapsed: it is dropped with its question, as a refused one is
+        (the reconfirm mark stays), and None is returned. A question nobody answered within PROPOSAL_TTL
+        (the temperature, which menu) lapses the same way: the questions at the end of the context are
+        dropped, so the next customer's "아이스로요" is not read as the answer to the last one's order.
+        """
         with self._lock:
-            return self._proposals.pop(session_id, None)
+            now = self._clock()
+            proposal = self._proposals.pop(session_id, None)
+            lapsed = proposal is not None and proposal.made_at is not None and now - proposal.made_at > PROPOSAL_TTL
+            asked_at = self._last_turn_at.get(session_id)
+            history = self._history.get(session_id)
+            if lapsed or (asked_at is not None and now - asked_at > PROPOSAL_TTL):
+                while history and history[-1].result.status in QUESTION_STATUSES:
+                    history.pop()
+            return None if lapsed else proposal
 
     def set_proposal(self, session_id: str, tool_calls: list[ToolCall], cart: Iterable[CartLine] = ()) -> None:
         """Keep the offer with the cart it was checked against, so "네" runs it on that cart only."""
         with self._lock:
-            self._proposals[session_id] = Proposal(list(tool_calls), list(cart))
+            self._proposals[session_id] = Proposal(list(tool_calls), list(cart), self._clock())
             self._reconfirm.add(session_id)
 
     def mark_reconfirm(self, session_id: str) -> None:
@@ -170,6 +219,19 @@ class VoiceRepository:
         """An order went through; the session's readings are orders again."""
         with self._lock:
             self._reconfirm.discard(session_id)
+
+    def discard_question_turn(self, session_id: str) -> None:
+        """Drop every question (confirmation or clarification) at the end of the context after an executed order.
+
+        All of them go, not only the last: a question asked again ("네" to the temperature question), or the
+        clarification an offer answered, stays behind it and would read as still open once the last one is gone.
+        With its completed turn stored, the order would have closed them all the same way: only the last turn
+        is read as an open question.
+        """
+        with self._lock:
+            history = self._history.get(session_id)
+            while history and history[-1].result.status in QUESTION_STATUSES:
+                history.pop()
 
     def discard_proposal_turn(self, session_id: str) -> None:
         """Drop the trailing needs_confirmation exchange: its offer is no longer open.

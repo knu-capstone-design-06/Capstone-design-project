@@ -29,7 +29,8 @@ test('선택·수량 정정·저장 전후 장바구니를 구분하고 새 세�
           const heldAdd = new Promise(resolve => { releaseAdd = resolve; });
           await page.route('**/cart/items', async route => { await heldAdd; await route.fallback(); });
           await page.goto(url);
-          const click = id => page.locator(`[data-log-target="${id}"]`).click();
+          // 창이 닫히거나 화면이 바뀐 직후의 하단 바(data-armed="false")는 두 번 클릭 간격이 지난 뒤 누릅니다.
+          const click = id => page.locator(`[data-log-target="${id}"]:not([data-armed="false"])`).click();
           await page.locator('[data-log-target="product:americano"]:not([disabled])').waitFor();
           await click('product:americano');
           await click('options-increase');
@@ -42,8 +43,11 @@ test('선택·수량 정정·저장 전후 장바구니를 구분하고 새 세�
           assert.equal(pending.cart.totalQuantity, 0);
           releaseAdd();
           await page.locator('dialog[open]').waitFor({ state: 'hidden' });
+          // 큰 글씨에서는 장바구니가 '담은 메뉴 보기' 시트 안에 있습니다.
+          if (!(await page.locator('[data-log-target="cart:americano:아이스:decrease"]').count())) await click('cart-sheet-open');
           await click('cart:americano:아이스:decrease');
           await page.waitForFunction(() => window.kioskTouchLogDraft.read().events.some(event => event.kind === 'order_state_change' && event.data.after.cart?.version === 2));
+          if (await page.locator('dialog.cart-sheet[open]').count()) await click('cart-sheet-close');
           events = await page.evaluate(() => window.kioskTouchLogDraft.read().events);
           const quantities = events.filter(event => event.kind === 'order_state_change' && event.data.after.status === 'ready').map(event => event.data.after.cart.totalQuantity);
           assert.deepEqual(quantities, [0, 2, 1]);
@@ -213,7 +217,7 @@ test('로컬 로그: 중복 방지, 화면·옵션·설정, 서버 세션 연결
     await page.waitForFunction(() => window.kioskTouchLogDraft);
     await page.waitForFunction(id => window.kioskTouchLogDraft.read().serverSessionId === id, first);
     const read = () => page.evaluate(() => window.kioskTouchLogDraft.read());
-    const click = id => page.locator(`[data-log-target="${id}"]`).click();
+    const click = id => page.locator(`[data-log-target="${id}"]:not([data-armed="false"])`).click();
     let log = await read();
     assert.equal(log.events.filter(event => event.kind === 'session_start' && event.serverSessionId === first).length, 1);
     assert.equal(log.events.filter(event => event.kind === 'screen_enter' && event.sessionId === log.sessionId).length, 1);
@@ -242,7 +246,7 @@ test('로컬 로그: 중복 방지, 화면·옵션·설정, 서버 세션 연결
     await click('cart-add');
     await click('support-toggle');
     await click('support:largeButton');
-    await click('support-toggle');
+    await click('support-close');
     await click('review-open');
     log = await read();
     assert(log.events.some(event => event.kind === 'ui_settings_change'));
@@ -419,11 +423,11 @@ test('하단 주문 바의 완전·부분 가림을 제외하고 주문 버튼�
           const responses = await installOrderResponses(page, steps);
           await page.goto(url);
           await page.waitForFunction(() => document.querySelector('[data-log-target="product:americano"]')?.disabled === false);
-          const click = id => page.locator(`[data-log-target="${id}"]`).click();
+          const click = id => page.locator(`[data-log-target="${id}"]:not([data-armed="false"])`).click();
           if (settings.length) {
             await click('support-toggle');
             for (const setting of settings) await click(`support:${setting}`);
-            await click('support-toggle');
+            await click('support-close');
           }
           const point = await page.evaluate(() => {
             const bar = document.querySelector('.order-actions').getBoundingClientRect();
@@ -490,5 +494,33 @@ test('하단 주문 바의 완전·부분 가림을 제외하고 주문 버튼�
         });
       }
     }
+  } finally { await browser.close(); }
+});
+
+test('화면 도움 시트가 열려 있으면 가까운 후보는 시트 안에서만 찾고, 시트 밖 누름은 대상 밖으로 기록한 뒤 시트를 닫는다', async () => {
+  const browser = await chromium.launch(launchOptions);
+  try {
+    const page = await browser.newPage({ viewport: { width: 1080, height: 1920 } });
+    const responses = await installOrderResponses(page, bootstrap('help-occlusion'));
+    await page.goto(url);
+    await page.waitForFunction(() => document.querySelector('[data-log-target="product:americano"]')?.disabled === false);
+    await page.locator('[data-log-target="support-toggle"]').click();
+    await page.locator('dialog#support-panel[open]').waitFor();
+    // 시트 위쪽의 어두운 곳에서 분류 탭 바로 옆(탭이 가장 가까운 자리)을 누릅니다.
+    const point = await page.evaluate(() => {
+      const tab = document.querySelector('[data-log-target="category:푸드"]').getBoundingClientRect();
+      const sheet = document.querySelector('#support-panel').getBoundingClientRect();
+      if (tab.bottom > sheet.top) throw new Error('분류 탭이 시트 위쪽에 보여야 함');
+      return { x: tab.right + 4, y: tab.top + tab.height / 2 };
+    });
+    await page.mouse.click(point.x, point.y);
+    const press = await page.evaluate(() => window.kioskTouchLogDraft.read().events.filter(event => event.kind === 'pointer_start').at(-1).data);
+    assert.equal(press.target, null, '팝업만 닫는 누름은 대상 밖 누름으로 기록');
+    assert(press.nearestCandidates.length > 0);
+    const inSheet = await page.evaluate(() => [...document.querySelectorAll('#support-panel [data-log-target]')].map(element => element.dataset.logTarget));
+    assert(press.nearestCandidates.every(candidate => inSheet.includes(candidate.id)), '가려진 상품은 후보가 아님');
+    await page.locator('dialog#support-panel[open]').waitFor({ state: 'detached' }).catch(() => {});
+    assert.equal(await page.locator('dialog#support-panel[open]').count(), 0, '시트 밖 누름으로 닫힘');
+    responses.verify();
   } finally { await browser.close(); }
 });

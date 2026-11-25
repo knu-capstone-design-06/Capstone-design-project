@@ -1,4 +1,5 @@
-"""Time over HTTP retries and format re-calls (call_time.py and the runners) and the 1-s tools that read it.
+"""Time over HTTP retries and format re-calls (call_time.py and the runners) and the 1-s tools that read it; the
+runners on an HTTP error whose body cannot be read.
 
 Standard library only and no network: urllib.request.urlopen, time.perf_counter and time.sleep are replaced, and the
 anthropic package is replaced by a small stand-in. From the repository root:
@@ -96,14 +97,23 @@ class HTTPError(urllib.error.HTTPError):
         return body
 
 
+class DroppedErrorBody(HTTPError):
+    def read(self, *args):  # the connection drops while the error body is read
+        self.close()
+        raise ConnectionResetError("connection reset while the error body was read")
+
+
 def http(clock, steps):
-    """urlopen stand-in; each step is (ms, reply bytes) or (ms, (HTTP code, message))."""
+    """urlopen stand-in; each step is (ms, reply bytes) or (ms, (HTTP code, message)); message None: the error body
+    cannot be read (the connection drops while it is read)."""
     steps = list(steps)
 
     def urlopen(req, timeout=None):
         ms, out = steps.pop(0)
         clock.t += ms / 1000
         if isinstance(out, tuple):
+            if out[1] is None:
+                raise DroppedErrorBody(req.full_url, out[0], "error", {}, io.BytesIO())
             raise HTTPError(req.full_url, out[0], "error", {}, io.BytesIO(out[1].encode()))
         return Reply(out)
 
@@ -438,6 +448,61 @@ class ScenarioOneSecondTool(TempDir):
         # r3: 900 ms then 300 ms after a format error, over 1 s
         self.assertEqual(scores["m | novel"]["runs"], [1.0, 0.5, 0.5])
         self.assertEqual(unknown["m | novel"], [0, 1, 0])
+
+
+class UnreadableErrorBody(TempDir):
+    """An HTTP error whose body cannot be read (the connection drops while it is read): its status still decides.
+    The first window (case) gets a 400, which is not retried: the usual failure line, then the re-call answers. The
+    second gets a 503 (900 ms), which is retried after the usual 2 s wait and answered in 300 ms. The run goes on and
+    writes its answers and calls."""
+
+    make_kit = OneSecondTool.make_kit  # the one-second tests' kit, here with windows w1 and w2
+
+    def steps(self, reply):
+        return [(120, (400, None)), (130, reply), (900, (503, None)), (300, reply)]
+
+    def run_main(self, module, argv, steps):
+        with self.clock.patch(), http(self.clock, steps), mock.patch.object(sys, "argv", argv), \
+                redirect_stdout(io.StringIO()):
+            module.main()
+
+    def check(self, out, key, first, second):
+        self.assertEqual({r[key]: r["choice"] for r in read_jsonl(out / "answers.jsonl")}, {first: "a", second: "a"})
+        calls = read_jsonl(out / "calls.jsonl")
+        self.assertEqual([(c[key], c["attempt"], c["error"], c["retries"], c["request_ms"]) for c in calls],
+                         [(first, 0, "http 400: ", 0, 120.0), (first, 1, None, 0, 130.0), (second, 0, None, 1, 3200.0)])
+        self.assertEqual(calls[0]["http_attempts"], [{"ms": 120.0, "result": "http 400", "wait_ms": 0.0}])
+        self.assertEqual(calls[2]["http_attempts"], [{"ms": 900.0, "result": "http 503", "wait_ms": 2000.0},
+                                                     {"ms": 300.0, "result": "ok", "wait_ms": 0.0}])
+
+    def test_gpt_runner(self):
+        kit, _ = self.make_kit({"w1": {"k": 1}, "w2": {"k": 2}})
+        env, out = self.dir / "env", self.dir / "runs/gpt_E5_C0"
+        env.write_text("OPENAI_API_KEY=not-a-key\n", encoding="utf-8")
+        self.run_main(run_gpt, ["run_gpt.py", "--kit", str(kit), "--arm", "E5_C0", "--model", "gpt-4o-mini-2024-07-18",
+                                "--env", str(env), "--out", str(out), "--cache", str(self.dir / "cache"),
+                                "--workers", "1"], self.steps(openai_reply("a")))
+        self.check(out, "window_id", "w1", "w2")
+
+    def test_gemini_runner(self):
+        kit, _ = self.make_kit({"w1": {"k": 1}, "w2": {"k": 2}})
+        env, out = self.dir / "env", self.dir / "runs/gemini_E5_C0"
+        env.write_text("GEMINI_API_KEY=not-a-key\n", encoding="utf-8")
+        self.run_main(run_gemini, ["run_gemini.py", "--kit", str(kit), "--arm", "E5_C0", "--model", "gemini-3.8-flash",
+                                   "--env", str(env), "--out", str(out), "--cache", str(self.dir / "cache"),
+                                   "--workers", "1"], self.steps(gemini_reply("a")))
+        self.check(out, "window_id", "w1", "w2")
+
+    def test_scenario_runner(self):
+        root, env = self.dir / "scen", self.dir / "env"
+        env.write_text("OPENAI_API_KEY=not-a-key\n", encoding="utf-8")
+        q = {"support_choice": {"criteria": {"a": "Help.", "none": "Wait."}}}
+        write_jsonl(root / "inputs/novel.jsonl", [{"case_id": c, "state": {"case": c}, "questions": q} for c in ("c1", "c2")])
+        self.run_main(run_scenarios, ["run_scenarios.py", "--set", "novel", "--model", "gpt-4o-mini-2024-07-18",
+                                      "--run", "1", "--root", str(root), "--cache", str(self.dir / "cache"),
+                                      "--openai-env", str(env), "--anthropic-env", str(env), "--workers", "1"],
+                      self.steps(openai_reply("a", "support_choice")))
+        self.check(root / "gpt-4o-mini-2024-07-18__novel__r1", "case_id", "c1", "c2")
 
 
 if __name__ == "__main__":

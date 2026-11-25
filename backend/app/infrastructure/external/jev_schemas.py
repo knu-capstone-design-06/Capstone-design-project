@@ -1,7 +1,7 @@
 """Jev (TypeSafe AI) System One request and answer shapes.
 
 Source: https://docs.typesafe.ai/api/system-one.md (2026-11-01). The request is what
-the vision rule table already builds (ai-engine jev_request: model, state, questions);
+the backend judgment layer builds (app/modules/decision: model, state, questions);
 the answer is validated here so callers only ever see a well-formed one or None.
 """
 

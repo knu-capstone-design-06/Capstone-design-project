@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createTouchLog } from './touchLog.ts';
+import { createTouchLog, logLimit } from './touchLog.ts';
 import { buildTouchFeatureWindow } from './interactionFeatures.ts';
 import { createTouchFeatureTransport } from './touchFeatureTransport.ts';
 import { ApiError } from '../../shared/api/client.ts';
 import { measureTouchPilot } from './touchLogFeatures.ts';
 
-function fixture(session = 'server-1') {
+function fixture(session = 'server-1', collectFeatures = false) {
   let clock = 0, id = 0;
-  const recorder = createTouchLog(null, () => `e-${++id}`, () => clock);
+  const recorder = createTouchLog(null, () => `e-${++id}`, () => clock, collectFeatures);
   recorder.newSession(session);
   const context = { screen: 'menu', visitId: 'visit-1', settings: { largeText: true } };
   const ready = { status: 'ready', completed: false, cart: { version: 0, items: [] } };
@@ -27,6 +27,51 @@ function fixture(session = 'server-1') {
 function voiceAt(f, time, phase) {
   f.record(time, 'voice_state_change', { before: {}, after: { enabled: true, microphoneActive: phase === 'listening', phase } });
 }
+
+test('scrolls can roll out the raw log while feature uploads retain current session state', async () => {
+  const f = fixture('server-1', true);
+  f.record(100, 'selection_state_change', { before: null, after: { productId: 'drink' } });
+  f.press(500);
+  let now = 2001;
+  const sent = [];
+  const transport = createTouchFeatureTransport(async (session, window) => {
+    sent.push(window);
+    return { session_id: session };
+  }, () => f.recorder.readForFeatures(), () => now);
+  transport.setContext('server-1', true);
+
+  await transport.tick();
+  for (let i = 1; i <= logLimit + 200; i++) {
+    f.record(2000 + i * 10, 'scroll');
+    now = 2001 + i * 10;
+    await transport.tick();
+  }
+  const raw = f.recorder.read();
+  assert.equal(raw.events.length, logLimit);
+  assert(raw.events.every(event => event.kind === 'scroll'));
+  assert.equal(sent.length, 7);
+  assert.deepEqual(sent.slice(1).map(w => w.touch.interaction.scroll_event_count), Array(6).fill(200));
+  const latest = sent.at(-1);
+  assert.equal(latest.screen_id, 'menu');
+  assert.equal(latest.touch.interaction.visit_id, 'visit-1');
+  assert.equal(latest.touch.interaction.options_open, true);
+  assert.equal(latest.touch.interaction.order_busy, false);
+  assert.equal(latest.touch.interaction.screen_revisit_count, 0);
+  assert.equal(latest.touch.interaction.since_last_input_ms, 13500);
+  assert.equal(latest.touch.dwell_ms, 14000);
+});
+
+test('a window with lost scroll evidence is skipped and a later full window can be sent', () => {
+  const f = fixture('server-1', true);
+  for (let i = 0; i < logLimit + 1; i++) f.record(2500, 'scroll');
+  assert.equal(buildTouchFeatureWindow(f.recorder.readForFeatures(), 4000, 1), null);
+  const window = buildTouchFeatureWindow(f.recorder.readForFeatures(), 5500, 1);
+  assert.equal(window.touch.interaction.scroll_event_count, 0);
+  f.recorder.newSession('server-2');
+  const next = f.recorder.readForFeatures();
+  assert.deepEqual(next.events, []);
+  assert.equal(next.discardedThrough, undefined);
+});
 
 test('processing → speaking → listening preserves legacy metrics and excludes both waits', () => {
   const f = fixture(); f.press(1000);
@@ -137,6 +182,22 @@ test('same feature window carries five pilot metrics and contextual interaction 
   assert(!JSON.stringify(result).includes('"x":'), 'raw pointer coordinates are not uploaded');
 });
 
+test('ui settings use the change after-value without waiting for a new input event', () => {
+  const f = fixture();
+  f.record(1200, 'ui_settings_change', {
+    before: { largeText: true },
+    after: { largeText: true, largeButton: true, highContrast: true },
+  });
+  const saved = f.recorder.read();
+  assert.equal(saved.events.at(-1).settings.largeButton, undefined);
+  for (const end of [3000, 5000]) {
+    const extra = buildTouchFeatureWindow(saved, end, 1).touch.interaction;
+    assert.equal(extra.ui_settings.large_button, true);
+    assert.equal(extra.ui_settings.high_contrast, true);
+    assert.equal(extra.ui_settings_change_count, end === 3000 ? 1 : 0);
+  }
+});
+
 test('no input is distinct from unobserved windows and unobserved historical context', () => {
   const f = fixture();
   const saved = f.recorder.read();
@@ -177,6 +238,45 @@ test('completed sessions and currently unresolved pointer samples are not transm
   assert.equal(buildTouchFeatureWindow(completed.recorder.read(), 3000, 1), null);
 });
 
+test('a pointer that ends in an older visit cannot replace the screen and visit at window end', () => {
+  const f = fixture();
+  const inputId = f.record(1300, 'pointer_start', { start: { x: 0, y: 0 }, target: null, pointerType: 'touch', isPrimary: true });
+  f.record(1400, 'screen_leave', { to: 'review' });
+  f.context.screen = 'review'; f.context.visitId = 'visit-2';
+  f.record(1400, 'screen_enter', { from: 'menu', visibility: 'visible' });
+  f.context.screen = 'menu'; f.context.visitId = 'visit-1';
+  f.record(2200, 'pointer_end', { inputId, cancelled: false, maxObservedDistance: 0 });
+  const result = buildTouchFeatureWindow(f.recorder.read(), 3000, 1);
+  assert.equal(result.screen_id, 'review');
+  assert.equal(result.touch.interaction.visit_id, 'visit-2');
+  assert.equal(result.touch.interaction.since_last_input_ms, null);
+  assert.equal(result.touch.tap_count, 1);
+});
+
+test('2.6-second press remains in its original window and late ticks neither miss nor duplicate presses', async () => {
+  const f = fixture();
+  let now = 3001;
+  const sent = [];
+  const sender = createTouchFeatureTransport(async (session, body) => { sent.push(body); return { session_id: session }; },
+    () => f.recorder.read(), () => now);
+  sender.setContext('server-1', true);
+  await sender.tick();
+  f.press(3250);
+  const inputId = f.record(4500, 'pointer_start', { start: { x: 0, y: 0 }, target: null, pointerType: 'touch', isPrimary: true });
+  for (now = 5250; now <= 7000; now += 250) await sender.tick();
+  assert.equal(sent.length, 1, 'do not report a newer zero while the held input is still unresolved');
+  f.press(6500);
+  f.record(7100, 'pointer_end', { inputId, cancelled: false, maxObservedDistance: 0 });
+  now = 7250; await sender.tick();
+  now = 7500; await sender.tick();
+  now = 9300; await sender.tick();
+  assert.deepEqual(sent.map(w => [Date.parse(w.window_start), Date.parse(w.window_end), w.touch.tap_count]), [
+    [1000, 3000, 0], [3000, 5000, 2], [5000, 7000, 1], [7000, 9000, 0],
+  ]);
+  assert.deepEqual(sent.map(w => w.touch.interaction.window_sequence), [1, 2, 3, 4]);
+  sender.dispose();
+});
+
 test('transport serializes requests, cancels an old session and ignores its late response', async () => {
   let f = fixture(), resolve;
   const calls = [];
@@ -202,7 +302,8 @@ test('failed transport sends a fresh sample later, while 410 stops this session'
   sender.setContext('server-1', true); await sender.tick(); assert.equal(sender.status().state, 'error');
   error = null; now = 5000; await sender.tick(); assert.equal(sender.status().sent, 1);
   assert.notEqual(calls[0].window_end, calls[1].window_end);
-  error = new ApiError(410, {}); await sender.tick(); await sender.tick(); assert.equal(attempts, 3);
+  error = new ApiError(410, {}); now = 7000; await sender.tick();
+  now = 9000; await sender.tick(); assert.equal(attempts, 3);
   assert.equal(sender.status().state, 'stopped'); sender.dispose();
 });
 
