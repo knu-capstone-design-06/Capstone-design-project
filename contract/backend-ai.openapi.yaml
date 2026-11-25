@@ -77,9 +77,17 @@ components:
         status: { type: string, const: ok }
         service: { type: string, const: ai-engine }
 
-    # TouchFeatures, VisionFeatures, StateScores는 frontend-backend.openapi.yaml과 같은 형식입니다.
+    # 내부 터치 입력과 프론트 관측 확장은 각각 관리합니다.
     TouchFeatures:
-      $ref: "./frontend-backend.openapi.yaml#/components/schemas/TouchFeatures"
+      type: object
+      description: 내부 분석으로 전달하는 터치 지표 5개
+      required: [tap_count, miss_tap_count, repeat_tap_count, back_count, dwell_ms]
+      properties:
+        tap_count: { type: integer, minimum: 0, description: 전체 터치 횟수 }
+        miss_tap_count: { type: integer, minimum: 0, description: 버튼 밖 터치 횟수 }
+        repeat_tap_count: { type: integer, minimum: 0, description: 같은 위치 반복 터치 횟수 }
+        back_count: { type: integer, minimum: 0, description: 뒤로가기 횟수 }
+        dwell_ms: { type: integer, minimum: 0, description: 현재 화면 체류 시간(ms) }
     VisionFeatures:
       $ref: "./frontend-backend.openapi.yaml#/components/schemas/VisionFeatures"
     StateScores:
