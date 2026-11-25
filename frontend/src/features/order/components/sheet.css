@@ -50,6 +50,9 @@
 .kiosk .sheet-bar { display: grid; grid-template-columns: minmax(0, 1fr) var(--w-restart) minmax(var(--w-action), auto); gap: var(--gap-btn); align-items: center; }
 .kiosk .sheet-bar .sheet-cancel { grid-column: 2; }
 .kiosk .sheet-bar .sheet-main { grid-column: 3; width: auto; font-weight: 700; }
+/* 장바구니 창의 아래 줄: 줄의 높이는 조작 높이이고, 그보다 높은 총 금액 묶음(S 위 L)은 하단 주문 바에서처럼 위아래로 고르게 넘칩니다.
+   [닫기]·[주문 확인]이 하단 주문 바의 [처음으로]·주요 버튼, 옵션 창의 [취소]·[담기]와 같은 높이에 섭니다. 큰 글씨·크게 보기·760px 이하 화면은 아래 줄의 배치가 달라 이 규칙을 두지 않습니다. */
+@media (min-width: 761px) { .kiosk:not(.large-text, .large-view) .cart-sheet .sheet-bar { grid-template-rows: var(--h-control); } }
 .kiosk.large-text dialog.sheet button { white-space: normal; height: auto; padding-block: var(--pad-1); }
 
 @media (max-width: 760px) {
@@ -84,6 +87,8 @@
 /* 큰 글씨: [기본 화면으로]는 글자만 둡니다([화면 도움] 줄의 큰 글씨 버튼과 같음). 아이콘을 두면 '화면으로'가 [닫기] 앞 칸에
    들어가지 않아 낱말 가운데에서 줄이 바뀝니다. */
 .kiosk.large-text .help-sheet .sheet-reset .pic { display: none; }
+/* 큰 글씨: 두 줄이 되는 [기본 화면으로]와 한 줄인 [닫기]를 같은 높이로 둡니다. */
+.kiosk.large-text .help-sheet .sheet-bar { align-items: stretch; }
 .kiosk.large-text .help-sheet .cols, .kiosk.large-text .help-sheet .cols2 { grid-template-columns: minmax(0, 1fr); }
 /* 크게 보기: 설정 타일은 두 열("단계별 안내"와 아이콘에 334 px가 필요해 316 px 열에 들어가지 않음) */
 .kiosk.large-view .help-sheet .support-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }

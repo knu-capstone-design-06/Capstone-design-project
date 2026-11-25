@@ -16,7 +16,9 @@
 
 /* 오류 카드: 오류 바탕과 그 글자색. 버튼(키오스크 버튼 88)은 카드 안 아래에 섭니다. 긴 안내는 카드 안에서 스크롤하고 버튼은 남습니다. */
 .kiosk .order-feedback { background: var(--ui-error); color: var(--ui-on-error); max-height: var(--order-feedback-space, 50dvh); overflow-y: auto; }
-.kiosk .order-feedback-actions { display: flex; flex-wrap: wrap; gap: var(--gap-btn); position: sticky; bottom: 0; background: inherit; }
+/* 대답 줄: 카드·창의 폭을 대답 수만큼 같은 너비로 나눕니다(하나면 전체 폭). 큰 글씨에서는 한 줄에 하나씩 둡니다. */
+.kiosk .order-feedback-actions { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: var(--gap-btn); padding-block: 0; position: sticky; bottom: 0; background: inherit; }
+.kiosk.large-text .order-feedback-actions { grid-auto-flow: row; }
 .kiosk .order-feedback button { min-height: var(--h-kiosk); padding: 0 var(--in); font-size: var(--fs-m); line-height: var(--lh);
   color: var(--ui-ink); background: var(--ui-surface); border-color: var(--ui-line); }
 .kiosk.high-contrast .order-feedback button:enabled { color: inherit; background: transparent; border-color: currentColor; }
