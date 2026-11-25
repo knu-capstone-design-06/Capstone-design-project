@@ -87,7 +87,7 @@ Jev에는 후속 연동에서 시간 구간·관측 여부·현재 화면·비�
 
 #72(`feat/frontend`)의 집계 코드에 선택적 필드를 먼저 추가한다. 이 집계는 #79 없이도 동작하고, `speaking`이 없는 기존 음성 제어 코드에서는 처리 대기만 집계한다. #72에 새 커밋이 추가되므로 기존 `ab1869f`의 승인을 최종 승인으로 취급하지 않고 다시 리뷰받아야 한다. #72를 먼저 병합한 뒤 #79(`TTS`, 확인한 커밋 `76a2a34`)가 그 결과와 최신 main을 받아 통합 검증하는 순서를 제안한다. 두 PR은 확인 시점 모두 열려 있고, 겹치는 경로는 `OrderPage.tsx`, `frontend/README.md`, 주문 기능 README이다. `TTS`는 #79 본문에 기록된 프론트 담당자의 별도 브랜치 요청에 따른 기존 브랜치다.
 
-검증: `node --test frontend/src/features/order/interactionFeatures.test.mjs`. 실제 #79 상태 전환과의 연결은 `TTS_VOICE_CONTROLLER_MODULE`에 #79의 `voiceController.ts` 파일 URL을 지정한 뒤 `voiceWait.integration.test.mjs`를 실행한다. 상태 전환 검증은 모의 인식·재생을 사용하며 G10 실제 음향 검증을 대신하지 않는다.
+검증: `node --test frontend/src/features/order/interactionFeatures.test.mjs`. 현재 #79 통합판의 상태 전환 연결은 `node --test frontend/src/features/order/voiceWait.integration.test.mjs`로 실행한다. 검사 파일이 같은 checkout의 `voiceController.ts`를 직접 불러오므로 `TTS_VOICE_CONTROLLER_MODULE` 지정은 필요 없다. 아래 외부 모듈 주입 결과는 통합 전 검증 기록이다. 상태 전환 검증은 모의 인식·재생을 사용하며 G10 실제 음향 검증을 대신하지 않는다.
 
 검증 결과: #72 기반 `pnpm test` 119개 통과(시간 집계 신규 6개 포함), #79 `76a2a34`의 실제 `VoiceController`를 주입한 연결 검사 6개 통과(완료·중단·실패·모드 해제·세션 변경·숨김), `pnpm build` 통과. 연결 검사는 별도 명령이며 기존 `pnpm test` 스크립트에는 추가하지 않았다. #79 통합 전 기본 음성 제어 코드로 이 연결 검사만 실행하면 6개를 건너뛰며, 앞선 6개 시간 집계 검사는 기본 `pnpm test`에 포함된다. 두 PR을 실제 병합한 화면 전체의 브라우저 검증은 후속 작업이다.
 

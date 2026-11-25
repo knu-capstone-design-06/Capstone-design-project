@@ -12,7 +12,7 @@ import { captureTouchLogObservation } from './touchLogObservation.ts';
 import { TouchLogPanel } from './TouchLogPanel.tsx';
 import { VoiceButton, VoicePanel, voiceAutoOffNotice } from './VoiceModeToggle.tsx';
 import { ReadAloudControls } from './ReadAloudControls.tsx';
-import { createVoiceApi, VoiceController } from '../voice/index.ts';
+import { createReplySpeaker, createVoiceApi, VoiceController } from '../voice/index.ts';
 import './components/tokens.css';
 import './order.css';
 import './orderAccessibility.css';
@@ -61,7 +61,7 @@ export function OrderPage() {
   }));
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const [voiceController] = useState(() => new VoiceController({
-    api: createVoiceApi(), recognitionOnly: sampleMode,
+    api: createVoiceApi(), recognitionOnly: sampleMode, replySpeaker: createReplySpeaker(),
     // tool_calls are only an explanation. The backend marks a completed Cart write with this action.
     onResult: result => { if (result.actions.includes('cart_updated')) void controller.refreshCartAfterVoice(); },
   }));
@@ -112,6 +112,16 @@ export function OrderPage() {
     if (screen !== 'menu' || (state.status !== 'ready' && state.status !== 'saving') || state.order) voiceController.setEnabled(false);
   }, [voiceController, screen, state.status, state.order]);
   useEffect(() => () => voiceController.dispose(), [voiceController]);
+  useEffect(() => {
+    const suspend = () => voiceController.setEnabled(false);
+    const hide = () => { if (document.visibilityState !== 'visible') suspend(); };
+    document.addEventListener('visibilitychange', hide);
+    window.addEventListener('pagehide', suspend);
+    return () => {
+      document.removeEventListener('visibilitychange', hide);
+      window.removeEventListener('pagehide', suspend);
+    };
+  }, [voiceController]);
   useEffect(() => { if (voice.enabled) setAutoOffClosed(false); }, [voice.enabled]);
   // 키오스크가 켜는 크게 보기는 화면 설정 밖의 상태라 저장하지 않고, 새로고침·새 이용에서 끝납니다.
   const enlargementPreview = useEnlargementPreview({ settings, screen, sessionId: state.session?.session_id ?? null, orderDone: state.order !== null });
@@ -119,7 +129,13 @@ export function OrderPage() {
   const largeView = enlargementPreview.largeView && !settings.largeText;
   useEffect(() => { try { localStorage.setItem(settingsStorageKey, JSON.stringify(manualSettings)); } catch { setStorageWarning(true); } }, [manualSettings]);
   useEffect(() => { heading.current?.focus(); }, [screen]);
-  useLayoutEffect(() => { if (selected) dialog.current?.showModal(); else if (dialog.current?.open) dialog.current.close(); }, [selected]);
+  // 모달 밖의 안내를 조작할 수 없는 동안 읽기와 자동 재청취를 함께 보류합니다.
+  const replyBlocked = selected !== null || supportOpen || cartSheetOpen;
+  useLayoutEffect(() => { voiceController.setReplyBlocked(replyBlocked); }, [replyBlocked, voiceController]);
+  useLayoutEffect(() => {
+    if (selected) dialog.current?.showModal();
+    else if (dialog.current?.open) dialog.current.close();
+  }, [selected]);
   useLayoutEffect(() => {
     if (restartOpen) restartDialog.current?.showModal();
     else if (restartDialog.current?.open) restartDialog.current.close();
