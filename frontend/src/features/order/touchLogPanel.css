@@ -1,16 +1,10 @@
-/* 380 px 상자는 누름을 받지 않고 안의 버튼·창만 받습니다. 접은 단추와 그 왼쪽의 개발용 [큰 글씨 + 큰 버튼]은 한 줄로 고객 조작이 없는
-   매장 이름 줄의 오른쪽 끝에 두고(위 끝은 그 줄의 안쪽 위 끝, 오른쪽 끝은 화면 여백 안쪽: TouchLogPanel이 재어 --touch-log-top·
-   --touch-log-right로 넣음), 펼친 창은 그 줄 아래에 엽니다. 두 단추 사이는 창 안 도구 줄(.touch-log-toolbar)과 같은 8 px입니다. */
-.touch-log-tools { position: fixed; top: var(--touch-log-top, 16px); right: var(--touch-log-right, 16px); z-index: 100; width: min(380px, calc(100vw - 2 * var(--touch-log-right, 16px))); color: #213c34; font: 13px/1.5 system-ui, sans-serif; pointer-events: none; }
+/* 380 px 상자는 누름을 받지 않고 안의 버튼·창만 받습니다. 접은 단추는 장바구니 줄의 버튼과 겹치지 않게 주문 바 4 px 위에 둡니다. */
+.touch-log-tools { position: fixed; right: 16px; bottom: calc(var(--order-actions-measured-height, 232px) + 4px); z-index: 100; width: min(380px, calc(100vw - 32px)); color: #213c34; font: 13px/1.5 system-ui, sans-serif; pointer-events: none; }
 .touch-log-tools > * { pointer-events: auto; }
-.touch-log-tools > .touch-log-bar { display: flex; justify-content: flex-end; gap: 8px; white-space: nowrap; pointer-events: none; }
-.touch-log-bar > * { pointer-events: auto; }
 .touch-log-tools button { min-height: 36px; padding: 7px 11px; font-size: 12px; border-radius: 8px; }
-.touch-log-launcher, .touch-log-combined { background: #173e34; color: white; box-shadow: 0 4px 16px #173e3426; }
-.touch-log-launcher:hover, .touch-log-combined:hover { background: #27574a; }
-/* 켜진 모습(두 설정이 모두 켜짐): 아래 최근 기록 목록에서 고른 줄의 모습과 같은 색입니다. */
-.touch-log-tools .touch-log-combined[aria-pressed="true"] { background: #e7efe8; border-color: #b5c7b9; color: #213c34; }
-.touch-log-panel { background: #fffefb; border: 1px solid #cad6ce; border-radius: 14px; padding: 16px; margin-top: 8px; box-shadow: 0 12px 40px #173e3426; max-height: min(620px, max(120px, calc(100dvh - var(--touch-log-top, 16px) - 76px))); overflow-y: auto; overscroll-behavior: contain; }
+.touch-log-launcher { display: block; margin-left: auto; background: #173e34; color: white; box-shadow: 0 4px 16px #173e3426; }
+.touch-log-launcher:hover { background: #27574a; }
+.touch-log-panel { background: #fffefb; border: 1px solid #cad6ce; border-radius: 14px; padding: 16px; margin-bottom: 8px; box-shadow: 0 12px 40px #173e3426; max-height: min(620px, max(120px, calc(100dvh - var(--order-actions-measured-height, 174px) - 76px))); overflow-y: auto; overscroll-behavior: contain; }
 .touch-log-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
 .touch-log-heading span { font-size: 11px; color: #64746b; }
 .touch-log-heading h2 { margin: 2px 0 0; font-size: 19px; }

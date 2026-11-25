@@ -22,9 +22,6 @@
 .kiosk .sheet .cart-lines { box-shadow: inset 0 1px 0 var(--ui-divider); }
 .kiosk .sheet-total { display: flex; flex-direction: column; justify-content: center; min-width: 0; line-height: var(--lh); }
 .kiosk .sheet-total .amount { font-size: var(--fs-l); font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
-/* 큰 글씨: 총 금액(L 굵게)이 [닫기] 앞 칸보다 넓어 [닫기] 밑으로 들어가므로, 하단 주문 바처럼 총 금액은 첫 줄에 따로 두고
-   [닫기]·[주문 확인]은 둘째 줄의 [처음으로]·주요 버튼 자리에 섭니다. */
-.kiosk.large-text .cart-sheet .sheet-total { grid-column: 1 / -1; }
 .kiosk .sheet .sheet-support .sheet-status { margin: 0; font-size: var(--fs-s); color: var(--ui-muted); }
 
 /* 큰 글씨·크게 보기·좁은 화면: 한 줄을 두 줄로(이름·옵션·금액 / − n + 와 [삭제]) */

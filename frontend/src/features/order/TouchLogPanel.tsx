@@ -1,5 +1,5 @@
 /// <reference types="vite/client" />
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { SavedLog } from './touchLog.ts';
 import { logLimit } from './touchLog.ts';
 import { summarizeTouchLog } from './touchLogSummary.ts';
@@ -28,12 +28,11 @@ const countLabels: [keyof RawTouchCounts, string][] = [
 const screenLabels: Record<string, string> = { menu: '메뉴', review: '주문 확인', complete: '주문 완료' };
 
 // 주문 UI가 아닌 개발 확인 도구. 프로덕션 빌드에서는 표시하지 않습니다.
-// 로그 단추 왼쪽의 [큰 글씨 + 큰 버튼]은 두 설정을 한 번에 켜고 끄는 개발용 비교 옵션입니다(둘 다 켜져 있을 때만 눌린 모습).
-export function TouchLogPanel({ combined, onCombined }: { combined: boolean; onCombined: () => void }) {
-  return import.meta.env.DEV ? <DraftPanel combined={combined} onCombined={onCombined} /> : null;
+export function TouchLogPanel() {
+  return import.meta.env.DEV ? <DraftPanel /> : null;
 }
 
-function DraftPanel({ combined, onCombined }: { combined: boolean; onCombined: () => void }) {
+function DraftPanel() {
   const [open, setOpen] = useState(false);
   const [paused, setPaused] = useState(false);
   const [snapshot, setSnapshot] = useState<SavedLog | null>(null);
@@ -41,32 +40,6 @@ function DraftPanel({ combined, onCombined }: { combined: boolean; onCombined: (
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [sampledAt, setSampledAt] = useState(Date.now);
   const [policy, setPolicy] = useState<TouchPilotPolicy>(() => ({ ...touchPilotPolicy }));
-  const tools = useRef<HTMLElement>(null);
-  // 자리: 고객 조작이 없는 매장 이름 줄의 오른쪽 끝. 보이는 매장 이름 줄(낮은 화면에서는 위쪽 읽기 자리의 줄)의 안쪽 위 끝과
-  // 안쪽 오른쪽 끝(화면 여백 안)을 재어 넣습니다. 설정이 바뀌어 그 줄이 옮겨 가면 다시 잽니다.
-  useEffect(() => {
-    let frame = 0;
-    const fixed = (element: Element) => {
-      for (let node: Element | null = element; node; node = node.parentElement) if (getComputedStyle(node).position === 'fixed') return true;
-      return false;
-    };
-    const place = () => {
-      frame = 0;
-      const element = tools.current;
-      const row = [...document.querySelectorAll('.kiosk .store-name')].map(name => name.parentElement)
-        .find((box): box is HTMLElement => box !== null && box.getBoundingClientRect().width > 1 && box.getBoundingClientRect().height > 1);
-      if (!element || !row) return;
-      const box = row.getBoundingClientRect(), style = getComputedStyle(row);
-      element.style.setProperty('--touch-log-top', `${box.top + (fixed(row) ? 0 : scrollY) + parseFloat(style.borderTopWidth) + parseFloat(style.paddingTop)}px`);
-      element.style.setProperty('--touch-log-right', `${document.documentElement.clientWidth - box.right + parseFloat(style.borderRightWidth) + parseFloat(style.paddingRight)}px`);
-    };
-    const schedule = () => { if (!frame) frame = requestAnimationFrame(place); };
-    const observer = new MutationObserver(schedule);
-    observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
-    window.addEventListener('resize', place);
-    place();
-    return () => { observer.disconnect(); window.removeEventListener('resize', place); cancelAnimationFrame(frame); };
-  }, []);
   useEffect(() => {
     if (!open || paused) return;
     function refresh() {
@@ -90,13 +63,7 @@ function DraftPanel({ combined, onCombined }: { combined: boolean; onCombined: (
   const selected = recent.find(event => event.id === selectedId) ?? recent[0];
   const summary = useMemo(() => snapshot ? summarizeTouchLog(snapshot) : null, [snapshot]);
   const pilot = useMemo(() => snapshot ? measureTouchPilot(snapshot, sampledAt, 2000, policy) : null, [snapshot, sampledAt, policy]);
-  return <aside ref={tools} className="touch-log-tools" aria-label="개발용 터치 로그 확인">
-    <div className="touch-log-bar">
-      <button type="button" data-log-target="support:combinedEnlargement" className="touch-log-combined" aria-pressed={combined} onClick={onCombined}>큰 글씨 + 큰 버튼</button>
-      <button type="button" className="touch-log-launcher" aria-expanded={open} aria-controls="touch-log-panel" onClick={() => setOpen(!open)}>
-        {open ? '로그 창 접기' : '터치 로그 보기'}
-      </button>
-    </div>
+  return <aside className="touch-log-tools" aria-label="개발용 터치 로그 확인">
     {open && <section id="touch-log-panel" className="touch-log-panel" aria-labelledby="touch-log-title">
       <header className="touch-log-heading">
         <div><span>개발 확인용 · 로컬 초안</span><h2 id="touch-log-title">터치 로그</h2></div>
@@ -176,5 +143,8 @@ function DraftPanel({ combined, onCombined }: { combined: boolean; onCombined: (
         <pre>{JSON.stringify(selected, null, 2)}</pre>
       </details>}
     </section>}
+    <button type="button" className="touch-log-launcher" aria-expanded={open} aria-controls="touch-log-panel" onClick={() => setOpen(!open)}>
+      {open ? '로그 창 접기' : '터치 로그 보기'}
+    </button>
   </aside>;
 }
