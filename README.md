@@ -14,7 +14,7 @@
 |---|---|---|---|
 | 프론트엔드 | dudwlghkd | main `9317b0b` 기준 상품·장바구니·모의 주문, 수동 접근성, 음성 결과의 Cart 재조회(PR #71), 기본 터치 통계와 선택적 확장 전송(PR #72), 키오스크 화면 개편·비모달 지원 안내 바(PR #70)를 반영했습니다. 기존 화면의 개발 PC 실제 음성 주문·DB 저장은 2026-11-16에 1건 검증했습니다. #70 개편 화면·#79 자동 TTS 조합의 실연동 재검증과 실제 AI 제안 생성·G10 검증은 남아 있습니다 | [프론트엔드 README](frontend/README.md), [프론트 MVP 현황](docs/Frontend-MVP-Status.md) |
 | 백엔드·DB | bb-cloud-create | 연결 확인·임시 세션·특징 전송 API를 구현했습니다(메모리 세션). 상품·장바구니·모의 주문 6개 API는 PR #40에서 초안 기준으로 구현했습니다(메모리 저장). 2026-10-14 Docker에서 실제 프론트를 연결한 주요 주문 흐름·응답 유실 재확인을 검증했습니다. G10 실기기·음성·DB 영속성 검증과 남은 계약·정책 합의는 남아 있습니다. Supabase 첫 마이그레이션을 적용했습니다(2026-10-07) | `backend/README.md`, `db/README.md` |
-| ai-engine·음성·Jev | jiwon-L-ee | `/v1/analyze`는 명세 예시 값을 돌려주는 자리 표시입니다. backend의 음성 해석 API(PR #36)와 frontend 독립 음성 입력·잡담 거르기(`ignored`)·해석용 주문 메뉴 조회(PR #42)를 병합했습니다. 주문 화면 연결·MCP 도구 실행은 남아 있으며 Jev는 아직 연동하지 않았습니다 | `ai-engine/README.md`, `docs/Voice-MCP-Implementation.md` |
+| ai-engine·음성·Jev | jiwon-L-ee | `/v1/analyze`는 명세 예시 값을 돌려주는 자리 표시입니다. backend의 음성 해석 API(PR #36)와 frontend 독립 음성 입력·잡담 거르기(`ignored`)·해석용 주문 메뉴 조회(PR #42)를 병합했습니다. 음성 결과의 도구 입력은 별도 MCP 서버 없이 backend 안에서 실행하고, 주문 화면 연결(PR #53)과 응답 자동 읽기(PR #79)를 병합했습니다. 판단 층은 backend에 뼈대와 그림자 Jev 단계(PR #77)가 있으며 응답의 지원 결정은 아직 바꾸지 않습니다 | `ai-engine/README.md`, `docs/Voice-MCP-Implementation.md` |
 | 컴퓨터 비전 | wdragon92 | 관측 뼈대(PR #32, 2026-10-10)와 상황 태그 3개의 규칙 · 출력 형식(PR #35, 2026-10-12)을 병합했습니다. 실행 파이프라인(녹화 재생 · 웹캠 실행기 → 상황 태그 → 규칙표 v0 → 계약 형식)과 머리 탐지기 · 머리 방향 분류기의 ONNX CPU 추론을 구현했습니다(2026-10-23, `feat/vision`; 병합은 PR 검토 뒤). 기준값은 모두 `[파일럿]`이고 값 묶음 파일은 아직 없으며, backend와의 연결은 없습니다. GPU 서버에서 머리 탐지기(2026-10-12)와 머리 방향 분류기(2026-10-14)를 학습했고, 구간 모델 baseline(FACT 끝, ASFormer 진행 중)을 돌리고 있습니다 | `ai-engine/app/modules/vision/README.md` |
 | 인프라 | bb-cloud-create | EC2 템플릿을 검증했습니다(PR #31). 스택은 비용 승인 전이라 만들지 않았습니다 | `infra/aws/README.md` |
 
@@ -157,7 +157,7 @@ Chrome 음성 인식 → 텍스트·후보·신뢰도
 → 상태 조회로 확인 질문·도구 입력 반환
 ```
 
-위 흐름을 처리하는 독립 모듈은 PR #42로 병합했고, PR #53으로 메뉴 화면에 연결해 인식 문장·확인 질문·결과·오류를 표시합니다. 반환된 도구 입력의 MCP 실행·주문 및 UI 반영·응답 자동 TTS는 미연결입니다. PR #58의 수동 화면 읽기는 별도 기능입니다. Chrome 내장 인식(Web Speech API)을 사용하고 Whisper·녹음 파일 전송은 쓰지 않습니다. 수행계획서와 달라진 점은 멘토·팀 공유가 남았습니다([음성 구현 문서](docs/Voice-MCP-Implementation.md)).
+위 흐름을 처리하는 독립 모듈은 PR #42로 병합했고, PR #53으로 메뉴 화면에 연결해 인식 문장·확인 질문·결과·오류를 표시합니다. 반환된 도구 입력은 별도 MCP 서버 없이 backend 안에서 실행해 주문에 반영하고, 응답은 자동으로 읽습니다(PR #79). 음성으로 화면 설정을 바꾸는 연결(`ui_changed`)은 남아 있습니다. PR #58의 수동 화면 읽기는 별도 기능입니다. Chrome 내장 인식(Web Speech API)을 사용하고 Whisper·녹음 파일 전송은 쓰지 않습니다. 수행계획서와 달라진 점은 멘토·팀 공유가 남았습니다([음성 구현 문서](docs/Voice-MCP-Implementation.md)).
 
 ### 지원 결과 피드백
 
@@ -216,7 +216,7 @@ Jev에는 상황 태그와 근거, 터치 통계, 현재 화면과 UI 설정, �
 | 음성 녹음 | Web MediaRecorder API | 쓰지 않음. Chrome 인식만 쓰고 녹음 파일을 서버로 보내지 않음(PR #36, 멘토·팀 공유 전) |
 | STT | Chrome 내장 인식(Web Speech API) | 독립 모듈 구현(PR #42, `frontend/src/features/voice/`), 메뉴 화면 연결(PR #53), 실제 마이크·OpenAI·G10 검증 대기. 수행계획서의 OpenAI Whisper는 쓰지 않으며 예비 경로도 뺌(PR #36, 멘토·팀 공유 전) |
 | 음성 의도 해석 | OpenAI Chat Completions(구조화 출력) | backend가 호출. 모델은 `OPENAI_MODEL`(기본 `gpt-4o-mini`), 실제 키 검증 전 |
-| TTS | 미정(수동 화면 읽기는 브라우저 내장 음성 합성으로 구현) | 2026-10-25 로컬 구현. 실제 G10 음성 재생은 미검증이며 응답 자동 읽기와 그 기술 선정은 남아 있음 |
+| TTS | 미정(수동 화면 읽기는 브라우저 내장 음성 합성으로 구현) | 2026-10-25 로컬 구현. 응답 자동 읽기는 PR #79로 연결. 실제 G10 음성 재생은 미검증이며 TTS 기술 선정은 남아 있음 |
 | 판단 층 | backend 판단 층(Jev 호출, 접근성 기능 선택) | backend에 둠(비전 담당 제안 2026-11-04; 뼈대와 그림자 Jev 단계는 PR #77로 구현). 계약 변경 전이라 현재 서버 지원 응답은 자리 표시(`decided_by: rule_placeholder`, `preset: none`). 규칙표 v0의 fallback·rule-only baseline 용도는 비전 측 제안이며 회의에서 정함. Jev 효과는 ablation으로 비교 |
 | 실시간 전달 | SSE 또는 WebSocket | 지원 제안·상태 전달. `docs/Voice-MCP-Implementation.md` 3.4는 SSE를 제안(팀 검토 전) |
 | 컨테이너 | Docker, Docker Compose | 시연 · 개발: 세 서비스를 한 PC에서 함께 실행 |
