@@ -9,7 +9,6 @@ import type { HintKind } from './copy.ts';
 import { createSampleOrderApi } from './sampleOrderApi.ts';
 import { useTouchLog } from './useTouchLog.ts';
 import { captureTouchLogObservation } from './touchLogObservation.ts';
-import { TouchLogPanel } from './TouchLogPanel.tsx';
 import { VoiceButton, VoicePanel, voiceAutoOffNotice } from './VoiceModeToggle.tsx';
 import { ReadAloudControls } from './ReadAloudControls.tsx';
 import { createReplySpeaker, createVoiceApi, VoiceController } from '../voice/index.ts';
@@ -350,7 +349,7 @@ export function OrderPage() {
   }, [screen, barCovered]);
   const barArmed = useArmedAfter(barChange);
 
-  return <><div ref={touchLog.root} data-order-mode={sampleMode ? 'sample' : 'api'} data-listening={voiceOn && voice.phase === 'listening' ? 'on' : undefined} className={`kiosk ${settings.largeText ? 'large-text' : ''} ${settings.largeButton ? 'large-button' : ''} ${settings.simpleScreen ? 'simple-screen' : ''} ${settings.lowScreen ? 'low-screen' : ''} ${settings.highContrast ? 'high-contrast' : ''}${largeView ? ' large-view' : ''}${voiceOn ? ' voice-on' : ''}`}>
+  return <div ref={touchLog.root} data-order-mode={sampleMode ? 'sample' : 'api'} data-listening={voiceOn && voice.phase === 'listening' ? 'on' : undefined} className={`kiosk ${settings.largeText ? 'large-text' : ''} ${settings.largeButton ? 'large-button' : ''} ${settings.simpleScreen ? 'simple-screen' : ''} ${settings.lowScreen ? 'low-screen' : ''} ${settings.highContrast ? 'high-contrast' : ''}${largeView ? ' large-view' : ''}${voiceOn ? ' voice-on' : ''}`}>
     {settings.lowScreen && <div className="low-screen-banner">
       {/* 낮은 화면의 비어 있는 위쪽 전체가 하나의 누름 자리입니다(화면 위로 올리기). 터치 기록에 남도록 주문 화면 안에 둡니다. */}
       <button type="button" className="raise-area" data-log-target="screen-position-pad" onClick={() => setManualSettings(current => ({ ...current, lowScreen: false }))}>
@@ -408,5 +407,5 @@ export function OrderPage() {
       <div className="order-feedback-actions"><button data-log-target="order-restart-cancel" onClick={closeRestart}>계속 주문하기</button>
         <button data-log-target="order-restart-confirm" disabled={busy || state.status === 'uncertain'} onClick={() => { setRestartOpen(false); void startNewOrder(true); }}>처음부터 주문하기</button></div>
     </dialog>
-  </div><TouchLogPanel /></>;
+  </div>;
 }

@@ -1,10 +1,14 @@
 # 터치·상호작용 로그 검토 초안
 
 - 작성일: 2026-10-05
-- 최종 갱신일: 2026-10-25
+- 최종 갱신일: 2026-11-25
 - 상태: 팀 검토용 초안. 확정된 데이터 계약이 아니며, 로컬 수집·파일럿 집계의 구현·검증 기록은 7~11장에 구분합니다.
 - 대상: 프론트엔드·백엔드·AI 담당자
 - 목적: 수집할 원시 정보, 계산할 통계, 팀에서 결정할 기준을 구분합니다.
+
+## 2026-11-25 개발용 확인 UI 제거
+
+프론트 담당자 요청으로 ‘터치 로그 보기’ 버튼과 확인 창(`TouchLogPanel.tsx`)·전용 스타일을 제거했습니다. 원시 수집·로컬 보관·요약·파일럿 집계·서버 전송은 유지하며 `window.kioskTouchLogDraft`의 `read()`·`summarize()`·`features()`·`status()`·`exportJson()`을 콘솔에서 계속 사용할 수 있습니다. 창에서만 제공하던 표시 정지·재개와 파일럿 집계 다운로드는 제거했습니다. 아래 개발 창 설명과 검증 결과는 각 작성 시점의 기록입니다. 팀 계약·집계 정책 변경은 없습니다.
 
 ## 2026-11-17 프론트 연결 결정
 
@@ -159,7 +163,7 @@ README는 터치 통계 계산을 백엔드 책임으로 설명하지만, 현재
 | [`touchLog.ts`](../frontend/src/features/order/touchLog.ts) | 로컬 세션·버퍼·기록 복사·거리 계산·저장 실패 상태 |
 | [`useTouchLog.ts`](../frontend/src/features/order/useTouchLog.ts) | DOM 입력·스크롤 관측과 화면·옵션·분류·설정 기록, 개발 확인 API |
 | [`OrderPage.tsx`](../frontend/src/features/order/OrderPage.tsx) | 훅 연결, 버튼·링크의 `data-log-target` 식별자, 새 주문 세션 분리 |
-| [`TouchLogPanel.tsx`](../frontend/src/features/order/TouchLogPanel.tsx) | 개발용 로그 확인 창: 최근 기록 20개 표시, JSON 내보내기 |
+| `TouchLogPanel.tsx` (2026-11-25 제거) | 당시 개발용 로그 확인 창: 최근 기록 20개 표시, JSON 내보내기 |
 | [`touchLog.test.mjs`](../frontend/src/features/order/touchLog.test.mjs) | 거리·복원·세션 분리·저장 실패·기록 복사·버퍼 제한 검증 |
 | [`touchLog.browser.test.mjs`](../frontend/src/features/order/touchLog.browser.test.mjs) | 실제 브라우저 주문 흐름·StrictMode·터치 스크롤 검증 |
 
@@ -273,7 +277,7 @@ node --test frontend/src/features/order/touchLog.browser.test.mjs
 
 - [`touchLogSummary.ts`](../frontend/src/features/order/touchLogSummary.ts)는 버퍼에 보관 중인 현재 세션의 누름·종료·취소·중단·스크롤과 방문별 기록을 요약합니다. 최대 1000개 버퍼이므로 오래된 기록이 빠졌다면 세션 전체 합계가 아닙니다. 대상 밖 비율의 분모는 보관 중인 현재 세션의 전체 누름 시작 수이며, 누름이 없거나 대상 판정이 누락되면 비율은 `null`입니다. 위의 최근 2초 파일럿 횟수와 범위가 다릅니다.
 - [`useTouchLog.ts`](../frontend/src/features/order/useTouchLog.ts)의 `window.kioskTouchLogDraft.summarize()`로 원시 요약, `.features()`로 기본 파일럿 집계를 확인합니다. 원시 기록은 `.read()`, 저장 상태는 `.status()`, 원시 JSON은 `.exportJson()`으로 확인합니다.
-- [`TouchLogPanel.tsx`](../frontend/src/features/order/TouchLogPanel.tsx)의 개발 창에서 반복 시간·거리와 체류 정의를 바꿔 비교할 수 있습니다. ‘마지막 누름 이후 경과’ 비교 모드는 성공 여부를 판정하지 않으며, 미구현인 ‘마지막 성공 조작 이후 시간’을 대신하지 않습니다. 개발 창의 500ms 갱신은 화면 표시 주기이며 수집·전송 주기가 아닙니다. 개발 창 입력은 수집 대상에서 제외합니다.
+- 당시 `TouchLogPanel.tsx`의 개발 창에서 반복 시간·거리와 체류 정의를 바꿔 비교했습니다(2026-11-25 창 제거, 콘솔의 `features(policy)` 유지). ‘마지막 누름 이후 경과’ 비교 모드는 성공 여부를 판정하지 않으며, 미구현인 ‘마지막 성공 조작 이후 시간’을 대신하지 않습니다. 개발 창의 500ms 갱신은 화면 표시 주기이며 수집·전송 주기가 아니었습니다. 개발 창 입력은 수집 대상에서 제외했습니다.
 - 별도 파일럿 내보내기는 정책·집계 시각 구간·세션 ID·관측 여부·산출 값을 포함한 `touch-features-pilot.json`이며 버전은 `touch-pilot-v1`입니다. 원시 `touch-log-draft.json`과 서버 계약은 유지하며 자동 통계 전송·지원 판단은 연결하지 않습니다.
 
 세부 정의·파일·실행 방법과 PR #55 UI 반영 범위는 [주문 기능 README](../frontend/src/features/order/README.md#2026-10-25-로컬-파일럿-터치-집계와-pr-55-반영)에 기록합니다. 이 로컬 파일럿 구현은 PR #58에서 게시합니다. 정식 기준과 서버 전송은 팀 합의 대상으로 유지합니다.
