@@ -36,7 +36,7 @@
 
 ### 주문 응답 재생에 필요한 기준 자료
 
-시연용 주문 백업의 복구를 연습할 때는 백업에 포함될 합성 모의 주문 한 건을 준비합니다. 원래 주문에 사용한 백엔드 커밋, 주문 경로의 세션 ID, `Idempotency-Key`, `expected_version`을 포함한 원래 JSON 요청 본문, 최초 HTTP `201`과 전체 응답 JSON을 기준 자료로 남깁니다. 기준 자료는 암호화해 Git 저장소 밖에서 백업과 연결해 보관합니다.
+시연용 주문 백업의 복구를 연습할 때는 백업에 포함될 합성 모의 주문 한 건을 준비합니다. 원래 주문에 사용한 백엔드 커밋, 세션 ID가 포함된 요청 경로와 쿼리 문자열, `Idempotency-Key`, `expected_version`을 포함한 원래 JSON 요청 본문, 최초 HTTP `201`과 전체 응답 JSON을 기준 자료로 남깁니다. 쿼리 문자열이 없었던 경우도 기록합니다. 기준 자료는 암호화해 Git 저장소 밖에서 백업과 연결해 보관합니다.
 
 ## 수동 백업 실행 (PowerShell)
 
@@ -141,9 +141,9 @@ if ($LASTEXITCODE -ne 0) { throw 'migration history restore failed' }
 
    SQL 검사 후에는 주문 API에서 응답을 재생합니다. 백업에 포함된 합성 주문의 기준 자료를 사용합니다.
 
-   1. 격리 복원 DB가 검증용 백엔드에서 접근 가능하고 TLS 연결을 받는지 확인합니다. 백엔드는 `sslmode=require`로 연결하므로, TLS를 지원하는 격리 Supabase 프로젝트에 복원하거나 로컬 PostgreSQL 컨테이너에 TLS를 설정합니다. 검증용 `DATABASE_URL`이 해당 복원 DB를 가리키는지 확인하고 `kiosk_backend` 역할로 접속합니다. 필요하면 복원 DB에서만 역할 비밀번호를 설정합니다. 연결한 세션에서 `SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid();`가 `true`인지 확인한 뒤 검증용 백엔드를 시작합니다. [백엔드 실행 안내](../backend/README.md#로컬-실행-powershell)를 참고합니다.
-   2. 복원 DB에서 합성 주문 세션의 `kiosk.orders` 행 수를 기록합니다. 검증용 백엔드의 `POST /api/v1/sessions/{session_id}/orders`로 최초와 같은 `Idempotency-Key`와 JSON 요청 본문을 보냅니다. 본문의 `expected_version`에는 처음 주문할 때 보낸 값을 사용합니다.
-   3. **HTTP `201`, 최초와 동일한 응답 JSON과 주문번호, 재전송 전후 해당 세션의 주문 1건 유지**를 모두 확인합니다. JSON은 키 순서나 공백의 차이를 제외하고 값 전체를 비교합니다. 각 결과를 운영 기록에 남깁니다.
+   1. 격리 복원 DB가 검증용 백엔드에서 접근 가능하고 TLS 연결을 받는지 확인합니다. 백엔드는 `sslmode=require`로 연결하므로, TLS를 지원하는 격리 Supabase 프로젝트에 복원하거나 로컬 PostgreSQL 컨테이너에 TLS를 설정합니다. 검증용 `DATABASE_URL`이 해당 복원 DB를 가리키는지 확인하고 `kiosk_backend` 역할로 접속합니다. 필요하면 복원 DB에서만 역할 비밀번호를 설정합니다. 연결한 세션에서 `SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid();`가 `true`인지 확인한 뒤 기준 자료에 기록한 커밋으로 검증용 백엔드를 시작합니다. 다른 커밋으로 검사했다면 사용한 커밋을 기록하고, 재생이 실패할 때 주문 요청·응답 스키마의 버전 차이를 함께 확인합니다. [백엔드 실행 안내](../backend/README.md#로컬-실행-powershell)를 참고합니다.
+   2. 복원 DB에서 합성 주문의 `session_id`로 좁혀 `kiosk.orders`와 `kiosk.order_request_replays`의 행 수, `kiosk.carts.version`을 기록합니다. 검증용 백엔드의 `POST /api/v1/sessions/{session_id}/orders`로 최초와 같은 쿼리 문자열, `Idempotency-Key`와 JSON 요청 본문을 보냅니다. 최초 요청에 쿼리가 비어 있었다면 그대로 두고, `expected_version`에는 처음 주문할 때 보낸 값을 사용합니다. 쿼리 문자열이 달라지면 같은 키여도 `409 idempotency_key_reused`가 반환됩니다.
+   3. **HTTP `201`, 최초와 동일한 응답 JSON과 주문번호, 해당 세션의 주문 1건 유지**를 확인합니다. 같은 세션의 `kiosk.order_request_replays` 행 수와 `kiosk.carts.version`도 재전송 전후가 같아야 합니다. JSON은 키 순서나 공백의 차이를 제외하고 값 전체를 비교합니다. 각 결과를 운영 기록에 남깁니다.
 
    SQL 검사와 주문 API 재생을 모두 통과하면 주문 데이터 복구를 검증 완료로 기록합니다. 백업에 해당 주문이나 기준 자료가 없으면 API 재생을 미검증으로 기록합니다. 불일치가 있으면 원인을 확인하고 격리 환경에서 다시 검증합니다.
 
