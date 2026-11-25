@@ -62,6 +62,29 @@ async function noOverflow(page) {
   assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
 }
 
+async function cartTotalFits(page, sheet) {
+  assert.equal(await sheet.locator('.sheet-total .amount').innerText(), '70,000원');
+  await page.evaluate(async () => { await document.fonts.ready; });
+  const { amount, close, review, dialog } = await sheet.evaluate(element => {
+    // 요소의 상자보다 금액 글자가 더 길게 그려질 수 있어서 실제 텍스트 경계를 잽니다.
+    const range = document.createRange();
+    range.selectNodeContents(element.querySelector('.sheet-total .amount'));
+    return {
+      amount: range.getBoundingClientRect().toJSON(),
+      close: element.querySelector('[data-log-target="cart-sheet-close"]').getBoundingClientRect().toJSON(),
+      review: element.querySelector('[data-log-target="cart-sheet-review"]').getBoundingClientRect().toJSON(),
+      dialog: element.getBoundingClientRect().toJSON(),
+    };
+  });
+  for (const button of [close, review]) {
+    assert(amount.right <= button.left || button.right <= amount.left ||
+      amount.bottom <= button.top || button.bottom <= amount.top, '금액 글자가 버튼과 겹치지 않음');
+  }
+  assert(amount.left >= dialog.left && amount.right <= dialog.right &&
+    amount.top >= dialog.top && amount.bottom <= dialog.bottom, '금액 글자가 창 안에 모두 보임');
+  return dialog;
+}
+
 async function bottomAction(page, target) {
   const button = page.locator(`[data-log-target="${target}"]`);
   await button.scrollIntoViewIfNeeded();
@@ -670,49 +693,55 @@ test('긴 주문 내역 아래에서 실패해도 안내와 재확인 버튼을 
   } finally { await browser.close(); }
 });
 
-test('1080×1920 큰 글씨·큰 버튼·낮은 화면에서 장바구니 총액과 버튼이 겹치지 않는다', async () => {
+test('기본·큰 글씨·크게 보기·좁은 화면에서 장바구니 총액과 버튼이 겹치지 않는다', async t => {
   const browser = await chromium.launch(launchOptions);
   try {
-    const session = 'cart-total-large-low';
-    const steps = bootstrap(session);
-    steps[2].body = cartResponse(session, 1, [iced(20)]);
-    const { page, errors, fixture } = await open(browser, steps);
-    await ready(page);
-    await click(page, 'support-toggle');
-    await click(page, 'support:largeText');
-    await click(page, 'support:largeButton');
-    await click(page, 'support:lowScreen');
-    await click(page, 'support-close');
-    await page.locator('.kiosk.large-text.large-button.low-screen').waitFor();
+    const cases = [
+      { name: 'default-1080x1920', viewport: { width: 1080, height: 1920 }, settings: [] },
+      { name: 'large-low-1080x1920', viewport: { width: 1080, height: 1920 }, settings: ['largeText', 'largeButton', 'lowScreen'] },
+      { name: 'large-view-1080x1920', viewport: { width: 1080, height: 1920 }, settings: [], largeView: true },
+      { name: 'default-390x844', viewport: { width: 390, height: 844 }, settings: [] },
+    ];
+    for (const { name, viewport, settings, largeView } of cases) {
+      await t.test(name, async () => {
+        const session = `cart-total-${name}`;
+        const steps = bootstrap(session);
+        // 기본 배치의 [모두 보기]가 나타나도록 두 줄을 담되 총액은 70,000원으로 맞춥니다.
+        steps[2].body = cartResponse(session, 1, [iced(19), hot]);
+        const { page, errors, fixture } = await open(browser, steps);
+        try {
+          await page.setViewportSize(viewport);
+          await ready(page);
+          if (settings.length) {
+            await click(page, 'support-toggle');
+            for (const setting of settings) await click(page, `support:${setting}`);
+            await click(page, 'support-close');
+            await page.locator('.kiosk.large-text.large-button.low-screen').waitFor();
+          }
+          if (largeView) {
+            await page.evaluate(() => window.kioskSupportDraft.previewEnlargement());
+            await page.locator('.offer-card[data-armed="true"]').waitFor();
+            await click(page, 'support-offer:accept');
+            await page.locator('.kiosk.large-view').waitFor();
+            assert.equal(await page.locator('.kiosk.large-text').count(), 0, '큰 글씨를 끈 크게 보기 갈래를 검사');
+          }
 
-    await click(page, 'cart-sheet-open');
-    const sheet = page.locator('dialog.cart-sheet[open]');
-    assert.equal(await sheet.locator('.sheet-total .amount').innerText(), '70,000원');
-    await page.evaluate(async () => { await document.fonts.ready; });
-    const { amount, close, review, dialog } = await sheet.evaluate(element => {
-      // 요소의 상자보다 금액 글자가 더 길게 그려질 수 있어서 실제 텍스트 경계를 잽니다.
-      const range = document.createRange();
-      range.selectNodeContents(element.querySelector('.sheet-total .amount'));
-      return {
-        amount: range.getBoundingClientRect().toJSON(),
-        close: element.querySelector('[data-log-target="cart-sheet-close"]').getBoundingClientRect().toJSON(),
-        review: element.querySelector('[data-log-target="cart-sheet-review"]').getBoundingClientRect().toJSON(),
-        dialog: element.getBoundingClientRect().toJSON(),
-      };
-    });
-    for (const button of [close, review]) {
-      assert(amount.right <= button.left || button.right <= amount.left ||
-        amount.bottom <= button.top || button.bottom <= amount.top, '금액 글자가 버튼과 겹치지 않음');
+          await click(page, 'cart-sheet-open');
+          const sheet = page.locator('dialog.cart-sheet[open]');
+          const dialog = await cartTotalFits(page, sheet);
+          if (settings.includes('lowScreen')) {
+            assert(dialog.top >= 768 && dialog.bottom <= 1920, '장바구니 창이 낮은 화면 영역 안에 있음');
+          }
+          await screenshot(page, `cart-total-${name}`);
+          await click(page, 'cart-sheet-close');
+          await sheet.waitFor({ state: 'hidden' });
+          await click(page, 'cart-sheet-open');
+          await click(page, 'cart-sheet-review');
+          await page.locator('.review-block').waitFor();
+          fixture.verify(); assert.deepEqual(errors, []);
+        } finally { await page.close(); }
+      });
     }
-    assert(amount.left >= dialog.left && amount.right <= dialog.right, '금액 글자가 창 안에 모두 보임');
-    assert(dialog.top >= 768 && dialog.bottom <= 1920, '장바구니 창이 낮은 화면 영역 안에 있음');
-    await screenshot(page, 'cart-total-large-low-1080x1920');
-    await click(page, 'cart-sheet-close');
-    await sheet.waitFor({ state: 'hidden' });
-    await click(page, 'cart-sheet-open');
-    await click(page, 'cart-sheet-review');
-    await page.locator('.review-block').waitFor();
-    fixture.verify(); assert.deepEqual(errors, []);
   } finally { await browser.close(); }
 });
 

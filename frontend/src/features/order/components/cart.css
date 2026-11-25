@@ -21,11 +21,12 @@
 .kiosk .cart-empty { display: flex; align-items: center; min-height: var(--h-line); font-size: var(--fs-s); color: var(--ui-muted); }
 .kiosk .sheet .cart-lines { box-shadow: inset 0 1px 0 var(--ui-divider); }
 .kiosk .sheet-total { display: flex; flex-direction: column; justify-content: center; min-width: 0; line-height: var(--lh); }
-.kiosk .sheet-total .amount { font-size: var(--fs-l); font-weight: 700; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.kiosk .sheet-total .amount { font-size: var(--fs-l); font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .kiosk .sheet .sheet-support .sheet-status { margin: 0; font-size: var(--fs-s); color: var(--ui-muted); }
 
 /* 확대 화면에서는 총액에 한 줄 전체를 주고 [닫기]·[주문 확인]은 그 아래에 둡니다. */
 .kiosk:is(.large-text, .large-view) .cart-sheet .sheet-total { grid-column: 1 / -1; }
+.kiosk:is(.large-text, .large-view) .cart-sheet .sheet-total .amount { white-space: normal; overflow-wrap: anywhere; }
 
 /* 큰 글씨·크게 보기·좁은 화면: 한 줄을 두 줄로(이름·옵션·금액 / − n + 와 [삭제]) */
 .kiosk:is(.large-text, .large-view) .cart-line { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'item price' 'step action'; row-gap: var(--in); padding: var(--in) 0; }
@@ -35,6 +36,7 @@
 .kiosk:is(.large-text, .large-view) .cart-line .line-action { grid-area: action; justify-self: end; }
 @media (max-width: 760px) {
   .kiosk .cart-sheet .sheet-total { grid-column: 1 / -1; }
+  .kiosk .cart-sheet .sheet-total .amount { white-space: normal; overflow-wrap: anywhere; }
   /* 좁은 화면: 제목이 줄을 넘으면 제목 줄의 버튼이 다음 줄로 내려갑니다(글자가 한 자씩 꺾이지 않도록). */
   .kiosk .cart-head { flex-wrap: wrap; }
   .kiosk .cart-title { white-space: normal; }
