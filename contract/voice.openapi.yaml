@@ -141,7 +141,8 @@ paths:
     get:
       summary: 음성 요청 처리 상태 조회
       description: |
-        알림 채널을 쓰지 못할 때(연결 끊김, 개발 중 확인)의 대안입니다. 1초 이상 간격으로 조회합니다.
+        알림 채널이 아직 없어 지금 frontend는 이 API를 조회해 결과를 받습니다.
+        알림 채널이 생기면 그 채널을 쓰지 못할 때(연결 끊김, 개발 중 확인)의 대안이 됩니다. 1초 이상 간격으로 조회합니다.
         장바구니 내용은 장바구니 조회 API로 다시 확인합니다.
         주문 완료 전에 접수된 요청은 완료 뒤에도 기록이 남아 있는 동안 조회할 수 있습니다.
         주문 완료가 음성 요청의 보관 기간을 연장하지는 않습니다.
@@ -320,7 +321,8 @@ components:
           description: |
             MCP 장바구니 도구의 입력. 말한 순서대로 실행합니다. completed에서는 바로 처리할 입력,
             needs_confirmation에서는 확인 전 제안이고, 그 밖의 상태에서는 빈 배열입니다.
-            item_id·expected_version·Idempotency-Key는 넣지 않으며, MCP 도구가 장바구니를 조회해 정합니다.
+            item_id·expected_version·Idempotency-Key는 넣지 않습니다. VOICE_EXECUTE_TOOLS=true일 때 backend 실행부가
+            장바구니를 조회해 item_id·expected_version을 정하고 Idempotency-Key를 만듭니다.
           items:
             $ref: "#/components/schemas/VoiceToolCall"
         actions:
@@ -417,7 +419,7 @@ components:
             - invalid_option
             - cart_update_failed
           description: |
-            frontend 분기용 오류 코드. cart_version_conflict 아래 여섯 개는 VOICE_EXECUTE_TOOLS=true에서 도구 입력이
+            frontend 분기용 오류 코드. cart_version_conflict부터 invalid_option까지 여섯 개는 VOICE_EXECUTE_TOOLS=true에서 도구 입력이
             주문 서비스에 거절됐을 때의 주문 오류 코드(frontend-backend.openapi.yaml과 같은 뜻)이며, 이때 장바구니는
             바뀌지 않았습니다. cart_update_failed는 해석은 성공했지만 장바구니 반영이 다른 이유로 실패한 경우로,
             ai_unavailable과 구분합니다. session_expired는 접수 410과 실행 중 완료된 세션 양쪽에 쓰입니다.
