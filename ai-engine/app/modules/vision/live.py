@@ -47,9 +47,9 @@ From ai-engine/:
 - The ring buffer keeps the rows a window needs (chain.history_s: window_s + 2 x gap_s of the value bundle).
 - When the run stops, the rows after the last full window get one shorter window (record 'partial').
 - --out DIR: windows.jsonl and meta.json only. The camera picture is never saved.
-- --aid-model AID.onnx (optional) with --aid-rule owner_box | head_centre and --aid-head-min SCORE: as in replay.py
-  (the reading of the walking-aid detector and the head_centre reading's aid_use cut, which has no default; they
-  override the value bundle and are recorded in meta.json with origin 'option').
+- --aid-model AID.onnx (optional) with --aid-rule owner_box | head_centre | head_centre_carry and --aid-head-min
+  SCORE: as in replay.py (the reading of the walking-aid detector and the aid_use cut of the two head_centre
+  readings, which has no default; they override the value bundle and are recorded in meta.json with origin 'option').
 - A run with neither --seconds nor --out (unbounded, e.g. the kiosk's all-day run) keeps no per-frame or per-window
   timing rows (RunTiming(keep=False)); at exit it prints the frame and window counts, the stop reason and the tag
   sender's counts, with no timing percentiles; with --serve it says so in one start line (unbounded_note). The local

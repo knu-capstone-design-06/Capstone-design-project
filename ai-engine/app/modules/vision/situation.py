@@ -34,7 +34,8 @@ Output for one window (sem section 4: dec section 3's output line plus quality, 
                 aid_use (1-1; window median of aid_any_score of the main user's person box > aid_use_min; only
                 when the walking-aid detector ran; with aid_rule head_centre, the kiosk-view detector files,
                 window median of aid_head_score, the aid-class box that holds the centre of the main user's head
-                box, > aid_head_min, which has no value yet),
+                box, > aid_head_min, which has no value yet; with head_centre_carry the same median, the rows
+                without the head box carrying that box's follow-up, columns.AidCarry),
                 phone_use (3-2's phone path: the phone at the main user's head in min_events of the window's segment_s
                 segments, or at the main user (head or hand) in min_events
                 segments with the main user not facing the screen in the window's last segment; no touch, body
@@ -80,8 +81,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .events import (AID_RULES, HEAD_CENTRE, OWNER_BOX, Cues, PilotParams, SceneCues, is_number, is_ratio, new_user,
-                     observe_scene, observe_window, user_change)
+from .events import (AID_HEAD_RULES, AID_RULES, OWNER_BOX, Cues, PilotParams, SceneCues, is_number, is_ratio,
+                     new_user, observe_scene, observe_window, user_change)
 
 SOURCE = "rules_v1"
 UNKNOWN, NONE = "unknown", "none"
@@ -340,11 +341,12 @@ def aid_use(sc: SceneCues, aid_use_min: float | None, min_share: float | None = 
             aid_head_min: float | None = None) -> tuple:
     """(status, events, unknown reason): the median aid_any_score of the main user's person box (aid_score)
     above the boundary. The detector not run, no value, no anchor for the main user, no box around it or too few rows
-    behind the median: unknown. aid_rule (params.aid_rule) head_centre reads the head_centre columns instead
-    (_aid_use_by_head, with aid_head_min); the default owner_box is the rule above."""
+    behind the median: unknown. aid_rule (params.aid_rule) head_centre or head_centre_carry reads the aid_head
+    columns instead (_aid_use_by_head, with aid_head_min; the two readings differ only in the rows' values, which the
+    chain writes); the default owner_box is the rule above."""
     if aid_rule not in AID_RULES:
         raise ValueError(f"aid_rule must be one of {AID_RULES}, got {aid_rule!r}")
-    if aid_rule == HEAD_CENTRE:
+    if aid_rule in AID_HEAD_RULES:
         return _aid_use_by_head(sc, aid_head_min, min_share)
     if not sc.frames:
         return None, [], "no_frames"
@@ -367,7 +369,8 @@ def _aid_use_by_head(sc: SceneCues, aid_head_min: float | None, min_share: float
     aid_head_min. The same window logic as the rule above. Unknown: no frames, the column missing (the detector not
     run, or run with the owner_box reading: column:aid_head_score), no cut for this model (no_value_for_model), no
     main-user head box on any row from the window's newest user on (no_main_user_box), too few rows behind the median
-    (too_few_rows). A head box with no aid-class box around its centre counts as 0.0, not as missing."""
+    (too_few_rows). A head box with no aid-class box around its centre counts as 0.0, not as missing. Under
+    head_centre_carry a carried row is a value too, so a window can be judged on rows without the head box."""
     if not sc.frames:
         return None, [], "no_frames"
     if not sc.aid_head_measured:

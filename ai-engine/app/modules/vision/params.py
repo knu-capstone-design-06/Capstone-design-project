@@ -18,10 +18,12 @@ Two kinds live here:
   bundle; without one a broken main-user track is never stitched (the behaviour before 2026-11-22). The hand-point
   limit of the phone columns (HAND_BOUNDARIES, columns.phone_columns) has no value either: without one no hand box
   is built and the phone path's hand half is held (a phone away from the heads is 'unknown'); the head half runs.
-  The walking-aid detector has two readings (aid_rule, AID_RULES; 2026-11-26): the default owner_box keeps the rule
+  The walking-aid detector has three readings (aid_rule, AID_RULES; 2026-11-26): the default owner_box keeps the rule
   of 2026-11-22 with its values aid_use_min and aid_person_min; head_centre is the reading of the kiosk-view detector
   files, and its aid_use cut (AID_HEAD_BOUNDARIES, aid_head_min) has no value: without one aid_use under that
-  reading is 'unknown' (no_value_for_model).
+  reading is 'unknown' (no_value_for_model). head_centre_carry is head_centre with the user's aid box followed through
+  the rows without the head box (columns.AidCarry); it reads aid_head_min too and adds no value of its own: it
+  follows the box with the head tracker's track_iou_min and track_max_gap_s.
 - events.PilotParams (re-exported here as SituationParams): the 13 values of the events and situation rules. They keep
   NO defaults on purpose (vision README '상황 층'; tests/test_situation.py checks it), so they only come from a value
   bundle file (load_bundle). Without one the runners still run and the situation output is 'unknown'.
@@ -203,11 +205,14 @@ class PilotParams:
                    "거르고 그 클래스 안에서 aid_nms_iou로 NMS를 한 뒤 주 사용자 머리 상자 가운데를 품은 상자의 가장 큰 점수를 "
                    "내고, 클래스들 가운데 가장 큰 값(aid_head_score)을 aid_head_min과 견줌: 보조기구 사용자를 사용자와 보조기구를 "
                    "함께 두른 보조기구 클래스 상자 하나로 표시하고 그 사람에게는 pedestrian 상자가 없는 파일(키오스크 시점 "
-                   "탐지기 파일; 그 파일들의 재생 도구와 같은 읽기)")
+                   "탐지기 파일; 그 파일들의 재생 도구와 같은 읽기). head_centre_carry = 머리 상자가 있는 프레임은 "
+                   "head_centre와 같고, 그 값을 낸 보조기구 상자를 머리 상자가 없는 프레임에서 머리 트랙과 같은 규칙"
+                   "(IoU가 가장 큰 상자, track_iou_min 이상; track_max_gap_s보다 오래 맞는 상자가 없으면 끝)으로 따라가 "
+                   "그 상자의 점수를 냄(columns.AidCarry). 새 값 없이 track_iou_min · track_max_gap_s를 그대로 씀")
     aid_head_min: float | None = _p(
-        None, f"{UNDECIDED}. 탐지기 파일마다 다름: aid_rule이 head_centre일 때 보조기구 사용(aid_use) = 창 안 "
-              "aid_head_score 중앙값이 이 값 초과(트리 표 3-가 1-1). 키오스크 시점 탐지기 파일의 값은 아직 정하지 않음. "
-              "값이 없으면 head_centre의 aid_use는 모름(no_value_for_model)", "score 0~1")
+        None, f"{UNDECIDED}. 탐지기 파일마다 다름: aid_rule이 head_centre · head_centre_carry일 때 보조기구 사용"
+              "(aid_use) = 창 안 aid_head_score 중앙값이 이 값 초과(트리 표 3-가 1-1). 키오스크 시점 탐지기 파일의 값은 "
+              "아직 정하지 않음. 값이 없으면 두 읽기의 aid_use는 모름(no_value_for_model)", "score 0~1")
 
     # --- phone detector (app/inference/phone.py; optional input, off unless its ONNX file is given) -------------
     phone_score_min: float = _p(

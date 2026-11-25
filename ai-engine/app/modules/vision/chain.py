@@ -29,7 +29,7 @@ import time
 
 from . import columns as C
 from .contract_view import to_contract
-from .events import HEAD_CENTRE, SEEN, new_user_rows, observe_window
+from .events import HEAD_CENTRE, HEAD_CENTRE_CARRY, SEEN, new_user_rows, observe_window
 from .judgment import rule_table_v0 as R
 from .judgment.jev_stub import ShadowJev
 from .situation import RULES, TAGS, UNKNOWN, assess
@@ -85,6 +85,7 @@ class FrameChain:
         self.change = C.MainUserChange(params.track_iou_min, params.track_max_gap_s,        # the change columns
                                        params.role_window_s, params.segment_s,
                                        params.stitch_shift_max, params.stitch_size_max)
+        self.aid_carry = C.AidCarry(params.track_iou_min, params.track_max_gap_s)   # aid_rule head_centre_carry
         self.session = None                     # the touch log's sessionId at the previous row
         self.prev_t = None
 
@@ -104,6 +105,7 @@ class FrameChain:
                 self.head_ref.reset()
                 self.pitch_ref.reset()
                 self.change.reset()
+                self.aid_carry.reset()
             if session is not None:
                 self.session = session
         row, _ = self.observer.process(frame, source_kind=self.source_kind)
@@ -141,6 +143,8 @@ class FrameChain:
                                      self.heads is not None, self.p.aid_person_min))
             if self.p.aid_rule == HEAD_CENTRE:  # the kiosk-view detector files: the aid-class box at the user's head
                 row.update(C.aid_head_columns(aids, row.get("primary_box")))
+            elif self.p.aid_rule == HEAD_CENTRE_CARRY:   # the same, followed through the rows without the head box
+                row.update(self.aid_carry.update(t, aids, row.get("primary_box")))
             row["ms_aids"] = sum(aids.ms.values())
         if self.phones is not None:             # the main user's phone: the head box and the pose's hands
             if self.phone_k % self.p.phone_every == 0:

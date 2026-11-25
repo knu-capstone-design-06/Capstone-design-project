@@ -466,11 +466,15 @@ def detect_events(rows: list, params: PilotParams, *, landmarker_num_faces: int,
 # --- the scene tags' measurements (situation.py SCENE_TAGS; 2026-11-22) ------------------------------------------
 SCENE_KINDS = ("face_height", "face_size", "main_user_changed", "nothing_seen", "aid_score", "aid_head",
                "phone_at_head", "phone_in_hand")
-# The two readings of the walking-aid detector (params.PilotParams.aid_rule, 2026-11-26): OWNER_BOX = the main user's
+# The readings of the walking-aid detector (params.PilotParams.aid_rule, 2026-11-26): OWNER_BOX = the main user's
 # person box and its aid scores (the default, the rule of 2026-11-22); HEAD_CENTRE = the aid-class boxes that hold the
-# centre of the main user's head box (the kiosk-view detector files: one aid-class box around the user and the aid)
-OWNER_BOX, HEAD_CENTRE = "owner_box", "head_centre"
-AID_RULES = (OWNER_BOX, HEAD_CENTRE)
+# centre of the main user's head box (the kiosk-view detector files: one aid-class box around the user and the aid);
+# HEAD_CENTRE_CARRY = HEAD_CENTRE on the rows with the head box, and on the rows without it the aid box of the latest
+# head row followed by the head tracker's rule (columns.AidCarry). AID_HEAD_RULES = the readings that write the
+# aid_head columns and judge aid_use on them.
+OWNER_BOX, HEAD_CENTRE, HEAD_CENTRE_CARRY = "owner_box", "head_centre", "head_centre_carry"
+AID_RULES = (OWNER_BOX, HEAD_CENTRE, HEAD_CENTRE_CARRY)
+AID_HEAD_RULES = (HEAD_CENTRE, HEAD_CENTRE_CARRY)
 
 
 def _main_face(row: dict) -> bool:
@@ -618,7 +622,8 @@ class SceneCues:
       aid_score          the rows with an aid_any_score (the walking-aid detector's box of the main user,
                          columns.aid_columns): aid_any_median, rows, owner_yes_rows
       aid_head           the rows with an aid_head_score (the head_centre reading: the aid-class box that holds the
-                         centre of the main user's head box, columns.aid_head_columns): aid_head_median, rows, aid_class
+                         centre of the main user's head box, columns.aid_head_columns; under head_centre_carry also the
+                         rows whose value was carried, columns.AidCarry): aid_head_median, rows, aid_class
                          (_aid_head_obs: the class behind the median)
     No value is compared here except the two size boundaries that mark near rows (face: approach_ratio_min, head box:
     head_approach_ratio_min); situation.py compares the medians with the camera's boundaries."""
@@ -630,7 +635,7 @@ class SceneCues:
     head_measured: bool = False  # every row carries head_count: 'no head box' can be concluded
     aid_measured: bool = False   # every row carries aid_owner: the walking-aid detector ran
     aid_anchor_rows: int = 0     # rows where the main user's anchor (shoulders or head box) was known
-    aid_head_measured: bool = False  # every row carries aid_head_score: the detector ran with the head_centre reading
+    aid_head_measured: bool = False  # every row carries aid_head_score: the detector ran with a head_centre reading
     head_near_rows: int = 0      # main-user head-box rows left out of head_height as grown beyond head_approach_ratio_min
     phone_measured: bool = False  # every row carries phone_owner: the phone detector ran
     phone_segments: tuple = ()    # 'yes' | 'no' | 'unknown' per segment_s bin of the window (_phone_segments)
