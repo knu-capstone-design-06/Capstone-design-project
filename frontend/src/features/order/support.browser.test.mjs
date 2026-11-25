@@ -464,3 +464,75 @@ test('처음으로 확인 창의 대답은 창이 뜬 직후의 누름을 받지
     fixture.verify(); assert.deepEqual(errors, []);
   } finally { await browser.close(); }
 });
+test('서버 제안을 받아들이면 적용 알림과 [원래대로]를 보이고, 되돌리면 키오스크가 켠 설정만 꺼진다', async () => {
+  const browser = await chromium.launch(launchOptions);
+  try {
+    const session = 'apply-undo';
+    const { page, errors, fixture } = await open(browser, bootstrap(session));
+    await page.evaluate(() => document.fonts.ready);
+    const card = page.locator('section.support-confirm-sheet');
+    const shown = () => page.evaluate(() => document.querySelector('.cart-notice:not([hidden])')?.textContent.trim() ?? '');
+    const receive = response => page.evaluate(value => window.kioskSupportDraft.receive(value), response);
+    const helpTile = async key => {
+      await target(page, 'support-toggle').click(); await target(page, `support:${key}`).click(); await target(page, 'support-close').click();
+      await page.locator('dialog[open]').waitFor({ state: 'hidden' });
+    };
+    // 고객이 화면 도움에서 고대비를 직접 켭니다: 직접 켠 설정만 있을 때는 되돌릴 것이 없습니다.
+    await helpTile('highContrast');
+    assert.equal(await target(page, 'support-undo').count(), 0, '고객이 직접 켠 설정만 있을 때는 [원래대로]가 없음');
+    // 알림이 터치로 닫히는지와 시간으로 닫히는지를 가르려고 앱의 시간을 멈추고 직접 보냅니다.
+    await page.clock.install();
+    await page.clock.pauseAt(new Date(Date.now() + 1000));
+    const accept = async question => {
+      await card.getByRole('heading', { name: question, exact: true }).waitFor();
+      await page.clock.runFor(501);
+      await page.locator('.support-confirm-actions[data-armed="true"]').waitFor();
+      await target(page, 'support-confirm:accept').click();
+      await card.waitFor({ state: 'hidden' });
+    };
+
+    assert.equal(await receive(decision(session, 'large_text')), true);
+    await accept('글씨를 크게 바꿀까요?');
+    await page.locator('.kiosk.large-text').waitFor();
+    assert.equal(await shown(), '글씨를 크게 바꿨어요.');
+    await target(page, 'support-undo').waitFor();
+    // [원래대로]는 [화면 도움] 옆에 같은 높이로, 버튼 간격만큼 떨어져 섭니다.
+    const [help, undo, gap] = [await target(page, 'support-toggle').boundingBox(), await target(page, 'support-undo').boundingBox(),
+      await page.locator('.kiosk').evaluate(element => parseFloat(getComputedStyle(element).getPropertyValue('--gap-btn')))];
+    assert.equal(undo.y, help.y); assert.equal(undo.height, help.height); assert.equal(undo.x - (help.x + help.width), gap);
+
+    // 앞의 알림이 떠 있는 동안 둘째 제안을 받아들입니다: 그 누름은 앞의 알림만 닫고, 자기가 띄운 알림은 닫지 않습니다.
+    assert.equal(await receive(decision(session, 'simple_screen')), true);
+    await accept('간편한 화면으로 바꿀까요?');
+    await page.clock.runFor(1);
+    await page.locator('.kiosk.large-text.simple-screen').waitFor();
+    assert.equal(await shown(), '간편한 화면으로 바꿨어요.', '알림을 띄운 누름은 그 알림을 닫지 않음');
+    // 그 뒤의 터치가 알림을 닫고(시간은 멈춰 있음) [원래대로]는 남습니다.
+    await page.locator('.store-name').first().click();
+    await page.clock.runFor(1);
+    assert.equal(await shown(), '', '다음 터치에 알림이 닫힘');
+    assert.equal(await target(page, 'support-undo').count(), 1);
+
+    // [원래대로] 한 번이면 키오스크가 켠 설정이 모두 꺼지고, 고객이 켠 설정은 남습니다.
+    await target(page, 'support-undo').click();
+    await page.clock.runFor(1);
+    await page.waitForFunction(() => !document.querySelector('.kiosk.large-text, .kiosk.simple-screen'));
+    assert.equal(await page.locator('.kiosk.high-contrast').count(), 1, '고객이 화면 도움에서 켠 고대비는 그대로');
+    assert.equal(await shown(), '바꾸기 전 화면으로 돌아갔어요.');
+    assert.equal(await target(page, 'support-undo').count(), 0, '되돌린 뒤에는 [원래대로]가 없음');
+    // 되돌림 알림은 시간이 지나면 닫힙니다.
+    await page.clock.runFor(2751);
+    assert.equal(await shown(), '', '2,750ms 뒤에 알림이 닫힘');
+    assert.equal(await receive(decision(session, 'large_text')), false, '같은 세션에서 이미 답한 제안은 다시 뜨지 않음');
+
+    // 키오스크가 켠 설정을 고객이 화면 도움에서 직접 끄면 되돌릴 것이 없습니다.
+    assert.equal(await receive(decision(session, 'step_guide')), true);
+    await accept('주문 순서를 안내해 드릴까요?');
+    assert.equal(await shown(), '주문 순서 안내를 켰어요.');
+    await target(page, 'support-undo').waitFor();
+    await helpTile('stepGuide');
+    assert.equal(await page.locator('.guide').count(), 0);
+    assert.equal(await target(page, 'support-undo').count(), 0, '화면 도움에서 직접 끈 뒤에는 [원래대로]가 없음');
+    fixture.verify(); assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
