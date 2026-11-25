@@ -902,28 +902,39 @@ def _meet(a, b) -> bool:
     return bool(a[0] <= b[2] and b[0] <= a[2] and a[1] <= b[3] and b[1] <= a[3])
 
 
-def _hand_boxes(pose, head) -> list | None:
-    """The main user's hand boxes (the box spanned by each hand's four points) when the pose is the main user's (its
-    nose lies in the main user's head box); None when there is no pose, it is someone else's, or no hand point of it is
-    finite (no hand could be checked)."""
+def _hand_boxes(pose, head, vis_min: float | None = None) -> list | None:
+    """The main user's hand boxes (the box spanned by each hand's points that count) when the pose is the main user's
+    (its nose lies in the main user's head box); None when there is no pose, it is someone else's, or no hand point of
+    it counts (no hand could be checked). A hand point counts when its x, y are finite and, with vis_min
+    (params.hand_vis_min), its visibility (pose column 2) is at least vis_min: below it the landmarker reports the point
+    as occluded or out of the frame, so its position is estimated, not seen. A point without a visibility (NaN, or a
+    pose without that column) does not count when vis_min is given: nothing confirms its position. vis_min None: the
+    visibility is not read."""
     if pose is None:
         return None
-    pts = np.asarray(pose, dtype=np.float64)[:, :2]
+    pose = np.asarray(pose, dtype=np.float64)
+    pts = pose[:, :2]
     if not np.isfinite(pts[NOSE]).all() or not inside(pts[NOSE], head):
         return None
     out = []
     for hand in HANDS:
         p = pts[list(hand)]
-        p = p[np.isfinite(p).all(axis=1)]
+        keep = np.isfinite(p).all(axis=1)
+        if vis_min is not None:
+            vis = pose[list(hand), 2] if pose.shape[1] > 2 else np.full(len(hand), np.nan)
+            keep &= np.isfinite(vis) & (vis >= vis_min)
+        p = p[keep]
         if len(p):
             out.append((p[:, 0].min(), p[:, 1].min(), p[:, 0].max(), p[:, 1].max()))
-    return out or None                           # no finite hand point: the hands cannot be checked
+    return out or None                           # no hand point counts: the hands cannot be checked
 
 
-def phone_columns(phones, pose, primary_box, head_boxes=None) -> dict:
+def phone_columns(phones, pose, primary_box, head_boxes=None, hand_vis_min: float | None = None) -> dict:
     """PHONE_COLUMNS of one frame. phones = app.inference.phone.Phones; pose = the pose points (33 x 4) or None;
     primary_box = the main user's head box or None; head_boxes = the frame's head_boxes entries (head_columns; None or
-    [] = no other head). A phone at a head belongs to the head box that holds the larger share of the phone box (the
+    [] = no other head); hand_vis_min = params.hand_vis_min (None: the hand points' visibility is not read; with a
+    value only hand points seen at least that visibly span a hand box, _hand_boxes). A phone at a head belongs to the
+    head box that holds the larger share of the phone box (the
     intersection area over the phone box's area; a tie goes to the main user): it is the main user's ('head', at the
     ear or in front of the face) when its box meets the main user's head box and no other head box holds more of it,
     and another person's when another head box holds more of it, or holds some of it while it does not meet the main
@@ -952,7 +963,7 @@ def phone_columns(phones, pose, primary_box, head_boxes=None) -> dict:
         elif not meets_main and rival <= 0.0:
             away.append(i)                       # at no head: tried against the hands
         # otherwise another person's head holds more of it: not the main user's
-    hands = _hand_boxes(pose, head)
+    hands = _hand_boxes(pose, head, hand_vis_min)
     in_hand = [] if hands is None else [i for i in away if any(_meet(phones.boxes[i], h) for h in hands)]
     for where, chosen in (("head", at_head), ("hand", in_hand)):
         if chosen:

@@ -28,7 +28,7 @@ import time
 
 from . import columns as C
 from .contract_view import to_contract
-from .events import SEEN, observe_window
+from .events import SEEN, observe_window, user_since
 from .judgment import rule_table_v0 as R
 from .judgment.jev_stub import ShadowJev
 from .situation import RULES, TAGS, UNKNOWN, assess
@@ -139,7 +139,7 @@ class FrameChain:
             if self.phone_k % self.p.phone_every == 0:
                 phones = self.phones(frame.image)
                 row.update(C.phone_columns(phones, inf.pose if inf is not None else None, row.get("primary_box"),
-                                           row.get("head_boxes")))
+                                           row.get("head_boxes"), self.p.hand_vis_min))
                 row["ms_phones"] = sum(phones.ms.values())
             else:                               # not run on this frame: the columns blank (the events skip them)
                 row.update(dict.fromkeys(C.PHONE_COLUMNS))
@@ -294,9 +294,11 @@ def away_from_screen(seg_rows: list, sp) -> bool | None:
     above the screen: a head seen without its face is not turned to the screen, and a face seen only turned beyond
     offscreen_yaw_deg is not either) - checked first, so it holds even when the gate says facing; otherwise False when
     the gate says facing, or a row with the head box shows the main user's face turned to the screen; None otherwise
-    (no row with the head box and the gate cannot tell, or no situation values)."""
+    (no row with the head box and the gate cannot tell, or no situation values). After a change of user inside the
+    segment (events.user_since) only the new user's rows are read: the earlier user's do not decide the new user's."""
     if sp is None:
         return None
+    seg_rows = seg_rows[user_since(seg_rows):]
     gaze = facing(seg_rows, sp, main_only=True)
     boxed = [r for r in seg_rows if not C.blank_box(r.get("primary_box"))]
     face_in_box = any(C.main_user_face(r) and _toward_screen(r, sp) for r in boxed)
@@ -430,7 +432,8 @@ class WindowJudge:
             "t": round(t_end, 4), "segment_s": [round(t_end - seg_len, 4), round(t_end, 4)],
             "frames": len(seg_rows), "situation": situation, "touch": seg,
             "screen": {**screen, "pause_s": None if screen["pause_s"] is None else round(screen["pause_s"], 3)},
-            "vision": vision_summary(seg_rows, gaze), "turns": turns, "measurable": measurable, "decision": d,
+            "vision": vision_summary(seg_rows, gaze), "detectors": detectors(seg_rows), "turns": turns,
+            "measurable": measurable, "decision": d,
             "session": self.state.snapshot(), "session_reset": session_reset, "jev": jev,
         }
         if seg_len != p.segment_s:
@@ -438,6 +441,18 @@ class WindowJudge:
         record["contract"] = to_contract(record, self.session_id)
         record["ms_window"] = (time.perf_counter() - w0) * 1000.0
         return record
+
+
+# a column each optional detector writes on every row while it is on (FrameChain; HEAD_COLUMNS, AID_COLUMNS,
+# PHONE_COLUMNS: phone_owner is blank on the rows phone_every skips, but present)
+DETECTOR_COLUMNS = (("heads", "head_count"), ("aids", "aid_owner"), ("phones", "phone_owner"))
+
+
+def detectors(seg_rows: list) -> dict:
+    """Which optional detectors ran on the segment's rows: {heads, aids, phones} (the window record's and the contract
+    view's 'detectors'). A detector counts when a row of the segment carries its column (DETECTOR_COLUMNS); a segment
+    without rows gives False for all three (record['frames'] is 0 then)."""
+    return {name: any(column in r for r in seg_rows) for name, column in DETECTOR_COLUMNS}
 
 
 def vision_summary(seg_rows: list, gaze) -> dict:

@@ -28,8 +28,8 @@ from collections import deque
 
 from .chain import SOURCE_KIND, FrameChain, WindowJudge, history_s
 from .params import load_bundle
-from .replay import (MODELS_DIR, add_frame_counts, environment, jsonable, load_aids, load_perception, load_phones,
-                     timing_summary)
+from .replay import (MODELS_DIR, TIMING_COLUMNS, add_frame_counts, environment, jsonable, load_aids, load_perception,
+                     load_phones, timing_summary)
 
 WINDOW = "vision chain live (q = stop)"   # ASCII: OpenCV window titles may not show Korean on Windows
 
@@ -100,9 +100,7 @@ def run_live(source, bundle, *, models, detector=None, direction=None, show_wind
                 row = chain.process(frame)
                 buf.append(row)
                 add_frame_counts(frame_counts, row)
-                all_ms.append({"ms_total": row.get("ms_total"), "ms_heads": row.get("ms_heads"),
-                               "ms_head_dir": row.get("ms_head_dir"), "ms_chain": row.get("ms_chain"),
-                               "cpu_ms_chain": row.get("cpu_ms_chain")})
+                all_ms.append({k: row.get(k) for k in ("ms_total",) + TIMING_COLUMNS})   # timing_summary's keys
                 t = last_t = float(row["t_s"])
                 while buf and float(buf[0]["t_s"]) < t - keep_s:
                     buf.popleft()

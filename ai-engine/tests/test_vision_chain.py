@@ -43,6 +43,7 @@ SEEN, NOT_SEEN = "보임", "못 봄"
 NAN = float("nan")
 DT = 0.1
 PITCH_TEST = 20.0   # head_down_pitch_min of these tests: an arbitrary round value, not a calibration
+VIS_TEST = 0.3      # hand_vis_min of these tests: between the fake points' visibility 0.0 and 0.9, not a proposal
 SIT_VALUES = dict(window_s=6.0, gap_s=0.25, offscreen_yaw_deg=30.0, shoulder_vis_min=0.5, look_back_min_count=2,
                   sweep_min_count=2, stay_min_s=1.0, dwell_min_s=1.0, mouth_motion_min=0.2, body_still_max=0.05,
                   min_events=3, face_visible_min=0.6, track_conf_min=0.6)   # test values for the synthetic rows
@@ -192,6 +193,21 @@ class ParamsTests(unittest.TestCase):   # plain Python: runs with the server pac
         for bad in (0, 2.5, True):
             with self.assertRaises(ValueError):
                 PilotParams(phone_every=bad)
+
+    def test_the_hand_point_limit_has_no_value_and_says_what_none_does(self):
+        from app.modules.vision.params import HAND_BOUNDARIES, UNDECIDED, Bundle, PilotParams
+        self.assertEqual(HAND_BOUNDARIES, ("hand_vis_min",))
+        p = PilotParams()
+        self.assertIsNone(p.hand_vis_min)
+        source = PilotParams.sources()["hand_vis_min"]
+        self.assertTrue(source.startswith(UNDECIDED))
+        self.assertIn("visibility", source)
+        self.assertNotIn("hand_vis_min", PilotParams.pilot_fields())
+        self.assertEqual(Bundle(p, None).to_dict()["chain"]["hand_vis_min"]["origin"], "default")
+        for bad in (0, -0.5, 1.5, float("nan"), "0.5", True):
+            with self.assertRaises(ValueError, msg=repr(bad)):
+                PilotParams(hand_vis_min=bad)
+        self.assertEqual(PilotParams(hand_vis_min=VIS_TEST).hand_vis_min, VIS_TEST)
 
     def test_values_are_checked(self):
         from app.modules.vision.params import PilotParams
@@ -1077,6 +1093,38 @@ class ColumnsTests(unittest.TestCase):
         out = phone_columns(phones(companion_call), reach, (0.20, 0.10, 0.40, 0.30), [left, right])
         self.assertEqual((out["phone_owner"], out["phone_at"]), ("no", None))   # another head holds it: not a hand
 
+    def test_hand_points_below_the_visibility_limit_are_no_ownership_evidence(self):
+        """With hand_vis_min (params; no value by default) a hand point counts only when its visibility is at least the
+        limit: a hidden hand whose position the landmarker estimated spans no hand box, and a point without a
+        visibility (NaN) does not count either. The other hand still checks the phone ('no'); with neither hand left the
+        hands cannot be checked ('unknown'). Without the limit the visibility is not read (the earlier behaviour)."""
+        import numpy as np
+        from app.inference.phone import Phones
+        from app.modules.vision.columns import phone_columns
+        held = (0.31, 0.50, 0.40, 0.57)
+        phones = Phones(np.array([held]), np.array([0.6]), (100, 100))
+        head = (0.40, 0.10, 0.60, 0.30)
+        pose = np.zeros((33, 4))
+        pose[:, 2:] = 0.9                                         # visibility, presence
+        pose[0, :2] = (0.50, 0.20)                                # nose in the head box: the main user's pose
+        for k, xy in zip((15, 17, 19, 21), ((0.30, 0.60), (0.28, 0.58), (0.29, 0.56), (0.32, 0.57))):
+            pose[k, :2] = xy                                      # the left hand at the phone
+        for k in (16, 18, 20, 22):
+            pose[k, :2] = (0.70, 0.70)                            # the right hand away from it
+        self.assertEqual(phone_columns(phones, pose, head, hand_vis_min=VIS_TEST)["phone_at"], "hand")   # seen
+        hidden = pose.copy()
+        hidden[[15, 17, 19, 21], 2] = 0.0                         # the left hand's points not visible
+        self.assertEqual(phone_columns(phones, hidden, head)["phone_at"], "hand")           # no limit: as before
+        self.assertEqual(phone_columns(phones, hidden, head, hand_vis_min=VIS_TEST)["phone_owner"], "no")
+        unrated = pose.copy()
+        unrated[[15, 17, 19, 21], 2] = np.nan                     # no visibility from the landmarker
+        self.assertEqual(phone_columns(phones, unrated, head, hand_vis_min=VIS_TEST)["phone_owner"], "no")
+        self.assertEqual(phone_columns(phones, unrated, head)["phone_at"], "hand")
+        both = hidden.copy()
+        both[[16, 18, 20, 22], 2] = np.nan                        # neither hand counts: nothing checked
+        self.assertEqual(phone_columns(phones, both, head, hand_vis_min=VIS_TEST)["phone_owner"], "unknown")
+        self.assertEqual(phone_columns(phones, pose[:, :2], head, hand_vis_min=VIS_TEST)["phone_owner"], "unknown")
+
     def test_aid_columns_use_the_shoulders_only_when_they_are_the_main_users(self):
         """One pose per frame, not always the main user's. Shoulders under another person's box give way to the main
         user's head box; with the head detector on and no main-user box in the frame there is no anchor."""
@@ -1643,13 +1691,16 @@ class RuleTableTests(unittest.TestCase):   # plain Python: runs with the server 
     def test_3_2_phone_path_ranks_with_the_other_rows(self):
         """The phone path opens the same rank-2 wait as the companion: it wins over a 3-1 row in the same window,
         replaces a held 4-2 highlight (which comes back after the touch ends the wait) and a held 4-1 ask (JP 0-3 ⑤);
-        with both paths the cues name both."""
+        the cues name the companion tag only when the companion path holds, and the path when the phone path holds:
+        another tag of the window (here looking_back_with_people_behind, or none known) is not a cue of the 3-2 row."""
         def phone(name="none", tags=True):
             return {**sit(name), "tags": [{"name": "phone_use", "status": tags}]}
         (d,), _ = self.run_windows([win(situation=phone("looking_back_with_people_behind"), screen="menu",
                                         steps_left=2)])
-        self.assertEqual((d.transition, d.scene, d.cues), ("open", "3-2", {"tag": "looking_back_with_people_behind",
-                                                                         "path": "phone_use"}))
+        self.assertEqual((d.transition, d.scene, d.cues), ("open", "3-2", {"path": "phone_use"}))
+        unknown = {**phone(), "name": "unknown"}                  # the situation tag unknown, phone_use true
+        (d,), _ = self.run_windows([win(situation=unknown)])
+        self.assertEqual((d.scene, d.cues), ("3-2", {"path": "phone_use"}))
         (d,), _ = self.run_windows([win(situation=phone("consulting_companion"))])
         self.assertEqual(d.cues, {"tag": "consulting_companion", "path": "phone_use"})
         (d,), _ = self.run_windows([win(situation=phone("consulting_companion", tags="unknown"))])
@@ -1952,6 +2003,71 @@ class WindowJudgeTests(unittest.TestCase):
         self.assertTrue(away(rows_of(looked_away, [(1, lost_in_box)]), sp))   # boxed faces only turned away: away
         self.assertIsNone(away(rows_of(facing(3)), None))                                  # no situation values
 
+    def test_away_from_screen_reads_the_new_user_only_after_a_change_in_the_segment(self):
+        """phone_use's hand path after a change of user inside the segment: the earlier user's face turned to the
+        screen does not decide the new user's 'away' (the new user's head box without a face: away). A reacquired or
+        stitched track, or a swap before the earlier user settled, keeps the earlier rows (not away)."""
+        from app.modules.vision.chain import away_from_screen as away
+        sp = sit_params()
+        box = (0.38, 0.22, 0.62, 0.58)
+        flags = {"main_user_prev_track": 1, "main_user_prev_settled": True, "main_user_reacquired": False,
+                 "main_user_stitched": False}
+        earlier = {"yaw_deg": 0.0, "primary_box": box, "face_in_primary": True, "primary_track": 1}
+        new = {"face_state": NOT_SEEN, "yaw_deg": NAN, "face_cx": NAN, "primary_box": box, "face_in_primary": None,
+               "primary_track": 2}                                # looking down: the head box without a face
+        seg = rows_of([(5, earlier)], [(1, {**new, **flags})], [(4, new)])
+        self.assertIs(away(seg, sp), True)
+        for kept in ({"main_user_reacquired": True}, {"main_user_stitched": "True"}, {"main_user_prev_settled": False}):
+            rows = [dict(r) for r in seg]
+            rows[5].update(kept)
+            self.assertIs(away(rows, sp), False, kept)
+
+    @staticmethod
+    def user_change_rows(**change):
+        """The review's input (PR #98, 2026-11-22 and 11-24): one UI session, a 6-s window; 0.0-3.9 s main-user track 1
+        with its phone at the head, 4.0-6.0 s track 2 without a phone, facing the screen; no touch, the body still.
+        change = the change row's flags (main_user_prev_settled, main_user_reacquired, main_user_stitched)."""
+        box = (0.38, 0.22, 0.62, 0.58)
+        first = {"primary_track": 1, "primary_box": box, "face_in_primary": True, "head_count": 1,
+                 "phone_owner": "yes", "phone_at": "head", "phone_score": 0.6,
+                 **dict.fromkeys(("main_user_prev_track", "main_user_prev_settled", "main_user_reacquired",
+                                  "main_user_stitched"))}
+        second = {**first, "primary_track": 2, "phone_owner": "no", "phone_at": None, "phone_score": None}
+        flags = {"main_user_prev_track": 1, "main_user_prev_settled": True, "main_user_reacquired": False,
+                 "main_user_stitched": False, **change}
+        return rows_of([(40, first)], [(1, {**second, **flags})], [(20, second)])
+
+    def judge_user_change(self, **change):
+        """(user_changed, phone_use, (transition, support)) of the window ending at 6.0 s, min_events 2."""
+        from app.modules.vision.chain import WindowJudge
+        from app.modules.vision.params import Bundle, PilotParams
+        rec = WindowJudge(Bundle(PilotParams(), sit_params(min_events=2), "test")).evaluate(
+            self.user_change_rows(**change), 6.0)
+        tags = {t["name"]: (t["status"], t["unknown_reason"]) for t in rec["situation"]["tags"]}
+        return tags["user_changed"], tags["phone_use"], (rec["decision"]["transition"], rec["decision"]["support"])
+
+    def test_after_a_change_of_user_the_earlier_users_phone_opens_no_wait(self):
+        """After a confirmed change of user (user_changed true) only the new user's rows feed the phone segments: the
+        earlier user's call opens no 3-2 wait. The segments before the change have no rows of the new user, so
+        phone_use cannot tell (review of PR #98 on 9ad34c2, events.py:614)."""
+        self.assertEqual(self.judge_user_change(),
+                         ((True, None), ("unknown", "phone_owner_unknown"), ("none", None)))
+
+    def test_a_reacquired_track_keeps_its_phone_history(self):
+        """The same user found again in the same place (main_user_reacquired) is no change: the phone segments keep the
+        rows before the new track, and the call opens the wait."""
+        self.assertEqual(self.judge_user_change(main_user_reacquired=True),
+                         (("unknown", "reacquired_same_place"), (True, None), ("open", "wait_hold_timer")))
+        self.assertEqual(self.judge_user_change(main_user_reacquired="True")[1:],     # read back from rows.csv
+                         ((True, None), ("open", "wait_hold_timer")))
+
+    def test_a_stitched_track_keeps_its_phone_history(self):
+        """A track stitched back to the same user (main_user_stitched), and a swap before the earlier user settled
+        (main_user_prev_settled False), are no change: the phone segments keep the rows before the new track."""
+        for flags in ({"main_user_stitched": True}, {"main_user_prev_settled": False}, {"main_user_stitched": "True"}):
+            self.assertEqual(self.judge_user_change(**flags),
+                             ((False, None), (True, None), ("open", "wait_hold_timer")), flags)
+
     def test_pause_counts_only_after_a_press_on_this_screen_visit(self):
         from app.modules.vision.chain import WindowJudge
         from app.modules.vision.touch import load_timeline
@@ -1994,6 +2110,24 @@ class WindowJudgeTests(unittest.TestCase):
         self.assertEqual(set(SCENE_OF_TAG), set(TAGS) | set(SCENE_TAGS))
         self.assertEqual([SCENE_OF_TAG[n] for n in SCENE_TAGS],
                          ["wheelchair", "lowvision", "newcustomer", "absence", "aid", "busy"])
+
+    def test_the_window_record_and_the_contract_view_say_which_detectors_ran(self):
+        """'detectors' = {heads, aids, phones}: a detector counts when a row of the segment carries its column (head_count,
+        aid_owner, phone_owner; a blank phone_owner on a frame phone_every skipped still counts). The contract view's
+        extension carries the same; model_version stays the same string."""
+        from app.modules.vision.chain import WindowJudge
+        from app.modules.vision.contract_view import MODEL_VERSION
+        none_ran = WindowJudge(bundle()).evaluate(rows_of(facing(30)), 2.9)
+        self.assertEqual(none_ran["detectors"], {"heads": False, "aids": False, "phones": False})
+        every = rows_of(facing(30), extra={**FULL, "head_count": 1, "aid_owner": "no", "phone_owner": None})
+        rec = WindowJudge(bundle()).evaluate(every, 2.9)
+        self.assertEqual(rec["detectors"], {"heads": True, "aids": True, "phones": True})
+        self.assertEqual(rec["contract"]["extension"]["detectors"], rec["detectors"])
+        heads = WindowJudge(bundle(situation=False)).evaluate(rows_of(facing(30), extra={**FULL, "head_count": 0}), 2.9)
+        self.assertEqual(heads["contract"]["extension"]["detectors"], {"heads": True, "aids": False, "phones": False})
+        self.assertEqual({r["contract"]["extension"]["model_version"] for r in (none_ran, rec, heads)}, {MODEL_VERSION})
+        empty = WindowJudge(bundle()).evaluate(every, 9.0)          # no row in the segment (8.0, 9.0]
+        self.assertEqual((empty["frames"], empty["detectors"]), (0, {"heads": False, "aids": False, "phones": False}))
 
     def test_the_window_record_lists_its_head_turns_with_the_loss_context(self):
         """'turns' = the window's look_back / yaw_sweep_offscreen events and their observations; the pre-loss head
@@ -2465,6 +2599,38 @@ class FrameChainTests(unittest.TestCase):
         rec = WindowJudge(bundle()).evaluate(gone, 5.9)
         self.assertEqual((rec["measurable"], rec["decision"]["transition"]), (False, "none"))   # placeholder again
         self.assertNotIn("phone_use", rec["contract"]["extension"]["measurement"]["basis"])
+
+    def test_a_hidden_hand_at_the_phone_opens_no_wait_with_the_visibility_limit(self):
+        """The review's input (PR #98, 2026-11-24, columns.py:911): the fake-detector run above (60 frames, the main
+        user looking away, no touch) with the visibility of the four hand points at the phone set to 0.0. Without
+        hand_vis_min the visibility is not read and the wait opens as before; with it the hidden hand is no ownership
+        evidence: the other hand is checked, phone_use is false and no wait opens."""
+        import numpy as np
+        from app.inference.phone import Phones
+        from app.modules.vision.chain import FrameChain, WindowJudge
+        from app.modules.vision.params import PilotParams
+
+        def inference():
+            inf = fake_inference(yaw=40.0)                       # beyond offscreen_yaw_deg 30: looking away
+            inf.pose[0, :2] = (0.50, 0.40)                       # nose inside the fake head box
+            for k in (15, 17, 19, 21):
+                inf.pose[k, :2] = (0.45, 0.80)                   # one hand at the chest, inside the phone box ...
+                inf.pose[k, 2] = 0.0                             # ... but not visible
+            return inf
+
+        def fake_phones(img):
+            return Phones(np.array([[0.40, 0.70, 0.48, 0.82]]), np.array([0.6]), (img.shape[1], img.shape[0]),
+                          {"infer": 0.0})
+
+        def run(params):
+            chain = FrameChain(FakeModels([inference() for _ in range(60)]), params, FakeHeads(), phones=fake_phones)
+            rows = [dict(chain.process(f), tap_count=0, miss_tap_count=0) for f in frames(60)]
+            rec = WindowJudge(bundle()).evaluate(rows, 5.9)
+            tag = {t["name"]: (t["status"], t["unknown_reason"]) for t in rec["situation"]["tags"]}["phone_use"]
+            return (rows[55]["phone_owner"], rows[55]["phone_at"]), tag, (rec["decision"]["transition"],
+                                                                          rec["decision"]["support"])
+        self.assertEqual(run(PilotParams()), (("yes", "hand"), (True, None), ("open", "wait_hold_timer")))
+        self.assertEqual(run(PilotParams(hand_vis_min=VIS_TEST)), (("no", None), (False, None), ("none", None)))
 
     def test_the_aid_input_is_off_by_default_and_fills_its_columns_when_given(self):
         import numpy as np
@@ -2986,6 +3152,35 @@ class LiveTests(unittest.TestCase):
         self.assertFalse(meta["window_shown"])
         with open(os.path.join(folder, "windows.jsonl"), encoding="utf-8") as f:
             self.assertEqual(sum(1 for _ in f), meta["windows"])
+
+    def test_both_runners_summarise_every_timing_column(self):
+        """meta.json timing_ms of the replay and the live runner carries ms_total and every TIMING_COLUMNS entry
+        (ms_aids and ms_phones included, from fake detectors), and its note names each of them."""
+        import numpy as np
+        from app.inference.aid import Aids
+        from app.inference.phone import Phones
+        from app.modules.vision.live import run_live
+        from app.modules.vision.replay import TIMING_COLUMNS, run_replay
+
+        def aids(img):
+            return Aids(np.array([[0.30, 0.10, 0.70, 0.95]]), np.array([0.7]), np.array([[0.1, 0.7, 0.0, 0.0, 0.0]]),
+                        ("pedestrian", "crutch", "cane", "walker", "wheelchair"), (img.shape[1], img.shape[0]),
+                        {"pre": 1.0, "infer": 2.0, "post": 0.5})
+
+        def phones(img):
+            return Phones(np.array([[0.40, 0.70, 0.48, 0.82]]), np.array([0.6]), (img.shape[1], img.shape[0]),
+                          {"pre": 0.5, "infer": 1.5, "post": 0.25})
+        sched = [fake_inference() for _ in range(20)]
+        common = dict(models=FakeModels(sched), detector=FakeHeads(), direction=FakeDirection(), blendshapes=False,
+                      aids=aids, phones=phones)
+        replay = run_replay(frames(20), os.path.join(tempfile.mkdtemp(), "out"), bundle(), **common)["timing_ms"]
+        live = run_live(frames(20), bundle(), show_window=False, out_dir=tempfile.mkdtemp(), print_fn=lambda line: None,
+                        **common)["timing_ms"]
+        for timing in (replay, live):
+            for key in ("ms_total",) + TIMING_COLUMNS:
+                self.assertIsNotNone(timing.get(key), key)
+                self.assertIn(key, timing["note"])
+            self.assertEqual((timing["ms_aids"]["p50"], timing["ms_phones"]["p50"]), (3.5, 2.25))
 
 
 def drawn_clip(folder, n=30, fps=10.0):

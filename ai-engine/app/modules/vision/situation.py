@@ -76,7 +76,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .events import Cues, PilotParams, SceneCues, is_number, is_ratio, observe_scene, observe_window
+from .events import (Cues, PilotParams, SceneCues, is_number, is_ratio, new_user, observe_scene, observe_window,
+                     user_change)
 
 SOURCE = "rules_v1"
 UNKNOWN, NONE = "unknown", "none"
@@ -310,9 +311,8 @@ def user_changed(sc: SceneCues) -> tuple:
     if not sc.frames:
         return None, [], "no_frames"
     changes = [e for e in sc.of("main_user_changed")          # a swap during the first approach is not a change,
-               if e["obs"].get("previous_settled") is not False  # nor a track stitched back to the same user
-               and e["obs"].get("stitched") is not True]
-    new = [e for e in changes if e["obs"].get("reacquired") is not True]
+               if user_change(e["obs"])]                       # nor a track stitched back to the same user
+    new = [e for e in changes if new_user(e["obs"])]           # events.observe_scene cuts the phone rows here too
     if new:
         return True, new, None
     if changes:

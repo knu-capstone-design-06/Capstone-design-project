@@ -500,9 +500,55 @@ def _flag(value) -> bool | None:
     return None
 
 
+def user_change(obs: dict) -> bool:
+    """Whether a main_user_changed event (its obs) is weighed as a change of user by situation.user_changed: the
+    earlier main user had settled (previous_settled not False: a swap during the first approach is no change) and the
+    break was not stitched back to the same user (stitched not True). An unknown flag (None) does not rule it out."""
+    return obs.get("previous_settled") is not False and obs.get("stitched") is not True
+
+
+def new_user(obs: dict) -> bool:
+    """Whether a main_user_changed event (its obs) brings a new user, as situation.user_changed counts it: a
+    user_change that is not the same user found again in the same place (reacquired not True)."""
+    return user_change(obs) and obs.get("reacquired") is not True
+
+
+def _change_obs(r: dict) -> dict:
+    """The observations of the main_user_changed event of a row that carries main_user_prev_track (SceneCues)."""
+    return {"track": _track_value(r.get("primary_track")),
+            "previous_track": _track_value(r["main_user_prev_track"]),
+            "gap_s": _num(r, "main_user_gap_s"), "body_kept": _flag(r.get("main_user_body_kept")),
+            "body_gap_s": _num(r, "main_user_body_gap_s"),
+            "previous_h": _num(r, "main_user_prev_h"), "new_h": _num(r, "main_user_new_h"),
+            "h_ratio": _num(r, "main_user_h_ratio"),
+            "new_was_role": None if _blank(r.get("main_user_new_was_role")) else r.get("main_user_new_was_role"),
+            "new_rel_dist": _num(r, "main_user_new_rel_dist"),
+            "new_growth": _num(r, "main_user_new_growth"),
+            "reacquired": _flag(r.get("main_user_reacquired")),
+            "previous_settled": _flag(r.get("main_user_prev_settled")),
+            "stitched": _flag(r.get("main_user_stitched")),
+            "new_start_s": _num(r, "main_user_new_start_s"),
+            "start_shift": _num(r, "main_user_start_shift"),
+            "start_size": _num(r, "main_user_start_size")}
+
+
+def user_since(rows: list) -> int:
+    """The index of the newest row of rows that starts a new user (a main_user_changed row that new_user counts, as
+    situation.user_changed does), 0 when there is none. The per-user measures of a window (observe_scene) and the hand
+    path's last segment (chain.away_from_screen) read the rows from there on: the earlier user's rows do not decide
+    the new user's. A reacquired or stitched track, or a swap during the first approach, is no new user and keeps the
+    rows before it."""
+    return max((i for i, r in enumerate(rows) if not _blank(r.get("main_user_prev_track")) and new_user(_change_obs(r))),
+               default=0)
+
+
 @dataclass(frozen=True)
 class SceneCues:
-    """What the scene tags read for one window. Their events are measurements of the window's rows:
+    """What the scene tags read for one window. Their events are measurements of the window's rows. The per-user
+    measures (face_height, head_pitch, head_size, head_height, face_size, aid_score, the phone segments and the counts
+    near_rows, face_rows, aid_anchor_rows, head_near_rows) read only the rows from the window's newest new user on
+    (user_since: after a change of user, the earlier user's rows are not the new user's); main_user_changed,
+    nothing_seen, frames and the *_measured checks read the whole window:
       face_height        the main user's face rows (face values not blanked; with the head detector, face_in_primary
                          True) without the rows closer than
                          approach_ratio_min (leaning in moves the face down): face_cy_median, rows
@@ -529,7 +575,7 @@ class SceneCues:
     No value is compared here except the two size boundaries that mark near rows (face: approach_ratio_min, head box:
     head_approach_ratio_min); situation.py compares the medians with the camera's boundaries."""
     events: list
-    frames: int                  # rows inside the window
+    frames: int                  # rows inside the window (all of them, also after a change of user)
     track_measured: bool         # every row carries primary_track: the head detector ran, a change can be seen
     near_rows: int               # face rows left out of face_height as closer than approach_ratio_min
     face_rows: int = 0           # rows with the main user's face (face values not blanked)
@@ -550,11 +596,16 @@ def observe_scene(rows: list, window: tuple, approach_ratio_min: float | None = 
     """SceneCues of window = (t0, t1) from the rows inside it (rows after t1 are never read). approach_ratio_min = the
     face-approach boundary of the bundle, or None (then no row is left out of face_height); head_approach_ratio_min =
     the head-box boundary, or None (then no row is left out of head_height). segment_s = the runners' window step
-    (params.segment_s): the phone events are counted per segment; None = no phone segments."""
+    (params.segment_s): the phone events are counted per segment; None = no phone segments. After a change of user in
+    the window (a main_user_changed event that new_user counts, as situation.user_changed does) the per-user measures
+    (SceneCues) read only the rows from the newest such change on (user_since). A reacquired or stitched track, or a
+    swap during the first approach, keeps the rows before it."""
     rows, first = _split(rows, window)
     inside = rows[first:]
-    events = []
-    own = [_main_face(r) for r in inside]
+    since = user_since(inside)              # the per-user measures read the rows from the newest new user on
+    events = [_event("main_user_changed", inside, [i], _change_obs(r)) for i, r in enumerate(inside)
+              if not _blank(r.get("main_user_prev_track"))]
+    own = [i >= since and _main_face(r) for i, r in enumerate(inside)]     # the window's current main user's face
     ratios = [_num(r, "iod_ratio_user") if own[i] else None for i, r in enumerate(inside)]
     near = [approach_ratio_min is not None and q is not None and q > approach_ratio_min for q in ratios]
     height = [i for i, r in enumerate(inside) if own[i] and _num(r, "face_cy") is not None and not near[i]]
@@ -562,8 +613,8 @@ def observe_scene(rows: list, window: tuple, approach_ratio_min: float | None = 
         events.append(_event("face_height", inside, height,
                              {"face_cy_median": statistics.median(_num(inside[i], "face_cy") for i in height),
                               "rows": len(height)}))
-    head_ratios = [_num(r, "head_ratio_user") for r in inside]
-    boxed = [i for i, r in enumerate(inside) if _box_cy(r.get("primary_box")) is not None]
+    head_ratios = [_num(r, "head_ratio_user") if i >= since else None for i, r in enumerate(inside)]
+    boxed = [i for i, r in enumerate(inside) if i >= since and _box_cy(r.get("primary_box")) is not None]
     head = [i for i in boxed if not (head_approach_ratio_min is not None and head_ratios[i] is not None
                                      and head_ratios[i] > head_approach_ratio_min)]
     head_sized = [i for i, q in enumerate(head_ratios) if q is not None]
@@ -584,26 +635,7 @@ def observe_scene(rows: list, window: tuple, approach_ratio_min: float | None = 
     if sized:
         events.append(_event("face_size", inside, sized,
                              {"iod_ratio_median": statistics.median(ratios[i] for i in sized), "rows": len(sized)}))
-    for i, r in enumerate(inside):
-        if not _blank(r.get("main_user_prev_track")):
-            events.append(_event("main_user_changed", inside, [i],
-                                 {"track": _track_value(r.get("primary_track")),
-                                  "previous_track": _track_value(r["main_user_prev_track"]),
-                                  "gap_s": _num(r, "main_user_gap_s"), "body_kept": _flag(r.get("main_user_body_kept")),
-                                  "body_gap_s": _num(r, "main_user_body_gap_s"),
-                                  "previous_h": _num(r, "main_user_prev_h"), "new_h": _num(r, "main_user_new_h"),
-                                  "h_ratio": _num(r, "main_user_h_ratio"),
-                                  "new_was_role": None if _blank(r.get("main_user_new_was_role"))
-                                  else r.get("main_user_new_was_role"),
-                                  "new_rel_dist": _num(r, "main_user_new_rel_dist"),
-                                  "new_growth": _num(r, "main_user_new_growth"),
-                                  "reacquired": _flag(r.get("main_user_reacquired")),
-                                  "previous_settled": _flag(r.get("main_user_prev_settled")),
-                                  "stitched": _flag(r.get("main_user_stitched")),
-                                  "new_start_s": _num(r, "main_user_new_start_s"),
-                                  "start_shift": _num(r, "main_user_start_shift"),
-                                  "start_size": _num(r, "main_user_start_size")}))
-    aid = [i for i, r in enumerate(inside) if _num(r, "aid_any_score") is not None]
+    aid = [i for i, r in enumerate(inside) if i >= since and _num(r, "aid_any_score") is not None]
     if aid:
         events.append(_event("aid_score", inside, aid,
                              {"aid_any_median": statistics.median(_num(inside[i], "aid_any_score") for i in aid),
@@ -611,7 +643,7 @@ def observe_scene(rows: list, window: tuple, approach_ratio_min: float | None = 
                               "owner_yes_rows": sum(inside[i].get("aid_owner") == "yes" for i in aid)}))
     segments, head_segments = [], []
     if segment_s is not None and inside:
-        segments, head_segments, phone_events = _phone_segments(inside, window, segment_s)
+        segments, head_segments, phone_events = _phone_segments(inside[since:], window, segment_s)
         events += phone_events
     if inside and all(not _face(r) and not _body(r) and not (_num(r, "head_count") or 0) > 0
                       and not (_num(r, "aid_person_count") or 0) > 0 and not (_num(r, "face_count") or 0) > 0
@@ -625,7 +657,7 @@ def observe_scene(rows: list, window: tuple, approach_ratio_min: float | None = 
                      aid_measured=bool(inside) and all("aid_owner" in r for r in inside),
                      face_rows=sum(own[i] and _num(r, "face_cy") is not None for i, r in enumerate(inside)),
                      head_measured=bool(inside) and all(_num(r, "head_count") is not None for r in inside),
-                     aid_anchor_rows=sum(r.get("aid_owner") in ("yes", "no") for r in inside),
+                     aid_anchor_rows=sum(r.get("aid_owner") in ("yes", "no") for r in inside[since:]),
                      near_rows=sum(n and _face(r) and _num(r, "face_cy") is not None for n, r in zip(near, inside)),
                      head_near_rows=len(boxed) - len(head),
                      phone_measured=bool(inside) and all("phone_owner" in r for r in inside),

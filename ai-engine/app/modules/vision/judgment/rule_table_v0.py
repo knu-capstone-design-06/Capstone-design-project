@@ -273,8 +273,10 @@ def candidate_rows(inp: WindowInput, state: SessionState, p, tag: str | None, ta
     rows = []
     phone = phone_path(inp.situation)
     if (tag == BUSY or phone) and WAIT not in excluded:          # 3-2: a session action, re-opened at every trigger
-        rows.append(Row(WAIT, "3-2", "wait", 2, True, "touch_resumed", False,
-                        cues={"tag": tag, "path": PHONE_USE} if phone else {"tag": tag}))   # both paths: both named
+        # the cues name the paths that hold: the companion tag only on the companion path (another tag of the window
+        # is no cue of this row), the phone path as path; both paths: both named
+        cues = ({"tag": tag} if tag == BUSY else {}) | ({"path": PHONE_USE} if phone else {})
+        rows.append(Row(WAIT, "3-2", "wait", 2, True, "touch_resumed", False, cues=cues))
 
     steps_open = inp.steps_left is None or inp.steps_left > 0
     tremor = None                                                                    # 4-1 (조작 중: steps left)

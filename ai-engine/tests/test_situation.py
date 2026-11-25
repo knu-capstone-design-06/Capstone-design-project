@@ -753,6 +753,71 @@ class SceneCueTests(unittest.TestCase):
         out, _ = assess(rows, rows[-1]["t_s"], P, landmarker_num_faces=1)
         self.assertIs(out["tags"][2]["status"], True)
 
+    @staticmethod
+    def changed_rows(before: dict, after: dict, **flags):
+        """20 frames (0.0-1.9 s): main-user track 1 with the values `before` on frames 0-13, track 2 with `after` from
+        frame 14, which carries the change (the earlier user settled, not reacquired, not stitched; flags override)."""
+        rows = rows_of(face(20), extra={**OPTIONAL, "primary_track": 1, "head_count": 1, "face_in_primary": True,
+                                        **before})
+        put(rows, 14, 19, primary_track=2, **after)
+        return put(rows, 14, 14, main_user_prev_track=1, main_user_prev_settled=True, main_user_reacquired=False,
+                   main_user_stitched=False, **flags)
+
+    KEPT = ({"main_user_reacquired": True}, {"main_user_stitched": True}, {"main_user_prev_settled": False})
+
+    def test_after_a_change_of_user_the_face_measures_read_the_new_user_only(self):
+        """face_height, face_size, head_pitch (and face_rows, near_rows) after a change of user: the earlier user's
+        lower face and bowed head do not reach the new user's seated_height and face_approach. A reacquired or
+        stitched track, or a swap before the earlier user settled, keeps the history."""
+        from app.modules.vision.events import observe_scene
+        from app.modules.vision.situation import face_approach, seated_height
+        rows = self.changed_rows({"face_cy": 0.9, "iod_ratio_user": 1.5, "dpitch_user_deg": 30.0},
+                                 {"face_cy": 0.3, "iod_ratio_user": 1.5, "dpitch_user_deg": 0.0})
+        sc = observe_scene(rows, (0.0, 1.9))
+        self.assertEqual([e["obs"] for e in sc.of("face_height", "face_size", "head_pitch")],
+                         [{"face_cy_median": 0.3, "rows": 6}, {"iod_ratio_median": 1.5, "rows": 6},
+                          {"dpitch_median": 0.0, "rows": 6}])
+        self.assertEqual((sc.face_rows, observe_scene(rows, (0.0, 1.9), approach_ratio_min=1.2).near_rows), (6, 6))
+        self.assertIs(seated_height(sc, 0.6)[0], False)                   # the new user stands
+        self.assertIs(face_approach(sc, 1.2, head_down_pitch_min=PITCH_TEST)[0], True)   # leaning in, not bowed
+        for flags in self.KEPT:
+            kept = observe_scene(put([dict(r) for r in rows], 14, 14, **flags), (0.0, 1.9))
+            self.assertEqual((kept.face_rows, seated_height(kept, 0.6)[0],
+                              face_approach(kept, 1.2, head_down_pitch_min=PITCH_TEST)[0]), (20, True, False), flags)
+
+    def test_after_a_change_of_user_the_head_box_measures_read_the_new_user_only(self):
+        """head_height and head_size (and head_near_rows) after a change of user: the earlier user's low head box does
+        not reach the new user's seated_height (head-box path); reacquire / stitch / a first-approach swap keep it."""
+        from app.modules.vision.events import observe_scene
+        from app.modules.vision.situation import seated_height
+        rows = self.changed_rows({"primary_box": "0.40;0.60;0.60;0.90", "head_ratio_user": 1.4},   # centre 0.75
+                                 {"primary_box": "0.40;0.10;0.60;0.40", "head_ratio_user": 1.0})   # centre 0.25
+        sc = observe_scene(rows, (0.0, 1.9))
+        self.assertEqual([e["obs"] for e in sc.of("head_height", "head_size")],
+                         [{"head_cy_median": 0.25, "rows": 6}, {"head_ratio_median": 1.0, "rows": 6}])
+        self.assertEqual(observe_scene(rows, (0.0, 1.9), head_approach_ratio_min=1.2).head_near_rows, 0)
+        self.assertIs(seated_height(sc, None, seated_head_cy_min=0.5)[0], False)
+        for flags in self.KEPT:
+            kept = put([dict(r) for r in rows], 14, 14, **flags)
+            self.assertEqual((observe_scene(kept, (0.0, 1.9), head_approach_ratio_min=1.2).head_near_rows,
+                              seated_height(observe_scene(kept, (0.0, 1.9)), None, seated_head_cy_min=0.5)[0]),
+                             (14, True), flags)
+
+    def test_after_a_change_of_user_the_aid_score_reads_the_new_user_only(self):
+        """aid_score (and aid_anchor_rows) after a change of user: the earlier user's walking aid does not reach the new
+        user's aid_use; reacquire / stitch / a first-approach swap keep it."""
+        from app.modules.vision.events import observe_scene
+        from app.modules.vision.situation import aid_use
+        rows = self.changed_rows({"aid_owner": "yes", "aid_any_score": 0.8}, {"aid_owner": "no", "aid_any_score": 0.1})
+        sc = observe_scene(rows, (0.0, 1.9))
+        (score,) = sc.of("aid_score")
+        self.assertEqual((score["obs"], sc.aid_anchor_rows),
+                         ({"aid_any_median": 0.1, "rows": 6, "owner_yes_rows": 0}, 6))
+        self.assertIs(aid_use(sc, 0.5)[0], False)
+        for flags in self.KEPT:
+            kept = observe_scene(put([dict(r) for r in rows], 14, 14, **flags), (0.0, 1.9))
+            self.assertEqual((kept.aid_anchor_rows, aid_use(kept, 0.5)[0]), (20, True), flags)
+
     def test_only_the_main_users_face_counts_when_the_head_detector_ran(self):
         """A face matched to no head box while the main user's track lives (face_in_primary None) may be someone
         else's: it gives no face height and no face size. True (also 'True' read back from rows.csv) counts."""
@@ -835,6 +900,9 @@ class SceneTagTests(unittest.TestCase):
         self.assertEqual(self.tags(out)["user_changed"], (False, None))    # the column on every row, no change
 
     def test_the_scene_columns_do_not_leak_into_the_three_tags(self):
+        """Scene columns, with a change of user on the second row, leave the three tags, their evidence and their
+        events as they are. The scene tags follow the cut of a change: the earlier user's first row (standing, near,
+        no aid) is not read, and the new user's rows make seated_height, aid_use true and face_approach false."""
         from app.modules.vision.situation import assess
         windows = [put(rows_of(face(5), look_back(), face(5), look_back(), face(5)), 0, 30, people_behind_count=1),
                    companion_window(sweep(+1)), around_window(), rows_of(face(10))]
@@ -843,15 +911,20 @@ class SceneTagTests(unittest.TestCase):
             plain, plain_events = assess(rows, t, P, landmarker_num_faces=1)
             marked = [dict(r) for r in rows]
             for i, r in enumerate(marked):          # scene columns that move the scene tags
-                r.update(face_cy=0.9, iod_ratio_user=1.1, primary_track=1 + (i >= len(rows) // 2),
+                r.update(face_cy=0.9, iod_ratio_user=1.1, primary_track=1 + (i >= 1),
                          head_count=1, aid_owner="yes", aid_any_score=0.8)
-            marked[len(rows) // 2].update(main_user_prev_track=1, main_user_gap_s=0.1, main_user_body_kept=True)
+            marked[0].update(face_cy=0.3, iod_ratio_user=1.5, aid_owner="no", aid_any_score=0.1)   # the earlier user
+            marked[1].update(main_user_prev_track=1, main_user_gap_s=0.1, main_user_body_kept=True)
             out, events = assess(marked, t, P, landmarker_num_faces=1, seated_face_cy_min=0.6,
                                  approach_ratio_min=1.2, aid_use_min=0.5)
             self.assertEqual({k: v for k, v in out.items() if k != "tags"},
                              {k: v for k, v in plain.items() if k != "tags"})
             self.assertEqual(events, plain_events)
             self.assertEqual([t["status"] for t in out["tags"]], [True, False, True, False, True, UNKNOWN])
+            scene = {t["name"]: {e["obs"]: e["value"] for e in t["evidence"]} for t in out["tags"]}
+            self.assertEqual((scene["seated_height"]["face_cy_median"], scene["aid_use"]["aid_any_median"],
+                              scene["face_approach"]["iod_ratio_median"]), (0.9, 0.8, 1.1))   # row 0 not read
+            self.assertEqual((scene["aid_use"]["rows"], scene["aid_use"]["owner_yes_rows"]), (len(rows) - 1,) * 2)
 
     def test_aid_use_reads_the_main_users_box_only_when_the_detector_ran(self):
         from app.modules.vision.situation import assess

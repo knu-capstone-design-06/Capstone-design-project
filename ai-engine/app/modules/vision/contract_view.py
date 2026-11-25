@@ -10,11 +10,14 @@ No AnalyzeResponse is emitted: this chain has no discomfort-state model, while t
 states when measurable=true. Sensor measurability and the pipeline version are proposal-only extension data.
   support           {preset, requires_confirmation, decided_by}: UIPreset and the confirmation flag of the rule table's
                     support (JP 2-5 table); decided_by 'rule_placeholder' (shadow mode: Jev never changes the screen)
-  extension         {measurement: {measurable, basis}, model_version, situation: {...}, decision_meta: {...}};
+  extension         {measurement: {measurable, basis}, model_version, detectors, situation: {...},
+                    decision_meta: {...}};
                     measurement follows the team placeholder (a tap or back in the segment, or a face); in a window
                     that is not measurable with the scene tag phone_use true (3-2's phone path, only with the phone
                     detector) basis adds that the 3-2 wait alone may open or keep its hold_timer in the window (a
                     measurable window runs every row, phone_use or not, and keeps the plain basis).
+                    detectors = the record's {heads, aids, phones}: which optional detectors ran on the segment's
+                    rows (chain.detectors; model_version stays the same string with or without them).
                     situation.tags carries the scene tags (name, status, unknown_reason, evidence ids).
                     decision_meta also carries the execution fields of
                     JP 2-5 (steps_left, target_id, message_id) and session_signal ({name: hold_timer} on the 3-2 wait)
@@ -40,6 +43,7 @@ def to_contract(record: dict, session_id: str) -> dict:
             "measurement": {"measurable": bool(record["measurable"]),
                             "basis": BASIS_PHONE if (phone and not record["measurable"]) else BASIS},
             "model_version": MODEL_VERSION,
+            "detectors": dict(record["detectors"]),
             "situation": {"tag": sit["name"], "display_text": sit["display_text"], "evidence_ids": sit["evidence_ids"],
                           "confidence": sit["confidence"], "alternatives": sit["alternatives"],
                           "unknown_reason": sit["unknown_reason"], "quality": sit["quality"], "source": sit["source"],

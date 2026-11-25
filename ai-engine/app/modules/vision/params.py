@@ -15,7 +15,9 @@ Two kinds live here:
   head detector; the two gates head_down_pitch_min and head_approach_ratio_min are not applied when None. The two
   stitch boundaries of the user
   change (STITCH_BOUNDARIES, columns.MainUserChange) are the same kind: method STITCH_METHOD, value per camera from a
-  bundle; without one a broken main-user track is never stitched (the behaviour before 2026-11-22).
+  bundle; without one a broken main-user track is never stitched (the behaviour before 2026-11-22). The hand-point
+  limit of the phone columns (HAND_BOUNDARIES, columns.phone_columns) has no value either: without one the hand
+  points' visibility is not read (the behaviour before 2026-11-25).
 - events.PilotParams (re-exported here as SituationParams): the 13 values of the events and situation rules. They keep
   NO defaults on purpose (vision README '상황 층'; tests/test_situation.py checks it), so they only come from a value
   bundle file (load_bundle). Without one the runners still run and the situation output is 'unknown'.
@@ -59,6 +61,7 @@ SCENE_BOUNDARIES = ("seated_face_cy_min", "approach_ratio_min", "seated_head_cy_
                     "head_approach_ratio_min")   # None = no value yet (situation.py scene tags)
 AID_BOUNDARIES = ("aid_use_min", "aid_person_min")   # None allowed (no value); defaults: [파일럿] values from a public set
 STITCH_BOUNDARIES = ("stitch_shift_max", "stitch_size_max")   # None = no value yet (columns.MainUserChange: no stitch)
+HAND_BOUNDARIES = ("hand_vis_min",)   # None = no value yet (columns.phone_columns: the hand points' visibility not read)
 SCENE_METHOD = ("정하는 방법 = 그 카메라 앞에서 서서 보통으로 쓰는 녹화(평가 촬영본과 따로 찍은 것)의 창 중앙값(창 길이 = "
                 "값 묶음의 window_s)으로 기준선 평균 + 2 SD(Wu 외, W4A 2021의 기준선 ± 2 SD; 조사 22 §2-1 · §2-11), "
                 "tools/calibrate_scene.py")
@@ -197,6 +200,11 @@ class PilotParams:
            "줄었음(2026-11-22). 휴대폰이 있어야 하는 구간 수는 새 "
            "값을 두지 않고 같은 값 묶음의 상황 값 min_events를 다시 씀: 세 상황 태그가 근거 사건 수로 쓰는 값과 같은 "
            "규칙이고, 그 값의 출처 표시는 값 묶음 파일에, 이 읽기의 표시는 비전 README '휴대폰 입력'에 있음", "frames")
+    hand_vis_min: float | None = _p(
+        None, f"{UNDECIDED}. 휴대폰 손 길의 손 점 하한: 주 사용자 몸 점(Pose Landmarker)의 손 점은 visibility(그 점이 "
+              "가려지지 않고 화면 안에 보일 가능성, MediaPipe landmark.py)가 이 값 이상일 때만 손 상자에 넣음. 이 값이 "
+              "있으면 visibility가 없는 점(NaN)도 넣지 않음. 값이 없으면 visibility를 읽지 않음(2026-11-22까지의 동작: "
+              "가려지거나 화면 밖이라 위치를 추정한 손 점도 손 상자에 들어감)", "visibility 0~1")
 
     # --- runners (replay.py, live.py) -------------------------------------------------------------------------
     segment_s: float = _p(
@@ -234,12 +242,12 @@ class PilotParams:
             if f.name == "primary_rule":
                 if value not in PRIMARY_RULES:
                     raise ValueError(f"PilotParams.primary_rule must be one of {PRIMARY_RULES}, got {value!r}")
-            elif f.name in ROLE_BOUNDARIES + SCENE_BOUNDARIES + AID_BOUNDARIES + STITCH_BOUNDARIES:
+            elif f.name in ROLE_BOUNDARIES + SCENE_BOUNDARIES + AID_BOUNDARIES + STITCH_BOUNDARIES + HAND_BOUNDARIES:
                 if value is not None and (isinstance(value, bool) or not isinstance(value, numbers.Real)
                                           or not math.isfinite(value) or value <= 0):
                     raise ValueError(f"PilotParams.{f.name} must be None (no value yet) or a finite number > 0, "
                                      f"got {value!r}")
-                if f.name in AID_BOUNDARIES and value is not None and value > 1:
+                if f.name in AID_BOUNDARIES + HAND_BOUNDARIES and value is not None and value > 1:
                     raise ValueError(f"PilotParams.{f.name} is a score and must be at most 1, got {value!r}")
                 if f.name in ("approach_ratio_min", "head_approach_ratio_min") and value is not None and value <= 1:
                     raise ValueError(f"PilotParams.{f.name} is a size ratio to the user's own reference (1 = "

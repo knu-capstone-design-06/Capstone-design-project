@@ -95,11 +95,11 @@ def percentiles(values: list) -> dict | None:
 
 def timing_summary(rows: list, records: list) -> dict:
     later = rows[1:]   # the first frame loads models and caches (render.timing_stats convention)
-    out = {k: percentiles([r.get(k) for r in later]) for k in ("ms_total", "ms_heads", "ms_head_dir", "ms_phones",
-                                                               "ms_chain", "cpu_ms_chain")}
+    out = {k: percentiles([r.get(k) for r in later]) for k in ("ms_total",) + TIMING_COLUMNS}
     out["ms_window"] = percentiles([r.get("ms_window") for r in records])
     out["note"] = ("ms_total = MediaPipe set + features (features.Observer); ms_heads = H1 pre + infer + post; "
-                   "ms_head_dir = P1 crop + infer (main user only); ms_phones = phone detector pre + infer + post; "
+                   "ms_head_dir = P1 crop + infer (main user only); ms_aids = walking-aid detector pre + infer + post; "
+                   "ms_phones = phone detector pre + infer + post (frames it ran on); "
                    "ms_chain = the whole per-frame step (wall); "
                    "cpu_ms_chain = process CPU time of that step (all threads); ms_window = situation + rule table "
                    "per window; first frame left out")
