@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     # "state_scores,support_choice", ...). Default "off": a key alone never starts paid calls; an
     # experiment is switched on explicitly.
     jev_stages: str = "off"
+    # Demonstration switch. Off: the judgment layer only records (shadow mode) and every /features answer keeps
+    # support at preset none. On: the answer's support carries the rule table's decision; Jev answers are still
+    # only recorded.
+    decision_send_support: bool = False
 
     @field_validator("database_url")
     @classmethod

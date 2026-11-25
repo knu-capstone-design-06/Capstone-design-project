@@ -15,20 +15,60 @@ from datetime import datetime
 QUEUE, BUSY, AROUND = "looking_back_with_people_behind", "consulting_companion", "looking_around"
 UNKNOWN = "unknown"
 TAGS = frozenset({QUEUE, BUSY, AROUND})
+# Scene tags the vision situation layer sends in observations.scene_tags (vision situation.py SCENE_TAGS) that the rule
+# table reads: 1-2 seated height, 1-1 walking aid, 2-1 face approach, 2-2 new customer.
+SEATED, AID_USE, APPROACH, CHANGED = "seated_height", "aid_use", "face_approach", "user_changed"
+SCENE_TAGS = (SEATED, AID_USE, APPROACH, CHANGED)
+# The event behind a true user_changed: the vision chain puts items of its event main_user_changed into the tag's
+# evidence, event_id "main_user_changed@<frame of the row that starts the new main-user track>". One change of customer
+# stays true through the overlapping engine windows (the situation window_s 3 s with a 1 s step) with the same id, so 2-2
+# counts its events by that id (DecisionRepository.note_user_changed).
+CHANGE_EVENT = "main_user_changed"
+# Why the new ids of an engine window were only remembered, not made 2-2 events (DecisionRepository.note_user_changed;
+# the session service logs it under the demonstration switch).
+NO_FIRST_PRESS = "no first press yet"
+NO_PREVIOUS_WINDOW = "no previous engine window"
+PREVIOUS_BEFORE_PRESS = "the previous engine window ended before the first-press window's end"
+NOT_AFTER_PREVIOUS = "this engine window did not end after the previous one"
+
+
+@dataclass(frozen=True)
+class ChangeNote:
+    """The new event ids of one engine window (2-2) and, when they were only remembered, why (reason; None = they
+    became pending)."""
+
+    ids: tuple
+    reason: str | None
+# The class behind aid_use: the vision chain's head-centre reading puts items of its event aid_head into the tag's
+# evidence, obs aid_class with the class name as value (crutch, cane, walker, wheelchair, or null). A wheelchair also
+# opens 1-2; the older reading (event aid_score) sends no class.
+AID_CLASS_EVENT, AID_CLASS_OBS, WHEELCHAIR = "aid_head", "aid_class", "wheelchair"
 
 # Supports (JP scene table); DEFER is an option of the 3-1 choice, not a row.
 WAIT, NOTICE, DELAY, BIG, HIGHLIGHT = (
     "wait_hold_timer", "remaining_steps_notice", "delay_responsibility_notice", "large_button", "highlight_next_action",
 )
 DEFER = "defer_big_button_question"
+# Supports of the scene rows (the vision rule table's draft names): 1-2 lower the screen, 1-1 order by voice, 2-2 ask
+# whether to go on with the order in the cart or start a new one, 2-1 ask about 크게 보기 (code name large_text) and
+# point at the help entry where it is (highlight_large_view_help).
+LOWER, VOICE, SWAP = "lower_screen", "voice_order", "continue_or_new_order"
+LARGE_TEXT, LARGE_VIEW = "large_text", "highlight_large_view_help"
+# 크게 보기 is ONE support (text and buttons big together); large_text (2-1) and large_button (4-1) are its two code
+# names, one per row that asks about it.
+BIG_VIEW = frozenset({LARGE_TEXT, BIG})
 HOLD_TIMER = "hold_timer"  # session_signal name of an opened or kept 3-2 wait
 INTERVENTION = {"wait": "기다림", "propose": "묻기", "apply": "바로 적용", "call_staff": "직원 호출"}
-# contract SupportDecision (UIPreset, requires_confirmation) per support, JP 2-5
+# contract SupportDecision (UIPreset, requires_confirmation) per support, JP 2-5. The contract has no preset for the
+# low screen, voice ordering or the new-customer question: those asks answer preset none, requires_confirmation true
+# and the support's name.
 CONTRACT_FORM = {
     WAIT: ("none", False), NOTICE: ("step_guide", False), DELAY: ("step_guide", False),
     BIG: ("large_button", True), HIGHLIGHT: ("none", False), "call_staff": ("none", False),
+    LOWER: ("none", True), VOICE: ("none", True), SWAP: ("none", True),
+    LARGE_TEXT: ("large_text", True), LARGE_VIEW: ("none", False),
 }
-QUIET_APPLY = frozenset({NOTICE, DELAY, HIGHLIGHT})
+QUIET_APPLY = frozenset({NOTICE, DELAY, HIGHLIGHT, LARGE_VIEW})
 
 
 @dataclass(frozen=True)
@@ -65,7 +105,7 @@ PILOT_PARAMS = DecisionParams(
 SCREEN_FLOW = ("menu", "review", "complete")
 
 # Shadow-stage settings with no source yet ("기준 없음"): experiment settings, not agreed thresholds.
-HISTORY_WINDOWS = 5         # windows read by the trajectory stage (the records themselves stay for the session) (2 s windows: about ten seconds)
+HISTORY_WINDOWS = 10        # windows read by the trajectory stage (the records themselves stay for the session) (1 s windows: about ten seconds)
 FORECAST_HORIZON_S = 10     # how far ahead next_difficulty asks about
 
 # The only stage answers the trajectory reads (docs 9.6): stage-1 state scores. A forecast never reads the
@@ -94,6 +134,17 @@ class WindowInput:
     taps_segment: int | None = None        # presses in this window
     progress_segment: bool | None = None   # a screen forward in this window; None = not known
     options_open: bool | None = None       # the options dialog is open at t
+    cart_items: int | None = None          # items in the session's cart at t (its total quantity, the backend's own
+                                           # cart; read under DECISION_SEND_SUPPORT for a window with a press); None = not read
+    # The order screen's block touch.scene_signals, read under DECISION_SEND_SUPPORT: this window's own counts, and
+    # zoom_attempt from the counts summed over the recent span like fixes_recent (service.recent_signals).
+    fixes_segment: int | None = None       # presses in this window that fix the near miss before them
+    zoom_attempts_segment: int | None = None   # zoom attempts in this window (a double tap on text)
+    zoom_attempt: bool | None = None       # a zoom attempt in the recent span (2-1); None = not known
+    can_offer: bool | None = None          # the order screen could show an ask when it built the window (1-1, 1-2)
+    # The supports the customer already has on at t (touch.interaction ui_settings and voice_enabled, read under
+    # DECISION_SEND_SUPPORT; sessions/service.settings_on): counted as active by the rows. None = not known.
+    supports_on: tuple | None = None
 
 
 @dataclass(frozen=True)
@@ -109,6 +160,9 @@ class Row:
     lowered_action: str | None = None
     options: tuple = ()                    # 3-1 group: allowed options, default first
     cues: dict = field(default_factory=dict)
+    # The decision's scope when set (decide() and the candidate filter use it): ("session",) for an ask made at most
+    # once per session. None: the tag scope for a row from a tag, else the screen scope.
+    scope: tuple | None = None
 
 
 @dataclass(frozen=True)
@@ -180,6 +234,16 @@ class SessionState:
     alt_t: float | None = None     # a window that fell off the timeline, kept to see whether the next one follows it
     alt_now: float | None = None
     epoch: int = 0                 # goes up each time the frontend clock moved: windows of another epoch are another timeline
+    first_press: bool = False      # the session has had a press (a judged window with taps)
+    # The end of the touch window that held the session's first press: epoch seconds on the order screen's clock (its
+    # /features window_end, the base of last_t, tag_since and screen_since; moved with them when that clock moves).
+    first_press_t: float | None = None
+    # 2-2: the new-customer events by the engine's event id (CHANGE_EVENT, DecisionRepository.note_user_changed): every
+    # id the session has received, before its first press too (the same change seen again in a later overlapping window
+    # is no new event), and of them the ids that came after the first press in time and that no press has used yet, in
+    # the order they came; the first press after them uses them (rule_table.decide).
+    user_changed_seen: list = field(default_factory=list)
+    user_changed_pending: list = field(default_factory=list)
 
     def snapshot(self) -> dict:
         held = None if self.held is None else {
@@ -193,8 +257,15 @@ class SessionState:
 # Versions kept with every record (docs/Convention.md 7: the rule and question versions of an experiment).
 # Bump RULES_VERSION when a row, a rank, a parameter or a transition of the rule table changes, and
 # QUESTIONS_VERSION when the wording or the state given to Jev changes.
-RULES_VERSION = "rule_table_v0"
-QUESTIONS_VERSION = "jev_questions_v1"
+# v1, the one name of this pull request's table: the scene rows (1-1, 1-2, 2-1, 2-2) on the scene tags and the per-row
+# scope; 1-1 and 1-2 also shut while the screen's ask gate is false (can_offer); the 2-2 event by the engine's event
+# id, counted only when the session's previous received engine window ended at or after the end of the first-press
+# touch window (DecisionRepository.note_user_changed), and kept while a held ask keeps the row shut; and the 4-2 guard: no 4-2 on the menu with the options dialog known closed (rule_table.candidate_rows
+# plain_menu, a demonstration-switch difference from the vision table awaiting the owners' word).
+RULES_VERSION = "rule_table_v1"
+# v2: the 2-1 rows' fit questions (large_text, highlight_large_view_help) with their state keys touch.zoom_attempt and
+# vision.face_approach, and support_choice's candidates limited to the supports its question offers.
+QUESTIONS_VERSION = "jev_questions_v2"
 
 
 @dataclass(frozen=True)
@@ -220,6 +291,104 @@ class JevRecord:
     reason: str | None = None
     answered_at: datetime | None = None    # server UTC when the call ended; None when no call was made (build_error)
     questions_version: str = QUESTIONS_VERSION
+
+
+@dataclass(frozen=True)
+class VisionWindow:
+    """One window the AI engine posted (POST /sessions/{id}/vision-windows), kept for the session until a /features
+    window has passed it (DecisionRepository.pair_vision)."""
+
+    session_id: str
+    window_start: datetime                 # the kiosk PC's wall clock, like the /features window times
+    window_end: datetime
+    situation: dict                        # name, evidence, confidence: the shape WindowInput.situation holds
+    gaze: bool | None
+    face_seen: bool
+    scene_tags: list
+    model_version: str
+    received_at: datetime                  # server UTC when the backend received it
+
+
+@dataclass(frozen=True)
+class PairedVision:
+    """The AI engine windows one /features window reads (DecisionService.paired_vision), all within its bound.
+
+    The bound (two touch-window lengths) holds two 1 s engine segments and all are kept, so a tag that holds in one
+    segment only may be the earlier of the two. The latest window in the bound gives the gaze, the face and the scene tags; the
+    situation comes from the freshest window in the bound that names a tag (TAGS), the latest one when none does.
+    A tag of the latest window always wins. The scene tags the rule table reads come from every window in the bound
+    (scene_tag_states).
+    """
+
+    latest: VisionWindow
+    named: VisionWindow                    # the window the situation comes from (the latest when no window names a tag)
+    windows: tuple = ()                    # every engine window in the bound, the two above included
+
+    def scene_tag_states(self, names: tuple[str, ...] = SCENE_TAGS) -> list[dict]:
+        """The scene tags in `names` over every engine window in the bound, in the item form the rule table reads
+        (rule_table.scene_tag): status true when ANY window in the bound says true, with t the end (epoch seconds) of
+        the freshest such window; otherwise false when the latest window says false; otherwise "unknown". One item per
+        name that some window in the bound carries. The aid_use item also carries aid_class: the class in the evidence
+        of the window that gave it its true status (AID_CLASS_EVENT, AID_CLASS_OBS), None without one.
+
+        A tag may hold in one 1 s segment only, and one touch window reads two segments: a true in the earlier one must
+        not be lost behind the later one. No number: the bound is the pairing's own. (user_changed holds in about three
+        windows in a row for one change; 2-2 counts its events by id when the engine window arrives, not from here.)
+        """
+        windows = self.windows or (self.latest,)
+        states = []
+        for name in names:
+            carried = [(w, tag) for w in windows for tag in w.scene_tags if tag.get("name") == name]
+            if not carried:
+                continue
+            trues = [(w.window_end, tag) for w, tag in carried if tag.get("status") is True]
+            latest = next((tag.get("status") for tag in self.latest.scene_tags if tag.get("name") == name), None)
+            status = True if trues else (False if latest is False else UNKNOWN)
+            freshest = max(trues, key=lambda item: item[0]) if trues else None
+            state = {"name": name, "status": status, "t": freshest[0].timestamp() if freshest else None}
+            if name == AID_USE:
+                state["aid_class"] = None if freshest is None else next(
+                    (e.get("value") for e in freshest[1].get("evidence") or ()
+                     if str(e.get("event_id", "")).startswith(AID_CLASS_EVENT + "@") and e.get("obs") == AID_CLASS_OBS),
+                    None)
+            states.append(state)
+        return states
+
+    @property
+    def situation(self) -> dict:
+        return self.named.situation
+
+    @property
+    def situation_window_end(self) -> datetime:
+        return self.named.window_end
+
+    @property
+    def gaze(self) -> bool | None:
+        return self.latest.gaze
+
+    @property
+    def face_seen(self) -> bool:
+        return self.latest.face_seen
+
+    @property
+    def scene_tags(self) -> list:
+        return self.latest.scene_tags
+
+    @property
+    def window_start(self) -> datetime:
+        return self.latest.window_start
+
+    @property
+    def window_end(self) -> datetime:
+        return self.latest.window_end
+
+    @property
+    def received_at(self) -> datetime:
+        return self.latest.received_at
+
+    @property
+    def model_version(self) -> str:
+        return self.latest.model_version
 
 
 @dataclass
@@ -253,3 +422,8 @@ class WindowRecord:
     ai_model_version: str | None = None    # ai-engine's model_version for the window, when it answered
     received_at: datetime | None = None    # server UTC when /features received the window (window_end is the frontend's)
     rules_version: str = RULES_VERSION
+    # The AI engine windows this /features window read (DecisionService.paired_vision): the latest one's window_start,
+    # window_end, received_at, model_version, face_seen and scene_tags (for the later rows that read them), and
+    # situation_window_end, the end of the window the situation came from (= window_end when the latest gave it); the
+    # situation and gaze themselves are in inputs. None: no engine window read.
+    vision_window: dict | None = None

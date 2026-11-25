@@ -1081,7 +1081,7 @@ class ResponseInvarianceTests(unittest.TestCase):
             await asyncio.sleep(0.02)   # the round trip: a stamp taken after it is later than this one
             return httpx.Response(200, json={"session_id": payload["session_id"], "measurable": True, "states": self.SCORES, "model_version": "dummy-0.1"})
 
-        app = create_app(Settings(_env_file=None, openai_api_key=None, jev_api_key="jev-secret-value", jev_stages="state_scores"))
+        app = create_app(Settings(_env_file=None, decision_send_support=False, openai_api_key=None, jev_api_key="jev-secret-value", jev_stages="state_scores"))
         real_client = httpx.AsyncClient   # app.main.httpx is this module: keep the class before patching it
         with patch("app.main.httpx.AsyncClient",
                    side_effect=lambda **kw: real_client(base_url="http://ai-engine:8001", transport=httpx.MockTransport(handler))), \
@@ -1122,7 +1122,7 @@ class ResponseInvarianceTests(unittest.TestCase):
             return httpx.Response(200, json={"session_id": payload["session_id"], "measurable": measurable,
                                              "states": answers.pop(0), "model_version": "dummy-0.1"})
 
-        app = create_app(Settings(_env_file=None, openai_api_key=None, jev_api_key="jev-secret-value",
+        app = create_app(Settings(_env_file=None, decision_send_support=False, openai_api_key=None, jev_api_key="jev-secret-value",
                                   jev_stages="state_scores"))
         real_client = httpx.AsyncClient
         bodies = []
@@ -1179,7 +1179,7 @@ class FeaturesEndpointTests(unittest.TestCase):
             "touch": {"tap_count": 1, "miss_tap_count": 0, "repeat_tap_count": 0, "back_count": 1, "dwell_ms": 3000}}
 
     def test_jev_stages_off_keeps_the_app_up_with_the_rule_table_alone(self):
-        settings = Settings(_env_file=None, openai_api_key=None, jev_api_key="jev-secret-value", jev_stages="off", ai_engine_url="http://127.0.0.1:9")
+        settings = Settings(_env_file=None, decision_send_support=False, openai_api_key=None, jev_api_key="jev-secret-value", jev_stages="off", ai_engine_url="http://127.0.0.1:9")
         with TestClient(create_app(settings)) as client:
             self.assertFalse(client.app.state.decision_service.shadow)
             self.assertEqual(client.app.state.decision_service.stage_names, ())
@@ -1187,7 +1187,7 @@ class FeaturesEndpointTests(unittest.TestCase):
     def test_the_response_is_unchanged_while_the_table_runs_beside_it(self):
         for key in (None, "jev-secret-value"):
             with self.subTest(jev_key=bool(key)):
-                settings = Settings(_env_file=None, openai_api_key=None, jev_api_key=key, ai_engine_url="http://127.0.0.1:9",
+                settings = Settings(_env_file=None, decision_send_support=False, openai_api_key=None, jev_api_key=key, ai_engine_url="http://127.0.0.1:9",
                                     jev_stages="state_scores" if key else "off")
                 with TestClient(create_app(settings)) as client:
                     session_id = client.post("/api/v1/sessions").json()["session_id"]
@@ -1211,7 +1211,7 @@ class FeaturesEndpointTests(unittest.TestCase):
         def jev_http(api_key, base_url, timeout_seconds):
             return httpx.AsyncClient(base_url="https://api.typesafe.ai", transport=httpx.MockTransport(slow))
 
-        settings = Settings(_env_file=None, openai_api_key=None, jev_api_key="jev-secret-value", jev_stages="state_scores",
+        settings = Settings(_env_file=None, decision_send_support=False, openai_api_key=None, jev_api_key="jev-secret-value", jev_stages="state_scores",
                             ai_engine_url="http://127.0.0.1:9")
         with unittest.mock.patch("app.main.create_jev_http", jev_http):
             with TestClient(create_app(settings)) as client:

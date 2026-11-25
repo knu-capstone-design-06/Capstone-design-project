@@ -49,8 +49,22 @@ def _database_voice_menu(repository: PostgresOrderingRepository):
         return []
 
 
+def show_decision_lines() -> None:
+    """Let the demonstration's per-window decision line (sessions/service, INFO) reach the console: uvicorn
+    configures only its own loggers, so an INFO line of an app logger would otherwise be dropped."""
+    decision_log = logging.getLogger(SessionService.__module__)
+    decision_log.setLevel(logging.INFO)
+    if not any(getattr(handler, "decision_lines", False) for handler in decision_log.handlers):
+        handler = logging.StreamHandler()
+        handler.decision_lines = True
+        handler.setFormatter(logging.Formatter(logging.BASIC_FORMAT))
+        decision_log.addHandler(handler)
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings if settings is not None else get_settings()
+    if settings.decision_send_support:
+        show_decision_lines()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -89,8 +103,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 app.state.decision_repository, PILOT_PARAMS, app.state.jev_client,
                 stages=build_stages(settings.jev_stages),
             )
+            # DECISION_SEND_SUPPORT (demonstration, off by default): the rule table's decision goes into the answer.
             app.state.session_service = SessionService(
-                session_repository, app.state.ordering_repository, decision=app.state.decision_service
+                session_repository, app.state.ordering_repository, decision=app.state.decision_service,
+                send_support=settings.decision_send_support,
             )
             openai = None
             if settings.openai_api_key is not None:

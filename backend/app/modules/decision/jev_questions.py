@@ -134,10 +134,14 @@ class SupportChoiceStage:
         candidates = allowed_supports(ctx.inp, ctx.state, self._params)
         if not candidates:
             return None
-        criteria = {support: WHAT[support] for support in candidates if support in WHAT}
+        # The supports the question offers: those with a WHAT line. The asks by name of the scene rows (lower_screen,
+        # voice_order, continue_or_new_order) have none (nor in the vision table's draft), so the state lists the same
+        # candidates as the criteria.
+        offered = [support for support in candidates if support in WHAT]
+        criteria = {support: WHAT[support] for support in offered}
         criteria[NO_SUPPORT] = "Show nothing new in this window; the user is doing fine or already has the help they need"
         state = with_previous(shadow_state(ctx.inp, ctx.state, ctx.touch), ctx.previous)
-        state["candidates"] = candidates
+        state["candidates"] = offered
         return state, {"support_choice": {
             "type": "choice",
             "instructions": "Choose the one support the kiosk should give the user described in this state in this "

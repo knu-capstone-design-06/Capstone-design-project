@@ -1,15 +1,17 @@
-"""Process-local session state, window records and shadow Jev records; sessions idle past the retention are dropped.
+"""Process-local session state, window records, shadow Jev records and the AI engine's windows; sessions idle past
+the retention are dropped.
 
 Every judged window is a WindowRecord for the whole session (the experiment's comparison rows, docs 7.1);
 the trajectory stage reads only the last HISTORY_WINDOWS of them.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import datetime, timedelta, timezone
 from threading import Lock
 
 from app.modules.decision.schemas import (
-    HISTORY_SCORES, HISTORY_STAGES, HISTORY_WINDOWS, STALE, JevRecord, SessionState, WindowRecord,
+    HISTORY_SCORES, HISTORY_STAGES, HISTORY_WINDOWS, NO_FIRST_PRESS, NO_PREVIOUS_WINDOW, NOT_AFTER_PREVIOUS,
+    PREVIOUS_BEFORE_PRESS, STALE, TAGS, ChangeNote, JevRecord, SessionState, VisionWindow, WindowRecord,
 )
 
 RETENTION = timedelta(hours=1)   # as the voice context (voice/repository.py): records live as long as the session's talk
@@ -24,6 +26,9 @@ class DecisionRepository:
         self._states: dict[str, SessionState] = {}
         self._records: dict[str, list[JevRecord]] = {}
         self._windows: dict[str, list[WindowRecord]] = {}
+        self._vision: dict[str, list[VisionWindow]] = {}
+        self._vision_after: dict[str, datetime] = {}   # the latest touch window's pairing bound (pair_vision's `after`)
+        self._vision_last: dict[str, datetime] = {}    # the end of the engine window received last (kept when pruned)
         self._touched: dict[str, datetime] = {}
         self._retention = retention
         self._clock = clock
@@ -35,7 +40,8 @@ class DecisionRepository:
         now = self._clock()
         cutoff = now - self._retention
         for stale in [s for s, at in self._touched.items() if at < cutoff]:
-            for store in (self._touched, self._states, self._records, self._windows):
+            for store in (self._touched, self._states, self._records, self._windows, self._vision,
+                          self._vision_after, self._vision_last):
                 store.pop(stale, None)
         return now
 
@@ -77,6 +83,111 @@ class DecisionRepository:
         with self._lock:
             self._touch(record.session_id)
             self._windows.setdefault(record.session_id, []).append(record)
+
+    def add_vision(self, window: VisionWindow) -> datetime | None:
+        """Keep one AI engine window of the session, in the order it arrived. Returns the end of the session's engine
+        window received before it (None for the session's first), for the new-customer rule (note_user_changed).
+
+        An engine post is not a use of the session: it expires idle sessions first and does not refresh this
+        session's idle time, so a session whose order screen stopped still expires under the retention while the
+        engine keeps posting (a session not used before is marked once, so its windows expire too). The windows a
+        later /features window can no longer read are pruned on arrival: those that ended at or before the latest
+        touch window's pairing bound (pair_vision), the new one included. The end of the window received last is kept
+        apart from that pruning.
+        """
+        with self._lock:
+            now = self._expire()
+            session_id = window.session_id
+            self._touched.setdefault(session_id, now)
+            after = self._vision_after.get(session_id)
+            kept = [w for w in self._vision.get(session_id, []) if after is None or w.window_end > after]
+            if after is None or window.window_end > after:
+                kept.append(window)
+            self._vision[session_id] = kept
+            previous = self._vision_last.get(session_id)
+            self._vision_last[session_id] = window.window_end
+            return previous
+
+    def note_user_changed(self, session_id: str, event_ids: Sequence[str], window_end: float,
+                          previous_end: float | None) -> ChangeNote | None:
+        """Keep the new-customer events of an engine window whose user_changed tag is true, by the engine's event ids
+        (DecisionService.change_events). window_end = the end of that engine window (its segment); previous_end = the
+        end of the session's engine window received before it (add_vision), None for the first; all epoch seconds on the
+        kiosk PC's clock like SessionState.first_press_t. Called when the window arrives (DecisionService.add_vision),
+        so a window that no touch window reads, or one in a stretch that is not measurable, still counts.
+
+        Every id is remembered for the session (SessionState.user_changed_seen), also before the first press and before
+        the session's first /features window: one change stays true through about three overlapping engine windows with
+        the same id, and an id the session already has is that change seen again, no new event.
+
+        "After the first press" is meant in time. A new id becomes pending (user_changed_pending) only when the session
+        has had its first press when this window arrives, AND the previous received engine window ended at or after the
+        end of the touch window that held the first press (previous_end >= first_press_t), AND this window ended after
+        it (window_end > previous_end). Otherwise the id is only remembered, and a later window that brings it again
+        changes nothing.
+
+        Why this is exact: the previous received window did not carry the id (else the session would already have it),
+        and its tag looked back over the engine's situation window ending at its own end; this window carries the id;
+        so the change lies after the previous window's end, whatever was lost in between. When that end is at or after
+        the end of the first-press touch window, the change surely came after the first press. A change before the
+        previous window's end is impossible by this argument. A change whose previous window ended before the end of
+        the first-press window (inside it, or earlier with windows lost since) may have come before the first press:
+        its id is only remembered. So are the ids of a session's first engine window (no previous one) and those that
+        arrive before the /features window with the first press is judged. Counting such an id could open 2-2 over the
+        newcomer's own cart; missing a 2-2 is the milder error (no dialog).
+
+        An engine post: the session's idle time is not refreshed; a session without a state yet gets one (marked once
+        like add_vision, so it still expires). Returns the new ids and, when they were only remembered, which condition
+        failed (ChangeNote); None when no id was new."""
+        with self._lock:
+            now = self._expire()
+            self._touched.setdefault(session_id, now)
+            state = self._states.setdefault(session_id, SessionState())
+            new = [e for e in dict.fromkeys(event_ids) if e not in state.user_changed_seen]
+            if not new:
+                return None
+            state.user_changed_seen.extend(new)
+            if not state.first_press or state.first_press_t is None:
+                reason = NO_FIRST_PRESS
+            elif previous_end is None:
+                reason = NO_PREVIOUS_WINDOW
+            elif previous_end < state.first_press_t:
+                reason = PREVIOUS_BEFORE_PRESS
+            elif not window_end > previous_end:
+                reason = NOT_AFTER_PREVIOUS
+            else:
+                reason = None
+                state.user_changed_pending.extend(new)
+            return ChangeNote(tuple(new), reason)
+
+    def vision(self, session_id: str) -> list[VisionWindow]:
+        """The AI engine windows of the session still kept, in the order they arrived."""
+        with self._lock:
+            self._expire()
+            return list(self._vision.get(session_id, []))
+
+    def pair_vision(self, session_id: str, after: datetime, until: datetime
+                    ) -> tuple[VisionWindow | None, VisionWindow | None, tuple[VisionWindow, ...]]:
+        """(latest, named, inside) of the session's AI engine windows that ended in (after, until]: the latest one, the
+        latest one whose situation names a tag (TAGS), or the latest one again when none does, and all of them (later
+        arrivals first). Of two with the same end, the one that arrived last. The session's windows that ended at or
+        before `after` are dropped first; the latest `after` is kept for add_vision's pruning (an earlier touch window
+        arriving late does not lower it)."""
+        with self._lock:
+            # A /features window is a use of the session (its judgment touches it right after); marked here once so
+            # the kept bound always expires with the session.
+            self._touched.setdefault(session_id, self._expire())
+            bound = self._vision_after.get(session_id)
+            self._vision_after[session_id] = after if bound is None else max(bound, after)
+            if session_id not in self._vision:
+                return None, None, ()
+            kept = self._vision[session_id] = [w for w in self._vision[session_id] if w.window_end > after]
+            inside = [w for w in reversed(kept) if w.window_end <= until]   # later arrivals first
+            if not inside:
+                return None, None, ()
+            latest = max(inside, key=lambda w: w.window_end)
+            named = [w for w in inside if w.situation.get("name") in TAGS]
+            return latest, max(named, key=lambda w: w.window_end) if named else latest, tuple(inside)
 
     def attach(self, window: WindowRecord, stage: str, outcome: str, answers: dict | None = None) -> None:
         """Add a stage's result to this one window record, as it arrives (never to another window that ended at
