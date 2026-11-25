@@ -4,7 +4,7 @@ import type { CartItem, Product, Temperature } from '../../shared/api/index.ts';
 import { categoryLabels, initialSettings, MAX_QUANTITY, readSettings, settingsStorageKey, temperatureLabel } from './model.ts';
 import type { Settings } from './model.ts';
 import { OrderController } from './orderController.ts';
-import { hintCopy, orderCopy, supportCopy } from './copy.ts';
+import { hintCopy, orderCopy, restartCopy, supportCopy } from './copy.ts';
 import type { HintKind } from './copy.ts';
 import { createSampleOrderApi } from './sampleOrderApi.ts';
 import { useTouchLog } from './useTouchLog.ts';
@@ -84,6 +84,9 @@ export function OrderPage() {
   const [storageWarning, setStorageWarning] = useState(false);
   const [orderNumber, setOrderNumber] = useState('');
   const [restartOpen, setRestartOpen] = useState(false);
+  // [처음으로] 확인 창의 대답은 창이 뜬 뒤 두 번 클릭 간격 동안 누름을 받지 않고, 그동안 받지 않은 누름은 보호를 다시 시작합니다([처음으로]를 연달아 누른 손가락이 대답이 되지 않게, 하단 주문 바와 같은 방식).
+  const [restartOpens, setRestartOpens] = useState(0);
+  const restartArmed = useArmedAfter(restartOpens);
   const [cartSheetOpen, setCartSheetOpen] = useState(false);
   const [autoOffClosed, setAutoOffClosed] = useState(false);
   // 버튼 강조 힌트: 고리와 그 한 줄 안내는 그 조작을 쓰거나 화면이 바뀔 때까지 남습니다(안내는 누름을 받지 않음).
@@ -382,7 +385,7 @@ export function OrderPage() {
       {screen !== 'complete' && <div className="support-confirm-slot">{supportCard ?? offerCard}</div>}
       <ActionBar total={screen === 'complete' || lowMenu ? null : sum}
         cartButton={cartInBar ? { ref: cartOpener, amount: lowMenu ? sum : null, onClick: () => setCartSheetOpen(true) } : null}
-        restart={screen === 'complete' ? null : { ref: restartTrigger, disabled: busy || state.status === 'uncertain', onClick: () => { voiceController.setEnabled(false); setRestartOpen(true); } }}
+        restart={screen === 'complete' ? null : { ref: restartTrigger, disabled: busy || state.status === 'uncertain', onClick: () => { voiceController.setEnabled(false); setRestartOpens(count => count + 1); setRestartOpen(true); } }}
         primary={{ target: screen === 'complete' ? 'new-order' : screen === 'menu' ? 'review-open' : 'simulate-payment',
           label: screen === 'complete' ? '새 주문 시작' : screen === 'menu' ? '주문 확인' : '주문하기',
           disabled: screen === 'complete' ? busy : !count || writeDisabled,
@@ -402,11 +405,11 @@ export function OrderPage() {
     <CartSheet ref={cartDialog} open={cartSheetOpen} lines={cartLines} count={count} total={sum} actions={lineActions}
       status={feedback ?? (notice ? <p className="sheet-status" role="status">{notice}</p> : null)}
       reviewDisabled={!count || writeDisabled} onClose={closeCartSheet} onReview={openReview} />
-    <dialog ref={restartDialog} className="options-dialog" aria-labelledby="restart-title" onCancel={event => { event.preventDefault(); closeRestart(); }}>
-      <h2 id="restart-title">처음부터 주문할까요?</h2>
-      <p>담은 메뉴를 비우고 새 주문을 시작합니다. 화면 도움 설정은 유지합니다.</p>
-      <div className="order-feedback-actions"><button data-log-target="order-restart-cancel" onClick={closeRestart}>계속 주문하기</button>
-        <button data-log-target="order-restart-confirm" disabled={busy || state.status === 'uncertain'} onClick={() => { setRestartOpen(false); void startNewOrder(true); }}>처음부터 주문하기</button></div>
+    <dialog ref={restartDialog} className="confirm-dialog" aria-labelledby="restart-title" aria-describedby="restart-description" onCancel={event => { event.preventDefault(); closeRestart(); }}>
+      <div><h2 id="restart-title" className="sheet-name">처음부터 주문할까요?</h2>
+        <div id="restart-description" className="sheet-support"><p className="confirm-fact">{restartCopy.cart(count, sum)}</p>{Object.values(manualSettings).some(Boolean) && <p className="sheet-desc">{restartCopy.keep}</p>}</div></div>
+      <div className="order-feedback-actions"><button data-log-target="order-restart-cancel" data-armed={restartArmed} onClick={() => { if (restartArmed) closeRestart(); else setRestartOpens(count => count + 1); }}>계속 주문하기</button>
+        <button data-log-target="order-restart-confirm" data-armed={restartArmed} disabled={busy || state.status === 'uncertain'} onClick={() => { if (restartArmed) { setRestartOpen(false); void startNewOrder(true); } else setRestartOpens(count => count + 1); }}>처음부터 주문하기</button></div>
     </dialog>
   </div><TouchLogPanel /></>;
 }

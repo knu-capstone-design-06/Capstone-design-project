@@ -281,7 +281,7 @@ test('제안은 처음으로 확인 창이 열린 동안 기다리고, 그사이
     await page.evaluate(() => window.kioskSupportDraft.previewEnlargement());
     await page.waitForTimeout(300);
     assert.equal(await page.locator('.offer-card').count(), 0, '처음으로 확인 창이 열린 동안 제안은 뜨지 않음');
-    await target(page, 'order-restart-cancel').click();
+    await page.locator('[data-log-target="order-restart-cancel"][data-armed="true"]').click();
     await page.locator('.offer-card[data-armed="true"]').waitFor();
     await page.waitForTimeout(300);
     assert.equal(await page.locator('.offer-card').count(), 1, '창을 닫은 누름은 제안을 닫지 않음');
@@ -337,6 +337,130 @@ test('글자 줄은 품절을 글자로 보이고 버튼 이름에 담으며, �
     assert.equal((await count.innerText()).trim(), '1 / 2');
     await target(page, 'menu-page:next').click();
     assert.equal((await count.innerText()).trim(), '2 / 2');
+    fixture.verify(); assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+test('처음으로 확인 창은 어느 대답이 무엇을 지우는지 알리고, 같은 너비의 두 대답을 [처음으로] 자리 밖에 둔다', async () => {
+  const browser = await chromium.launch(launchOptions);
+  try {
+    const session = 'restart-look';
+    const steps = bootstrap(session); steps[2].body = cartResponse(session, 1, [iced()]);
+    const { page, errors, fixture } = await open(browser, steps);
+    await page.evaluate(() => document.fonts.ready);
+    const dialog = page.locator('dialog[aria-labelledby="restart-title"]'), opened = page.locator('dialog[aria-labelledby="restart-title"][open]');
+    const armedAnswer = id => page.locator(`[data-log-target="${id}"][data-armed="true"]`);
+    const box = id => target(page, id).boundingBox();
+    const openDialog = async () => {
+      await page.locator('[data-log-target="order-restart"][data-armed="true"]').waitFor();
+      await target(page, 'order-restart').click(); await opened.waitFor();
+    };
+    const apart = (a, b) => a.x + a.width <= b.x || b.x + b.width <= a.x || a.y + a.height <= b.y || b.y + b.height <= a.y;
+    // 창의 안쪽 끝(테두리와 안쪽 여백 안)과 토큰 값: 대답 줄이 창의 폭을 다 쓰는지 봅니다.
+    const inner = () => dialog.evaluate(element => {
+      const rect = element.getBoundingClientRect(), style = getComputedStyle(element), px = name => parseFloat(style.getPropertyValue(name));
+      return { left: rect.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft), right: rect.right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight),
+        top: rect.top, bottom: rect.bottom, gap: px('--gap-btn'), kiosk: px('--h-kiosk'), fits: element.scrollHeight <= element.clientHeight,
+        areaTop: innerHeight - parseFloat(getComputedStyle(element.closest('.kiosk')).height), viewBottom: innerHeight };
+    });
+    await openDialog();
+    assert.match(await dialog.innerText(), /'처음부터 주문하기'를 누르면 담은 메뉴 1개\(3,500원\)가 모두 지워져요\./);
+    assert.doesNotMatch(await dialog.innerText(), /그대로예요/, '화면 도움에서 고른 설정이 없으면 설정 안내 줄을 보이지 않음');
+    const frame = await dialog.boundingBox(), main = await page.locator('main').evaluate(element => {
+      const rect = element.getBoundingClientRect(), style = getComputedStyle(element);
+      return { left: rect.left + parseFloat(style.paddingLeft), right: rect.right - parseFloat(style.paddingRight) };
+    });
+    assert.equal(frame.x, main.left, '창의 왼쪽 끝 = 내용 열의 왼쪽 끝');
+    assert.equal(frame.x + frame.width, main.right, '창의 오른쪽 끝 = 내용 열의 오른쪽 끝');
+    let [stay, restart, opener, edge] = [await box('order-restart-cancel'), await box('order-restart-confirm'), await box('order-restart'), await inner()];
+    assert.equal(stay.x, edge.left, '첫 대답의 왼쪽 끝 = 창 안쪽의 왼쪽 끝');
+    assert.equal(restart.x + restart.width, edge.right, '둘째 대답의 오른쪽 끝 = 창 안쪽의 오른쪽 끝');
+    assert.equal(restart.x - (stay.x + stay.width), edge.gap, '대답 사이 = 버튼 간격');
+    assert.equal(stay.width, restart.width, '두 대답의 너비가 같음');
+    assert.equal(stay.y, restart.y); assert.equal(stay.height, restart.height);
+    assert(stay.height >= edge.kiosk, '대답 높이 = 키오스크 버튼 높이 이상');
+    assert(apart(stay, opener) && apart(restart, opener), '기본 화면: 대답이 [처음으로] 자리와 겹치지 않음');
+    await armedAnswer('order-restart-cancel').click(); await opened.waitFor({ state: 'hidden' });
+    assert.equal(await page.locator('dialog[open]').count(), 0);
+
+    // 큰 글씨 + 낮은 화면: 대답은 한 줄에 하나씩 창의 폭을 다 쓰고, 이때도 [처음으로] 자리 밖에 섭니다.
+    await target(page, 'support-toggle').click();
+    await target(page, 'support:largeText').click(); await target(page, 'support:lowScreen').click();
+    await target(page, 'support-close').click();
+    await openDialog();
+    assert.match(await dialog.innerText(), /화면 도움에서 고른 설정은 그대로예요\./, '화면 도움에서 고른 설정이 켜져 있으면 그 설정이 남는다고 알림');
+    [stay, restart, opener, edge] = [await box('order-restart-cancel'), await box('order-restart-confirm'), await box('order-restart'), await inner()];
+    for (const answer of [stay, restart]) {
+      assert.equal(answer.x, edge.left); assert.equal(answer.x + answer.width, edge.right, '큰 글씨: 대답이 창의 폭을 다 씀');
+    }
+    assert.equal(restart.y - (stay.y + stay.height), edge.gap, '위아래 대답 사이 = 버튼 간격');
+    assert(apart(stay, opener) && apart(restart, opener), '큰 글씨 + 낮은 화면: 대답이 [처음으로] 자리와 겹치지 않음');
+    assert.equal(edge.top, edge.areaTop, '낮은 화면: 창이 아래 조작 영역의 위 끝에서부터 섬');
+    assert(edge.fits && edge.bottom <= edge.viewBottom, '낮은 화면: 창이 아래 조작 영역 안에 스크롤 없이 들어옴');
+    await armedAnswer('order-restart-cancel').click();
+    fixture.verify(); assert.deepEqual(errors, []);
+
+    const empty = await open(browser, bootstrap('restart-empty'));
+    await empty.page.locator('[data-log-target="order-restart"][data-armed="true"]').waitFor();
+    await target(empty.page, 'order-restart').click();
+    const text = await empty.page.locator('dialog[aria-labelledby="restart-title"]').innerText();
+    assert.match(text, /'처음부터 주문하기'를 누르면 처음 화면으로 돌아가요\./); assert.doesNotMatch(text, /담은 메뉴|지워져요/, '담은 메뉴가 없으면 지운다는 말을 하지 않음');
+    empty.fixture.verify(); assert.deepEqual(empty.errors, []);
+  } finally { await browser.close(); }
+});
+
+test('처음으로 확인 창의 대답은 창이 뜬 직후의 누름을 받지 않고, 처음으로를 연달아 누른 손가락은 대답이 되지 않는다', async () => {
+  const browser = await chromium.launch(launchOptions);
+  try {
+    // 낮은 창(1080 × 560)에서는 가운데 뜨는 확인 창의 [처음부터 주문하기]가 하단 주문 바의 [처음으로] 위에 섭니다(2026-11-26 측정: 대답 y 295–383, [처음으로] y 360–432).
+    const session = 'restart-twice';
+    const steps = bootstrap(session); steps[2].body = cartResponse(session, 1, [iced()]);
+    const page = await browser.newPage({ viewport: { width: 1080, height: 560 } });
+    const errors = []; page.on('pageerror', error => errors.push(error.message));
+    await page.route('https://fonts.googleapis.com/**', route => route.abort());
+    const fixture = await installOrderResponses(page, steps);
+    await page.goto(url);
+    await page.waitForFunction(() => document.querySelector('[data-log-target="product:americano"]')?.disabled === false);
+    await page.evaluate(() => document.fonts.ready);
+    const opened = page.locator('dialog[aria-labelledby="restart-title"][open]');
+    const armed = id => page.locator(`[data-log-target="${id}"][data-armed="true"]`);
+    const center = box => [box.x + box.width / 2, box.y + box.height / 2];
+    const targetAt = point => page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest('[data-log-target]')?.getAttribute('data-log-target'), point);
+    const sessionNow = () => page.evaluate(() => window.kioskTouchLogDraft.read().serverSessionId);
+    await armed('order-restart').waitFor();
+    // 부하가 누름 간격을 늘리지 않도록 앱의 시간을 멈추고 직접 보냅니다.
+    await page.clock.install();
+    await page.clock.pauseAt(new Date(Date.now() + 1000));
+
+    // 처음 열 때: 창이 뜬 직후에는 두 대답 모두 누름을 받지 않습니다.
+    await target(page, 'order-restart').click(); await opened.waitFor();
+    const [stay, restart, opener] = [await target(page, 'order-restart-cancel').boundingBox(), await target(page, 'order-restart-confirm').boundingBox(), await target(page, 'order-restart').boundingBox()];
+    await page.mouse.click(...center(restart));
+    await page.clock.runFor(100);
+    await page.mouse.click(...center(stay));
+    assert.equal(await opened.count(), 1, '창이 뜬 직후의 누름은 대답이 되지 않음'); assert.equal(await sessionNow(), session);
+    // 받지 않은 누름은 보호를 다시 시작합니다: 마지막 누름에서 두 번 클릭 간격이 지나야 누름을 받습니다.
+    await page.clock.runFor(450);
+    assert.equal(await armed('order-restart-cancel').count(), 0, '창이 뜬 지 550ms여도 마지막 누름에서 450ms라 아직 받지 않음');
+    // Esc는 보호 중에도 창을 닫습니다(새 주문을 시작하지 않는 쪽).
+    await page.keyboard.press('Escape'); await opened.waitFor({ state: 'hidden' });
+    assert.equal(await sessionNow(), session);
+
+    // 같은 자리를 연달아 누름: 첫 누름이 창을 열고, 다음 누름들은 그 자리에 선 [처음부터 주문하기]에 닿습니다.
+    await page.clock.runFor(501); await armed('order-restart').waitFor();
+    const point = [Math.max(restart.x, opener.x) + 4, Math.max(restart.y, opener.y) + 4];
+    assert(point[0] < Math.min(restart.x + restart.width, opener.x + opener.width) && point[1] < Math.min(restart.y + restart.height, opener.y + opener.height),
+      '검사의 전제: 이 창 높이에서 [처음부터 주문하기]가 [처음으로] 자리와 겹침');
+    await page.mouse.click(...point); await opened.waitFor();
+    assert.equal(await targetAt(point), 'order-restart-confirm', '다음 누름이 닿을 자리에 [처음부터 주문하기]가 섬');
+    await page.clock.runFor(250);
+    await page.mouse.click(...point);
+    await page.clock.runFor(250);
+    await page.mouse.click(...point);
+    assert.equal(await opened.count(), 1, '250ms 간격으로 이어진 누름은 대답이 되지 않아 확인 창이 그대로 열려 있음');
+    assert.equal(await sessionNow(), session, '새 주문이 시작되지 않음');
+    assert.match(await opened.innerText(), /담은 메뉴 1개/);
+    await page.clock.runFor(501);
+    await armed('order-restart-cancel').click(); await opened.waitFor({ state: 'hidden' });
     fixture.verify(); assert.deepEqual(errors, []);
   } finally { await browser.close(); }
 });

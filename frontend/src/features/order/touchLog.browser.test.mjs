@@ -55,7 +55,7 @@ test('선택·수량 정정·저장 전후 장바구니를 구분하고 새 세�
           assert.equal(correction.data.before.cart.items[0].quantity, 2);
           assert.equal(correction.data.after.cart.items[0].quantity, 1);
           assert.equal(events.filter(event => event.kind === 'selection_state_change').at(-1).data.after, null);
-          await click('order-restart'); await click('order-restart-confirm');
+          await click('order-restart'); await page.locator('[data-log-target="order-restart-confirm"][data-armed="true"]').waitFor(); await click('order-restart-confirm');
           await page.waitForFunction(id => window.kioskTouchLogDraft.read().serverSessionId === id, next);
           const log = await page.evaluate(() => window.kioskTouchLogDraft.read());
           const firstState = log.events.find(event => event.sessionId === log.sessionId && event.kind === 'order_state_change');

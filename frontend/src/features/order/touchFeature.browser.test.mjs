@@ -52,7 +52,7 @@ test('page suspension stops samples; a new server session restarts sequence with
     assert.equal(fixture.featureRequests.length, before);
     await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
     await page.locator('[data-log-target="order-restart"]').click();
-    await page.locator('[data-log-target="order-restart-confirm"]').click();
+    await page.locator('[data-log-target="order-restart-confirm"][data-armed="true"]').click();
     await page.waitForFunction(() => window.kioskTouchLogDraft?.read().serverSessionId === 'after' && window.kioskTouchLogDraft.transmission()?.sent > 0);
     const after = fixture.featureRequests.find(r => r.path.includes('/after/'));
     assert.equal(after.body.touch.interaction.window_sequence, 1);

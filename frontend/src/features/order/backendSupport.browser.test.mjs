@@ -299,7 +299,7 @@ test('새 서버 세션에서는 자동 적용을 해제하고 같은 종류의 
     const { page, fixture, errors } = await open(browser, async route => decision('large_text', { session_id: new URL(route.request().url()).pathname.split('/').at(-2) }), {}, [...bootstrap('support-session'), ...bootstrap('new-session')]);
     await dialog(page).waitFor(); await answer(page, 'accept');
     await target(page, 'order-restart').click();
-    await target(page, 'order-restart-confirm').click();
+    await page.locator('[data-log-target="order-restart-confirm"][data-armed="true"]').click();
     await page.waitForFunction(() => !document.querySelector('.kiosk.large-text'));
     await dialog(page).waitFor(); await answer(page, 'decline'); fixture.verify(); assert.deepEqual(errors, []);
   } finally { await browser.close(); }

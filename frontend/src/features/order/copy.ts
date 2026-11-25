@@ -1,3 +1,5 @@
+import { money } from './model.ts';
+
 /** 고객 화면의 안내 문구입니다. 서버 오류 상세는 고객에게 그대로 표시하지 않습니다. */
 export const orderCopy = {
   preparing: '주문을 준비하고 있어요.',
@@ -39,6 +41,15 @@ const errors: Record<string, string> = {
 export function orderErrorCopy(code: string, ended: boolean): string {
   return ended ? orderCopy.ended : errors[code] ?? orderCopy.failed;
 }
+
+/** [처음으로] 확인 창의 안내입니다. 어느 대답을 누르면 무엇이 지워지는지 담은 수와 금액으로 알리고, 담은 메뉴가 없으면 그 대답이 하는 일만 알립니다. */
+export const restartCopy = {
+  cart: (count: number, amount: number) => count > 0
+    ? `'처음부터 주문하기'를 누르면 담은 메뉴 ${count}개(${money(amount)})가 모두 지워져요.`
+    : "'처음부터 주문하기'를 누르면 처음 화면으로 돌아가요.",
+  // 고객이 화면 도움에서 고른 설정이 켜져 있을 때만 보입니다. 키오스크가 제안해서 켠 설정은 새 주문에서 끝나므로 말하지 않습니다.
+  keep: '화면 도움에서 고른 설정은 그대로예요.',
+};
 
 /** 키오스크가 먼저 띄우는 화면 지원의 문구입니다. '버튼을 크게 했어요.'는 임시로 정한 문구입니다. */
 export const supportCopy = {
