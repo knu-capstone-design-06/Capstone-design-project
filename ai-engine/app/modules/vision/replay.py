@@ -17,6 +17,11 @@ From ai-engine/ (runtime environment: requirements.txt + app/modules/vision/requ
 - Models: MediaPipe files in app/modules/vision/models/ (download_models.py) and the two ONNX files from
   tools/export_onnx.py. A missing ONNX file is reported and its columns stay missing (--no-heads does the same on
   purpose).
+- Walking-aid detector (--aid-model AID.onnx, optional): --aid-rule owner_box | head_centre picks how it is read
+  (params.py aid_rule; default owner_box, the main user's person box; head_centre for the kiosk-view detector files)
+  and --aid-head-min SCORE gives the head_centre reading's aid_use cut (params.py aid_head_min; no default: without it
+  aid_use stays unknown, no_value_for_model). Both override the value bundle, need --aid-model and are recorded in
+  meta.json with origin 'option'.
 - Windows: one every segment_s from the first frame; the rows after the last full window get one shorter window at
   the last frame (its record has 'partial': {segment_s}; meta last_window_partial_s), so the end of the take is judged.
 - Outputs in --out: windows.jsonl, rows.csv (one line per processed frame), meta.json (inputs, bundle with sources,
@@ -38,8 +43,8 @@ from collections import deque
 
 from .chain import SOURCE_KIND, FrameChain, WindowJudge, history_s
 from .columns import OPTIONAL_COLUMNS
-from .events import SEEN
-from .params import load_bundle
+from .events import AID_RULES, HEAD_CENTRE, SEEN
+from .params import PilotParams, load_bundle, with_options
 
 CODE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODELS_DIR = os.path.join(CODE_DIR, "models")
@@ -131,17 +136,54 @@ def load_perception(models_dir: str, params, threads: int, heads_on: bool, log) 
 
 def load_aids(path: str | None, params, threads: int, log):
     """The walking-aid detector of --aid-model, or None (off unless a file is given; the weights are not in this
-    repository). Returns (detector or None, {file: info})."""
+    repository); with params.aid_rule head_centre it also reads the per-class boxes (AidDetector per_class). Returns
+    (detector or None, {file: info})."""
     if not path:
         return None, {}
     if not os.path.isfile(path):
         raise FileNotFoundError(f"--aid-model: no file {path}")
     from app.inference.aid import AidDetector
-    detector = AidDetector(path, params.aid_score_min, params.aid_nms_iou, threads)
+    head_centre = params.aid_rule == HEAD_CENTRE
+    detector = AidDetector(path, params.aid_score_min, params.aid_nms_iou, threads, per_class=head_centre)
     log(f"보조기구 탐지기 켬: 클래스 {', '.join(detector.classes)}. 키오스크 시점 정확도는 재지 않았습니다")
+    if head_centre:
+        cut = ("aid_use 컷(aid_head_min)이 없어 aid_use는 모름(no_value_for_model)입니다" if params.aid_head_min is None
+               else f"aid_use 컷 aid_head_min = {params.aid_head_min:g}")
+        log(f"보조기구 읽기 head_centre: 주 사용자 머리 상자 가운데를 품은 보조기구 클래스 상자의 점수(aid_head_score). {cut}")
+    elif params.aid_head_min is not None:
+        log(f"aid_head_min {params.aid_head_min:g}은 head_centre 읽기에서만 씁니다. 지금 읽기는 {params.aid_rule}입니다")
     return detector, {os.path.basename(path): {"bytes": os.path.getsize(path), "sha256": sha256(path),
                                                "licence": detector.meta.get("licence"),
                                                "attribution": detector.meta.get("attribution")}}
+
+
+def add_aid_options(ap):
+    """--aid-rule and --aid-head-min, next to --aid-model (params.py aid_rule, aid_head_min). Unset: the value
+    bundle's value (by default the owner_box reading and no cut)."""
+    ap.add_argument("--aid-rule", default=None, choices=AID_RULES,
+                    help="how the walking-aid detector is read (params.py aid_rule): owner_box = the main user's "
+                         "person box (the default), head_centre = the aid-class box that holds the centre of the main "
+                         "user's head box (the kiosk-view detector files); overrides the value bundle; needs "
+                         "--aid-model")
+    ap.add_argument("--aid-head-min", type=float, default=None, metavar="SCORE",
+                    help="the aid_use cut of the head_centre reading (params.py aid_head_min; no default: without it "
+                         "aid_use stays unknown, no_value_for_model); overrides the value bundle; needs --aid-model")
+
+
+def aid_values(a) -> dict:
+    """{chain field: value} of the aid options given on the command line ({} when neither is: the bundle as it is)."""
+    return {k: v for k, v in (("aid_rule", a.aid_rule), ("aid_head_min", a.aid_head_min)) if v is not None}
+
+
+def check_aid_options(ap, a):
+    """Stops the parser (ap.error) when an aid option comes without --aid-model or with a value PilotParams refuses."""
+    values = aid_values(a)
+    if values and not a.aid_model:
+        ap.error("--aid-rule / --aid-head-min need --aid-model")
+    try:
+        PilotParams(**values)
+    except ValueError as e:
+        ap.error(f"--aid-rule / --aid-head-min: {e}")
 
 
 def load_phones(path: str | None, params, threads: int, log):
@@ -292,6 +334,7 @@ def main(argv=None) -> int:
     ap.add_argument("--no-heads", action="store_true", help="no H1 / P1: head columns stay missing")
     ap.add_argument("--aid-model", default=None,
                     help="walking-aid detector ONNX (optional; off unless given, weights not in the repository)")
+    add_aid_options(ap)
     ap.add_argument("--phone-model", default=None,
                     help="COCO YOLOX-Nano ONNX for the phone (optional; off unless given, weights not in the "
                          "repository; without --touch-log phone_use is never true, as the companion "
@@ -299,9 +342,10 @@ def main(argv=None) -> int:
                          "false, otherwise unknown (column:tap_count when the phone part holds))")
     ap.add_argument("--overwrite", action="store_true")
     a = ap.parse_args(argv)
+    check_aid_options(ap, a)
     if os.path.isfile(os.path.join(a.out, "windows.jsonl")) and not a.overwrite:
         ap.error(f"{a.out} already holds a replay - choose another --out or add --overwrite")
-    bundle = load_bundle(a.params)
+    bundle = with_options(load_bundle(a.params), aid_values(a))
     timeline = None
     if a.touch_log:
         from .touch import load_timeline

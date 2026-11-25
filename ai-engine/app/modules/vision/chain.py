@@ -29,7 +29,7 @@ import time
 
 from . import columns as C
 from .contract_view import to_contract
-from .events import SEEN, new_user_rows, observe_window
+from .events import HEAD_CENTRE, SEEN, new_user_rows, observe_window
 from .judgment import rule_table_v0 as R
 from .judgment.jev_stub import ShadowJev
 from .situation import RULES, TAGS, UNKNOWN, assess
@@ -139,6 +139,8 @@ class FrameChain:
             aids = self.aids(frame.image)
             row.update(C.aid_columns(aids, inf.pose if inf is not None else None, row.get("primary_box"),
                                      self.heads is not None, self.p.aid_person_min))
+            if self.p.aid_rule == HEAD_CENTRE:  # the kiosk-view detector files: the aid-class box at the user's head
+                row.update(C.aid_head_columns(aids, row.get("primary_box")))
             row["ms_aids"] = sum(aids.ms.values())
         if self.phones is not None:             # the main user's phone: the head box and the pose's hands
             if self.phone_k % self.p.phone_every == 0:
@@ -402,7 +404,7 @@ class WindowJudge:
                                  approach_ratio_min=p.approach_ratio_min, aid_use_min=p.aid_use_min,
                                  seated_head_cy_min=p.seated_head_cy_min, head_down_pitch_min=p.head_down_pitch_min,
                                  head_approach_ratio_min=p.head_approach_ratio_min, segment_s=p.segment_s,
-                                 away=away)
+                                 away=away, aid_rule=p.aid_rule, aid_head_min=p.aid_head_min)
             reasons = unknown_reasons(rows, t_end, sp) if out["name"] == UNKNOWN else []
             turns = [{"event_id": e["event_id"], "kind": e["kind"], "t_start": e["t_start"], "t_end": e["t_end"],
                       "obs": e["obs"]} for e in events if e["kind"] in TURN_KINDS]

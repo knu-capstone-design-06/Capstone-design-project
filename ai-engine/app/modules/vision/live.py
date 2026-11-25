@@ -47,6 +47,9 @@ From ai-engine/:
 - The ring buffer keeps the rows a window needs (chain.history_s: window_s + 2 x gap_s of the value bundle).
 - When the run stops, the rows after the last full window get one shorter window (record 'partial').
 - --out DIR: windows.jsonl and meta.json only. The camera picture is never saved.
+- --aid-model AID.onnx (optional) with --aid-rule owner_box | head_centre and --aid-head-min SCORE: as in replay.py
+  (the reading of the walking-aid detector and the head_centre reading's aid_use cut, which has no default; they
+  override the value bundle and are recorded in meta.json with origin 'option').
 - A run with neither --seconds nor --out (unbounded, e.g. the kiosk's all-day run) keeps no per-frame or per-window
   timing rows (RunTiming(keep=False)); at exit it prints the frame and window counts, the stop reason and the tag
   sender's counts, with no timing percentiles; with --serve it says so in one start line (unbounded_note). The local
@@ -64,9 +67,9 @@ from collections import deque
 from .chain import SOURCE_KIND, FrameChain, WindowJudge, history_s
 from .events import window_any_tap
 from .judgment.jev_stub import ShadowJev
-from .params import load_bundle
-from .replay import (MODELS_DIR, TIMING_COLUMNS, add_frame_counts, environment, jsonable, load_aids, load_perception,
-                     load_phones, timing_summary)
+from .params import load_bundle, with_options
+from .replay import (MODELS_DIR, TIMING_COLUMNS, add_aid_options, add_frame_counts, aid_values, check_aid_options,
+                     environment, jsonable, load_aids, load_perception, load_phones, timing_summary)
 from .tag_sender import TagSender, check_base_url, vision_window
 
 WINDOW = "vision chain live (q = stop)"   # ASCII: OpenCV window titles may not show Korean on Windows
@@ -338,6 +341,7 @@ def parse_args(argv=None):
     ap.add_argument("--no-heads", action="store_true")
     ap.add_argument("--aid-model", default=None,
                     help="walking-aid detector ONNX (optional; off unless given, weights not in the repository)")
+    add_aid_options(ap)
     ap.add_argument("--phone-model", default=None,
                     help="COCO YOLOX-Nano ONNX for the phone (optional; off unless given, weights not in the "
                          "repository; without --serve live has no touch log, so phone_use is never true, as the companion "
@@ -353,6 +357,7 @@ def parse_args(argv=None):
                          "to URL/api/v1/sessions/{session_id}/vision-windows (tag_sender.py); needs --serve, off "
                          "unless given")
     a = ap.parse_args(argv)
+    check_aid_options(ap, a)
     if a.serve is not None and not 0 <= a.serve <= 65535:
         ap.error("--serve needs a port from 0 to 65535")
     if a.allow_origin and a.serve is None:
@@ -376,7 +381,7 @@ def main(argv=None) -> int:
         except (AttributeError, ValueError):
             pass
     a = parse_args(argv)
-    bundle = load_bundle(a.params)
+    bundle = with_options(load_bundle(a.params), aid_values(a))
     if a.out:
         os.makedirs(a.out, exist_ok=True)
     import cv2

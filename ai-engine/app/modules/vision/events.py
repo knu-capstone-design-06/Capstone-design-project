@@ -464,8 +464,13 @@ def detect_events(rows: list, params: PilotParams, *, landmarker_num_faces: int,
 
 
 # --- the scene tags' measurements (situation.py SCENE_TAGS; 2026-11-22) ------------------------------------------
-SCENE_KINDS = ("face_height", "face_size", "main_user_changed", "nothing_seen", "aid_score", "phone_at_head",
-               "phone_in_hand")
+SCENE_KINDS = ("face_height", "face_size", "main_user_changed", "nothing_seen", "aid_score", "aid_head",
+               "phone_at_head", "phone_in_hand")
+# The two readings of the walking-aid detector (params.PilotParams.aid_rule, 2026-11-26): OWNER_BOX = the main user's
+# person box and its aid scores (the default, the rule of 2026-11-22); HEAD_CENTRE = the aid-class boxes that hold the
+# centre of the main user's head box (the kiosk-view detector files: one aid-class box around the user and the aid)
+OWNER_BOX, HEAD_CENTRE = "owner_box", "head_centre"
+AID_RULES = (OWNER_BOX, HEAD_CENTRE)
 
 
 def _main_face(row: dict) -> bool:
@@ -570,12 +575,24 @@ def _user_rows(rows: list, first: int) -> tuple:
     return (rows, first) if since is None else (rows[first + since:], 0)
 
 
+def _aid_head_obs(rows: list) -> dict:
+    """The observations of an aid_head event over its rows (each with an aid_head_score): the median score (the
+    statistic aid_score uses), the row count and aid_class = the class behind the median: aid_head_class of the row at
+    the upper middle of the rows sorted by score (the row statistics.median_high takes; the middle row for an odd
+    count; among equal scores the earlier row first), None when that row's score came from no box (0.0)."""
+    scores = [_num(r, "aid_head_score") for r in rows]
+    middle = rows[sorted(range(len(rows)), key=lambda i: scores[i])[len(rows) // 2]]
+    name = middle.get("aid_head_class")
+    return {"aid_head_median": statistics.median(scores), "rows": len(rows),
+            "aid_class": None if _blank(name) else name}
+
+
 @dataclass(frozen=True)
 class SceneCues:
     """What the scene tags read for one window. Their events are measurements of the window's rows. The per-user
-    measures (face_height, head_pitch, head_size, head_height, face_size, aid_score, the phone segments and the counts
-    near_rows, face_rows, aid_anchor_rows, head_near_rows) read only the rows from the window's newest new user on
-    (user_since: after a change of user, the earlier user's rows are not the new user's); main_user_changed,
+    measures (face_height, head_pitch, head_size, head_height, face_size, aid_score, aid_head, the phone segments and
+    the counts near_rows, face_rows, aid_anchor_rows, head_near_rows) read only the rows from the window's newest new
+    user on (user_since: after a change of user, the earlier user's rows are not the new user's); main_user_changed,
     nothing_seen, frames and the *_measured checks read the whole window:
       face_height        the main user's face rows (face values not blanked; with the head detector, face_in_primary
                          True) without the rows closer than
@@ -600,6 +617,9 @@ class SceneCues:
                          min(face_unseen_s, body_unseen_s) at the window's last row
       aid_score          the rows with an aid_any_score (the walking-aid detector's box of the main user,
                          columns.aid_columns): aid_any_median, rows, owner_yes_rows
+      aid_head           the rows with an aid_head_score (the head_centre reading: the aid-class box that holds the
+                         centre of the main user's head box, columns.aid_head_columns): aid_head_median, rows, aid_class
+                         (_aid_head_obs: the class behind the median)
     No value is compared here except the two size boundaries that mark near rows (face: approach_ratio_min, head box:
     head_approach_ratio_min); situation.py compares the medians with the camera's boundaries."""
     events: list
@@ -610,6 +630,7 @@ class SceneCues:
     head_measured: bool = False  # every row carries head_count: 'no head box' can be concluded
     aid_measured: bool = False   # every row carries aid_owner: the walking-aid detector ran
     aid_anchor_rows: int = 0     # rows where the main user's anchor (shoulders or head box) was known
+    aid_head_measured: bool = False  # every row carries aid_head_score: the detector ran with the head_centre reading
     head_near_rows: int = 0      # main-user head-box rows left out of head_height as grown beyond head_approach_ratio_min
     phone_measured: bool = False  # every row carries phone_owner: the phone detector ran
     phone_segments: tuple = ()    # 'yes' | 'no' | 'unknown' per segment_s bin of the window (_phone_segments)
@@ -671,6 +692,9 @@ def observe_scene(rows: list, window: tuple, approach_ratio_min: float | None = 
                              {"aid_any_median": statistics.median(_num(inside[i], "aid_any_score") for i in aid),
                               "rows": len(aid),
                               "owner_yes_rows": sum(inside[i].get("aid_owner") == "yes" for i in aid)}))
+    head_aid = [i for i, r in enumerate(inside) if i >= since and _num(r, "aid_head_score") is not None]
+    if head_aid:
+        events.append(_event("aid_head", inside, head_aid, _aid_head_obs([inside[i] for i in head_aid])))
     segments, head_segments = [], []
     if segment_s is not None and inside:
         segments, head_segments, phone_events = _phone_segments(inside[since:], window, segment_s)
@@ -688,6 +712,7 @@ def observe_scene(rows: list, window: tuple, approach_ratio_min: float | None = 
                      face_rows=sum(own[i] and _num(r, "face_cy") is not None for i, r in enumerate(inside)),
                      head_measured=bool(inside) and all(_num(r, "head_count") is not None for r in inside),
                      aid_anchor_rows=sum(r.get("aid_owner") in ("yes", "no") for r in inside[since:]),
+                     aid_head_measured=bool(inside) and all("aid_head_score" in r for r in inside),
                      near_rows=sum(n and _face(r) and _num(r, "face_cy") is not None for n, r in zip(near, inside)),
                      head_near_rows=len(boxed) - len(head),
                      phone_measured=bool(inside) and all("phone_owner" in r for r in inside),

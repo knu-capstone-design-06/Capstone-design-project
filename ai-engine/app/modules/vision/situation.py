@@ -32,15 +32,19 @@ Output for one window (sem section 4: dec section 3's output line plus quality, 
                 track starts in the window, not the same user found again or stitched back), none_seen (the absence node; no face, body, head box or aid-detector
                 person box on any row),
                 aid_use (1-1; window median of aid_any_score of the main user's person box > aid_use_min; only
-                when the walking-aid detector ran), phone_use (3-2's phone path: the phone at the main user's head in
-                min_events of the window's segment_s segments, or at the main user (head or hand) in min_events
+                when the walking-aid detector ran; with aid_rule head_centre, the kiosk-view detector files,
+                window median of aid_head_score, the aid-class box that holds the centre of the main user's head
+                box, > aid_head_min, which has no value yet),
+                phone_use (3-2's phone path: the phone at the main user's head in min_events of the window's segment_s
+                segments, or at the main user (head or hand) in min_events
                 segments with the main user not facing the screen in the window's last segment; no touch, body
                 still; only with the phone detector).
                 status True | False | "unknown"; unknown_reason a code exactly when "unknown" (no_frames,
                 no_value_for_camera, no_value, no_main_user_face, no_main_user_box, face_near, head_near, no_reference,
                 too_few_rows (the rows
                 behind a median are fewer than face_visible_min of the window), reacquired_same_place,
-                column:primary_track, column:head_count, column:aid_owner, no_anchor, no_user_box, column:phone_owner,
+                column:primary_track, column:head_count, column:aid_owner, no_anchor, no_user_box,
+                column:aid_head_score, no_value_for_model, column:phone_owner,
                 no_segments, phone_owner_unknown, gaze_unknown, column:tap_count, body_position_missing); evidence points into the
                 window's scene events (events.observe_scene). The five scene-tag boundaries are
                 params.SCENE_BOUNDARIES (bundle values; None = that part is not judged: approach_ratio_min None ->
@@ -76,8 +80,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .events import (Cues, PilotParams, SceneCues, is_number, is_ratio, new_user, observe_scene, observe_window,
-                     user_change)
+from .events import (AID_RULES, HEAD_CENTRE, OWNER_BOX, Cues, PilotParams, SceneCues, is_number, is_ratio, new_user,
+                     observe_scene, observe_window, user_change)
 
 SOURCE = "rules_v1"
 UNKNOWN, NONE = "unknown", "none"
@@ -332,10 +336,16 @@ def none_seen(sc: SceneCues) -> tuple:
     return bool(nothing), nothing, None
 
 
-def aid_use(sc: SceneCues, aid_use_min: float | None, min_share: float | None = None) -> tuple:
+def aid_use(sc: SceneCues, aid_use_min: float | None, min_share: float | None = None, aid_rule: str = OWNER_BOX,
+            aid_head_min: float | None = None) -> tuple:
     """(status, events, unknown reason): the median aid_any_score of the main user's person box (aid_score)
     above the boundary. The detector not run, no value, no anchor for the main user, no box around it or too few rows
-    behind the median: unknown."""
+    behind the median: unknown. aid_rule (params.aid_rule) head_centre reads the head_centre columns instead
+    (_aid_use_by_head, with aid_head_min); the default owner_box is the rule above."""
+    if aid_rule not in AID_RULES:
+        raise ValueError(f"aid_rule must be one of {AID_RULES}, got {aid_rule!r}")
+    if aid_rule == HEAD_CENTRE:
+        return _aid_use_by_head(sc, aid_head_min, min_share)
     if not sc.frames:
         return None, [], "no_frames"
     if not sc.aid_measured:
@@ -349,6 +359,28 @@ def aid_use(sc: SceneCues, aid_use_min: float | None, min_share: float | None = 
     if not _enough(sc, event["obs"]["rows"], min_share):
         return None, scores, "too_few_rows"
     return event["obs"]["aid_any_median"] > aid_use_min, scores, None
+
+
+def _aid_use_by_head(sc: SceneCues, aid_head_min: float | None, min_share: float | None) -> tuple:
+    """aid_use under the head_centre reading (the kiosk-view detector files): the median aid_head_score of the
+    window's rows with the main user's head box (aid_head; its aid_class names the class behind the median) above
+    aid_head_min. The same window logic as the rule above. Unknown: no frames, the column missing (the detector not
+    run, or run with the owner_box reading: column:aid_head_score), no cut for this model (no_value_for_model), no
+    main-user head box on any row from the window's newest user on (no_main_user_box), too few rows behind the median
+    (too_few_rows). A head box with no aid-class box around its centre counts as 0.0, not as missing."""
+    if not sc.frames:
+        return None, [], "no_frames"
+    if not sc.aid_head_measured:
+        return None, [], "column:aid_head_score"
+    if aid_head_min is None:
+        return None, [], "no_value_for_model"
+    scores = sc.of("aid_head")
+    if not scores:
+        return None, [], "no_main_user_box"
+    (event,) = scores
+    if not _enough(sc, event["obs"]["rows"], min_share):
+        return None, scores, "too_few_rows"
+    return event["obs"]["aid_head_median"] > aid_head_min, scores, None
 
 
 def _any(*conditions):
@@ -408,15 +440,16 @@ def scene_tags(sc: SceneCues, *, seated_face_cy_min: float | None = None, seated
                head_down_pitch_min: float | None = None,
                approach_ratio_min: float | None = None, aid_use_min: float | None = None,
                min_share: float | None = None, cues: Cues | None = None, min_events: int | None = None,
-               away: bool | None = None) -> list:
+               away: bool | None = None, aid_rule: str = OWNER_BOX, aid_head_min: float | None = None) -> list:
     """The `tags` list of one window, in SCENE_TAGS order. min_share = the share of the window's frames a median must
     stand on (assess passes params.face_visible_min); cues / min_events / away = the window's Cues, params.min_events
     and whether the main user is not facing the screen at the segment end (chain.away_from_screen; None = cannot
-    tell) for phone_use."""
+    tell) for phone_use; aid_rule / aid_head_min = the aid detector's reading and its head_centre cut (aid_use)."""
     verdicts = {"seated_height": seated_height(sc, seated_face_cy_min, min_share, seated_head_cy_min),
                 "face_approach": face_approach(sc, approach_ratio_min, min_share, head_down_pitch_min),
                 "user_changed": user_changed(sc), "none_seen": none_seen(sc),
-                "aid_use": aid_use(sc, aid_use_min, min_share), "phone_use": phone_use(sc, cues, min_events, away)}
+                "aid_use": aid_use(sc, aid_use_min, min_share, aid_rule, aid_head_min),
+                "phone_use": phone_use(sc, cues, min_events, away)}
     return [{"name": name, "display_text": SCENE_DISPLAY_TEXT[name],
              "status": UNKNOWN if status is None else status, "evidence": _evidence(events),
              "unknown_reason": reason}
@@ -465,7 +498,7 @@ def assess(rows: list, t_end: float, params: PilotParams, *, landmarker_num_face
            approach_ratio_min: float | None = None, aid_use_min: float | None = None,
            seated_head_cy_min: float | None = None, head_down_pitch_min: float | None = None,
            head_approach_ratio_min: float | None = None, segment_s: float | None = None,
-           away: bool | None = None) -> tuple:
+           away: bool | None = None, aid_rule: str = OWNER_BOX, aid_head_min: float | None = None) -> tuple:
     """(output, events) for the window [t_end - window_s, t_end] of the observation rows (features.COLUMNS plus the
     optional columns of events.py). Events come from all rows up to t_end and are kept when their time (end) lies in
     the window; the evidence ids point into the returned events. The output passes check_output, or this raises
@@ -478,7 +511,9 @@ def assess(rows: list, t_end: float, params: PilotParams, *, landmarker_num_face
     face decides alone); head_down_pitch_min, head_approach_ratio_min = the gates of face_approach and of the head-box
     path (None = not applied). segment_s = the runners' segment (phone_use counts the phone per segment; None = no
     segments); away = the main user not facing the screen at the segment end (chain.away_from_screen; None =
-    cannot tell), read by phone_use's hand path only. The scene tags' evidence points into their own events (output['tags'], not in
+    cannot tell), read by phone_use's hand path only. aid_rule / aid_head_min = the aid detector's reading
+    (params.aid_rule; default owner_box, the rule with aid_use_min) and the cut of its head_centre reading (None = no
+    value: aid_use unknown). The scene tags' evidence points into their own events (output['tags'], not in
     the returned events); the other keys of the output do not depend on them."""
     window = (t_end - params.window_s, t_end)
     cues = observe_window(rows, window, params, landmarker_num_faces=landmarker_num_faces, baseline_s=baseline_s)
@@ -501,7 +536,7 @@ def assess(rows: list, t_end: float, params: PilotParams, *, landmarker_num_face
                            head_down_pitch_min=head_down_pitch_min,
                            approach_ratio_min=approach_ratio_min,
                            aid_use_min=aid_use_min, min_share=params.face_visible_min, cues=cues,
-                           min_events=params.min_events, away=away),
+                           min_events=params.min_events, away=away, aid_rule=aid_rule, aid_head_min=aid_head_min),
     }
     problems = check_output(out, cues.events, params, scene_events=scene.events)
     if problems:
