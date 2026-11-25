@@ -1,11 +1,20 @@
 # 터치·상호작용 전체 확장 계약 합의안
 
 - 작성일: 2026-11-16
-- 상태: **팀 검토용 제안 / 미채택 / 서비스 미적용**
+- 상태: **수신·검증·전달 범위 채택 / 아래는 검토 이력**
 - 검토 반영일: 2026-11-18
 - 작성 범위 결정: 백엔드 담당자가 PR #72의 전체 확장에 대한 계약 합의안 작성을 요청했다. 이는 아래 정책의 팀 채택이나 기존 계약 수정 허용을 뜻하지 않는다.
 - 기준: PR #72 병합 커밋 `f316e708a98a5299e48d7fcfcdc3805dd22eb9ca`의 프론트 생산자·전송기와 두 OpenAPI의 TouchFeatures. #77 판단 계층은 해당 PR의 검토 중 변경으로 구분한다.
 - 검토 자료: 이 합의안, [독립 검토 스키마](touch-interaction-contract-proposal.openapi.json), [합성 요청 예시 6종](touch-interaction-contract-examples.json).
+
+## 채택한 수신 계약
+
+1. `touch.interaction`은 필수 27개·선택 5개 필드와 중첩 설정 6개를 받는다. 기존 터치 5개 요청도 지원한다.
+2. 생략과 명시적 `null`을 모두 허용한다. 허용된 필드별 결측값도 그대로 전달한다.
+3. `touch-interaction-pilot-v1`의 미지원 버전, 잘못된 타입·범위, 필수값 누락, 확장 객체나 `ui_settings`의 미정의 속성은 `/features`에서 `422`를 반환한다. `detail` 배열의 `loc`으로 문제 필드를 찾는다. 배포 순서와 세션 전송 복구는 정식 계약에 적는다.
+4. 검증된 창은 백엔드 판단 계층에 전달한다. 내부 `/v1/analyze`와 Jev 질문의 터치 입력은 기존 5개 필드를 사용한다.
+
+5초 집계, `fixes_recent`·`options_open`·`pause_s`의 판단 연결, 확장의 영구 저장과 화면 지원 활성화는 후속 작업이다. 아래 초안의 정책 상태와 독립 검토 스키마는 검토 당시 기록이다. 구현 기준은 프론트↔백엔드 0.5.0과 내부 분석 계약이다. [프론트 의견](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/89#issuecomment-7123687310) · [AI 의견](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/89#issuecomment-7154567898) · [프론트↔백엔드 OpenAPI](../contract/frontend-backend.openapi.yaml) · [내부 분석 OpenAPI](../contract/backend-ai.openapi.yaml)
 
 ## 1. 제안하는 결과와 범위
 
