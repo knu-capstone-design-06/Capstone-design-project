@@ -58,6 +58,7 @@ flowchart LR
 - 비전 관측값은 키오스크 PC에서 계산해 브라우저가 기존 `vision` 필드로 전달하는 안이 제안됐으나, 로컬 브라우저 통신과 프론트 제공 위치는 2026-10-14 팀 결정 전까지 미정입니다. 직접 백엔드 전송안은 현재 계약과 달라 별도 합의가 필요합니다.
 - 기존 `/health`는 프로세스 상태만 나타내고, 백엔드→ai-engine 연결은 이미 `GET /api/v1/connectivity`로 확인할 수 있습니다. 배포 후에는 프론트엔드 → 백엔드, 백엔드 → ai-engine, 백엔드 → DB를 각각 확인합니다.
 - 실시간 전달(WebSocket 또는 SSE)이 최종 요구사항이면 Amplify 프록시를 통한 동작을 별도 검증하고, 지원되지 않는 경로는 HTTPS API의 직접 호출과 출처 허용 정책을 팀에서 결정합니다. 현재 백엔드 CORS는 허용한 출처의 GET·POST·PATCH·DELETE와 `Content-Type`·`Idempotency-Key`를 지원합니다. 브라우저가 HTTPS API를 직접 호출하는 안에서는 Amplify 출처를 `CORS_ORIGINS`에 등록해야 합니다. HTTP API 경로와 실시간 통신 방식은 각각 결정합니다.
+- 다른 출처의 HTTPS API를 브라우저가 직접 호출하고 주문 오류 응답에 `Retry-After`를 사용하는 구성에서는 `Access-Control-Expose-Headers: Retry-After`로 해당 응답 헤더를 노출합니다. 배포된 프론트 출처에서 오류 응답을 받아 브라우저의 `response.headers.get('Retry-After')`로 값을 읽고 수동 재시도에 반영하는지 확인합니다. [Fetch 표준의 CORS 응답 헤더 규칙](https://fetch.spec.whatwg.org/#cors-safelisted-response-header-name)
 
 ## 프론트엔드 담당자 리뷰 요청
 
