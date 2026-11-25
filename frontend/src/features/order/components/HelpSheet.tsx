@@ -25,9 +25,9 @@ export function SettingTile({ target, icon, label, on, disabled = false, onClick
  * 모달이라 터치 기록의 가까운 후보도 이 시트 안에서만 찾습니다. 화면 읽기 상태를 지키려고 닫혀도 내용을 남겨 둡니다.
  * 직원 호출은 실제 전달 경로가 준비되기 전까지 표시하지 않습니다.
  */
-export function HelpSheet({ ref, settings, combined, onToggle, onCombined, onReset, onClose, readAloud }: {
-  ref: Ref<HTMLDialogElement>; settings: Settings; combined: boolean;
-  onToggle: (key: keyof Settings) => void; onCombined: () => void; onReset: () => void; onClose: () => void; readAloud: ReactNode;
+export function HelpSheet({ ref, settings, onToggle, onReset, onClose, readAloud }: {
+  ref: Ref<HTMLDialogElement>; settings: Settings;
+  onToggle: (key: keyof Settings) => void; onReset: () => void; onClose: () => void; readAloud: ReactNode;
 }) {
   return <Sheet ref={ref} id="support-panel" className="help-sheet" labelledBy="help-sheet-title" logTarget="support-panel" logScroll="support-panel" onClose={onClose}>
       <div>
@@ -36,7 +36,6 @@ export function HelpSheet({ ref, settings, combined, onToggle, onCombined, onRes
       </div>
       <div className="support-options cols">
         {tiles.map(([key, label, icon]) => <SettingTile key={key} target={`support:${key}`} icon={icon} label={label} on={settings[key]} onClick={() => onToggle(key)} />)}
-        {import.meta.env.DEV && <SettingTile target="support:combinedEnlargement" icon="text_increase" label="큰 글씨 + 큰 버튼" on={combined} onClick={onCombined} />}
       </div>
       {readAloud}
       <div className="sheet-bar">

@@ -80,7 +80,7 @@ export function createSampleOrderApi() {
     let status = 200;
     if (path === 'orders') {
       if (!cart.items.length) return error(409, 'empty_cart', '샘플 메뉴를 먼저 담아 주세요.', cart);
-      body = { order_id: `sample-order-${crypto.randomUUID()}`, order_number: `DEV-SAMPLE-${String(++orderNumber).padStart(3, '0')}`,
+      body = { order_id: `sample-order-${crypto.randomUUID()}`, order_number: `DEMO-${String(++orderNumber).padStart(3, '0')}`,
         session_id: session, status: 'simulated', currency: 'KRW', items: structuredClone(cart.items),
         total_quantity: cart.total_quantity, total_amount: cart.total_amount, created_at: new Date().toISOString() };
       carts.set(session, snapshot(session, cart.version + 1, []));

@@ -25,12 +25,25 @@
 .kiosk .sheet .field { display: flex; flex-direction: column; gap: var(--in); margin: 0; padding: 0; border: 0; min-width: 0; }
 .kiosk .sheet .field-label { padding: 0; margin: 0; font-size: var(--fs-m); font-weight: 700; color: var(--ui-ink); }
 .kiosk .sheet .field-note { margin-left: var(--pad-1); font-size: var(--fs-s); font-weight: 400; color: var(--ui-muted); }
+/* 큰 글씨: "(최대 20개)"가 괄호 안에서 줄이 바뀌지 않게 한 덩어리로 둡니다(줄이 바뀌면 "수량" 다음에서 바뀜). */
+.kiosk.large-text .sheet .field-note { white-space: nowrap; }
 .kiosk .sheet .cols { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--col)), 1fr)); gap: var(--gap-btn); align-items: center; }
 .kiosk .sheet .qty-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap-btn); }
 .kiosk .sheet .qty-row .field-label { flex: 0 1 var(--col); }
+/* 옵션 시트의 온도·수량 두 열(키오스크 기준 폭 1080px 이상, 큰 글씨 제외): 폭은 (내용 폭 − [담기] 폭 − 버튼 간격 2개) ÷ 2로,
+   1080px 폭에서 둘째 열 오른쪽 끝이 아래 줄 [취소] 오른쪽 끝에 맞음. 열 간격은 그대로이고 왼쪽부터 채우며, 카드 열 폭을 넘지 않음(더 넓은 화면에서는 카드 열 폭에서 멈춤).
+   큰 글씨에서는 [담기]가 글자만큼 넓어지고 1080px보다 좁은 화면에서는 아래 줄의 열 구성이 달라 이 식이 맞지 않으므로 기존 배치 그대로 */
+@media (min-width: 1080px) {
+  .kiosk:not(.large-text) .option-sheet { --option-col: min(var(--col), calc((100% - var(--w-action) - 2 * var(--gap-btn)) / 2)); }
+  .kiosk:not(.large-text) .option-sheet .cols { grid-template-columns: repeat(auto-fill, var(--option-col)); }
+  .kiosk:not(.large-text) .option-sheet .qty-row .field-label { flex: 0 1 var(--option-col); }
+  /* 수량 [−] n [+]: 같은 폭의 둘째 열에 [−]와 [+]는 양 끝, 수는 그 가운데 */
+  .kiosk:not(.large-text) .option-sheet .qty-row .stepper { flex: 0 1 var(--option-col); justify-content: space-between; }
+}
 .kiosk .sheet .cols button[aria-pressed=true] { font-weight: 700; }
 .kiosk .stepper { display: flex; flex-wrap: nowrap; align-items: center; gap: 0; }
-.kiosk .stepper button { width: var(--h-control); min-width: var(--h-control); padding: 0; }
+/* [−]·[+]의 아이콘은 버튼 가운데에 섭니다(창 밖의 장바구니·주문 확인 줄도 창 안의 버튼과 같이). */
+.kiosk .stepper button { display: inline-flex; align-items: center; justify-content: center; width: var(--h-control); min-width: var(--h-control); padding: 0; }
 .kiosk .stepper > span { width: var(--w-count); text-align: center; font-size: var(--fs-m); font-variant-numeric: tabular-nums; }
 
 /* 아래 줄: [취소]는 [처음으로] 자리, 주요 버튼은 주요 버튼 자리 */
@@ -68,6 +81,9 @@
 .kiosk .help-sheet .sheet-bar .sheet-reset { grid-column: 1; }
 .kiosk .help-sheet .sheet-bar .sheet-cancel { grid-column: 2; }
 .kiosk.large-text .help-sheet button { white-space: normal; height: auto; padding-block: var(--pad-1); }
+/* 큰 글씨: [기본 화면으로]는 글자만 둡니다([화면 도움] 줄의 큰 글씨 버튼과 같음). 아이콘을 두면 '화면으로'가 [닫기] 앞 칸에
+   들어가지 않아 낱말 가운데에서 줄이 바뀝니다. */
+.kiosk.large-text .help-sheet .sheet-reset .pic { display: none; }
 .kiosk.large-text .help-sheet .cols, .kiosk.large-text .help-sheet .cols2 { grid-template-columns: minmax(0, 1fr); }
 /* 크게 보기: 설정 타일은 두 열("단계별 안내"와 아이콘에 334 px가 필요해 316 px 열에 들어가지 않음) */
 .kiosk.large-view .help-sheet .support-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
