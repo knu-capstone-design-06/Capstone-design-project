@@ -1238,7 +1238,8 @@ class RetentionTests(unittest.IsolatedAsyncioTestCase):
         repository = self.repository()
         self.used_session(repository)
         self.now[0] = T0 + timedelta(hours=2)
-        self.assertEqual(repository.state("s1").next_id, 1, "no other session touched the repository in between")
+        # Fresh but for its id counter, which goes on (backend review of #107: a decision id is never issued twice).
+        self.assertEqual(repository.state("s1").next_id, 7, "no other session touched the repository in between")
         self.assertEqual(repository.windows("s1"), [])
 
     def test_another_sessions_access_expires_an_idle_session(self):
@@ -1256,7 +1257,8 @@ class RetentionTests(unittest.IsolatedAsyncioTestCase):
         self.now[0] = T0 + RETENTION                        # exactly the retention: still kept
         self.assertEqual(repository.state("s1").next_id, 7)
         self.now[0] = T0 + 2 * RETENTION + timedelta(seconds=1)   # idle one second past it since that access
-        self.assertEqual(repository.state("s1").next_id, 1)
+        self.assertEqual(repository.windows("s1"), [])
+        self.assertEqual(repository.state("s1").next_id, 7, "fresh, its id counter goes on")
 
     async def test_an_answer_arriving_after_the_session_expired_does_not_bring_it_back(self):
         gate = asyncio.Event()
@@ -1276,7 +1278,24 @@ class RetentionTests(unittest.IsolatedAsyncioTestCase):
         await service.drain()
         await http.aclose()
         self.assertEqual((repository.records("s1"), repository.windows("s1")), ([], []))
-        self.assertEqual(repository.state("s1").next_id, 1)
+        self.assertIsNone(repository.state("s1").held)
+        self.assertEqual(repository.state("s1").next_id, 2, "fresh; d0001 was issued, so the counter goes on")
+
+    def test_a_new_decision_after_the_retention_gets_a_new_id_and_a_kept_one_keeps_its_id(self):
+        # Backend review of #107 [P2]: the order screen acts on a decision id once per session.
+        repository = self.repository()
+        service = DecisionService(repository, P, None, stages=())
+        opened = service.observe("s1", ending_at(2, back_count=1), measurable=True)
+        kept = service.observe("s1", ending_at(4), measurable=True)
+        self.assertEqual((opened.transition, opened.decision_id, kept.transition, kept.decision_id),
+                         ("open", "d0001", "keep", "d0001"))
+        self.now[0] = T0 + timedelta(hours=2)                                   # the state expires
+        again = service.observe("s1", ending_at(7202, back_count=1), measurable=True)
+        kept = service.observe("s1", ending_at(7204), measurable=True)
+        self.assertEqual((again.transition, again.decision_id, kept.transition, kept.decision_id),
+                         ("open", "d0002", "keep", "d0002"))
+        other = service.observe("s2", ending_at(7202, back_count=1), measurable=True)
+        self.assertEqual(other.decision_id, "d0001", "each session counts its own")
 
     def test_the_first_window_after_the_retention_reads_no_previous_screen_or_history(self):
         """Expiry comes before the reads of observe(): no previous screen (no progress) and no history."""

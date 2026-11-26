@@ -325,6 +325,16 @@ test('강조 대상은 data-log-target과 같거나 *가 아무 글자에 맞는
   assert.equal(matchesLogTarget('menu-page:.', 'menu-page:x'), false);
 });
 
+test('판단 기록이 정리된 뒤 backend가 새 ID로 실은 결정은 띄우고, 같은 ID는 두 번 띄우지 않는다(#107 백엔드 리뷰)', () => {
+  const read = createDecisionReader();
+  const notice = decision_id => switched({ ...stepsNotice.support, decision_id, steps_left: 2 });
+  assert.equal(read(notice('d0001'), 'session').notice?.decisionId, 'd0001');
+  assert.equal(read(switched({ preset: 'none' }), 'session').notice, null, '결정이 없는 응답(기록 정리 뒤 첫 창)');
+  assert.equal(read(notice('d0002'), 'session').notice?.decisionId, 'd0002', 'backend는 같은 세션에 새 ID를 냄');
+  assert.equal(read(switched({ preset: 'none' }), 'session').notice, null);
+  assert.equal(read(notice('d0002'), 'session').notice, null, '같은 ID는 다시 띄우지 않음');
+});
+
 test('남은 단계 안내는 응답의 steps_left를 디자인 명세의 문구에 넣는다', () => {
   assert.equal(stepsLeftCopy(readSupportDecision(stepsNotice, 'session').action.stepsLeft), '앞으로 2단계 남았어요');
   assert.equal(stepsLeftCopy(1), '앞으로 1단계 남았어요');

@@ -27,9 +27,14 @@ class DecisionRepository:
         self._records: dict[str, list[JevRecord]] = {}
         self._windows: dict[str, list[WindowRecord]] = {}
         self._vision: dict[str, list[VisionWindow]] = {}
-        self._vision_after: dict[str, datetime] = {}   # the latest touch window's pairing bound (pair_vision's `after`)
+        # (epoch, bound, until) of the placed touch windows' pairings on the session's current timeline (pair_vision):
+        # the latest `after` (the bound add_vision prunes by) and the latest `until`.
+        self._vision_after: dict[str, tuple[int, datetime, datetime]] = {}
         self._vision_last: dict[str, datetime] = {}    # the end of the engine window received last (kept when pruned)
         self._touched: dict[str, datetime] = {}
+        # Each session's next decision number, kept past the retention: a session's state made again after it expired
+        # goes on from it, so a decision id is never issued twice in one session (the order screen acts on an id once).
+        self._next_ids: dict[str, int] = {}
         self._retention = retention
         self._clock = clock
         self._lock = Lock()
@@ -50,18 +55,22 @@ class DecisionRepository:
         after the retention starts fresh, as it would after another session's access."""
         self._touched[session_id] = self._expire()
 
+    def _new_state(self, session_id: str) -> SessionState:
+        return self._states.setdefault(session_id, SessionState(next_id=self._next_ids.get(session_id, 1)))
+
     def _holds(self, window: WindowRecord) -> bool:
         return any(w is window for w in self._windows.get(window.session_id, ()))
 
     def state(self, session_id: str) -> SessionState:
         with self._lock:
             self._touch(session_id)
-            return self._states.setdefault(session_id, SessionState())
+            return self._new_state(session_id)
 
     def save_state(self, session_id: str, state: SessionState) -> None:
         with self._lock:
             self._touch(session_id)
             self._states[session_id] = state
+            self._next_ids[session_id] = max(self._next_ids.get(session_id, 1), state.next_id)
 
     def add_record(self, record: JevRecord, window: WindowRecord | None = None) -> bool:
         """Keep a shadow call's record. With the window it answered, only while that window is still kept: an
@@ -92,14 +101,15 @@ class DecisionRepository:
         session's idle time, so a session whose order screen stopped still expires under the retention while the
         engine keeps posting (a session not used before is marked once, so its windows expire too). The windows a
         later /features window can no longer read are pruned on arrival: those that ended at or before the latest
-        touch window's pairing bound (pair_vision), the new one included. The end of the window received last is kept
+        placed touch window's pairing bound on the session's current timeline (pair_vision), the new one included. The end of the window received last is kept
         apart from that pruning.
         """
         with self._lock:
             now = self._expire()
             session_id = window.session_id
             self._touched.setdefault(session_id, now)
-            after = self._vision_after.get(session_id)
+            bound = self._vision_after.get(session_id)
+            after = None if bound is None else bound[1]
             kept = [w for w in self._vision.get(session_id, []) if after is None or w.window_end > after]
             if after is None or window.window_end > after:
                 kept.append(window)
@@ -142,7 +152,7 @@ class DecisionRepository:
         with self._lock:
             now = self._expire()
             self._touched.setdefault(session_id, now)
-            state = self._states.setdefault(session_id, SessionState())
+            state = self._new_state(session_id)
             new = [e for e in dict.fromkeys(event_ids) if e not in state.user_changed_seen]
             if not new:
                 return None
@@ -166,19 +176,26 @@ class DecisionRepository:
             self._expire()
             return list(self._vision.get(session_id, []))
 
-    def pair_vision(self, session_id: str, after: datetime, until: datetime
+    def pair_vision(self, session_id: str, after: datetime, until: datetime, epoch: int = 0
                     ) -> tuple[VisionWindow | None, VisionWindow | None, tuple[VisionWindow, ...]]:
         """(latest, named, inside) of the session's AI engine windows that ended in (after, until]: the latest one, the
         latest one whose situation names a tag (TAGS), or the latest one again when none does, and all of them (later
         arrivals first). Of two with the same end, the one that arrived last. The session's windows that ended at or
         before `after` are dropped first; the latest `after` is kept for add_vision's pruning (an earlier touch window
-        arriving late does not lower it)."""
+        arriving late does not lower it). For a touch window placed on the session's timeline only (DecisionService.place):
+        one recorded only does not call it. epoch: the session's timeline (SessionState.epoch). On a new one (the
+        frontend clock moved) the old timeline's bound is dropped, so it does not hide this timeline's engine windows,
+        and so are the engine windows that ended at or before the old timeline's latest `until` (its own times)."""
         with self._lock:
             # A /features window is a use of the session (its judgment touches it right after); marked here once so
             # the kept bound always expires with the session.
             self._touched.setdefault(session_id, self._expire())
             bound = self._vision_after.get(session_id)
-            self._vision_after[session_id] = after if bound is None else max(bound, after)
+            if bound is not None and bound[0] != epoch:
+                if session_id in self._vision:
+                    self._vision[session_id] = [w for w in self._vision[session_id] if w.window_end > bound[2]]
+                bound = None
+            self._vision_after[session_id] = (epoch, after, until) if bound is None else                 (epoch, max(bound[1], after), max(bound[2], until))
             if session_id not in self._vision:
                 return None, None, ()
             kept = self._vision[session_id] = [w for w in self._vision[session_id] if w.window_end > after]

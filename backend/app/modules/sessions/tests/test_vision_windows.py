@@ -740,6 +740,46 @@ class SwitchOnTests(FeaturesAppCase):
                 self.assertEqual(self.support(0, 2, backs=1), PLACEHOLDER_SUPPORT)
 
 
+class TimelinePairingOffTests(FeaturesAppCase):
+    """Backend review of #107 [P1]: only a window placed on the session's timeline pairs engine windows and moves the
+    pairing bound, and a confirmed clock move starts pairing again on the new timeline. Switch off; the subclass: on."""
+
+    def test_a_window_off_the_timeline_does_not_take_the_next_windows_engine_windows(self):
+        # The clock ran ahead for one window and came back; the control run without that window opens 3-1.
+        for off in (False, True):
+            with self.subTest(off_window=off):
+                session_id = self.new_session()
+                self.features(0, 2, session_id=session_id, taps=0)
+                self.engine(3, QUEUE, session_id=session_id)
+                if off:
+                    _, stale = self.features(5000, 5002, session_id=session_id)
+                    self.assertEqual((stale.jev, stale.vision_window), (STALE, None), "recorded only: pairs nothing")
+                self.engine(4, "none", session_id=session_id)    # arrives after it: not pruned by its times
+                _, record = self.features(2, 4, session_id=session_id)
+                self.assertEqual((record.inputs["situation"]["name"], record.vision_window["window_end"],
+                                  record.decision["transition"], record.decision["support"]),
+                                 (QUEUE, at(4), "open", NOTICE))
+
+    def test_after_a_clock_move_pairing_goes_on_on_the_new_timeline(self):
+        # The clock is set back by 2,000 s (PressSpanTests' case): the old timeline's bound lies ahead of every new time.
+        self.features(3000, 3002, taps=0)
+        self.engine(3001, BUSY)                            # the old timeline's: after its bound (2998 s), kept
+        _, crossed = self.features(1000, 1002, taps=0)     # off that timeline: recorded only
+        _, first = self.features(1002, 1004, taps=0)       # follows it: the new epoch
+        self.assertEqual((crossed.jev, first.jev == STALE, first.epoch), (STALE, False, 1))
+        self.assertNotIn(at(3001), [w.window_end for w in self.repository.vision(self.session_id)],
+                         "the old timeline's engine windows go with its bound")
+        self.engine(1005, QUEUE)
+        _, record = self.features(1004, 1006)
+        self.assertEqual((record.inputs["situation"]["name"], record.decision["transition"], record.decision["support"]),
+                         (QUEUE, "open", NOTICE))
+
+
+class TimelinePairingOnTests(TimelinePairingOffTests):
+    def settings(self):
+        return Settings(_env_file=None, openai_api_key=None, decision_send_support=True)
+
+
 CONTRACT_TOUCH = {"tap_count", "miss_tap_count", "repeat_tap_count", "back_count", "dwell_ms"}
 
 

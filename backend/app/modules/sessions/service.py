@@ -201,8 +201,6 @@ class SessionService:
             ai = ("unavailable" if result is None else "invalid_scores" if not valid
                   else "ok" if result.measurable else "unmeasurable")
             try:
-                # The AI engine's window for this stretch or the one before: its situation and gaze go to the table.
-                paired = self._decision.paired_vision(session_id, window)
                 # The pilot block's two values only under the demonstration switch: the default mode's records
                 # stay as they are.
                 pilot = {**interaction_inputs(window.touch), **scene_signal_inputs(window.touch),
@@ -210,11 +208,13 @@ class SessionService:
                 if self._send_support and window.touch.tap_count > 0:
                     # 2-2 reads the session's own cart on a window with a press (no new field in the window).
                     pilot["cart_items"] = await run_in_threadpool(self._cart_items, session_id)
-                placed = None
+                # Placed first, with no await before observe(), so the engine windows and the earlier presses are read
+                # on the timeline this window is placed on (a window that confirms a clock move has started the new
+                # epoch). A window recorded only (late, or off the timeline) pairs nothing and moves no pairing bound.
+                placed = self._decision.place(session_id, window)
+                # The AI engine's window for this stretch or the one before: its situation and gaze go to the table.
+                paired = self._decision.paired_vision(session_id, window) if placed else None
                 if self._send_support:
-                    # Placed first, with no await before observe(), so the earlier presses are read on the timeline
-                    # this window is placed on (a window that confirms a clock move has started the new epoch).
-                    placed = self._decision.place(session_id, window)
                     # Whatever /v1/analyze returned (down, slow, invalid): a tap or a back in this window or in an
                     # earlier one inside its pairing span, or the face.
                     measurable = measurable_here(window, paired, self._decision.pressed_before(session_id, window))

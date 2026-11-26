@@ -269,11 +269,15 @@ class DecisionService:
         after the pairing span is read by no request. The bound holds two 1 s segments (this stretch's and the one
         before), all kept: a tag that holds in the earlier one only is not
         lost behind a later `none`. The only tolerance is the touch window's own length; both times are on the kiosk
-        PC's clock. The session's engine windows that ended at or before that bound are dropped. None: no such window
-        (situation and gaze stay unknown, as without the engine). All windows in the bound are kept on the answer for
+        PC's clock. The session's engine windows that ended at or before that bound are dropped. Called after place()
+        and only for a window it placed: a window recorded only (late, or off the session's timeline) reads no engine
+        window and moves no bound, so the next window placed still reads its own stretch. The bound belongs to the
+        session's current epoch: a confirmed clock move starts pairing again on the new timeline (pair_vision). None:
+        no such window (situation and gaze stay unknown, as without the engine). All windows in the bound are kept on the answer for
         the scene tags (PairedVision.scene_tag_states: true when any of them says true).
         """
-        latest, named, inside = self._repository.pair_vision(session_id, pairing_after(window), window.window_end)
+        latest, named, inside = self._repository.pair_vision(session_id, pairing_after(window), window.window_end,
+                                                             self._repository.state(session_id).epoch)
         return None if latest is None else PairedVision(latest, named, inside)
 
     def pressed_before(self, session_id: str, window: FeatureWindowRequest) -> bool:
@@ -332,8 +336,9 @@ class DecisionService:
 
     def place(self, session_id: str, window: FeatureWindowRequest) -> bool:
         """_place ahead of observe(), for a caller that reads the session's timeline before the window is observed: the
-        session service under the demonstration switch, so pressed_before reads the epoch this window is placed in.
-        The result goes to observe(placed=...), which then does not place the window again: placed once either way."""
+        session service in both modes, so only a placed window pairs engine windows (paired_vision) and pressed_before
+        reads the epoch this window is placed in. The result goes to observe(placed=...), which then does not place the
+        window again: placed once either way."""
         return self._place(session_id, window.window_end.timestamp())
 
     def _place(self, session_id: str, t: float) -> bool:
@@ -424,7 +429,7 @@ class DecisionService:
         vision is the AI engine windows the situation and gaze came from (paired_vision), kept on the record.
         options_open and pause_s come from the order screen's pilot block under the demonstration switch only, and
         so do the further input fields in extra (window_input). placed: place()'s result when the caller placed the
-        window first (the demonstration switch); None places it here.
+        window first (the session service); None places it here.
         """
         placed = self._place(session_id, window.window_end.timestamp()) if placed is None else placed
         inp = self._input(session_id, window, measurable, situation, gaze, options_open, pause_s, **extra)
