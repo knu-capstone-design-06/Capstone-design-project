@@ -6,6 +6,7 @@ info:
     FastAPI backend와 ai-engine 사이의 내부 API 명세입니다.
     ai-engine은 Docker 내부 네트워크에서만 접근하며 외부에 포트를 공개하지 않습니다.
     ai-engine은 자체 모델 추론(비전 특징, 불편 상태 판단)만 하고 DB·외부 AI API를 쓰지 않습니다. (AGENTS.md 4장)
+    지금 /v1/analyze는 점수를 계산하지 않고 이 명세의 예시 값을 돌려주는 자리 표시입니다(ai-engine/app/inference/placeholder.py).
 servers:
   - url: http://ai-engine:8001
     description: docker compose 내부 주소 (backend 환경변수 AI_ENGINE_URL)
@@ -31,6 +32,8 @@ paths:
         backend가 세션 ID를 붙여 frontend의 구간 특징을 전달합니다.
         backend는 타임아웃(기본 2초)을 두고, 실패하면 판단 없이 진행합니다.
         특징이 부족하면 measurable=false, states=null로 응답합니다.
+        지금의 자리 표시는 tap_count나 back_count가 1 이상이거나 vision.face_detected가 true이면 measurable=true와 예시 점수를,
+        그렇지 않으면 measurable=false와 states=null을 돌려줍니다.
       operationId: analyzeWindow
       requestBody:
         required: true
@@ -40,7 +43,7 @@ paths:
               $ref: "#/components/schemas/AnalyzeRequest"
             example:
               session_id: 3f2c9a0e7b1d4c5e8f6a2b1c0d9e8f7a
-              screen_id: menu_list
+              screen_id: menu
               window_start: "2026-10-01T10:00:00Z"
               window_end: "2026-10-01T10:00:03Z"
               touch: { tap_count: 6, miss_tap_count: 3, repeat_tap_count: 2, back_count: 0, dwell_ms: 3000 }
@@ -101,6 +104,9 @@ components:
 
     AnalyzeResponse:
       type: object
+      description: |
+        measurable=true이면 states가 있어야 하고, false이면 states는 null이거나 빠집니다. session_id는 요청과 같아야 합니다.
+        backend는 이 조건에 맞지 않는 응답을 호출 실패로 처리합니다.
       required: [session_id, measurable, model_version]
       properties:
         session_id: { type: string }
