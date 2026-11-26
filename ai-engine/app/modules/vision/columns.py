@@ -42,6 +42,28 @@ Columns (names = the ones events.py reads, then observation-only columns no rule
                         params.aid_person_min (the detector's person operating point), the only ones that count as a
                         person seen and that can be the main user's box (None without the value). No threshold of
                         'uses an aid' is applied here: that yes / no is the tag aid_use (situation.py).
+  aid_head_score, aid_head_class, aid_head_box   the walking-aid detector under the head_centre reading
+                        (params.aid_rule; aid_head_columns, 2026-11-26), for the kiosk-view detector files, where an
+                        aid user is one aid-class box around the user and the aid: for every class except pedestrian
+                        the highest score among that class's kept boxes (app/inference/aid.py Aids.class_boxes: the
+                        class's channel on every anchor, floor aid_score_min, NMS aid_nms_iou inside the class) that
+                        contain the centre of the main user's head box, and of those the highest, with the class and
+                        the box it came from (equal scores: the class first in the model's order). 0.0 with no class
+                        and no box when the head box is there and no kept box contains its centre; None (all three)
+                        when the frame has no main-user head box (the head detector off: on every row). Present only
+                        when the detector runs with this reading; the aid_columns are written then too. No threshold
+                        here: aid_use compares the window median with params.aid_head_min (situation.py).
+                        Under the head_centre_carry reading (AidCarry, 2026-11-26) the three columns are the same on
+                        every row with the main user's head box, and a frame without that box follows the aid-class
+                        box of the latest head row with the head tracker's association rule (params.track_iou_min,
+                        track_max_gap_s; 'Tracks' below): the kept box of any aid class with the highest IoU against
+                        it, when that IoU is at least track_iou_min, gives its score, class and box and becomes the box
+                        followed; no box matched for longer than track_max_gap_s ends the carry. A head row whose value
+                        is 0.0 clears the box, a head row with a value replaces it, and nothing is carried before a
+                        head row. The carry does not end with the head track (the user's head can be lost for long
+                        stretches while the aid box stays).
+  aid_head_from         under the head_centre_carry reading only: 'head' (the value of a row with the main user's head
+                        box, as head_centre), 'carried' (a value followed from the latest head row), None (no value).
   iod_ratio_user        the main user's inter-ocular distance (iod_px) over a reference of the same user's face rows
                         before this one (FaceSizeRef; tree table 3-가 2-1 '시작 대비 눈 사이 거리 비'). Anchor = the
                         start of the current main-user track (primary_track changes) and of the touch-log session.
@@ -185,13 +207,16 @@ HEAD_COLUMNS = ("people_behind_count", "companion_box", "head_count", "primary_b
                 "primary_from", "primary_track", "face_in_primary", "face_track") + DIR_COLUMNS + ("head_boxes",)
 AID_COLUMNS = ("aid_owner", "aid_top_class", "aid_any_score", "aid_wheelchair_score", "aid_kind", "aid_class_scores",
                "aid_box", "aid_count", "aid_person_count")
+AID_HEAD_COLUMNS = ("aid_head_score", "aid_head_class", "aid_head_box")   # the head_centre reading (aid_head_columns)
+AID_CARRY_COLUMNS = ("aid_head_from",)   # the head_centre_carry reading (AidCarry): where the row's value came from
+AID_FROM_HEAD, AID_FROM_CARRIED = "head", "carried"   # the values of aid_head_from
 CHANGE_COLUMNS = ("main_user_prev_track", "main_user_gap_s", "main_user_body_kept", "main_user_prev_h",
                   "main_user_new_h", "main_user_h_ratio", "main_user_new_was_role", "main_user_new_rel_dist",
                   "main_user_new_growth", "main_user_reacquired", "main_user_prev_settled", "main_user_new_start_s",
                   "main_user_start_shift", "main_user_start_size", "main_user_stitched", "main_user_body_gap_s")
 PHONE_COLUMNS = ("phone_owner", "phone_at", "phone_score", "phone_box", "phone_count")
-OPTIONAL_COLUMNS = HEAD_COLUMNS + CHANGE_COLUMNS + AID_COLUMNS + PHONE_COLUMNS + (
-    "shoulder_cx", "shoulder_cy", "mouth_motion", "iod_ratio_user", "head_ratio_user", "dpitch_user_deg")
+OPTIONAL_COLUMNS = HEAD_COLUMNS + CHANGE_COLUMNS + AID_COLUMNS + AID_HEAD_COLUMNS + AID_CARRY_COLUMNS + PHONE_COLUMNS \
+    + ("shoulder_cx", "shoulder_cy", "mouth_motion", "iod_ratio_user", "head_ratio_user", "dpitch_user_deg")
 # features.COLUMNS that the Face Landmarker's face gives (its position, size, angles and the face box's image
 # statistics): blanked where that face is not the main user's (face_in_primary False). face_state, the face detector's
 # columns (face_count, face_det_score, det_box_w_frac) and the run counters stay.
@@ -891,6 +916,81 @@ def aid_columns(aids, pose, primary_box, head_detector: bool = False, person_min
                else "standing",
                aid_box=tuple(float(v) for v in aids.boxes[k]))
     return out
+
+
+def aid_head_columns(aids, primary_box) -> dict:
+    """AID_HEAD_COLUMNS of one frame under the head_centre reading (module docstring). aids =
+    app.inference.aid.Aids with class_boxes (AidDetector(per_class=True)); primary_box = the main user's head box or
+    None. A class's value is the highest score of its kept boxes that contain the head-box centre (edges included),
+    the frame's the highest of the classes' values; a score must be above the best so far, so 0.0 stays when no box
+    contains the centre and the first class in the model's order wins a tie."""
+    if aids.class_boxes is None:
+        raise ValueError("the head_centre reading needs the per-class boxes (AidDetector(per_class=True))")
+    out = dict.fromkeys(AID_HEAD_COLUMNS)
+    if primary_box is None:
+        return out
+    head = tuple(float(v) for v in primary_box)
+    centre = [((head[0] + head[2]) / 2.0, (head[1] + head[3]) / 2.0)]
+    out["aid_head_score"] = 0.0
+    for name in aids.classes:
+        if name not in aids.class_boxes:
+            continue
+        boxes, scores = aids.class_boxes[name]
+        for box, score in zip(boxes, scores):
+            if float(score) > out["aid_head_score"] and _contains(box, centre):
+                out.update(aid_head_score=float(score), aid_head_class=name,
+                           aid_head_box=tuple(float(v) for v in box))
+    return out
+
+
+class AidCarry:
+    """AID_HEAD_COLUMNS + AID_CARRY_COLUMNS per frame under the head_centre_carry reading (module docstring,
+    aid_head_score ...). iou_min, max_gap_s = params.track_iou_min, track_max_gap_s: the values and the rule of
+    HeadTracker (the highest IoU first, at least iou_min; ended when nothing matched for more than max_gap_s), applied
+    to the main user's aid-class box. One instance per input (chain.FrameChain); reset() with the other per-user state
+    when the touch-log session changes."""
+
+    def __init__(self, iou_min: float, max_gap_s: float):
+        self.iou_min, self.max_gap_s = float(iou_min), float(max_gap_s)
+        self.reset()
+
+    def reset(self):
+        self.box = None            # the aid-class box followed: from the latest head row, or the latest match
+        self.last_t = None         # the time of that row
+
+    def update(self, t: float, aids, primary_box) -> dict:
+        """The columns of one frame. aids = app.inference.aid.Aids with class_boxes; primary_box = the main user's head
+        box or None. A row with the head box gives aid_head_columns' value; one without it the box followed, matched
+        among the kept boxes of every aid class (a tie on IoU: the class first in the model's order, then the higher
+        score, as aid_head_columns orders them)."""
+        out = aid_head_columns(aids, primary_box)
+        out["aid_head_from"] = None
+        if primary_box is not None:
+            out["aid_head_from"] = AID_FROM_HEAD
+            if out["aid_head_box"] is None:        # 0.0: no aid box holds the head centre
+                self.reset()
+            else:
+                self.box, self.last_t = out["aid_head_box"], float(t)
+            return out
+        if self.box is None:                       # no head row with an aid box yet: nothing to follow
+            return out
+        if float(t) - self.last_t > self.max_gap_s:
+            self.reset()                           # nothing matched for longer than a head track lives: ended
+            return out
+        best = None
+        for name in aids.classes:
+            if name not in aids.class_boxes:
+                continue
+            boxes, scores = aids.class_boxes[name]
+            for box, score in zip(boxes, scores):
+                iou = box_iou(box, self.box)
+                if iou >= self.iou_min and (best is None or iou > best[0]):
+                    best = (iou, name, tuple(float(v) for v in box), float(score))
+        if best is not None:
+            _, name, box, score = best
+            out.update(aid_head_score=score, aid_head_class=name, aid_head_box=box, aid_head_from=AID_FROM_CARRIED)
+            self.box, self.last_t = box, float(t)
+        return out
 
 
 NOSE = 0                                         # pose point 0 (nose) in the 33-point map [D3]

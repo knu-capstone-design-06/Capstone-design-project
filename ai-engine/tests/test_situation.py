@@ -818,6 +818,22 @@ class SceneCueTests(unittest.TestCase):
             kept = observe_scene(put([dict(r) for r in rows], 14, 14, **flags), (0.0, 1.9))
             self.assertEqual((kept.aid_anchor_rows, aid_use(kept, 0.5)[0]), (20, True), flags)
 
+    def test_after_a_change_of_user_the_head_centre_aid_score_reads_the_new_user_only(self):
+        """aid_head (the head_centre reading) follows the same cut as aid_score: the earlier user's wheelchair box does
+        not reach the new user's aid_use; reacquire / stitch / a first-approach swap keep it."""
+        from app.modules.vision.events import observe_scene
+        from app.modules.vision.situation import aid_use
+        rows = self.changed_rows({"aid_head_score": 0.8, "aid_head_class": "wheelchair"},
+                                 {"aid_head_score": 0.0, "aid_head_class": None})
+        sc = observe_scene(rows, (0.0, 1.9))
+        (score,) = sc.of("aid_head")
+        self.assertEqual(score["obs"], {"aid_head_median": 0.0, "rows": 6, "aid_class": None})
+        self.assertIs(aid_use(sc, None, aid_rule="head_centre", aid_head_min=0.5)[0], False)
+        for flags in self.KEPT:
+            kept = observe_scene(put([dict(r) for r in rows], 14, 14, **flags), (0.0, 1.9))
+            self.assertEqual(aid_use(kept, None, aid_rule="head_centre", aid_head_min=0.5)[:1], (True,), flags)
+            self.assertEqual(kept.of("aid_head")[0]["obs"]["aid_class"], "wheelchair", flags)
+
     def test_only_the_main_users_face_counts_when_the_head_detector_ran(self):
         """A face matched to no head box while the main user's track lives (face_in_primary None) may be someone
         else's: it gives no face height and no face size. True (also 'True' read back from rows.csv) counts."""
@@ -1010,6 +1026,82 @@ class SceneTagTests(unittest.TestCase):
         noanchor = rows_of(face(10), extra={**OPTIONAL, "aid_owner": "unknown", "aid_any_score": None})
         self.assertEqual(tag(noanchor, aid_use_min=0.5), (UNKNOWN, "no_anchor"))
         self.assertEqual(tag(rows_of(face(10)), aid_use_min=0.5), (UNKNOWN, "column:aid_owner"))   # detector off
+
+    def test_aid_use_under_the_head_centre_reading_reads_the_aid_class_box_at_the_users_head(self):
+        """aid_rule head_centre (the kiosk-view detector files): the same window logic on aid_head_score - the median of
+        the rows with the main user's head box above aid_head_min, too few rows unknown - and the evidence names the
+        class behind the median. No cut: unknown (no_value_for_model), whatever aid_use_min says; the column missing
+        (the detector off, or rows of the owner_box reading): column:aid_head_score; no head box on any row:
+        no_main_user_box; a head box with no aid box around its centre (0.0) is a value. The default reading reads
+        aid_any_score as before and ignores these columns and the cut."""
+        from app.modules.vision.situation import assess
+        head = {**OPTIONAL, "aid_owner": "no", "aid_any_score": 0.05, "aid_head_score": 0.7,
+                "aid_head_class": "wheelchair"}
+
+        def window(rows, **values):
+            out, _ = assess(rows, rows[-1]["t_s"], P, landmarker_num_faces=1, **values)   # check_output runs inside
+            return self.tags(out)["aid_use"], {e["obs"]: e["value"] for e in out["tags"][4]["evidence"]}
+
+        def tag(rows, **values):
+            return window(rows, **values)[0]
+        rows = rows_of(face(10), extra=head)
+        self.assertEqual(window(rows, aid_rule="head_centre", aid_head_min=0.5),
+                         ((True, None), {"aid_head_median": 0.7, "rows": 10, "aid_class": "wheelchair"}))
+        self.assertEqual(tag(rows, aid_rule="head_centre", aid_head_min=0.7), (False, None))   # equal is not above
+        self.assertEqual(tag(rows, aid_rule="head_centre"), (UNKNOWN, "no_value_for_model"))
+        self.assertEqual(tag(rows, aid_rule="head_centre", aid_use_min=0.5), (UNKNOWN, "no_value_for_model"))
+        self.assertEqual(window(rows, aid_use_min=0.5),                     # the default reading, as before
+                         ((False, None), {"aid_any_median": 0.05, "rows": 10, "owner_yes_rows": 0}))
+        self.assertEqual(tag(rows, aid_use_min=0.5, aid_head_min=0.5), (False, None))   # a cut alone switches nothing
+        zero = rows_of(face(10), extra={**head, "aid_head_score": 0.0, "aid_head_class": None})
+        self.assertEqual(window(zero, aid_rule="head_centre", aid_head_min=0.5),
+                         ((False, None), {"aid_head_median": 0.0, "rows": 10, "aid_class": None}))
+        nohead = rows_of(face(10), extra={**head, "aid_head_score": None, "aid_head_class": None})
+        self.assertEqual(tag(nohead, aid_rule="head_centre", aid_head_min=0.5), (UNKNOWN, "no_main_user_box"))
+        few = put(rows_of(face(10), extra={**head, "aid_head_score": None, "aid_head_class": None}), 0, 2,
+                  aid_head_score=0.7, aid_head_class="wheelchair")      # 3 rows of 10 carry the score
+        self.assertEqual(tag(few, aid_rule="head_centre", aid_head_min=0.5), (UNKNOWN, "too_few_rows"))
+        owner = rows_of(face(10), extra={**OPTIONAL, "aid_owner": "yes", "aid_any_score": 0.7})
+        self.assertEqual(tag(owner, aid_rule="head_centre", aid_head_min=0.5), (UNKNOWN, "column:aid_head_score"))
+        self.assertEqual(tag(rows_of(face(10)), aid_rule="head_centre", aid_head_min=0.5),
+                         (UNKNOWN, "column:aid_head_score"))
+        mixed = put(put(rows_of(face(11), extra=head), 0, 4, aid_head_score=0.2, aid_head_class="cane"), 5, 5,
+                    aid_head_score=0.6, aid_head_class="crutch")       # 0.2 x 5 (cane), 0.6 (crutch), 0.7 x 5
+        self.assertEqual(window(mixed, aid_rule="head_centre", aid_head_min=0.5)[1],
+                         {"aid_head_median": 0.6, "rows": 11, "aid_class": "crutch"})
+        even = put(rows_of(face(10), extra=head), 0, 4, aid_head_score=0.2, aid_head_class="cane")
+        status, evidence = window(even, aid_rule="head_centre", aid_head_min=0.5)
+        self.assertEqual((status, evidence["aid_class"]), ((False, None), "wheelchair"))   # the upper middle row
+        self.assertAlmostEqual(evidence["aid_head_median"], 0.45)
+        with self.assertRaises(ValueError):
+            tag(rows, aid_rule="largest")
+
+    def test_aid_use_under_the_carry_reading_judges_the_aid_head_rows_as_head_centre_does(self):
+        """aid_rule head_centre_carry differs from head_centre only in the rows' values (the chain carries the aid box
+        through rows without the head box, aid_head_from 'carried'): on the same rows the tag, its reason and its
+        evidence are the same, carried rows count as values, and the cut and the column checks are the same."""
+        from app.modules.vision.situation import assess
+        head = {**OPTIONAL, "aid_owner": "no", "aid_any_score": 0.05, "aid_head_score": 0.7,
+                "aid_head_class": "wheelchair", "aid_head_from": "carried"}
+
+        def window(rows, **values):
+            out, _ = assess(rows, rows[-1]["t_s"], P, landmarker_num_faces=1, **values)
+            return self.tags(out)["aid_use"], {e["obs"]: e["value"] for e in out["tags"][4]["evidence"]}
+        put_head = put(rows_of(face(10), extra=head), 0, 2, aid_head_from="head")   # 3 head rows, 7 carried
+        few = put(rows_of(face(10), extra={**head, "aid_head_score": None, "aid_head_class": None,
+                                          "aid_head_from": None}), 0, 2, aid_head_score=0.7,
+                  aid_head_class="wheelchair", aid_head_from="head")
+        nohead = rows_of(face(10), extra={**head, "aid_head_score": None, "aid_head_class": None,
+                                          "aid_head_from": None})
+        for rows in (put_head, few, nohead, rows_of(face(10))):
+            for cut in (None, 0.5, 0.7):
+                self.assertEqual(window(rows, aid_rule="head_centre_carry", aid_head_min=cut),
+                                 window(rows, aid_rule="head_centre", aid_head_min=cut), cut)
+        self.assertEqual(window(put_head, aid_rule="head_centre_carry", aid_head_min=0.5),
+                         ((True, None), {"aid_head_median": 0.7, "rows": 10, "aid_class": "wheelchair"}))
+        self.assertEqual(window(few, aid_rule="head_centre_carry", aid_head_min=0.5)[0], (UNKNOWN, "too_few_rows"))
+        self.assertEqual(window(nohead, aid_rule="head_centre_carry", aid_head_min=0.5)[0],
+                         (UNKNOWN, "no_main_user_box"))
 
     def test_a_stitched_track_break_is_no_change(self):
         rows = rows_of(face(5), face(5), extra={**OPTIONAL, "primary_track": 1, "head_count": 1})

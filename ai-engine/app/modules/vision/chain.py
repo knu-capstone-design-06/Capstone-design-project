@@ -3,7 +3,8 @@
 Per frame (FrameChain.process): features.Observer row (MediaPipe face / face detector / pose, plus blendshapes when
 on) -> H1 head boxes (app/inference/head.py) -> head tracks, the main user as a track, companion and people behind
 from the tracks' cues, and the main user's P1 direction (columns.py HeadPeople; its state lives as long as the
-FrameChain and starts again when the touch log's sessionId changes, as does the Observer's session-start reference
+FrameChain and starts again when the touch log's sessionId changes - with the live runner's touch entry also when
+its first session arrives, since the runner was tracking before any order session - as does the Observer's session-start reference
 of iod_ratio_start / dyaw_start_deg / dpitch_start_deg) -> the face values blanked where the tracked face
 is someone else's (columns.FACE_VALUE_COLUMNS, face_in_primary False) -> shoulders, mouth_motion -> the main user's
 face size against the running reference (iod_ratio_user, columns.FaceSizeRef; it starts again with a new main-user
@@ -28,7 +29,7 @@ import time
 
 from . import columns as C
 from .contract_view import to_contract
-from .events import SEEN, new_user_rows, observe_window
+from .events import HEAD_CENTRE, HEAD_CENTRE_CARRY, SEEN, new_user_rows, observe_window
 from .judgment import rule_table_v0 as R
 from .judgment.jev_stub import ShadowJev
 from .situation import RULES, TAGS, UNKNOWN, assess
@@ -84,6 +85,7 @@ class FrameChain:
         self.change = C.MainUserChange(params.track_iou_min, params.track_max_gap_s,        # the change columns
                                        params.role_window_s, params.segment_s,
                                        params.stitch_shift_max, params.stitch_size_max)
+        self.aid_carry = C.AidCarry(params.track_iou_min, params.track_max_gap_s)   # aid_rule head_centre_carry
         self.session = None                     # the touch log's sessionId at the previous row
         self.prev_t = None
 
@@ -92,13 +94,18 @@ class FrameChain:
         t = round(frame.t_s, 4)                 # = the row's t_s (features.Observer)
         if self.timeline is not None:           # tree section 4 ①: a new session is judged from the start
             session = self.timeline.session_at(t)
-            if session is not None and self.session is not None and session != self.session:
+            # A change of session resets the per-session state. The first known session resets it too when the
+            # timeline says the frames before it belong to no session (FIRST_SESSION_RESETS: the live runner's touch
+            # entry, touch_entry.LiveTouch); a replay's touch log starts with its first session, so nothing changes.
+            first = self.session is None and getattr(self.timeline, "FIRST_SESSION_RESETS", False)
+            if session is not None and session != self.session and (self.session is not None or first):
                 self.observer.reset_reference()  # the start-relative columns (iod_ratio_start, d*_start_deg)
                 self.people.reset()
                 self.size_ref.reset()
                 self.head_ref.reset()
                 self.pitch_ref.reset()
                 self.change.reset()
+                self.aid_carry.reset()
             if session is not None:
                 self.session = session
         row, _ = self.observer.process(frame, source_kind=self.source_kind)
@@ -134,6 +141,10 @@ class FrameChain:
             aids = self.aids(frame.image)
             row.update(C.aid_columns(aids, inf.pose if inf is not None else None, row.get("primary_box"),
                                      self.heads is not None, self.p.aid_person_min))
+            if self.p.aid_rule == HEAD_CENTRE:  # the kiosk-view detector files: the aid-class box at the user's head
+                row.update(C.aid_head_columns(aids, row.get("primary_box")))
+            elif self.p.aid_rule == HEAD_CENTRE_CARRY:   # the same, followed through the rows without the head box
+                row.update(self.aid_carry.update(t, aids, row.get("primary_box")))
             row["ms_aids"] = sum(aids.ms.values())
         if self.phones is not None:             # the main user's phone: the head box and the pose's hands
             if self.phone_k % self.p.phone_every == 0:
@@ -397,7 +408,7 @@ class WindowJudge:
                                  approach_ratio_min=p.approach_ratio_min, aid_use_min=p.aid_use_min,
                                  seated_head_cy_min=p.seated_head_cy_min, head_down_pitch_min=p.head_down_pitch_min,
                                  head_approach_ratio_min=p.head_approach_ratio_min, segment_s=p.segment_s,
-                                 away=away)
+                                 away=away, aid_rule=p.aid_rule, aid_head_min=p.aid_head_min)
             reasons = unknown_reasons(rows, t_end, sp) if out["name"] == UNKNOWN else []
             turns = [{"event_id": e["event_id"], "kind": e["kind"], "t_start": e["t_start"], "t_end": e["t_end"],
                       "obs": e["obs"]} for e in events if e["kind"] in TURN_KINDS]

@@ -30,6 +30,8 @@ class Frame:
     image: np.ndarray   # BGR uint8 (OpenCV channel order)
     src_ref: str        # source frame number (video) or file name (image folder)
     read_ms: float      # time spent reading / decoding / resizing this frame (offline only)
+    epoch_s: float | None = None   # wall-clock time of the capture (time.time(), s since 1970 UTC); camera only:
+                                   # the local touch entry places the order screen's window times with it
 
 
 def resize_keep_aspect(img: np.ndarray, width: int | None) -> np.ndarray:
@@ -214,7 +216,8 @@ class LiveCameraSource:
     fps     = frame rate written into output videos; None = the rate the driver reports (CAP_PROP_FPS).
     seconds = stop after this many seconds; None = until the camera stops delivering frames.
 
-    Frame time comes from a monotonic clock (MediaPipe VIDEO mode needs increasing timestamps). read_ms is
+    Frame time comes from a monotonic clock (MediaPipe VIDEO mode needs increasing timestamps); the wall-clock time
+    read right after it goes into Frame.epoch_s (the order screen's window times are on that clock). read_ms is
     the wait for the next frame from the driver, not a decode cost. Frames are handed on in order; when the
     processing is slower than the camera, the driver's queue decides which frames are lost (not handled here;
     LIVE_STREAM mode is the asynchronous alternative, doc 28 section 6)."""
@@ -255,12 +258,13 @@ class LiveCameraSource:
                     self.end_reason = "camera stopped delivering frames"
                     break
                 now = time.monotonic()
+                wall = time.time()
                 if t0 is None:
                     t0 = now
                 if self.seconds is not None and now - t0 > self.seconds:
                     self.end_reason = "--seconds reached"
                     break
-                yield Frame(i, now - t0, img, str(i), (time.perf_counter() - t_wait) * 1000.0)
+                yield Frame(i, now - t0, img, str(i), (time.perf_counter() - t_wait) * 1000.0, wall)
                 i += 1
         finally:
             self.cap.release()

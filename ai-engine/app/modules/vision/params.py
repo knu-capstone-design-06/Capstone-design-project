@@ -18,6 +18,12 @@ Two kinds live here:
   bundle; without one a broken main-user track is never stitched (the behaviour before 2026-11-22). The hand-point
   limit of the phone columns (HAND_BOUNDARIES, columns.phone_columns) has no value either: without one no hand box
   is built and the phone path's hand half is held (a phone away from the heads is 'unknown'); the head half runs.
+  The walking-aid detector has three readings (aid_rule, AID_RULES; 2026-11-26): the default owner_box keeps the rule
+  of 2026-11-22 with its values aid_use_min and aid_person_min; head_centre is the reading of the kiosk-view detector
+  files, and its aid_use cut (AID_HEAD_BOUNDARIES, aid_head_min) has no value: without one aid_use under that
+  reading is 'unknown' (no_value_for_model). head_centre_carry is head_centre with the user's aid box followed through
+  the rows without the head box (columns.AidCarry); it reads aid_head_min too and adds no value of its own: it
+  follows the box with the head tracker's track_iou_min and track_max_gap_s.
 - events.PilotParams (re-exported here as SituationParams): the 13 values of the events and situation rules. They keep
   NO defaults on purpose (vision README '상황 층'; tests/test_situation.py checks it), so they only come from a value
   bundle file (load_bundle). Without one the runners still run and the situation output is 'unknown'.
@@ -30,7 +36,8 @@ Value bundle file (JSON; one per replay run, fixed before the run - D13 3 and 19
 Every value in the file carries its own non-empty source: the bundle is the one place where values are fixed before a
 recording, and every constant names where it comes from. A bare value or an empty source is an error (ValueError naming
 the field). Bundle.to_dict() records each value with its source and origin: 'bundle' (the file's source text),
-'default' (a chain default with the source written below) or 'code' (set in code without a source, e.g. in tests).
+'default' (a chain default with the source written below), 'option' (a runner option, with_options: replay.py / live.py
+--aid-rule, --aid-head-min; the source names the option) or 'code' (set in code without a source, e.g. in tests).
 
 Plain Python (dataclasses, json): no numpy, OpenCV or ONNX Runtime.
 """
@@ -39,8 +46,9 @@ from __future__ import annotations
 import json
 import math
 import numbers
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field, fields, replace
 
+from .events import AID_RULES, OWNER_BOX
 from .events import PilotParams as SituationParams
 
 PILOT = "[파일럿]"
@@ -60,6 +68,7 @@ ROLE_BOUNDARIES = ("companion_rel_dist_max", "companion_lateral_min", "behind_re
 SCENE_BOUNDARIES = ("seated_face_cy_min", "approach_ratio_min", "seated_head_cy_min", "head_down_pitch_min",
                     "head_approach_ratio_min")   # None = no value yet (situation.py scene tags)
 AID_BOUNDARIES = ("aid_use_min", "aid_person_min")   # None allowed (no value); defaults: [파일럿] values from a public set
+AID_HEAD_BOUNDARIES = ("aid_head_min",)   # None = no value yet (situation.aid_use under aid_rule head_centre: unknown)
 STITCH_BOUNDARIES = ("stitch_shift_max", "stitch_size_max")   # None = no value yet (columns.MainUserChange: no stitch)
 HAND_BOUNDARIES = ("hand_vis_min",)   # None = no value yet (columns.phone_columns: no hand box, the hand path held)
 SCENE_METHOD = ("정하는 방법 = 그 카메라 앞에서 서서 보통으로 쓰는 녹화(평가 촬영본과 따로 찍은 것)의 창 중앙값(창 길이 = "
@@ -166,10 +175,12 @@ class PilotParams:
     # --- walking-aid detector (app/inference/aid.py; optional input, off unless its ONNX file is given) ----------
     aid_score_min: float = _p(
         0.01, "관행값: 보조기구 탐지기 평가 설정의 점수 하한(YOLOX 평가 conf 0.01, ONNX 메타데이터 postprocess). 상자와 "
-              "클래스 점수를 기록하려는 하한이고, 쓴다 · 안 쓴다를 가르는 값이 아님", "score 0~1")
+              "클래스 점수를 기록하려는 하한이고, 쓴다 · 안 쓴다를 가르는 값이 아님. aid_rule head_centre에서는 클래스마다 "
+              "그 클래스 점수에 같은 하한을 씀", "score 0~1")
     aid_nms_iou: float = _p(
         0.65, "관행값: YOLOX 6ddff48 yolox/exp/yolox_base.py nmsthre 기본값(보조기구 탐지기 평가와 같은 IoU). 사람 하나에 "
-              "상자 하나를 남기려고 클래스를 가리지 않고 적용", "IoU 0~1")
+              "상자 하나를 남기려고 클래스를 가리지 않고 적용. aid_rule head_centre에서는 클래스마다 그 클래스 안에서 적용"
+              "(ONNX 메타데이터 postprocess의 평가 설정 'class-aware 0.65'와 같은 방식)", "IoU 0~1")
     aid_use_min: float | None = _p(
         0.350, f"{PILOT} 시작값, 공개 자료에서 잰 값: 보조기구 사용(aid_use) = 창 안 주 사용자 사람 상자의 보조기구 "
                "점수(aid_any_score: 목발 · 지팡이 · 보행기 · 휠체어의 objectness x 클래스 점수 가운데 가장 큰 값, "
@@ -185,6 +196,23 @@ class PilotParams:
                "Users v1.0 검증 분할의 '사람 아무나' 과제에서 F1이 가장 큰 점수 기준 0.38998(F1 0.813, 정밀도 0.841, "
                "재현율 0.786; 모델 aid_det joint_416, 입력 416). PMMA 검증 분할은 0.479, 키오스크 시점 값이 아님",
         "score 0~1")
+    aid_rule: str = _p(
+        OWNER_BOX, "규칙 스위치: 보조기구 탐지기 출력을 읽는 방법(탐지기 파일의 라벨 방식에 맞춤). owner_box(기본값, "
+                   "2026-11-22부터의 규칙) = 주 사용자의 사람 상자(주 사용자 머리 상자 가운데를 품고 aid_person_min을 넘는 "
+                   "사람 상자 가운데 위 끝이 머리 상자 위 끝에 가장 가까운 것)의 보조기구 점수 aid_any_score를 aid_use_min과 "
+                   "견줌: 사람마다 사람 상자가 있고 클래스가 그 사람의 이동 방법인 파일(aid_det joint_416). head_centre = "
+                   "pedestrian을 뺀 클래스마다 모든 anchor의 그 클래스 점수(objectness x 클래스 점수)를 aid_score_min으로 "
+                   "거르고 그 클래스 안에서 aid_nms_iou로 NMS를 한 뒤 주 사용자 머리 상자 가운데를 품은 상자의 가장 큰 점수를 "
+                   "내고, 클래스들 가운데 가장 큰 값(aid_head_score)을 aid_head_min과 견줌: 보조기구 사용자를 사용자와 보조기구를 "
+                   "함께 두른 보조기구 클래스 상자 하나로 표시하고 그 사람에게는 pedestrian 상자가 없는 파일(키오스크 시점 "
+                   "탐지기 파일; 그 파일들의 재생 도구와 같은 읽기). head_centre_carry = 머리 상자가 있는 프레임은 "
+                   "head_centre와 같고, 그 값을 낸 보조기구 상자를 머리 상자가 없는 프레임에서 머리 트랙과 같은 규칙"
+                   "(IoU가 가장 큰 상자, track_iou_min 이상; track_max_gap_s보다 오래 맞는 상자가 없으면 끝)으로 따라가 "
+                   "그 상자의 점수를 냄(columns.AidCarry). 새 값 없이 track_iou_min · track_max_gap_s를 그대로 씀")
+    aid_head_min: float | None = _p(
+        None, f"{UNDECIDED}. 탐지기 파일마다 다름: aid_rule이 head_centre · head_centre_carry일 때 보조기구 사용"
+              "(aid_use) = 창 안 aid_head_score 중앙값이 이 값 초과(트리 표 3-가 1-1). 키오스크 시점 탐지기 파일의 값은 "
+              "아직 정하지 않음. 값이 없으면 두 읽기의 aid_use는 모름(no_value_for_model)", "score 0~1")
 
     # --- phone detector (app/inference/phone.py; optional input, off unless its ONNX file is given) -------------
     phone_score_min: float = _p(
@@ -242,12 +270,16 @@ class PilotParams:
             if f.name == "primary_rule":
                 if value not in PRIMARY_RULES:
                     raise ValueError(f"PilotParams.primary_rule must be one of {PRIMARY_RULES}, got {value!r}")
-            elif f.name in ROLE_BOUNDARIES + SCENE_BOUNDARIES + AID_BOUNDARIES + STITCH_BOUNDARIES + HAND_BOUNDARIES:
+            elif f.name == "aid_rule":
+                if value not in AID_RULES:
+                    raise ValueError(f"PilotParams.aid_rule must be one of {AID_RULES}, got {value!r}")
+            elif f.name in (ROLE_BOUNDARIES + SCENE_BOUNDARIES + AID_BOUNDARIES + AID_HEAD_BOUNDARIES
+                            + STITCH_BOUNDARIES + HAND_BOUNDARIES):
                 if value is not None and (isinstance(value, bool) or not isinstance(value, numbers.Real)
                                           or not math.isfinite(value) or value <= 0):
                     raise ValueError(f"PilotParams.{f.name} must be None (no value yet) or a finite number > 0, "
                                      f"got {value!r}")
-                if f.name in AID_BOUNDARIES + HAND_BOUNDARIES and value is not None and value > 1:
+                if f.name in AID_BOUNDARIES + AID_HEAD_BOUNDARIES + HAND_BOUNDARIES and value is not None and value > 1:
                     raise ValueError(f"PilotParams.{f.name} is a score and must be at most 1, got {value!r}")
                 if f.name in ("approach_ratio_min", "head_approach_ratio_min") and value is not None and value <= 1:
                     raise ValueError(f"PilotParams.{f.name} is a size ratio to the user's own reference (1 = "
@@ -308,6 +340,7 @@ def _is_pilot(source: str | None) -> bool:
 
 
 SOURCED_FORM = '{"value": <value>, "source": "<where the value comes from>"}'
+OPTION_SOURCE = "실행 옵션 --{}"   # the recorded source of a chain value a runner option set (Bundle.options)
 
 
 def _split(section: str, entries: dict, names: list) -> tuple:
@@ -337,17 +370,20 @@ def _split(section: str, entries: dict, names: list) -> tuple:
 class Bundle:
     """One value bundle: the chain values and, when the file has them, the 13 situation values. sources = {field:
     source text given in the bundle file} (empty for a Bundle built in code); the chain and situation fields share no
-    name, so one dict holds both."""
+    name, so one dict holds both. options = the chain fields a runner option set (with_options)."""
     chain: PilotParams
     situation: SituationParams | None
     bundle_id: str = ""
     note: str = ""
     path: str = ""
     sources: dict = field(default_factory=dict)
+    options: tuple = ()
 
     def _chain_entry(self, f) -> tuple:
-        """(source, origin) of one chain field: the file's text, else the default's source when the value is the
-        default, else None (set in code without a source)."""
+        """(source, origin) of one chain field: the option that set it, else the file's text, else the default's
+        source when the value is the default, else None (set in code without a source)."""
+        if f.name in self.options:
+            return OPTION_SOURCE.format(f.name.replace("_", "-")), "option"
         if f.name in self.sources:
             return self.sources[f.name], "bundle"
         if getattr(self.chain, f.name) == f.default:
@@ -360,8 +396,8 @@ class Bundle:
 
     def to_dict(self) -> dict:
         """The bundle as the runners record it: chain {field: {"value", "unit", "source", "origin"}} with origin
-        'bundle' | 'default' | 'code', situation {field: {"value", "source", "origin"}} with origin 'bundle' | 'code'
-        (source None when the Bundle was built in code), or None without situation values."""
+        'bundle' | 'default' | 'option' | 'code', situation {field: {"value", "source", "origin"}} with origin
+        'bundle' | 'code' (source None when the Bundle was built in code), or None without situation values."""
         chain = {}
         for f in fields(self.chain):
             value = getattr(self.chain, f.name)
@@ -407,3 +443,17 @@ def load_bundle(path: str | None) -> Bundle:
         sources = {**sources, **situation_sources}
     return Bundle(PilotParams.from_dict(chain_values), situation, str(data.get("bundle_id", "")),
                   str(data.get("note", "")), path, sources)
+
+
+def with_options(bundle: Bundle, values: dict) -> Bundle:
+    """The bundle with chain values given as runner options ({field: value}; replay.py / live.py --aid-rule,
+    --aid-head-min): each replaces the file's or the default value (PilotParams checks it; an unknown name is a
+    ValueError) and is recorded with origin 'option' and the option as its source (Bundle.to_dict). No values: the
+    bundle itself."""
+    if not values:
+        return bundle
+    unknown = sorted(set(values) - {f.name for f in fields(PilotParams)})
+    if unknown:
+        raise ValueError(f"unknown chain parameter(s) {unknown}")
+    return replace(bundle, chain=replace(bundle.chain, **values),
+                   options=tuple(sorted(set(bundle.options) | set(values))))

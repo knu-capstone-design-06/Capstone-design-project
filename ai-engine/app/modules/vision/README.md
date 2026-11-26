@@ -1,8 +1,8 @@
 # 비전 관측 뼈대 (`app/modules/vision/`)
 
-카메라나 영상 파일의 프레임마다 MediaPipe 3종(얼굴 점 Face Landmarker · 얼굴 검출 Face Detector short-range · 몸 점 Pose Landmarker lite)을 돌려 관측값과 단계별 처리 시간을 CSV로 남기고, 점 · 선을 그린 영상과 그래프를 만드는 뼈대입니다. **2026-10-22부터 녹화 재생 · 웹캠 실시간 실행기(`replay.py` · `live.py`)가 머리 탐지기 · 카메라 시점 분류기 · 선택 열 · 터치 로그 · 상황 태그 규칙 3개 · 판단 층 규칙표 v0(장면 3-1 · 3-2 · 4-1 · 4-2, Jev는 질문만 기록)를 창마다 끝까지 잇습니다**(아래 '실행 파이프라인'). 엔드포인트(`app.main`)에는 등록하지 않았고, 주문 화면 · backend와 잇는 연결은 아직 구현하지 않았습니다(아래 '연결과 이어지는 일'). 상황 규칙의 기준값 13개는 기본값 없이 값 묶음 파일로 넣고, 실행 파이프라인이 새로 쓰는 값은 출처와 함께 `params.py`에 있습니다(출처가 없는 값은 `[파일럿]`).
+카메라나 영상 파일의 프레임마다 MediaPipe 3종(얼굴 점 Face Landmarker · 얼굴 검출 Face Detector short-range · 몸 점 Pose Landmarker lite)을 돌려 관측값과 단계별 처리 시간을 CSV로 남기고, 점 · 선을 그린 영상과 그래프를 만드는 뼈대입니다. **2026-10-22부터 녹화 재생 · 웹캠 실시간 실행기(`replay.py` · `live.py`)가 머리 탐지기 · 카메라 시점 분류기 · 선택 열 · 터치 로그 · 상황 태그 규칙 3개 · 판단 층 규칙표 v0(장면 3-1 · 3-2 · 4-1 · 4-2, Jev는 질문만 기록)를 창마다 끝까지 잇습니다**(아래 '실행 파이프라인'). 엔드포인트(`app.main`)에는 등록하지 않았습니다. 실시간 실행기에는 주문 화면의 터치 창을 받는 입구(`--serve`)와 창마다 상황 태그를 backend로 보내는 쪽(`--backend-url`)이 있습니다. 그 상대편인 주문 화면의 터치 창 보내기(`VITE_AI_ENGINE_URL`)와 backend의 창 받는 곳 · 시연 스위치(`DECISION_SEND_SUPPORT`)도 저장소에 있습니다(아래 '주문 화면 · backend와 잇는 두 연결'). 상황 규칙의 기준값 13개는 기본값 없이 값 묶음 파일로 넣고, 실행 파이프라인이 새로 쓰는 값은 출처와 함께 `params.py`에 있습니다(출처가 없는 값은 `[파일럿]`).
 
-**어디서 돌리나** — 설계안(2026-10-15): 카메라가 연결된 키오스크 PC에서 로컬 프로세스로 돌립니다(영상이 기기 밖으로 나가지 않음). FastAPI · 서버 의존성이 없는 일반 Python 코드라 ai-engine 컨테이너 안에서도 돌 수 있습니다. GPU 서버는 학습 · 평가에만 쓰고 내보낸 모델(ONNX)은 키오스크 PC의 CPU에서 돌립니다. 목표 구조(팀 논문 그림 1)에서는 주문 화면이 터치 통계를 같은 PC의 이 프로세스에 보내고(한 방향), 이 프로세스가 창마다 상황 태그를 backend로 직접 보냅니다. 두 연결은 아직 구현하지 않았고 팀 통합에서 구현합니다.
+**어디서 돌리나** — 설계안(2026-10-15): 카메라가 연결된 키오스크 PC에서 로컬 프로세스로 돌립니다(영상이 기기 밖으로 나가지 않음). FastAPI · 서버 의존성이 없는 일반 Python 코드라 ai-engine 컨테이너 안에서도 돌 수 있습니다. GPU 서버는 학습 · 평가에만 쓰고 내보낸 모델(ONNX)은 키오스크 PC의 CPU에서 돌립니다. 데이터 경로는 팀 논문 그림 1을 따릅니다. 주문 화면이 터치 통계를 같은 PC의 이 프로세스에 보내고(한 방향), 이 프로세스가 창마다 상황 태그를 backend로 직접 보냅니다. 주문 화면으로는 비전 값이 가지 않습니다. 세 쪽 끝이 모두 있습니다. 주문 화면의 터치 창 보내기, 이 프로세스의 터치 입구와 상황 태그 보내기, backend의 창 받는 곳입니다(아래 '주문 화면 · backend와 잇는 두 연결').
 
 **코드 주석의 출처 약칭** — `doc 27` · `doc 28` · `research/NN`은 비전 담당(wdragon92)의 설계 노트(doc 27 = 케이스별 전후 표 `27_before_after_table.md`, doc 28 = MediaPipe 한계·도달 범위 조사 `28_mediapipe_limits_and_reach.md`)로 저장소 밖(`01_requirements/research/`)에 있습니다. `[D1]`~`[D3]`은 `app/inference/vision.py` 머리말의 MediaPipe 공식 문서 주소이고, `[C5]` · `[D17]`은 doc 28 출처 목록의 번호입니다. `JP`는 판단 층과 Jev 파이프라인 설계 v2.2(`3_design/jev_pipeline_2026-10-13.md`), `tree`는 시나리오 트리 v1.7(`3_design/scenario_tree_v1_2026-10-13.md`)로, 역시 저장소 밖 설계 노트입니다. 노트 내용이 필요하면 비전 담당에게 요청해 주세요. 실험 기록(각 실행의 데이터 · 설정 · 결과 · 서버 위치)과 라이선스 대장은 비전 담당의 작업 노트(저장소 밖)에 있습니다. 숫자가 필요하면 비전 담당에게 요청해 주세요.
 
@@ -21,7 +21,9 @@
 | 사건 | `events.py` | 관측값 줄을 사건으로 묶음(8종, 아래 '상황 층'). 고개를 한 번 돌린 것은 사건 하나. 창 길이 · 횟수 · 각도 · 품질 하한은 모두 `PilotParams`(기본값 없음, `[파일럿]`) |
 | 상황 | `situation.py` | 상황 태그 규칙 3개와 장면 태그 6개(아래 '장면 태그 6개') 구현, 값은 `[파일럿]`. 창마다 한 줄(근거 사건 · 품질 · 확신 정보 · 대안)을 내고 검사 규칙으로 확인함. 재생 · 실시간 실행기가 창마다 부름(`run.py` · 엔드포인트는 부르지 않음) |
 | 판단 | `judgment/rule_table_v0.py` · `judgment/jev_stub.py` | 장면 3-1 · 3-2 · 4-1 · 4-2의 규칙표 v0: 창마다 지원 하나 · 출력 형태 · 전이를 냄. Jev 질문은 만들어 기록만 함(그림자 모드, 아래 '기존 재생용 규칙표 v0') |
-| 전달 | `contract_view.py` | 창 결과의 `support`는 `SupportDecision` 형식을 유지하고, 관측 가능 여부·모델 버전·돌아간 탐지기·상황·결정 정보는 `extension`에 담음. 불편 상태 점수가 없어 `AnalyzeResponse`는 만들지 않음. 이 PR에서는 재생 파일 · 콘솔에 기록함. 상황 태그를 backend로 보내는 연결은 구현 전(팀 통합) |
+| 전달 | `contract_view.py` | 창 결과의 `support`는 `SupportDecision` 형식을 유지하고, 관측 가능 여부·모델 버전·돌아간 탐지기·상황·결정 정보는 `extension`에 담음. 판단 층이 읽는 키의 상황(`decision_situation`)과 관측 블록(`observations`)도 함께 냄. 불편 상태 점수가 없어 `AnalyzeResponse`는 만들지 않음. 재생 파일 · 콘솔에 기록하고, 실시간 실행기는 이 가운데 상황 · 관측 블록을 backend로 보냄(`tag_sender.py`) |
+| 전달 | `touch_entry.py` | 실시간 실행기의 터치 입구(`live.py --serve`): 주문 화면이 보낸 터치 창을 카메라 시간축에 놓고 실행기의 창 판단에 넣음. 답은 받음 · 거절 이유뿐이고 비전 값은 돌려주지 않음. 127.0.0.1에서만 받음(아래 '주문 화면 · backend와 잇는 두 연결') |
+| 전달 | `tag_sender.py` | 실시간 실행기가 판단한 창마다 세션 · 창 시각 · 판단 층 키의 상황 · 관측 블록 · 버전 표시를 backend의 `POST /api/v1/sessions/{session_id}/vision-windows`로 보냄(`live.py --backend-url`). 카메라 처리는 보내기를 기다리지 않음 |
 | 출력 | `render.py` · `run.py` | 점 · 선을 그린 화면 · 모아 보기 · 그래프 · 처리 시간 통계 / 파일 · 카메라 실행, 결과 폴더 저장, `--show` 창, `--replot` |
 | 출력 | `chain.py` · `replay.py` · `live.py` | 프레임에서 창까지 잇는 공용 파이프라인, 녹화 재생(창마다 JSONL 한 줄), 웹캠 실시간(창마다 콘솔 한 줄, `--no-window`) |
 
@@ -30,6 +32,7 @@
 | `models/` | MediaPipe 모델 내려받기 스크립트, ONNX 모델 2개의 해시 · 만드는 법, 출처 · 라이선스(가중치는 Git에 없음) |
 | `params.py` | 실행 파이프라인의 값과 출처(`PilotParams`, 기본값 있음), 값 묶음 파일 읽기(상황 규칙 13개는 기본값 없음) |
 | `tools/export_onnx.py` | H1 · P1 체크포인트를 ONNX로 바꿈. torch · YOLOX가 든 별도 환경에서 돌림(`models/README.md`) |
+| `tools/integration_smoke.py` | 카메라 없이 두 연결을 시험함: 가짜 카메라(검은 프레임)로 실시간 실행기를 돌리고, 주문 화면 대신 2초마다 터치 창을 보내며, 시험 backend가 받은 창을 한 줄씩 찍음. 그림은 저장하지 않음(아래 '주문 화면 · backend와 잇는 두 연결') |
 | `tools/companion_eval.py` | 사람 라벨이 있는 녹화로 동행자 · 뒤 사람 단서와 주 사용자 트랙을 평가함: 재생, 단서 분포, 경계 후보별 라벨 일치율, 확인 시트. 평가 전용이라 값을 정하지 않음(아래 '머리 트랙과 역할') |
 | `requirements.txt` | 이 모듈만 쓰는 패키지(mediapipe 0.10.33 · onnxruntime 1.30.0 고정). 서버 `requirements.txt` · Dockerfile은 그대로 |
 
@@ -40,8 +43,8 @@
 | 뼈대 | 병합됨(PR #32 관측·측정, PR #35 상황 층) |
 | 장면 구분 | 핵심 장면 8개 모두 구분 신호가 있습니다: 1-1 `aid_use`(보조기구 사용 중), 1-2 `seated_height`(앉은 높이), 2-1 `face_approach`(얼굴 접근), 2-2 `user_changed`(사용자 교체 가능성)는 장면 태그로, 3-1 · 3-2는 상황 태그로(3-2는 휴대폰 탐지기를 켜면 장면 태그 `phone_use`의 휴대폰 길도), 4-1 · 4-2는 터치 규칙(4-2는 두리번 태그를 함께 씀)으로 냅니다. 자리 비움은 `none_seen`. 장면 태그는 카메라별 경계값과 모델 파일을 주어야 판정합니다(아래 '장면 태그 6개') |
 | 상황 규칙 | 상황 태그 3개의 규칙 · 사건 8종 · 출력 형식을 구현했습니다(PR #35, 2026-10-12 병합; 아래 '상황 층'). 태그 이름과 표시 문구는 아래 '상황 태그 3개 요약' 표와 같습니다. 기준값 13개는 모두 `[파일럿]`이고 기본값 없이 값 묶음 파일로 넣습니다. 값 묶음이 없으면 `unknown`(이유 `no_value_bundle`)을 냅니다 |
-| 실행 파이프라인 | 재생 · 실시간 실행기, 선택 열, 터치 로그 정렬, 판단 층 규칙표 v0, `SupportDecision` 형식과 `extension` 출력(2026-10-22, 아래 '실행 파이프라인'). 주문 화면 · backend와 잇는 연결은 아직 구현하지 않았고 팀 통합에서 구현합니다(아래 '연결과 이어지는 일') |
-| 연결 | 목표 구조(팀 논문 그림 1)에서는 주문 화면이 터치 통계를 같은 PC의 이 프로세스에 보내고(한 방향), 이 프로세스가 창마다 상황 태그를 backend로 직접 보냅니다. 두 연결은 아직 구현하지 않았고 팀 통합에서 구현합니다. 이 PR의 창 결과는 `SupportDecision` 형식의 `support`와 재생 파일용 `extension`으로 기록합니다. 불편 상태 점수가 없어 `AnalyzeResponse`는 만들지 않습니다. 이 프로세스가 backend로 보내는 창의 형식은 팀 통합의 계약 항목입니다(아래 '계약과의 관계'). 판단 결과를 주문 화면 지원으로 띄우는 연결은 팀 통합에서 합니다 |
+| 실행 파이프라인 | 재생 · 실시간 실행기, 선택 열, 터치 로그 정렬, 판단 층 규칙표 v0, `SupportDecision` 형식과 `extension` 출력(2026-10-22, 아래 '실행 파이프라인'). 실시간 실행기의 터치 입구와 상황 태그 보내기(2026-11-25)는 아래 '주문 화면 · backend와 잇는 두 연결' |
+| 연결 | 팀 논문 그림 1의 경로를 따릅니다. 주문 화면이 터치 통계를 같은 PC의 이 프로세스에 보내고(한 방향, `live.py --serve`), 이 프로세스가 창마다 상황 태그를 backend로 직접 보냅니다(`live.py --backend-url`). 주문 화면으로는 비전 값이 가지 않습니다. 세 쪽 끝이 모두 있습니다. 주문 화면의 터치 창 보내기(`VITE_AI_ENGINE_URL`), 이 프로세스의 터치 입구와 상황 태그 보내기, backend의 창 받는 곳(`POST /api/v1/sessions/{session_id}/vision-windows`)과 시연 스위치(`DECISION_SEND_SUPPORT`, 기본 꺼짐)입니다. 판단은 시연 스위치를 켰을 때만 `/features` 응답에 실려 주문 화면에 닿습니다. 남은 일은 아래 '주문 화면 · backend와 잇는 두 연결'의 '아직 남은 것'입니다. 창 결과는 `SupportDecision` 형식의 `support`와 재생 파일용 `extension`으로 기록합니다. 불편 상태 점수가 없어 `AnalyzeResponse`는 만들지 않습니다. 두 연결의 형식은 `contract/frontend-ai.openapi.json` · `contract/ai-backend.openapi.json`에 있습니다 |
 | 처리 시간 | 아래 '처리 시간' 절. 측정 조건이 달라 따로 적습니다: 공개 영상 재생 프레임당 p50 42~49 ms(2026-10-22, 논리 CPU 1개), 녹화한 재현 영상 재생 중앙값 64 ms(팀 논문 3.1절, ONNX Runtime 스레드 2개) |
 | 학습 | GPU 서버(GPU 1장, 팀 계정 공유)에서 머리 탐지기(Open Images 'Human head', YOLOX-Nano)를 학습했고(2026-10-12 끝), 카메라 시점 분류기(AI Hub 「안내 로봇 인터랙션 멀티모달」 머리 크롭과 '촬영방향' 라벨, ResNet-18)를 학습했습니다(2026-10-14 끝). 두 모델은 2026-10-22에 ONNX로 바꿨습니다(`models/README.md`). AI Hub 「사람 행동 인식 로봇 자율 행동 데이터」로 다가옴·사용·떠남 구간 모델을 파일럿 학습했습니다. 보조기구 탐지기(YOLOX-Nano, 공개 데이터 PMMA와 TU Graz를 함께 학습)를 `--aid-model` 선택 입력으로 연결했습니다(2026-11-22). 숫자는 발표 자료에서 다룹니다 |
 | 데이터 규칙 | AI Hub 데이터는 승인받은 사람만 열람합니다(팀원 각자 신청). 원본 프레임은 저장소·발표에 넣지 않고 집계 숫자만 쓰며, 결과물에는 NIA 출처 문구를 붙입니다 |
@@ -59,7 +62,7 @@
 
 - 역할: 비전 쪽이 관측값과 상황 태그를 창 출력으로 제공하고, backend 판단 단계가 터치 통계와 함께 규칙 기반 후보 선별과 Jev로 접근성 기능을 고릅니다. 표정은 근거 하나로만 쓰고 혼자 쓰지 않습니다. 감정 이름과 결제 수단은 태그에 넣지 않습니다.
 - 고개를 크게 돌린 구간은 각도 대신 '얼굴 점 사라짐 + 몸 점 남음' 패턴을 근거로 씁니다(`look_back` 사건으로 구현, 아래 '사건 8종'). 근거: AFLW2000-3D 2,000장 평가에서 고개를 좌우로 60\~90° 돌린 얼굴은 얼굴 점이 37.7 %에서만 나왔습니다(저장소 밖 측정, 2026-10-08, 평가 전용 데이터).
-- 전달 형식: 이 프로세스가 backend로 보내는 창의 형식은 팀 통합의 계약 항목입니다. 이 PR의 출력은 창마다의 관측 요약 값 8개(창 기록의 `vision`)와 상황 태그(`extension.situation`)입니다(아래 '계약과의 관계'). 처음 제안(관측값 14개 + `situations[]`, 2026-10-10)을 지금 출력에 맞췄습니다. 계약의 `VisionFeatures` 4칸은 그대로입니다.
+- 전달 형식: 실시간 실행기가 backend로 보내는 창은 아래 '주문 화면 · backend와 잇는 두 연결'의 형식(판단 층 키의 상황 · 관측 블록)이고, `contract/ai-backend.openapi.json`에 있습니다. 창 기록에는 창마다의 관측 요약 값 8개(`vision`)와 상황 태그(`extension.situation`)도 남습니다(아래 '계약과의 관계'). 처음 제안(관측값 14개 + `situations[]`, 2026-10-10)을 지금 출력에 맞췄습니다. 계약의 `VisionFeatures` 4칸은 그대로입니다.
 - AI Hub 71827 관련 숫자는 과학기술정보통신부의 재원으로 한국지능정보사회진흥원의 지원을 받아 구축된 「사람 행동 인식 로봇 자율 행동 데이터」(AI 허브, aihub.or.kr)를 활용한 분석 결과입니다. 원본 영상과 프레임은 공개하지 않습니다.
 
 ## 실행 파이프라인 (2026-10-22)
@@ -99,8 +102,124 @@ segment_s마다 ─ situation.assess([t − window_s, t]) + 모름 이유
 
 - 창마다 콘솔에 한 줄이 나옵니다. 형식 예: `[   12.0초] 상황 unknown(모름: column:tap_count) | 머리 2 · 뒤 1 · 동행 프레임 0 · 입 0.08 · 화면 봄 예 | 판단 none | 프레임 처리 45 ms`.
 - `--no-window`면 화면에 아무것도 띄우지 않습니다. 빼면 창에 프레임과 주 사용자 · 동행자 상자를 그리고, 창에서 `q`를 누르거나 창을 닫으면 멈춥니다. `--seconds`가 없으면 Ctrl+C로 멈춥니다.
-- 이 PR의 실시간 실행기에는 터치 로그가 없어서, '터치 없음'이 필요한 태그는 `unknown`(이유 `column:tap_count`)으로 남고 규칙표의 터치 행(4-1 · 4-2)은 열리지 않습니다. 목표 구조(팀 논문 그림 1)에서는 주문 화면이 터치 통계를 이 프로세스에 보냅니다. 그 연결은 아직 구현하지 않았습니다.
-- `--out`에는 `windows.jsonl`과 `meta.json`만 씁니다. 카메라 그림은 저장하지 않습니다.
+- `--serve` 없이 돌리면 터치 입력이 없어서, '터치 없음'이 필요한 태그는 `unknown`(이유 `column:tap_count`)으로 남고 규칙표의 터치 행(4-1 · 4-2)은 열리지 않습니다. `--serve`를 주면 주문 화면이 보낸 터치 창이 실행기의 창 판단에 들어갑니다(아래 '주문 화면 · backend와 잇는 두 연결'). 콘솔 줄의 판단(로컬 규칙표)은 그때도 터치 횟수를 읽지 않아 터치 행이 열리지 않습니다. 지원은 backend 판단 단계가 고르고, `--backend-url`을 주면 이 칸을 '로컬 규칙표'로 적습니다.
+- `--seconds`도 `--out`도 없는 실행(키오스크에서 하루 종일 켜 두는 실행)은 프레임 · 창마다의 처리 시간 줄을 남기지 않습니다. 끝날 때는 프레임 수 · 창 수 · 멈춘 이유와 상황 태그 보내기의 수만 찍고, 처리 시간 백분위는 내지 않습니다(`--serve`로 시작할 때만 한 줄로 알림).
+- `--out`에는 `windows.jsonl`과 `meta.json`만 씁니다. 카메라 그림은 저장하지 않습니다. `meta.json`의 `source`에는 카메라가 실제로 준 크기(`size_wh`)와 드라이버가 알린 초당 장수(`reported_fps`)가 남습니다.
+
+### 주문 화면 · backend와 잇는 두 연결 (`--serve` · `--backend-url`, 2026-11-25)
+
+```powershell
+.venv\Scripts\python.exe -m app.modules.vision.live --camera 0 --no-window --params bundle_b0.json --serve <포트> --allow-origin http://127.0.0.1:5173 --backend-url http://127.0.0.1:8000
+```
+
+팀 논문 그림 1의 두 경로이고, 세 쪽 끝이 모두 저장소에 있습니다.
+
+- 주문 화면: `/features`로 보내는 터치 창마다 같은 본문에 서버 세션 ID(`session_id`)를 더해 이 프로세스의 터치 입구로도 보냅니다. 주소는 `VITE_AI_ENGINE_URL`이고, 5초에 끊으며 다시 보내지 않습니다(`frontend/src/features/order/engineTouchSender.ts`, 형식: `contract/frontend-ai.openapi.json`). 답은 읽지 않습니다.
+- 이 프로세스: 터치 입구(`touch_entry.py`)가 터치 창을 받아 창 판단에 넣고, 상황 태그 보내기(`tag_sender.py`)가 판단한 창을 backend로 직접 보냅니다(형식: `contract/ai-backend.openapi.json`). 카메라 처리 · 터치 입구 · 보내기는 한 프로세스에서 돌고, 카메라 그림은 프로세스 밖으로 나가지 않습니다.
+- backend: `POST /api/v1/sessions/{session_id}/vision-windows`로 받은 창 가운데 끝이 짝 짓는 범위에 드는 창을 같은 세션의 `/features` 창과 짝지어, 상황과 고개 방향을 규칙표 입력으로 씁니다(`backend/README.md` 'AI 엔진 창 입구'). 그 판단은 시연 스위치(`DECISION_SEND_SUPPORT`, 기본 꺼짐)를 켰을 때만 `/features` 응답에 실려 주문 화면에 닿습니다.
+- 주문 화면으로는 비전 값이 가지 않습니다.
+
+| 옵션 | 뜻 |
+|---|---|
+| `--serve <포트>` | 터치 입구를 127.0.0.1의 이 포트에 엶. 정해 둔 포트가 없어 실행할 때 줌(`0`이면 운영체제가 빈 포트를 골라 시작 줄에 찍음) |
+| `--allow-origin <출처>` | 터치 창을 보내도 되는 주문 화면의 출처. 주문 화면 주소창에 보이는 출처를 그대로 적음. 이 저장소의 개발 서버(`pnpm dev` = `vite --host 127.0.0.1`, `frontend/package.json`)는 `http://127.0.0.1:5173`이고, `http://localhost:5173`은 다른 출처라서 그 이름으로 열면 그 출처도 줘야 함. 출처마다 한 번씩 주고, 여러 번 줄 수 있음. `--serve`가 있어야 함. Compose의 프론트 이미지(`127.0.0.1:8080`)는 `VITE_AI_ENGINE_URL` 없이 빌드되어(`frontend/Dockerfile`) 터치 창을 보내지 않음 |
+| `--backend-url <주소>` | backend 기본 주소(예: Compose backend `http://127.0.0.1:8000`). 주면 창마다 상황 태그를 보내고, 주지 않으면 보내지 않음. 창의 세션을 터치 창이 알려 주므로 `--serve`가 있어야 함 |
+
+- `--serve`로 시작하면 콘솔에 터치 입구의 주소와 허용 출처, 주문 화면 환경 변수에 그대로 넣을 `VITE_AI_ENGINE_URL=http://127.0.0.1:<포트>` 줄, 이 주소가 backend의 `AI_ENGINE_URL`(ai-engine 앱의 `/v1/analyze`)과 다른 프로세스라는 줄을 찍습니다.
+- 3-1(뒤에 줄)과 3-2(일행 상의)를 보이려면 값 묶음의 `chain`에 역할 경계 3개(`companion_rel_dist_max` · `companion_lateral_min` · `behind_rel_dist_min`)가 있어야 합니다. 경계가 없는 값 묶음(위 명령의 예처럼 상황 값만 든 것)에서는 동행자와 뒤 사람이 `unknown`이라 두 장면이 나오지 않습니다. 저장소에는 경계를 든 값 묶음을 두지 않았습니다(값마다 출처를 적어 값 묶음에 넣음, 아래 '머리 트랙과 역할').
+- 새 옵션(`--serve` · `--allow-origin` · `--backend-url`)을 하나도 주지 않으면 판단 값과 창마다의 콘솔 줄은 전과 같습니다. 창 기록과 `meta.json`에는 키가 더해집니다(`contract.extension`의 `decision_situation` · `observations`, 창 기록의 `evaluated`, `meta.json`의 `source` · `tag_sender`).
+
+**들어오는 것: 터치 창** (`POST http://127.0.0.1:<포트>/touch-windows`)
+
+- 본문은 주문 화면의 `FeatureWindowRequest` 가운데 이 입구가 읽는 칸입니다. 다른 칸은 무시합니다.
+  - `window_start` · `window_end`: 시간대가 붙은 ISO 8601 시각(주문 화면이 `Date.toISOString()`으로 만드는 형식). 끝이 시작보다 뒤여야 합니다.
+  - `touch`: 그 창의 `tap_count` · `miss_tap_count` · `back_count`(0 이상의 정수, 계약 `TouchFeatures`).
+  - `session_id`(선택): backend의 세션 ID. 바뀌면 세션별 상태를 처음부터 다시 세고, 상황 태그는 이 세션으로 보냅니다.
+  - `screen_id`(선택): 현재 화면. 창과 함께 두고 `GET /status`에 보입니다.
+- 답에는 비전 값(상황 · 장면 태그 · 고개 방향 · 관측 요약 · `measurable`)이 없습니다. 받으면 202 `{"status": "accepted"}`이고, 거절하면 `{"status": "refused", "reason": "..."}`입니다. 202는 상황 태그 보내기가 그 터치 창이 푼 창을 끝낸 뒤에, 늦어도 받은 지 `segment_s` 안에 씁니다(아래 '받은 터치 창에 답하는 때').
+  - 400: 본문 형식이 틀리거나, `Content-Length`가 길이가 아님(음수 · 숫자가 아님). `Content-Length`가 없으면 411입니다.
+  - 403: `Host` 머리글이 `127.0.0.1:<포트>`나 `localhost:<포트>`가 아님(메서드와 관계없이; DNS 리바인딩 막기), 또는 허용하지 않은 출처의 브라우저 페이지. `Origin` 머리글이 없는 요청(로컬 도구)은 출처로 거절하지 않습니다. 거절한 `Host`와 출처는 처음 한 번만 고칠 점과 함께 콘솔에 남습니다.
+  - 503: 첫 카메라 프레임 전이거나 카메라 처리가 멈춤. 다른 경로는 404, 이 코드의 오류는 500(`status: error`)입니다.
+  - `Host` · 경로 · 출처 · `Content-Length`는 머리글만 보고 판단합니다. 그래서 이 가운데 하나로 거절한 요청은 본문을 읽지 않고 `Connection: close`로 답한 뒤 연결을 닫습니다. 받는 요청만 본문을 읽습니다.
+- CORS 머리글은 허용한 출처의 `POST /touch-windows`와 그 사전 요청에만 붙이고, Chrome의 Private Network Access 사전 요청에도 답합니다(WICG Private Network Access 초안).
+- `GET /status`는 카메라가 도는지, 처리한 프레임 수, 마지막 프레임 시각, 기억 구간, 마지막으로 받은 터치 창(시각 · 세션 · 화면), 받은 터치 창의 마지막 번호와, 1번부터 그 번호까지의 창을 모두 마친 가장 큰 번호(`settling`)를 답합니다. CORS 머리글이 없어 페이지는 읽지 못하고 로컬 도구만 읽습니다. 터치 창을 받을 때마다 콘솔에 한 줄이 더 나옵니다.
+- 시각 맞추기: 창 시각은 주문 화면의 시계(`Date.now()`)이고, 한 컴퓨터 안에서는 `time.time()`이 읽는 시스템 시계와 같습니다. 카메라 프레임마다 잡은 순간의 시스템 시각(`sources.Frame.epoch_s`)을 함께 남기고, 요청 시각 E를 마지막 프레임의 (시스템 시각 − 카메라 시각) 차이로 카메라 시간축에 옮깁니다(줄 시각과 같은 0.1 ms 단위로 반올림). 실행기가 backend로 보내는 창 시각도 같은 차이로 벽시계에 옮깁니다. 실행 중에 시스템 시계를 손으로 바꾸거나 시간 동기화가 시계를 건너뛰게 하면, 그 전에 남은 줄은 그만큼 어긋납니다.
+- 터치 횟수 배치(`[설계 제안]`): 상황 규칙은 줄마다 터치 수를 읽는데 보고는 터치 창 하나의 합계라서, 실행기가 창을 판단할 때마다 상황 창 [t − `window_s`, t]의 줄 사본에 횟수를 이렇게 놓습니다. 횟수가 0인 보고 창 하나에 든 줄은 0입니다. 횟수가 있는 보고 창이 상황 창 안에 통째로 들면 그 횟수를 그 창의 마지막 줄에 놓고 나머지 줄은 비웁니다. 상황 창의 시작에 걸친 보고 창은 누름이 어디였는지 몰라 비웁니다. 보고 창에 들지 않은 줄과 두 보고 창에 겹쳐 든 줄도 비웁니다. 빈칸은 '재지 않음'이라 그 단서로 정할 수 없으면 태그는 `unknown`이 됩니다. 같은 창을 다시 보내면 앞 보고를 바꿉니다. 요청에 누름 시각을 실으면 이 배치가 정확해집니다(팀 확인 사항).
+- 첫 누름 기준: 누름이 있는 창이 보고되면 다음 프레임부터 얼굴 크기 기준(`iod_ratio_user`)을 첫 누름 기준으로 모읍니다. 세션에서 누름이 보고되기 전에는 모으지 않습니다(터치 로그가 있는 재생과 같음). 그래서 오래 다가가 있어도 기준이 따라 올라가지 않습니다(아래 '장면 태그 6개').
+- 세션: 새 `session_id`가 오면 다음 프레임부터 세션별 상태(트랙 · 얼굴 크기 기준 · 시작 기준)를 다시 잡고, 그 세션의 창은 첫 보고 창의 시작 뒤의 줄만 읽습니다. 그 시작과 요청 사이의 줄은 앞 세션의 상태로 처리된 채 남습니다.
+
+**창을 판단하고 보내는 때**
+
+- 주문 화면이 없거나(`--serve` 없음) 터치 창이 아직 세션을 알리지 않았으면, 실행기는 전처럼 자기 간격(`segment_s`)마다 창을 판단하고 아무것도 보내지 않습니다.
+- 세션이 알려진 뒤에는 주문 화면의 그 구간 터치가 도착한 다음에 판단해 보냅니다. 구간 끝과 같거나 그 뒤에 끝나는 그 세션의 터치 창이 와야 그 구간을 판단합니다. 주문 화면은 창이 끝난 뒤에 보내므로, 그 전에 판단하면 마지막 터치 창 뒤의 줄이 비어 '터치 없음' 단서를 모르게 되기 때문입니다. 터치 창이 온 뒤 첫 프레임에서 판단합니다. 터치 창은 주문 화면의 창 길이(2026-11-26부터 1초)라서, 터치 창 하나가 오면 그 안에서 끝나는 1초 구간 하나를 판단합니다. 늦거나 건너뛴 터치 창 뒤에는 터치 창 하나가 구간 여러 개를 함께 판단합니다. 실행기는 창마다 자기 길이를 읽으므로 2초 터치 창도 그대로 받습니다(구간 두 개).
+- 기다림의 한도는 실행기가 이미 쓰는 기억 구간(`keep_s` = `window_s + 2 × gap_s + segment_s`)입니다. 구간의 시작이 최근 프레임에서 `keep_s`보다 멀어지려 하면, 터치가 오지 않았어도 그대로 판단합니다(터치가 빈 줄은 모름). 그래서 한 구간은 길어야 `keep_s − segment_s` 기다립니다. 그동안 실행기는 그 창이 읽을 줄을 남겨 두어, 늦게 판단한 창도 바로 판단한 창과 같은 줄을 읽습니다. 남겨 두는 줄은 길어야 `2 × keep_s − segment_s`초어치입니다.
+- 세션이 바뀌면 전처럼 처음부터 다시 셉니다. 앞 세션의 터치 창은 새 세션의 구간을 풀어 주지 않습니다. 새 세션의 구간이 먼저 준비되면 앞 세션에서 기다리던 구간은 그대로 판단합니다. 입력이 끝나면 남은 구간을 모두 판단합니다. 구간은 늘 시간 순서로 판단합니다.
+- 창 기록의 `evaluated`가 어떻게 판단했는지 적습니다. `how`는 `touch`(터치 창이 온 뒤) · `cadence`(자기 간격) · `kept_history`(기억 구간 한도) · `later_ready`(새 세션의 구간이 먼저 준비됨) · `input_end`(입력 끝)입니다. `at`은 판단한 프레임의 시각, `touch_until`은 그 세션의 터치를 받은 끝 시각입니다. `touch_complete`는 규칙이 상황 창의 터치 단서를 정할 수 있었는지입니다. 누름이 한 줄에라도 보였거나 모든 줄에 횟수가 있으면 참입니다(`events.window_any_tap`, 규칙의 `any_tap`과 같은 조건).
+- 실행기를 켠 뒤 첫 세션도 나중 세션처럼 그 세션의 첫 터치 창 시작 뒤의 줄만 읽고, 첫 세션이 알려진 다음 프레임부터 세션별 상태(머리 트랙 · 주 사용자 · 얼굴 크기와 시작 기준)를 처음부터 다시 잡습니다. 실행기는 주문 세션이 생기기 전부터 돌고 있어, 그 앞의 줄과 상태는 어느 세션의 것도 아니기 때문입니다. 재생의 터치 로그는 첫 세션과 함께 시작하므로 재생은 전과 같습니다. 기다림의 한도 `keep_s − segment_s`(= `window_s + 2 × gap_s`)가 터치 창 하나의 길이(2026-11-26부터 1초)와 전달 시간을 더한 것보다 짧은 값 묶음에서는, 터치가 오기 전에 한도에서 판단하는 구간이 생깁니다.
+
+**받은 터치 창에 답하는 때**
+
+- 받은 터치 창에는 받은 순서대로 1부터 번호를 매깁니다. 번호는 창을 저장하는 잠금 안에서 줍니다.
+- 실행기는 다음 두 조건이 모두 맞으면 창 n을 마친 것으로 적습니다.
+  - 카메라 시간축에서 창 n의 끝과 같거나 그 뒤의 프레임을 처리했고, 창 n을 담은 터치 상태 사본으로 그 프레임이나 그 뒤의 flush(`live.run_live`가 프레임마다 준비된 구간을 판단해 내보내는 단계)가 돌았습니다. flush는 판단할 구간이 없어도 프레임마다 한 번 돕니다. 이때까지 창 n의 끝 이전에 끝나는 구간은 모두 풀렸습니다.
+  - 상황 태그 보내기가 그 flush가 푼 묶음과 그 앞의 묶음을 모두 끝냈습니다. 묶음의 창마다 보냄 · 실패 · 건너뜀이 정해졌거나, 묶음이 보내지 않은 채 새 묶음으로 바뀌었거나, 보내기가 끝내는 중이면 그 묶음은 끝난 것으로 봅니다. 푼 창이 없는 flush는 앞 묶음이 끝나면 마치고(보내기가 쉬고 있으면 바로), 보내기가 없는 실행은 바로 마칩니다.
+- 창은 하나씩 따로 마칩니다. 요청 두 개가 동시에 오가면 받은 순서와 창이 끝나는 순서가 다를 수 있어서, flush는 그 프레임까지 끝난 창만 마칩니다. `GET /status`의 마친 번호(`settled`)는 1번부터 그 번호까지의 창을 모두 마친 가장 큰 번호이고, 줄지 않습니다.
+- 받은 창의 HTTP 처리기는 그 창을 마칠 때까지 기다렸다가 전과 같은 202 본문을 씁니다. 기다림은 길어야 값 묶음의 `segment_s`(상황 태그 보내기의 제한 시간과 같은 값)이고, 카메라 처리가 멈추면 바로 씁니다. 거절(400 · 403 · 404 · 411 · 503)은 전처럼 바로 답합니다.
+- 그래서 202는 '받았고, 이 터치 창이 푼 창을 상황 태그 보내기가 끝냈다(위 두 번째 조건), 또는 `segment_s`가 지났거나 카메라 처리가 멈췄다'는 뜻입니다. 주문 화면이 이 답을 받은 뒤 보내는 `/features` 요청은 대개 그 엔진 창을 읽습니다. 다만 엔진 창을 backend에 넘기는 일과 요청이 읽는 일은 보장하지 않습니다(best effort). 보내기가 실패로 끝난 엔진 창은 backend에 닿았는지 알 수 없습니다. 답을 읽다가 제한 시간을 넘긴 보내기는 backend가 창을 이미 받았어도 실패로 셉니다. 보내기 전에 새 묶음으로 바뀐 엔진 창은 어느 요청도 읽지 못합니다. 답에는 여전히 비전 값이 없습니다.
+- 기다리는 동안 카메라 처리나 보내기가 쓰는 잠금은 잡지 않고, 카메라 처리는 답을 기다리지 않습니다.
+- 두 번째 조건이 그 flush의 묶음뿐 아니라 앞 묶음까지 기다리는 이유: 카메라 처리가 주문 화면의 시계보다 조금 늦으면, 창 끝 전의 프레임에서 그 터치 창이 푼 구간이 먼저 나가고 창 끝 뒤의 flush는 풀 것이 없습니다. 이때도 답은 보내기가 그 구간을 끝낸 뒤에 나갑니다.
+
+**나가는 것: 상황 태그** (`POST <backend>/api/v1/sessions/{session_id}/vision-windows`)
+
+- 실행기가 창을 판단하면(위 '창을 판단하고 보내는 때'; 재생과 같은 `WindowJudge`가 위의 터치 배치를 함께 읽음), 그 창 끝이 터치 창이 알린 세션 안에 있을 때 그 창을 보냅니다. 터치 창이 아직 세션을 알리지 않았으면 보내지 않습니다.
+- 실행기는 터치 창마다 그 터치 창이 함께 푼 구간을 모두 backend로 보냅니다. 어떤 창을 버리는지는 아래 우편함 항목과 404 · 410 항목에 있습니다. 팀 논문의 1초는 구간(`segment_s`)의 길이입니다. 1초 터치 창 하나는 그 안에서 끝나는 구간 하나를 풀고, 늦거나 건너뛴 터치 창 뒤에 한 터치 창이 구간 여러 개를 함께 풀면 그 구간들은 우편함의 한 묶음으로 시간 순서대로 보내집니다.
+- 본문의 키는 6개입니다.
+  - `session_id`: 경로의 세션과 같습니다. backend → ai-engine 계약의 `AnalyzeRequest`도 세션을 본문에 싣습니다.
+  - `window_start` · `window_end`: 창 기록의 `segment_s` 구간을 위의 시각 맞추기로 벽시계에 옮긴 ISO 8601 UTC 시각(밀리초까지)입니다. 판단한 때가 늦어도 구간의 시각은 그대로입니다.
+  - `situation`: 아래 '계약과의 관계'의 `decision_situation`, 곧 판단 층이 읽는 `name` · `evidence` · `confidence`입니다.
+  - `observations`: `gaze` · `face_seen` · `scene_tags`입니다.
+  - `model_version`: 창 결과의 버전 표시입니다.
+- 카메라 처리는 보내기를 기다리지 않습니다. 한 번의 판단이 함께 푼 창들(터치 창 하나가 푼 구간들, 또는 홀로 풀린 창 하나)은 한 묶음으로 칸 하나짜리 우편함에 들어가고, 스레드 하나가 그 묶음의 창을 시간 순서로 보냅니다. backend가 느려 앞 묶음을 보내는 동안 묶음이 쌓이면, 아직 보내기 시작하지 않은 묶음은 새 묶음이 통째로 바꿉니다(그 창들은 `replaced`로 셈). 묶음의 크기는 실행기의 기다림 한도로 이미 정해집니다. 응답이 2xx가 아니거나, 연결이 안 되거나, 제한 시간을 넘기면 실패로 세고 버리며 다시 보내지 않습니다. 첫 실패만 콘솔에 한 줄 찍습니다.
+- 묶음에는 끝났을 때 한 번 부를 함수(`done`)를 실을 수 있습니다. 그 묶음과 앞 묶음이 모두 끝나면 부릅니다. 빈 묶음은 `done`만 싣고 우편함의 묶음을 바꾸지 않습니다. 실행기는 이것으로 터치 창을 마친 것으로 적습니다(위 '받은 터치 창에 답하는 때').
+- backend가 404(모르는 세션, 예: backend를 다시 켠 뒤)나 410(주문을 마친 세션)으로 답하면 실패로 세지 않습니다. `ended_404` · `ended_410`으로 세고 종류마다 처음 한 번 콘솔에 찍으며, 새 세션 ID의 창이 올 때까지 그 세션의 창은 보내지 않습니다(`skipped_ended`).
+- 제한 시간은 창 간격 `segment_s`(값 묶음, 기본 1.0초 `[파일럿]`)라 보내기가 자기 창보다 오래 걸리지 않습니다. 이 시간은 연결과 읽기 한 번마다 걸립니다(urllib의 소켓 제한 시간). 프록시를 거치지 않고 바로 연결하며, 표준 라이브러리만 씁니다.
+- 실행이 끝나면 우편함에 남은 묶음과 보내던 묶음의 나머지를 제한 시간 하나 안에서 보냅니다. 보낸 수 · 실패 수 · 새 창으로 바뀐 수 · 끝에 못 보낸 수 · 끝난 세션의 답과 건너뛴 수 · 마지막 오류는 `meta.json`의 `tag_sender`와 마지막 콘솔 줄에 남습니다.
+- `--backend-url`을 주면 창마다의 콘솔 줄에서 판단 칸을 '로컬 규칙표'로 적습니다. 그 칸은 이 실행기의 규칙표이고, 화면에 닿는 판단은 backend 판단 층의 것입니다.
+
+아래는 테스트의 합성 줄(오른쪽 · 왼쪽으로 한 번씩 고개를 돌림, 터치 없음)로 만든 실제 본문이고, `"..."`는 줄인 곳입니다. 시각은 테스트의 가짜 시계 값입니다.
+
+```json
+{"session_id": "s1", "window_start": "2027-01-15T08:00:01.700Z", "window_end": "2027-01-15T08:00:02.700Z",
+ "situation": {"name": "looking_around",
+               "evidence": [{"event_id": "dwell_no_touch@0", "obs": "no_touch_s", "value": 2.7, "t": 2.7},
+                            {"event_id": "yaw_sweep_offscreen@5", "obs": "yaw_deg", "value": 55.0, "t": 0.9}, "..."],
+               "confidence": {"events": 3, "quality_ok": true}},
+ "observations": {"gaze": true, "face_seen": true,
+                  "scene_tags": [{"name": "seated_height", "status": "unknown", "unknown_reason": "no_value_for_camera",
+                                  "evidence": []}, "...",
+                                 {"name": "phone_use", "status": "unknown", "unknown_reason": "column:phone_owner",
+                                  "evidence": []}]},
+ "model_version": "vision-situation-rules_v1+rule_table_v0-shadow"}
+```
+
+**아직 남은 것**
+
+- 4-1의 횟수: 빗나간 뒤 바로 고친 횟수(`fixes_recent`)를 만드는 곳이 주문 화면에 없어, backend 규칙표의 4-1은 열리지 않습니다(`backend/README.md` '시연 스위치').
+- backend의 `/v1/analyze` 호출: backend는 `/features` 창마다 ai-engine 앱의 `/v1/analyze`를 아직 부릅니다(그림 1에 없는 화살표). 시연 스위치를 켜면 그 답과 관계없이 판단이 응답에 실립니다.
+- 2단계 행: 장면 태그(1-1 · 1-2 · 2-1 · 2-2 · 자리 비움)를 지원으로 잇는 판단 행은 아직 구현하지 않았습니다. backend는 짝 지은 창의 `scene_tags`를 창 기록에 남깁니다.
+- backend의 3-2 휴대폰 길: backend 규칙표에는 `phone_use` 길과, 측정할 수 없는 창에서 그 길만 통과시키는 예외가 아직 없습니다. 이 엔진의 로컬 규칙표에만 있습니다(아래 '기존 재생용 규칙표 v0').
+- 입구의 포트는 정해 두지 않았습니다(실행할 때 줌).
+- 벽시계가 건너뛸 때: 구간이 터치 창을 기다리는 동안 PC의 벽시계가 건너뛰면(손으로 바꾸거나 시간 동기화가 맞춤), 기다리던 구간은 건너뛴 뒤의 차이로 벽시계 시각이 찍혀 backend로 갈 수 있습니다. 늦게 온 터치 창도 그 차이로 카메라 시간축에 놓입니다. 실행기는 이 경우를 다루지 않습니다(프레임마다 시계 차이를 따로 두지 않음).
+
+**시험 도구(카메라 없음)**
+
+```powershell
+.venv\Scripts\python.exe -m app.modules.vision.tools.integration_smoke --seconds 30 --params bundle_b0.json --out runs\integration_smoke
+```
+
+- 가짜 카메라(검은 프레임, 기본 640×480: 아래 '처리 시간'의 합성 입력 크기)로 실제 모델을 돌립니다. 주문 화면 대신 카메라가 돌기 시작하면 2초(`FEATURE_WINDOW_MS`)마다 방금 끝난 창을 터치 0회 · 세션 `smoke` · 화면 `menu`로 보냅니다.
+- 시험 backend(127.0.0.1, 202로 답함)는 받은 창마다 한 줄을 찍습니다. 구간(`window_start`~`window_end`), 세션, 상황 태그, 터치 단서를 판정했는지(`evaluated.touch_complete`)와 실행기가 언제 판단했는지(터치 창이 온 뒤 · 기억 구간 한도 · 입력 끝 등), 고개 방향, 얼굴, 장면 태그, 구간 끝 뒤 도착 시간입니다. 두 구간은 그 터치 창이 온 뒤 함께 보내지므로, 2초 터치 창의 앞 구간은 자기 끝보다 1초쯤 늦게 도착합니다. 화면에 사람이 없어 상황은 `none`이나 `unknown`입니다. 이 도구는 무엇을 언제 어느 세션으로 보내는지만 봅니다.
+- `--out`을 주면 `smoke_summary.json`(설정 · 보낸 수 · 창 끝 뒤 도착 시간 p50 · p95 · 받은 본문)과 실행기의 `live/` 파일을 남깁니다. 그림은 저장하지 않습니다.
 
 ### 값 묶음 파일 (`--params`)
 
@@ -201,7 +320,7 @@ JP §0-2 · §0-3과 장면 표, tree 표 3-가 · 3-나 · §4에서 장면 4�
 
 ### 계약과의 관계 (추가형 제안, 명세는 그대로)
 
-- `contract/backend-ai.openapi.yaml`(0.2.0)과 `contract/frontend-backend.openapi.yaml`은 바꾸지 않았습니다.
+- 이 모듈은 `contract/backend-ai.openapi.yaml`(0.2.0)과 `contract/frontend-backend.openapi.yaml`을 바꾸지 않았습니다. `frontend-backend.openapi.yaml`의 `SupportDecision`에는 backend 시연 스위치가 싣는 선택 필드가 더해졌습니다(backend). 두 연결의 형식은 `contract/frontend-ai.openapi.json`(주문 화면 → 터치 입구)과 `contract/ai-backend.openapi.json`(실행기 → backend)입니다.
 - 불편 상태 모델이 이 파이프라인에 없어 상태 점수를 만들지 않습니다. 백엔드 `AnalyzeResponse`는 `measurable=true`일 때 비어 있지 않은 `states`를 요구하므로 `analyze_response` 키를 출력에서 뺐습니다. `measurable=false` · `states=null`은 백엔드 모델에서 유효하지만, 센서 관측이 있는 창도 이 응답으로 표시하지 않습니다.
 - `support`는 기존 `SupportDecision` 형식(`preset` · `requires_confirmation` · `decided_by`)을 유지합니다. `decided_by`는 그림자 모드라 늘 `rule_placeholder`입니다. 지원과 `UIPreset`의 대응은 JP §2-5 표를 따랐습니다(알림 = `step_guide`, 큰 버튼 묻기 = `large_button` · 확인 필요, 강조 · 기다림 = `none`).
 - 계약 변환 출력에서 센서 관측 가능 여부는 `extension.measurement`의 `measurable`과 `basis`에만 담고, 파이프라인 버전은 `extension.model_version`에 둡니다. `basis`는 팀 자리표시자와 같은 기준인 ‘구간에 누름이나 되돌아감이 있거나 얼굴이 한 번이라도 보임’을 설명하고, `phone_use`가 참이고 `measurable`이 거짓인 창에서는 그 창에서 3-2 기다림만 열거나 유지할 수 있다고 덧붙입니다. `measurable`이 참인 창은 `phone_use`와 상관없이 모든 행을 판단하므로 이 문장을 붙이지 않습니다. 창 기록 자체의 `measurable`은 내부 판단용으로 유지하며, 불편 상태 점수 산출 여부를 뜻하지 않습니다. 센서 관측 가능 여부와 상태 점수 산출 여부를 계약에서 분리하는 안은 추가형 계약 제안으로 팀 합의에서 정합니다.
@@ -220,7 +339,16 @@ JP §0-2 · §0-3과 장면 표, tree 표 3-가 · 3-나 · §4에서 장면 4�
    "situation": {"tag": "looking_around", "display_text": "무언가를 찾는 듯함",
                  "evidence_ids": ["dwell_no_touch@0", "yaw_sweep_offscreen@10", "yaw_sweep_offscreen@24"],
                  "confidence": {"events": 3, "quality_ok": true}, "alternatives": [], "unknown_reason": [],
-                 "quality": {"face_visible_ratio": 1.0, "track_conf": 1.0}, "source": "rules_v1"},
+                 "quality": {"face_visible_ratio": 1.0, "track_conf": 1.0}, "source": "rules_v1",
+                 "tags": [{"name": "seated_height", "status": "unknown", "unknown_reason": "no_value_for_camera",
+                           "evidence_ids": []},
+                          {"name": "face_approach", "status": "unknown", "unknown_reason": "no_value", "evidence_ids": []},
+                          {"name": "user_changed", "status": false, "unknown_reason": null, "evidence_ids": []},
+                          {"name": "none_seen", "status": false, "unknown_reason": null, "evidence_ids": []},
+                          {"name": "aid_use", "status": "unknown", "unknown_reason": "column:aid_owner",
+                           "evidence_ids": []},
+                          {"name": "phone_use", "status": "unknown", "unknown_reason": "column:phone_owner",
+                           "evidence_ids": []}]},
    "decision_meta": {"decision_id": "d0001", "withdrawn_id": null, "support": "highlight_next_action", "scene": "4-2",
                      "action": "apply", "intervention": "바로 적용", "transition": "open",
                      "scope": ["screen", "menu", 1.0], "rank": 7, "withdraw_on": "cart_progress",
@@ -230,14 +358,36 @@ JP §0-2 · §0-3과 장면 표, tree 표 3-가 · 3-나 · §4에서 장면 4�
                      "meta": {"t": 4.0, "tag": "looking_around", "tag_since": 3.0, "screen": "menu",
                               "screen_since": 1.0, "situation_known": true},
                      "steps_left": 2, "target_id": null, "message_id": null, "session_signal": null,
-                     "jev_kind": "fit", "jev": {"shadow": true, "applied": false, "answer": null}}}}
+                     "jev_kind": "fit", "jev": {"shadow": true, "applied": false, "answer": null}},
+   "decision_situation": {"name": "looking_around",
+                          "evidence": [{"event_id": "dwell_no_touch@0", "obs": "no_touch_s", "value": 4.0, "t": 4.0},
+                                       {"event_id": "yaw_sweep_offscreen@10", "obs": "yaw_deg", "value": 55.0, "t": 1.4},
+                                       {"event_id": "yaw_sweep_offscreen@10", "obs": "side", "value": "right", "t": 1.4},
+                                       {"event_id": "yaw_sweep_offscreen@10", "obs": "offscreen_s", "value": 0.4, "t": 1.4},
+                                       {"event_id": "yaw_sweep_offscreen@24", "obs": "yaw_deg", "value": -55.0, "t": 2.8},
+                                       {"event_id": "yaw_sweep_offscreen@24", "obs": "side", "value": "left", "t": 2.8},
+                                       {"event_id": "yaw_sweep_offscreen@24", "obs": "offscreen_s", "value": 0.4, "t": 2.8}],
+                          "confidence": {"events": 3, "quality_ok": true}},
+   "observations": {"gaze": true, "face_seen": true,
+                    "scene_tags": [{"name": "seated_height", "status": "unknown", "unknown_reason": "no_value_for_camera",
+                                    "evidence": []},
+                                   {"name": "face_approach", "status": "unknown", "unknown_reason": "no_value", "evidence": []},
+                                   {"name": "user_changed", "status": false, "unknown_reason": null, "evidence": []},
+                                   {"name": "none_seen", "status": false, "unknown_reason": null, "evidence": []},
+                                   {"name": "aid_use", "status": "unknown", "unknown_reason": "column:aid_owner",
+                                    "evidence": []},
+                                   {"name": "phone_use", "status": "unknown", "unknown_reason": "column:phone_owner",
+                                    "evidence": []}]}}}
 ```
 
 - `extension.detectors`는 창 기록의 `detectors`를 그대로 옮긴 것입니다.
-- `extension.situation`은 창 기록의 `situation`에서 근거 사건의 관찰 값(`evidence`)과 창 구간(`window_s`)을 빼고 `name`을 `tag`로 옮긴 것입니다.
+- `extension.situation`은 창 기록의 `situation`에서 근거 사건의 관찰 값(`evidence`)과 창 구간(`window_s`)을 빼고 `name`을 `tag`로 옮긴 것입니다. 장면 태그(`tags`)는 근거 사건 ID만 남깁니다. 재생 도구가 이 키를 읽으므로 이름을 바꾸지 않습니다.
 - `extension.decision_meta`는 창 기록의 `decision`에서 `support`로 옮긴 `preset` · `requires_confirmation`과 Jev 질문(`jev_request`) · 단서(`cues`) · 사유(`reason`)를 빼고, Jev 종류(`jev_kind`)와 그림자 모드 표시(`jev`; Jev 질문이 없는 창은 `null`)를 더한 것입니다.
+- `extension.decision_situation`(2026-11-22 추가)은 backend 판단 층(`backend/app/modules/decision/`)이 `WindowInput.situation`에서 읽는 키 이름으로 옮긴 상황입니다. `rule_table.py`의 `situation_known`이 `name`을, `evidence_counts`가 `evidence`의 항목마다 `event_id`를, `jev_state`가 `confidence`의 `quality_ok`를 읽습니다. `evidence`는 창 기록의 `situation.evidence`(근거 사건마다의 관찰 값)를 그대로 옮깁니다. `extension.situation`의 `tag` · `evidence_ids`는 판단 층이 읽지 못해 상황이 없는 창으로 처리됩니다(테스트 `BackendReadsTheViewTests`가 이 저장소의 판단 층 코드로 두 형태를 비교함).
+- `extension.observations`(2026-11-22 추가, 선택 블록)는 판단 층이 상황 말고 더 읽을 관측과 장면 태그를 담습니다. `gaze`는 창 기록의 `vision.facing_screen`과 같고 판단 층의 `WindowInput.gaze` 자리에 들어갑니다. `face_seen`은 구간에서 얼굴이 한 번이라도 보였는지이며, 팀 자리표시자(`app/inference/placeholder.py`)가 `vision.face_detected`로 `measurable`을 정할 때 쓰는 근거와 같은 뜻입니다. `scene_tags`는 장면 태그 6개(이름 · 상태 · 모름 이유 · 근거 관찰 값)이고, 태그 3개와 경쟁하지 않습니다. 이 엔진의 로컬 규칙표 v0는 이 가운데 `phone_use`만 읽습니다(3-2 기다림의 휴대폰 길). backend 판단 층의 규칙표는 아직 장면 태그를 하나도 읽지 않습니다(위 '주문 화면 · backend와 잇는 두 연결'의 '아직 남은 것'). 값 묶음이 없으면 `[]`입니다.
+- 실시간 실행기는 두 키를 상황 태그 본문의 `situation` · `observations`로 backend에 보냅니다(위 '주문 화면 · backend와 잇는 두 연결', `contract/ai-backend.openapi.json`).
 
-관측 요약: 위 `contract`에는 관측값이 없습니다. 관측값은 창마다 창 기록의 `vision` 칸에 담깁니다(`chain.vision_summary`, 위 '창 한 줄'). 이 프로세스가 backend로 보내는 창의 형식은 팀 통합의 계약 항목입니다.
+관측 요약: 위 `contract`에는 관측값이 없습니다. 관측값은 창마다 창 기록의 `vision` 칸에 담깁니다(`chain.vision_summary`, 위 '창 한 줄'). 상황 태그 본문에는 이 8개 가운데 고개 방향(`gaze`)과 얼굴을 봤는지(`face_seen`)만 실립니다(위 '주문 화면 · backend와 잇는 두 연결').
 
 - `vision`의 값 8개는 `frames`(구간의 프레임 수) · `face_seen_ratio` · `body_seen_ratio`(얼굴 · 몸을 본 프레임 비율) · `head_count_max`(머리 상자 수의 최댓값) · `people_behind_max`(뒤에 선 사람 수의 최댓값) · `companion_frames`(동행자 상자가 있는 프레임 수) · `mouth_motion_max`(입 움직임의 최댓값) · `facing_screen`(위 '창 한 줄')입니다. 값은 구간 (t − `segment_s`, t]의 요약입니다. `frames`와 `companion_frames`는 개수라 늘 숫자입니다. 얼굴 · 몸 비율은 프레임이 없으면 `null`입니다. 프레임이 있으면 상태 열(`face_state` · `body_state`)이 '보임'인 프레임 수를 구간의 프레임 수로 나누므로, 상태 값이 없는 프레임은 못 본 프레임으로 셉니다(상태 값이 모두 없으면 0). 최댓값 3개(`head_count_max` · `people_behind_max` · `mouth_motion_max`)는 구간에 유한한 값이 없으면(프레임이 없거나, 그 열이 없거나, 모두 빈칸) `null`이고, `facing_screen`은 위 '창 한 줄'의 규칙을 따릅니다. `companion_frames`는 머리 탐지기가 없거나 동행자인지 모를 때(경계값이 없는 기본 상태)도 0이라 '동행자 없음'과 구분되지 않습니다.
 - 계약의 `VisionFeatures` 4칸(`face_detected` · `face_size_ratio` · `assistive_device` · `confidence`)은 그대로 둡니다. 이 모듈의 창 결과는 그 4칸을 채우지 않습니다.
@@ -269,9 +419,11 @@ JP §0-2 · §0-3과 장면 표, tree 표 3-가 · 3-나 · §4에서 장면 4�
 | `stitch_size_max` | 없음 | \|ln(높이 비)\| | 정할 수 없음: 같은 상자 짝의 크기 차(R-CNN 상자 변화량 th의 절댓값)로 평균 + 2 SD. 값 묶음별로 보고 |
 | `approach_ratio_min` | 없음 | `iod_px` ÷ 기준 `iod_px` | 정할 수 없음: 정하는 방법은 아래 '장면 태그 6개'. 값 묶음별로 보고 |
 | `aid_score_min` | 0.01 | 점수 0~1 | 관행값: 보조기구 탐지기 평가 설정의 점수 하한(YOLOX 평가 conf 0.01). 상자를 기록하는 하한이고 쓴다 · 안 쓴다를 가르는 값이 아님 |
-| `aid_nms_iou` | 0.65 | IoU 0~1 | 관행값: YOLOX `nmsthre` 기본값(탐지기 평가와 같은 IoU). 사람 하나에 상자 하나를 남기려고 클래스를 가리지 않고 적용 |
+| `aid_nms_iou` | 0.65 | IoU 0~1 | 관행값: YOLOX `nmsthre` 기본값(탐지기 평가와 같은 IoU). 사람 하나에 상자 하나를 남기려고 클래스를 가리지 않고 적용(`head_centre` 읽기에서는 클래스마다 그 클래스 안에서 적용: 평가의 클래스별 NMS와 같은 방식) |
 | `aid_person_min` | 0.390 | 점수 0~1 | `[파일럿]` 시작값, 공개 자료에서 잰 값: 같은 검증 분할의 '사람 아무나' 과제에서 F1이 가장 큰 점수 기준(F1 0.813). 이 값을 넘는 사람 상자만 사람이 보인 것(`none_seen`)과 주 사용자 상자로 셈 |
 | `aid_use_min` | 0.350 | 점수 0~1 | `[파일럿]` 시작값, 공개 자료에서 잰 값: TU Graz Mobility Aid Users v1.0 검증 분할에서 F1이 가장 큰 점수 기준(목발 · 지팡이 · 보행기 · 휠체어 점수의 최댓값, 모델 aid_det joint_416, 입력 416). 시험 분할에 그대로 적용하면 정밀도 0.698 · 재현율 0.736. 주의할 점은 아래 '보조기구 입력' |
+| `aid_rule` | `owner_box` | — | 규칙 스위치: 보조기구 탐지기를 읽는 방법. `owner_box` = 주 사용자의 사람 상자와 그 `aid_any_score`, `head_centre` = 주 사용자 머리 상자 가운데를 품은 보조기구 클래스 상자의 점수 `aid_head_score`(키오스크 시점 탐지기 파일용), `head_centre_carry` = `head_centre`에 더해 머리 상자가 없는 프레임은 그 상자를 머리 트랙 규칙(`track_iou_min` · `track_max_gap_s`)으로 따라가 읽음(아래 '보조기구 입력'의 '세 읽기'). 값 묶음의 `chain` 칸이나 실행 옵션 `--aid-rule`로 바꿈 |
+| `aid_head_min` | 없음 | 점수 0~1 | 정할 수 없음: `head_centre` · `head_centre_carry` 읽기의 `aid_use` 컷(창 안 `aid_head_score` 중앙값이 이 값을 넘으면 참). 키오스크 시점 탐지기 파일의 값은 아직 정하지 않음. 값이 없으면 `aid_use`는 모름(`no_value_for_model`). 값 묶음이나 실행 옵션 `--aid-head-min`으로 줌 |
 | `phone_score_min` | 0.3 | 점수 0~1 | 관행값: YOLOX ONNX Runtime 데모(`demo/ONNXRuntime/onnx_inference.py`)의 `--score_thr` 기본값(이 점수 이상인 상자만 그림). 키오스크 시점 값 아님 |
 | `phone_nms_iou` | 0.45 | IoU 0~1 | 관행값: 같은 데모의 `multiclass_nms(nms_thr=0.45)`(클래스를 가리지 않는 판) |
 | `hand_vis_min` | 없음 | visibility 0~1 | 정할 수 없음: 휴대폰 손 길에서 손 점을 손 상자에 넣는 visibility 하한. 값이 없으면 손 상자를 만들지 않아 손 길은 판정하지 않음(머리 길은 그대로, 아래 '휴대폰 입력') |
@@ -438,17 +590,17 @@ out, events = assess(rows, t_end, params, landmarker_num_faces=1)  # 창 = [t_en
 | `face_approach`(얼굴 접근) | 2-1 `lowvision` | `iod_ratio_user` · `dpitch_user_deg`, 사건 `face_size` · `head_pitch` | 창 안 `iod_ratio_user` 중앙값 > `approach_ratio_min`. 다만 그 창의 `dpitch_user_deg` 중앙값이 `head_down_pitch_min`보다 크면(고개 숙임) 거짓(판정한 창으로 셈). 이 중앙값은 창 프레임의 `face_visible_min` 이상의 줄에서 낸 것만 씀(값을 정한 방법과 같음). 얼굴이 커지지 않은 창은 고개 숙임과 상관없이 크기로만 판정 | 값 없음(`no_value`), 주 사용자 얼굴 줄 없음(`no_main_user_face`: 얼굴을 바싹 대 얼굴을 놓친 창도 여기), 기준이 아직 없음(`no_reference`), 거짓일 때 중앙값을 낸 줄이 창의 `face_visible_min`보다 적음(`too_few_rows`) |
 | `user_changed`(사용자 교체 가능성) | 2-2 `newcustomer` | `main_user_prev_track` · `main_user_gap_s` · `main_user_body_kept` · `main_user_body_gap_s` · `main_user_reacquired` · `main_user_stitched`, 사건 `main_user_changed` | 창 안 줄에서 새 주 사용자 트랙이 시작됨(같은 자리에서 다시 잡은 트랙, 제자리에서 끊겼다 이어 붙인 트랙, 앞 주 사용자가 자리 잡기 전의 트랙 바뀜은 빼고) | 같은 자리에서 다시 잡은 트랙뿐(`reacquired_same_place`; 이어 붙이기도 한 트랙은 이어 붙인 쪽을 따라 거짓), 머리 탐지기가 돌지 않음(`column:primary_track`) |
 | `none_seen`(카메라에 사람이 안 보임) | 자리 비움 `absence` | `face_state` · `face_count` · `body_state` · `head_count`(보조기구 탐지기를 켜면 `aid_person_count`도), 사건 `nothing_seen` | 창의 모든 줄에 얼굴(얼굴 점 · 얼굴 검출 상자) · 몸 · 머리 상자 · 보조기구 탐지기의 사람 상자(`aid_person_min` 초과)가 없음 | 창에 줄이 없음(`no_frames`), 머리 탐지기가 돌지 않아 머리 상자가 없는지 모름(`column:head_count`) |
-| `aid_use`(보조기구 사용 중) | 1-1 `aid`(휠체어면 1-2, `aid_kind`로 나눔) | `aid_any_score` · `aid_owner`(아래 '보조기구 입력'), 사건 `aid_score` | 창 안 주 사용자 사람 상자의 `aid_any_score` 중앙값 > `aid_use_min` | 탐지기를 켜지 않음(`column:aid_owner`), 값 없음(`no_value`, 값 묶음이 `null`을 줄 때), 주 사용자 기준점 없음(`no_anchor`), 기준점을 품은 상자 없음(`no_user_box`), 줄이 적음(`too_few_rows`) |
+| `aid_use`(보조기구 사용 중) | 1-1 `aid`(휠체어면 1-2: `owner_box`는 `aid_kind`, `head_centre` · `head_centre_carry`는 근거의 `aid_class`로 나눔) | `aid_any_score` · `aid_owner`(아래 '보조기구 입력'), 사건 `aid_score`. `aid_rule`이 `head_centre` · `head_centre_carry`이면 `aid_head_score` · `aid_head_class`, 사건 `aid_head` | 창 안 주 사용자 사람 상자의 `aid_any_score` 중앙값 > `aid_use_min`. `head_centre` · `head_centre_carry`이면 창 안 `aid_head_score` 중앙값 > `aid_head_min`(근거에 그 중앙값을 낸 클래스 `aid_class`) | 탐지기를 켜지 않음(`column:aid_owner`), 값 없음(`no_value`, 값 묶음이 `null`을 줄 때), 주 사용자 기준점 없음(`no_anchor`), 기준점을 품은 상자 없음(`no_user_box`), 줄이 적음(`too_few_rows`). `head_centre`이면 열 없음(`column:aid_head_score`), 컷 없음(`no_value_for_model`), 창에 주 사용자 머리 상자 없음(`no_main_user_box`), 줄이 적음(`too_few_rows`) |
 | `phone_use`(잠시 딴 일 중(휴대폰)) | 3-2 `busy`의 휴대폰 길 | `phone_owner` · `phone_at`(아래 '휴대폰 입력'), 사건 `phone_at_head` · `phone_in_hand`, 터치 횟수, 어깨 위치, 구간 끝 주 사용자 얼굴의 고개 방향(고개 방향 게이트를 주 사용자 얼굴로만 읽음)과 머리 상자 | 창의 `segment_s` 구간 가운데 `min_events`개 이상에서 휴대폰이 주 사용자 머리에 있음(머리 길: 통화), 또는 머리나 손에 있으면서 주 사용자가 화면을 보지 않음(손 길) + 창 안 터치 없음 + 몸 제자리(일행 길 `consulting_companion`과 같은 터치 · 몸 조건). 다른 장면 태그와 달리 3-2 행의 길 하나라서 터치와 고개 방향을 읽음 | 탐지기를 켜지 않음(`column:phone_owner`), 창 간격 `segment_s`를 받지 못함(`no_segments`), 판정하지 못한 구간이 많음(`phone_owner_unknown`), 손 길인데 화면을 보는지 모름(고개 방향 게이트가 모르고 머리 상자도 없음, `gaze_unknown`), 터치 횟수가 없음(`column:tap_count`), 몸 위치를 못 봄(`body_position_missing`) |
 
 - 여섯 태그 모두 창에 줄이 없으면 모름(`no_frames`)입니다.
 - 창 안에서 사용자가 바뀌면(`user_changed`가 교체로 세는 트랙 바뀜, `events.user_since`) 주 사용자를 재는 값은 새 사용자의 첫 줄부터만 읽습니다. 장면 태그에서는 얼굴 높이 · 얼굴 크기 · 고개 숙임(`face_height` · `face_size` · `head_pitch`), 머리 상자의 세로 가운데와 크기(`head_height` · `head_size`), 보조기구 점수(`aid_score`), 휴대폰 구간, 손 길의 화면을 보지 않음(바뀐 줄이 마지막 구간 안에 있으면 그 구간의 새 사용자 줄)이 여기에 듭니다. 상황 태그 3개에서는 고개 돌림(`look_back` · `yaw_sweep_offscreen`; 바뀐 줄이 창의 첫 줄이어도 그 앞의 맥락 줄은 읽지 않음), 일행 쪽 고개(`yaw_toward_companion`, 일행 쪽을 모르는지도), 입 움직임(`mouth_moving`), 머묾(`dwell_no_touch`), 얼굴이 보인 비율과 몸 추적 비율(`face_visible_ratio` · `track_conf`), 몸 제자리(`body_still`, `phone_use`의 몸 조건도 같음), 고개 방향 · 어깨 · 입 값의 관측 확인이 여기에 듭니다. 창 기록에서는 바뀐 줄이 그 구간 안에 있을 때 규칙표의 고개 방향 게이트, `measurable`의 얼굴, `vision`의 얼굴 · 몸 비율과 입 움직임 최댓값이 여기에 듭니다. 앞 사용자의 얼굴 · 머리 · 몸 · 보조기구는 새 사용자의 것이 아니기 때문입니다. 중앙값 판정에 필요한 관측 줄 비율(`face_visible_min`)과 위의 비율은 그대로 창(창 기록은 구간) 전체 프레임 수에 견줍니다. 그래서 바뀐 직후의 창은 줄이 모자라 모름(`too_few_rows`)이나 센서 실패(`sensor_failure`)가 되기 쉽습니다. `face_approach`는 참 판정에 이 비율을 요구하지 않아서 새 사용자의 관측 줄 몇 개로도 참이 나옵니다. 같은 자리에서 다시 잡은 트랙, 이어 붙인 트랙, 앞 사용자가 자리 잡기 전의 트랙 바뀜은 교체로 세지 않으므로 앞 줄도 읽습니다. 장면을 재는 값(사용자 교체 사건, 사람 안 보임, 일행 상자, 뒷사람, 머리 상자 수)과 터치 횟수는 창 전체를 읽습니다.
-- 저장소 기본값만으로는 새 태그가 참이 될 수 없습니다. 앉은 높이 · 얼굴 접근 경계값은 기본값이 없어 모름이고, 사용자 교체 · 사람 안 보임은 머리 탐지기, 보조기구 사용은 보조기구 탐지기의 ONNX 파일이 있어야 하는데 둘 다 저장소에 없습니다. 카메라마다 보정한 값 묶음과 모델 파일을 주어야 태그가 판정합니다.
+- 저장소 기본값만으로는 새 태그가 참이 될 수 없습니다. 앉은 높이 · 얼굴 접근 경계값은 기본값이 없어 모름이고, 사용자 교체 · 사람 안 보임은 머리 탐지기, 보조기구 사용은 보조기구 탐지기의 ONNX 파일이 있어야 하는데 둘 다 저장소에 없습니다(보조기구의 `head_centre` · `head_centre_carry` 읽기는 컷 `aid_head_min`도 있어야 함). 카메라마다 보정한 값 묶음과 모델 파일을 주어야 태그가 판정합니다.
 - 앉은 높이는 얼굴로 판정하지 못하는 창에서 주 사용자 머리 상자의 세로 가운데를 읽습니다(머리 탐지기와 `seated_head_cy_min`이 있을 때). 얼굴을 못 보는 앉은 사용자도 판정하려는 것입니다. 머리 상자가 같은 사용자의 기준 머리 높이(`head_ratio_user`, `iod_ratio_user`와 같은 기준점)보다 `head_approach_ratio_min`을 넘게 커진 줄은 이 판정에서 뺍니다. 화면에 다가가면 머리가 커지고 아래로 내려가지만, 조작 거리에 앉은 사용자의 머리는 커지지 않기 때문입니다. 회사 키오스크 영상(카메라 값 150, 경계값은 다른 사람들의 서서 쓰는 테이크로 정하고 한 사람씩 빼 가며 견줌)에서 얼굴만 쓰면 앉은 영상 40편 가운데 33편을 찾고 7편은 끝내 판정하지 못했는데, 머리 상자를 함께 쓰면 40편을 모두 찾았습니다. 서서 쓰는 영상 92편 가운데 잘못 잡은 영상은 6편으로 같고, 잘못 잡은 창은 68/1158(5.9 %)에서 71/1394(5.1 %)가 됐습니다. 팀 촬영본에서는 T10(뒤에서 대신 조작)까지 잡았지만, 화면에 얼굴을 바싹 댄 T02 · T05에서 머리가 내려가 참인 창이 생깁니다.
 - 경계값(`params.SCENE_BOUNDARIES`)은 기본값이 없고 값 묶음의 `chain` 칸으로 넣습니다. 얼굴 위치는 카메라 높이 · 기울기에 따라 달라서 `seated_face_cy_min`은 카메라마다 따로 정합니다. 정하는 방법은 Wu 외(W4A 2021)의 기준선 + 2 SD입니다. 그 카메라 앞에서 서서 보통으로 쓰는 녹화를 창으로 나누고(창 길이 = 값 묶음의 `window_s`), 창 중앙값의 평균에 표준편차 2배를 더하고, 태그는 그 값을 넘을 때 참입니다. 보정 녹화는 평가 촬영본과 따로 찍습니다. 같은 테이크로 값을 정하고 그 테이크로 평가하면 평가가 아무것도 말해 주지 않기 때문입니다. `approach_ratio_min`이 1 이하로 나오면(기준 크기와 같거나 작음) 쓰지 않고, 값 묶음도 1 이하의 `approach_ratio_min` · `head_approach_ratio_min`을 받지 않습니다.
 - 보정 도구: `python -m app.modules.vision.tools.calibrate_scene --params 값묶음.json --rows 보정녹화1/rows.csv 보정녹화2/rows.csv --note "녹화 설명" --out 조각.json`. 창 중앙값 · 프레임 · 녹화 중앙값 세 가지로 n · 평균 · 표준편차 · 평균 + 2 SD를 출력하고, 창 중앙값 값을 값 묶음의 `chain` 칸 조각으로 씁니다. 최소 개수는 두지 않았습니다. n이 충분한지는 출력을 보고 판단합니다. `--note`에는 녹화를 묶어서 설명하고, 파일 이름이나 사람 이름은 적지 않습니다. 머리 탐지기를 켠 녹화를 주면 트랙 잇기 경계 2개(`stitch_shift_max` · `stitch_size_max`)도 냅니다. 같은 주 사용자 트랙의 머리 상자 하나와 그 뒤 `track_max_gap_s` 안의 마지막 상자를 짝지어 위치 차 · 크기 차를 재고(`columns.stitch_motion`), 그 평균 + 2 SD를 씁니다. 짝이 나온 녹화가 2개보다 적으면 값을 쓰지 않습니다. 보정 도구와 `companion_eval rewindow`는 `rows.csv`에 없는 장면 열을 값 묶음의 `chain` 값으로 채웁니다. 교체 열(`main_user_*`)은 하나라도 없으면(트랙 잇기 열이 생기기 전에 쓴 기록 등) 모두 다시 씁니다. 고개 숙임 열(`dpitch_user_deg`)은 이미 있으면 다시 쓰지 않습니다. 그래서 이어 붙인 트랙에서도 고개 숙임 기준을 이어 쓰게 고치기 전(2026-11-22)에 쓴 `rows.csv`는, 이어 붙인 끊김에서 기준을 다시 잡은 저장값을 그대로 씁니다. 교체 열을 다시 써서 이어 붙인 끊김이 새로 생긴 기록도 같습니다. 이런 기록으로 다시 낸 창 판단(`rewindow`)과 `head_down_pitch_min` 보정은 경고 없이 저장된 기준을 따릅니다. 영상으로 다시 재생하면(`replay.py`) 이 값을 새로 계산합니다.
 - `iod_ratio_user`의 기준은 같은 주 사용자의 눈 사이 거리입니다. 기준점(터치 로그가 있으면 그 세션의 첫 누름, 없으면 트랙 시작)부터 모은 크기 가운데 위쪽 절반의 중앙값이라, 걸어 들어오는 동안의 작은 크기는 빠집니다. 첫 누름이 사용자가 아직 다가오는 중에 와도 기준은 터치 로그가 없을 때와 같은 방법으로 잡습니다. 그래도 걸어 들어오는 속도에 따라 도착 직후 창이 얼굴 접근으로 잡힐 수 있습니다.
-- 터치 로그가 있으면 비가 이미 `approach_ratio_min`을 넘은 줄은 기준에 넣지 않습니다. 그래서 바싹 다가간 채 오래 머물러도 기준이 따라 올라가지 않고 `face_approach`가 이어집니다. 터치 로그가 없으면(이 PR의 실시간 실행 `live.py`, 터치 로그 없는 재생) 다가간 줄도 기준에 들어가서, 오래 다가가 있으면 접근이 사라집니다. 합성 입력(6초 동안 40 px, 그 뒤 10초 동안 52 px, 줄마다 ±1 px)에서는 다가간 뒤 3초 동안만 참이었습니다. 첫 누름(터치 로그가 없으면 트랙 시작) 때부터 이미 가까이 있던 사용자는 그 크기가 기준이라 잡히지 않습니다. 반대로 첫 누름 직후의 얼굴이 유난히 작게 잡히면(고개를 크게 돌린 채 누른 경우) 그 크기가 기준이 되어, 그 뒤 보통 거리의 줄도 접근으로 남을 수 있습니다. 첫 누름 뒤에도 얼굴이 기준보다 `approach_ratio_min` 넘게 빨리 커지며 다가오면 그 줄도 기준에 들어가지 않아 같은 일이 생깁니다. 이 경우는 따로 거르지 않습니다. 주 사용자 트랙이 바뀌면 기준을 다시 잡지만, 같은 자리에서 다시 잡은 트랙(`main_user_reacquired`, 아래)은 같은 사람이라 기준을 이어 씁니다. 제자리에서 이어 붙인 트랙(`main_user_stitched`, 아래)은 사용자 교체로 세지 않지만 크기 기준은 다시 잡습니다. 이어 붙는 끊김은 대개 다가오는 중에 생겨서, 앞 트랙의 작은 크기가 기준에 남으면 다가간 줄로 잘못 빠지기 때문입니다(회사 영상 카메라 값 150에서 이은 끊김 4개 가운데 3개가 자리 잡기 전이었고, 기준을 이어 쓰면 앉은 높이 머리 상자 판정 창이 366개에서 360개로 줄었습니다). 고개 숙임 기준(`dpitch_user_deg`)은 이어 붙인 트랙에서도 이어 씁니다. 깊이 숙여 끊긴 트랙의 첫 얼굴은 숙인 각도라서, 그 줄로 기준을 다시 잡으면 그 뒤의 숙임을 거르지 못하기 때문입니다. 이 기준은 첫 얼굴 한 줄이라, 이어 쓰면 트랙이 끊기지 않았을 때와 같은 값이 됩니다. 머리 탐지기가 없는 실행은 얼굴과 몸을 `track_max_gap_s`보다 오래 못 보면 기준을 다시 잡습니다. 그래서 손님이 쉬지 않고 이어지면 앞 손님의 크기가 기준에 남습니다. 기준 표본은 0.1 px 간격으로 묶어 개수만 남깁니다. 그래서 오래 켜 둬도 상태가 커지지 않고, 중앙값은 0.05 px 안에서 같습니다.
+- 터치 로그가 있으면 비가 이미 `approach_ratio_min`을 넘은 줄은 기준에 넣지 않습니다. 그래서 바싹 다가간 채 오래 머물러도 기준이 따라 올라가지 않고 `face_approach`가 이어집니다. 터치 로그가 없으면(`--serve` 없이 돌린 실시간 실행 `live.py`, 터치 로그 없는 재생) 다가간 줄도 기준에 들어가서, 오래 다가가 있으면 접근이 사라집니다. 합성 입력(6초 동안 40 px, 그 뒤 10초 동안 52 px, 줄마다 ±1 px)에서는 다가간 뒤 3초 동안만 참이었습니다. `--serve`로 돌린 실시간 실행에서는 주문 화면이 보낸 터치 창이 터치 로그 자리를 맡습니다(위 '주문 화면 · backend와 잇는 두 연결'의 첫 누름 기준). 첫 누름(터치 로그가 없으면 트랙 시작) 때부터 이미 가까이 있던 사용자는 그 크기가 기준이라 잡히지 않습니다. 반대로 첫 누름 직후의 얼굴이 유난히 작게 잡히면(고개를 크게 돌린 채 누른 경우) 그 크기가 기준이 되어, 그 뒤 보통 거리의 줄도 접근으로 남을 수 있습니다. 첫 누름 뒤에도 얼굴이 기준보다 `approach_ratio_min` 넘게 빨리 커지며 다가오면 그 줄도 기준에 들어가지 않아 같은 일이 생깁니다. 이 경우는 따로 거르지 않습니다. 주 사용자 트랙이 바뀌면 기준을 다시 잡지만, 같은 자리에서 다시 잡은 트랙(`main_user_reacquired`, 아래)은 같은 사람이라 기준을 이어 씁니다. 제자리에서 이어 붙인 트랙(`main_user_stitched`, 아래)은 사용자 교체로 세지 않지만 크기 기준은 다시 잡습니다. 이어 붙는 끊김은 대개 다가오는 중에 생겨서, 앞 트랙의 작은 크기가 기준에 남으면 다가간 줄로 잘못 빠지기 때문입니다(회사 영상 카메라 값 150에서 이은 끊김 4개 가운데 3개가 자리 잡기 전이었고, 기준을 이어 쓰면 앉은 높이 머리 상자 판정 창이 366개에서 360개로 줄었습니다). 고개 숙임 기준(`dpitch_user_deg`)은 이어 붙인 트랙에서도 이어 씁니다. 깊이 숙여 끊긴 트랙의 첫 얼굴은 숙인 각도라서, 그 줄로 기준을 다시 잡으면 그 뒤의 숙임을 거르지 못하기 때문입니다. 이 기준은 첫 얼굴 한 줄이라, 이어 쓰면 트랙이 끊기지 않았을 때와 같은 값이 됩니다. 머리 탐지기가 없는 실행은 얼굴과 몸을 `track_max_gap_s`보다 오래 못 보면 기준을 다시 잡습니다. 그래서 손님이 쉬지 않고 이어지면 앞 손님의 크기가 기준에 남습니다. 기준 표본은 0.1 px 간격으로 묶어 개수만 남깁니다. 그래서 오래 켜 둬도 상태가 커지지 않고, 중앙값은 0.05 px 안에서 같습니다.
 - 머리 탐지기를 켠 실행은 주 사용자 머리 상자에 맞춘 얼굴(`face_in_primary` 참)만 `seated_height` · `face_approach`와 `iod_ratio_user`의 기준에 씁니다. 머리 상자가 잠깐 빠진 프레임에서 어느 상자에도 들지 않은 얼굴처럼 누구 것인지 모르는 얼굴은 쓰지 않습니다.
 - `seated_height` · `aid_use`는 중앙값을 낸 줄이 창 프레임의 `face_visible_min`보다 적으면 모름(`too_few_rows`)입니다. 세 태그가 얼굴 단서에 이미 요구하는 비율을 그대로 써서, 줄 몇 개로 참 · 거짓을 내지 않습니다. `face_approach`는 참에는 이 비율을 묻지 않습니다. 얼굴을 바싹 대면 얼굴 점을 놓치는 일이 잦아서, 비율을 두면 이 장면을 가리게 됩니다. 거짓에는 비율을 묻습니다. 얼굴을 놓치기 직전 줄 몇 개로 창 전체를 거짓이라 하지 않으려는 것입니다.
 - 얼굴만 가려진 경우(모자 · 손)는 머리 상자 트랙이 이어져서 사용자 교체로 세지 않습니다. 머리 상자까지 `track_max_gap_s`보다 오래 놓쳐 트랙이 끝나도, 새 주 사용자 상자가 끝난 트랙의 마지막 상자와 `track_iou_min`(추적기가 상자를 잇는 SORT 관행값) 이상 겹치고 그동안 자리가 비지 않았으면 같은 자리에서 다시 잡은 것으로 보고(`main_user_reacquired`) 교체로 세지 않습니다. 자리가 비었다는 것은 머리 상자도 몸도 `track_max_gap_s`(머리 트랙이 끊기지 않는 시간)보다 오래 이어서 안 보였다는 뜻입니다(`main_user_body_gap_s`, 관측값 `body_unseen_s`로 잼). 그래서 깊이 숙일 때 자세 추정이 잠깐 몸을 놓쳐도 자리가 빈 것으로 보지 않습니다. `body_unseen_s`가 없는 줄이면 전처럼 몸이 모든 줄에 보여야 합니다(`main_user_body_kept`). 그 사이 몸까지 그보다 오래 안 보였으면 자리가 비었던 것이라 같은 자리에 선 다음 손님도 교체로 셉니다. 카메라가 잠깐 멈춘 경우도 같습니다. 깊이 숙이거나 모자를 쓰면 머리 상자가 크게 바뀌어, 추적기가 같은 사람에게 곧바로 새 트랙을 시작할 수 있습니다. 새 주 사용자 트랙이 앞 트랙의 마지막 상자 뒤 `track_max_gap_s` 안에 처음 잡혔고, 그 첫 상자의 위치 차가 `stitch_shift_max` 이하이고 크기 차가 `stitch_size_max` 이하이면 제자리에서 끊긴 같은 사용자로 보고 이어 붙입니다(`main_user_stitched`). 모양은 보지 않고 시간 · 위치 · 크기만 봅니다(StrongSORT AFLink와 같은 방식). 두 머리가 한 프레임에 함께 보였으면 두 사람이라 잇지 않습니다. 같은 자리에서 다시 잡았고 이어 붙이기도 한 끊김은 이어 붙인 쪽을 따라 교체가 아닌 것(거짓)으로 보고, 모름으로 두지 않습니다. 이어 붙이기는 새 머리가 앞 트랙의 마지막 상자 뒤 `track_max_gap_s` 안에 처음 잡혀야 한다는 시간 조건까지 맞춘 것이고, 다시 잡음은 이 조건을 보지 않기 때문입니다. 두 경계는 서서 쓰는 녹화에서 같은 주 사용자 머리 상자가 `track_max_gap_s` 안에 움직인 위치 차 · 크기 차의 평균 + 2 SD입니다. 상자 하나를 그 뒤 `track_max_gap_s` 안의 같은 트랙 마지막 상자와 짝짓기 때문에, 짝은 대개 `track_max_gap_s`만큼 떨어져 있습니다. 그래서 두 경계는 잇기가 건너는 가장 긴 끊김에 맞고, 자주 만나는 짧은 끊김(0.1초)에는 느슨합니다. 짝을 지을 때는 시간 차가 꼭 `track_max_gap_s`인 짝이 부동소수점 반올림으로 빠지지 않게 1e-9초를 더 받지만, 잇기 규칙과 추적기는 그 여유 없이 비교합니다. 회사 키오스크 영상(카메라 값 120 · 150 · 200, 311편)은 영상마다 참가자 한 명이라 영상 안의 교체는 모두 잘못 센 것입니다. 두 경계를 다른 사람들의 서서 쓰는 테이크로 정하고 한 사람씩 빼 가며 견주니, 교체로 잘못 센 창이 카메라 150에서 3/2414개(132편 중 1편)에서 0개, 120에서 52/1651개(90편 중 16편)에서 29개(9편)로 줄었고, 200은 4/1661개(89편 중 2편) 그대로입니다. 150의 1편은 트랙 잇기로, 120의 23창은 위의 몸 공백 허용으로 빠졌습니다. 대신 120에서 같은 자리 다시 잡음의 모름 창이 9개에서 32개가 됐습니다. 남은 잘못 센 바뀜 12개(120에서 10개, 200에서 2개) 가운데 10개는 새 상자가 앞 상자와 `track_iou_min`보다 덜 겹치고, 2개는 같은 자리지만 몸이 1.06초 · 1.23초 동안 안 보였습니다. 팀 촬영본의 교체 장면 2편(T03 · T08)은 그대로 잡히고 다른 테이크는 0창입니다. 앞 주 사용자가 키오스크 앞에 자리 잡기 전(머리 상자 높이가 1초 구간마다 계속 커지는 동안, `segment_s` 구간 중앙값이 앞 구간보다 커지지 않은 첫 구간부터 자리 잡음)에 트랙이 바뀌면, 처음 다가오는 중의 바뀜이라 교체로 세지 않습니다(`main_user_prev_settled`). 터치(장바구니가 남은 채 한참 무입력 뒤 첫 터치)와 묶는 일은 판단 층이 합니다.
@@ -465,12 +617,33 @@ out, events = assess(rows, t_end, params, landmarker_num_faces=1)  # 창 = [t_en
 - 탐지기를 불러올 때 빈 입력 한 장으로 출력 모양이 클래스 목록과 맞는지 봅니다. 실시간 실행의 `meta.json`에도 파일의 해시 · 라이선스 · 출처 문구를 적습니다.
 - 출처 문구(내보낸 파일의 `attribution`): aid_det joint weights (YOLOX-Nano, 5 person-level classes) were trained on the train split of "Crossroad Camera Dataset - Mobility Aid Users" v1.0 by Ludwig Mohr, Nadezda Kirillova, Horst Possegger, Horst Bischof (Graz University of Technology), https://doi.org/10.3217/2gat1-pev27, licensed under CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/), together with the train split of PMMA v1.1 (CC0 1.0). 가중치는 CC BY-SA 4.0이라, 파일을 넘길 때는 이 문구와 라이선스를 함께 넘깁니다. 코드는 YOLOX(Apache-2.0)의 전처리 · 디코딩 · NMS를 `app/inference/head.py`와 함께 씁니다.
 - 정확도: 공개 시험 자료(TU Graz 시험 분할, 입력 416)에서 목발 AP50 22.2 · 휠체어 82.1 · 보조기구 있음 76.0입니다. 교차로 카메라 시점에서 잰 값이라, 키오스크 시점의 정확도로 쓰지 않습니다.
-- 키오스크 앞 가까운 사용자: 길거리 카메라 영상으로 학습한 이 탐지기는 키오스크 앞에 가까이 선 사용자를 사람 상자로 잡지 않고, 그때 `aid_use`는 추측하지 않고 모름(`no_user_box`)을 냅니다. 팀 촬영본 32편(T10 · T33 제외, 2026-11-22)에서 주 사용자 기준점을 품은 상자가 나온 프레임은 4,638장 가운데 0장이었고, `aid_person_min`을 넘는 사람 상자 268프레임은 모두 더 멀리 있는 다른 사람이었습니다(창 480개 모두 모름: `no_user_box` 477 · `no_anchor` 3). 이 모듈에는 키오스크 앞 가까운 사용자를 판정하는 별도 경로가 없습니다.
+- 키오스크 앞 가까운 사용자: 길거리 카메라 영상으로 학습한 이 탐지기는 키오스크 앞에 가까이 선 사용자를 사람 상자로 잡지 않고, 그때 `aid_use`는 추측하지 않고 모름(`no_user_box`)을 냅니다. 팀 촬영본 32편(T10 · T33 제외, 2026-11-22)에서 주 사용자 기준점을 품은 상자가 나온 프레임은 4,638장 가운데 0장이었고, `aid_person_min`을 넘는 사람 상자 268프레임은 모두 더 멀리 있는 다른 사람이었습니다(창 480개 모두 모름: `no_user_box` 477 · `no_anchor` 3). 라벨 방식이 다른 키오스크 시점용 탐지기 파일은 아래 '세 읽기'의 `head_centre`나 `head_centre_carry`로 읽습니다.
 - `aid_use`의 기준값 `aid_use_min` 0.350(`[파일럿]`)은 TU Graz 검증 분할에서 F1이 가장 큰 점수 기준을 그대로 옮긴 것입니다. `aid_any_score`와 같은 점수 규칙(목발 · 지팡이 · 보행기 · 휠체어 점수의 최댓값)의 줄에서 가져왔고, 시험 분할에 그대로 적용하면 정밀도 0.698 · 재현율 0.736(사람 상자 3,966개)입니다. 1-1 경로(목발 · 지팡이 · 보행기)만 보는 독자를 위해 적으면, 같은 파일에서 그 셋의 묶음은 자기 검증 기준(0.350)에서 시험 정밀도 0.618 · 재현율 0.510(사람 상자 2,306개)입니다. 주의할 점은 넷입니다.
   - 이 값은 그 공개 자료와 그 자료의 보조기구 사용자 비율에 맞춘 값입니다. 키오스크 앞 손님 가운데 보조기구 사용자 비율은 재지 않았고, 다른 공개 자료(PMMA 검증 분할)로 같은 방법을 쓰면 0.480이 나옵니다.
   - 키오스크 시점에서 잰 기준이 아닙니다(위 '정확도').
   - 작은 사람 상자에서 재현율이 낮습니다. 같은 규칙에서 작은 상자 0.386(158개), 중간 0.760, 큰 상자 0.730입니다(COCO 넓이 구간).
   - 영상 한 장에서 가장 큰 사람만 보는 방식(이미지 단위)의 기준값은 쓸 만한 값이 나오지 않아 쓰지 않았습니다.
+
+#### 세 읽기 (`aid_rule`, 2026-11-26)
+
+탐지기 파일마다 라벨 방식이 달라서 `aid_use`를 읽는 방법이 셋입니다. 값 `aid_rule`로 고르고, 기본값은 지금 규칙인 `owner_box`입니다. `head_centre_carry`는 `head_centre`에 머리 상자가 없는 프레임의 읽기를 더한 것입니다.
+
+| 읽기 | 맞는 파일 | 프레임마다 읽는 값 | `aid_use` 참 |
+|---|---|---|---|
+| `owner_box`(기본값) | 사람마다 사람 상자가 있고 클래스가 그 사람의 이동 방법인 파일(`aid_det_joint_416_416.onnx`) | 위 '주 사용자의 상자'와 그 상자의 `aid_any_score` | 창 안 `aid_any_score` 중앙값 > `aid_use_min`(0.350, `[파일럿]`) |
+| `head_centre` | 키오스크 시점용 파일: `pedestrian`은 서 있거나 걷는 사람만, 보조기구 사용자는 사용자와 보조기구를 함께 두른 보조기구 클래스 상자 하나(그 사람에게는 `pedestrian` 상자가 없음), 앉은 사람은 상자 없음 | `aid_head_score`: `pedestrian`을 뺀 클래스마다 모든 anchor의 그 클래스 점수(objectness × 클래스 점수)를 `aid_score_min`으로 거르고 그 클래스 안에서 `aid_nms_iou`로 NMS를 한 뒤, 주 사용자 머리 상자 가운데를 품은 상자의 가장 큰 점수. 클래스들 가운데 가장 큰 값과 그 클래스(`aid_head_class`) | 창 안 `aid_head_score` 중앙값 > `aid_head_min`(값 없음) |
+| `head_centre_carry` | `head_centre`와 같은 파일 | 주 사용자 머리 상자가 있는 프레임은 `head_centre`와 같은 값이고, 그 값을 낸 상자를 기억함. 머리 상자가 없는 프레임은 모든 보조기구 클래스의 남은 상자 가운데 기억한 상자와 IoU가 가장 큰 상자(IoU `track_iou_min` 이상)의 점수와 클래스이고, 그 상자를 다음에 따라감. 값의 출처는 `aid_head_from`(`head` · `carried`) | `head_centre`와 같음 |
+
+- `head_centre`는 키오스크 시점용 파일을 시험한 재생 도구(저장소 밖)와 같은 읽기이고, 디코딩은 `app/inference/aid.py`와 같습니다. 그 도구는 휠체어 클래스만 읽고, 이 모듈은 `pedestrian`을 뺀 네 클래스 가운데 가장 큰 값을 씁니다.
+- 머리 상자는 있는데 그 가운데를 품은 상자가 없으면 그 프레임의 값은 0입니다. 주 사용자 머리 상자가 없는 프레임은 값이 없습니다. 그래서 이 읽기는 머리 탐지기가 있어야 하고, 머리 탐지기 없이 돌리면 `aid_use`는 늘 모름(`no_main_user_box`)입니다.
+- 창 판단은 `owner_box`와 같습니다. 창의 가장 새 사용자 줄부터 값이 있는 줄의 중앙값을 내고, 그 줄이 `face_visible_min`보다 적으면 모름(`too_few_rows`)입니다. 근거(사건 `aid_head`)에는 그 중앙값을 낸 클래스(`aid_class`: 점수 순으로 놓은 줄 가운데 위쪽 가운데 줄의 클래스)가 들어갑니다.
+- 컷 `aid_head_min`은 아직 정하지 않아 기본값이 없습니다. 값이 없으면 `aid_use`는 모름(`no_value_for_model`)이고, 저장소에는 값을 두지 않습니다.
+- 이 읽기에서도 위 `aid_*` 열은 전과 같이 적습니다(`none_seen`이 읽는 `aid_person_count` 포함). `aid_use`만 새 열을 읽습니다.
+- `head_centre_carry`는 머리 상자가 적게 잡히는 사용자를 읽으려고 더한 읽기입니다. 머리 상자가 없는 프레임에서는 주 사용자가 누구인지 줄에 남지 않으므로, 직전 머리 프레임에서 사용자 머리 가운데를 품었던 보조기구 상자를 머리 트랙과 같은 규칙으로 따라갑니다. IoU가 가장 큰 상자를 고르고, 그 IoU가 `track_iou_min`(0.3, 관행값: SORT 공개 구현의 기본값) 이상이어야 합니다. `track_max_gap_s`(1.0초, `[파일럿]`)보다 오래 맞는 상자가 없으면 따라가기를 끝냅니다. 새 값은 없습니다.
+  - 값이 0인 머리 프레임(머리 가운데를 품은 상자가 없음)은 기억한 상자를 지우고, 값이 있는 머리 프레임은 그 상자로 바꿉니다. 새 주 사용자의 첫 줄은 늘 머리 프레임이라 그 사람의 상자로 바뀝니다. 머리 프레임이 한 번도 없었으면 아무것도 따라가지 않습니다.
+  - 머리 트랙이 끝난 뒤에도 상자가 맞는 동안은 따라갑니다. 그래서 다른 태그가 주 사용자로 보지 않는 사람의 보조기구를 읽을 수 있고, 겹쳐 지나가는 다른 사람의 상자로 옮겨 갈 수도 있습니다(머리 트랙처럼 움직임 예측이 없음).
+  - 터치 로그 세션이 바뀌면 머리 트랙 · 기준과 함께 지웁니다. 창 판단, 컷 `aid_head_min`, 근거(`aid_head`, `aid_class`)는 `head_centre`와 같습니다.
+- 두 값은 값 묶음의 `chain` 칸으로 주거나, 재생 · 실시간 실행기에 `--aid-model 파일.onnx --aid-rule head_centre --aid-head-min <컷>`(또는 `--aid-rule head_centre_carry`)으로 줍니다. 옵션이 값 묶음보다 앞서고, `meta.json`에는 출처 `실행 옵션 --aid-head-min`, origin `option`으로 남습니다. `--aid-model` 없이 두 옵션 가운데 하나라도 주면 시작하지 않습니다. 키오스크 시점용 파일은 내부 시험 파일이라 저장소에 두지 않고 경로로 줍니다.
 
 ### 휴대폰 입력과 3-2 휴대폰 길 (2026-11-22, 선택)
 
@@ -548,6 +721,8 @@ out, events = assess(rows, t_end, params, landmarker_num_faces=1)  # 창 = [t_en
 | `mouth_motion` | 입 · 턱 blendshape 27개(`mouth_dials`) 가운데 기준선에서 가장 많이 바뀐 값. 기준선은 같은 얼굴 연속 구간의 직전 `mouth_baseline_s`초 중앙값입니다(사람별 기준선을 뺀 변화만 씀). 얼굴을 못 본 프레임, 연속 구간이 `mouth_baseline_s`보다 짧은 동안, blendshape를 끈 실행은 빈칸 | `columns.py`(MediaPipe blendshape, 실행기에 `--blendshapes`를 줄 때만 켬) |
 | `shoulder_cx` · `shoulder_cy` | 어깨 두 점(11 · 12)의 가운데, 화면 비율. 몸을 못 본 프레임은 빈칸 | `columns.py`(몸 점) |
 | `aid_owner` · `aid_top_class` · `aid_any_score` · `aid_wheelchair_score` · `aid_kind` · `aid_class_scores` · `aid_box` · `aid_count` | 보조기구 탐지기를 켰을 때만(위 '보조기구 입력'): 주 사용자 상자의 판정(`yes` = 그 상자의 가장 높은 클래스가 네 보조기구 가운데 하나, `no` = 기준점은 있는데 `pedestrian`이거나 품는 상자가 없음, `unknown` = 기준점이 없음), 그 상자의 가장 높은 클래스, 목발 · 지팡이 · 보행기 · 휠체어 점수 가운데 가장 큰 값, 휠체어 점수, 어느 쪽 보조기구인지(`wheelchair` · `standing`), 다섯 클래스 점수(JSON 한 칸), 상자, 프레임의 사람 상자 수(`aid_score_min` 이상)와 그 가운데 `aid_person_min`을 넘는 수. 기준값을 적용하지 않음 | `columns.py`(`aid_columns`), `app/inference/aid.py` |
+| `aid_head_score` · `aid_head_class` · `aid_head_box` | 보조기구 탐지기를 `aid_rule` `head_centre` · `head_centre_carry`로 켰을 때만(위 '세 읽기'): 주 사용자 머리 상자 가운데를 품은 보조기구 클래스 상자(`pedestrian`을 뺀 클래스마다 따로 거르고 NMS를 한 상자)의 가장 큰 점수, 그 클래스와 상자. 머리 상자는 있고 품는 상자가 없으면 0과 빈칸 둘, 머리 상자가 없으면 모두 빈칸(`head_centre_carry`에서는 따라간 상자가 맞은 프레임이면 그 상자의 점수 · 클래스 · 상자). 기준값을 적용하지 않음 | `columns.py`(`aid_head_columns`, `AidCarry`), `app/inference/aid.py`(`per_class`) |
+| `aid_head_from` | `aid_rule` `head_centre_carry`일 때만: 그 줄 값이 어디서 왔는지. `head` = 주 사용자 머리 상자가 있는 줄(`head_centre`와 같은 값), `carried` = 직전 머리 줄의 상자를 따라가 읽은 값, 빈칸 = 값 없음 | `columns.py`(`AidCarry`) |
 | `phone_owner` · `phone_at` · `phone_score` · `phone_box` · `phone_count` | 휴대폰 탐지기를 켰을 때만(아래 '휴대폰 입력'): 주 사용자의 휴대폰인지(`yes` = 휴대폰 상자가 주 사용자 머리 상자에 닿고 다른 머리 상자가 그 상자를 더 많이 담지 않음, 또는 어느 머리에도 걸치지 않고 주 사용자 손 상자에 닿음, `no` = 머리 상자가 있고 휴대폰이 없거나 모두 닿지 않음(탐지기가 놓친 휴대폰도 `no`), `unknown` = 머리 상자가 없거나, 머리에 닿지 않은 휴대폰이 있는데 몸 점이 주 사용자 것이 아니거나 손 점을 확인하지 못함(`hand_vis_min`이 없을 때 포함)), 닿은 곳(`head` · `hand`), 그 휴대폰의 점수와 상자, 프레임의 휴대폰 상자 수. 기준값을 적용하지 않음 | `columns.py`(`phone_columns`), `app/inference/phone.py` |
 | `iod_ratio_user` | 주 사용자의 눈 사이 거리(`iod_px`) ÷ 같은 사용자의 기준점부터 직전 얼굴 줄까지의 `iod_px` 가운데 위쪽 절반의 중앙값(터치 로그가 있으면 비가 `approach_ratio_min`을 넘은 줄은 뺌). 기준점 = 주 사용자 트랙의 시작과 터치 로그 세션의 시작이고, 터치 로그가 있으면 그 세션의 첫 누름. 다른 사람의 얼굴, 기준이 아직 없는 줄, 첫 누름 전은 빈칸(위 '장면 태그 6개') | `columns.py`(`FaceSizeRef`) · `chain.py` |
 | `head_ratio_user` | 주 사용자의 머리 상자 높이 ÷ 같은 사용자의 기준 머리 상자 높이(`HeadSizeRef`). 기준점과 규칙은 `iod_ratio_user`와 같고, 기준에서 빼는 경계는 `head_approach_ratio_min`. 주 사용자 상자가 없는 줄, 기준이 아직 없는 줄, 첫 누름 전은 빈칸. 머리 탐지기가 돌지 않으면 열이 없음 | `columns.py`(`HeadSizeRef`) · `chain.py` |
@@ -557,7 +732,7 @@ out, events = assess(rows, t_end, params, landmarker_num_faces=1)  # 창 = [t_en
 | `main_user_new_start_s` · `main_user_start_shift` · `main_user_start_size` · `main_user_stitched` | 교체 줄에만: 끝난 트랙의 마지막 머리 상자부터 새 트랙의 첫 상자(다른 머리로 먼저 잡혔으면 그때)까지의 초(0 이하 = 두 머리가 함께 보임, 두 사람), 그 두 상자의 위치 차(가로 차 ÷ 앞 상자 폭, 세로 차 ÷ 앞 상자 높이의 유클리드 거리)와 크기 차(\|ln(첫 상자 높이 ÷ 마지막 상자 높이)\|). `main_user_stitched` = 새 트랙이 `track_max_gap_s` 안에 시작했고 위치 차 ≤ `stitch_shift_max`, 크기 차 ≤ `stitch_size_max`이면 참(제자리에서 끊긴 같은 사용자), 아니면 거짓, 경계값이나 상자가 없으면 빈칸 | `columns.py`(`MainUserChange`) |
 | `main_user_prev_track` · `main_user_gap_s` · `main_user_body_kept` | 같은 터치 로그 세션에서 앞 주 사용자 트랙 다음에 새 주 사용자 트랙이 시작된 줄에만: 앞 트랙 번호, 앞 트랙의 마지막 머리 상자부터 지난 초, 그사이 모든 줄에 몸이 보였는지(누구의 몸인지는 모름). 다른 줄은 빈칸. H1 파일이 없으면 열이 없음 | `columns.py`(`MainUserChange`) |
 | (관측만) `main_user_prev_h` · `main_user_new_h` · `main_user_h_ratio` · `main_user_new_was_role` · `main_user_new_rel_dist` · `main_user_new_growth` | 같은 줄의 크기 근거(기준값 없음): 앞 주 사용자의 마지막 머리 상자 높이와 새 주 사용자의 머리 상자 높이(화면 비율), 새 ÷ 앞. 새 트랙이 바뀌기 전에 다른 머리로 보였으면 그때의 마지막 역할(`head_boxes`의 `role`), 마지막 `rel_dist_med`(앞 주 사용자 높이 ÷ 그 머리 높이, 1보다 크면 더 작음 = 더 멂), 그리고 지금 높이 ÷ 주 사용자가 아니던 동안 직전 `role_window_s`초 높이의 중앙값(커진 정도). 다른 머리의 기록은 `track_max_gap_s`보다 오래 안 보이면 지웁니다. 뒤에 선 사람은 앞으로 나와야 다음 사용자가 되므로, 커진 정도가 1에 가깝고 `rel_dist`가 1보다 크면 뒤 사람 크기 그대로 주 사용자가 된 것입니다. 읽는 규칙 없음 | `columns.py`(`MainUserChange`) |
-| `tap_count` · `miss_tap_count` | 직전 줄 이후의 누름 · 버튼 밖 누름 횟수(아래 '터치 로그'). 이름과 뜻은 `contract/frontend-backend.openapi.yaml`의 `TouchFeatures`를 따르고(0 이상의 정수), 세는 구간만 프레임 간격. 터치 로그가 관측하지 않은 구간의 줄은 빈칸(아래 '터치 로그')이고, 대상 정보가 없는 누름이 든 구간은 `miss_tap_count`가 빈칸 | `touch.py` · `chain.py`(재생만. 실시간에는 터치 로그가 없음) |
+| `tap_count` · `miss_tap_count` | 직전 줄 이후의 누름 · 버튼 밖 누름 횟수(아래 '터치 로그'). 이름과 뜻은 `contract/frontend-backend.openapi.yaml`의 `TouchFeatures`를 따르고(0 이상의 정수), 세는 구간만 프레임 간격. 터치 로그가 관측하지 않은 구간의 줄은 빈칸(아래 '터치 로그')이고, 대상 정보가 없는 누름이 든 구간은 `miss_tap_count`가 빈칸 | `touch.py` · `chain.py`(재생. 실시간 실행은 줄에 비워 두고, `--serve`로 받은 터치 창의 횟수를 창마다 줄 사본에 놓음: `touch_entry.place_touch`) |
 | (관측만) `head_count` · `primary_box` · `primary_score` · `primary_from` | 머리 상자 수, 주 사용자 머리 상자 · 점수 · 고른 방법(`track` = 앞 프레임부터 이어진 주 사용자 트랙, `face` = 이 프레임에서 얼굴을 품은 상자로 새로 고름, `largest` = 이 프레임에서 가장 큰 상자로 새로 고름). 주 사용자 트랙이 살아 있지만 이 프레임에 상자가 없으면 `primary_box`는 빈칸. 읽는 규칙 없음 | `columns.py` |
 | (관측만) `primary_track` | 주 사용자 트랙 번호. 트랙이 살아 있는 동안은 이 프레임에 상자가 없어도 적음 | `columns.py` |
 | `face_in_primary` | Face Landmarker가 따라가는 얼굴의 중심이 주 사용자 머리 상자 안에 있는지(참 · 거짓). 얼굴이나 주 사용자가 없으면 빈칸. 주 사용자 트랙은 살아 있는데 이 프레임에 그 상자가 없으면, 얼굴 중심이 다른 트랙의 머리 상자 안에 있을 때 거짓이고 어느 머리 상자 안에도 없을 때 빈칸(머리 탐지기가 주 사용자 머리를 놓쳤을 수 있음). 거짓이면 그 얼굴은 다른 사람의 것이라, 그 줄의 얼굴 값 15개(`columns.FACE_VALUE_COLUMNS`: 고개 각도 · 눈 사이 거리 · 얼굴 위치 · 얼굴 상자 밝기와 선명도)와 `mouth_motion`을 비움. 사건 층은 이를 주 사용자의 값이 아닌 결측으로 읽음 | `chain.py`(`columns.FACE_VALUE_COLUMNS`) |
@@ -610,8 +785,15 @@ P1은 머리 크롭 한 장을 보고 카메라가 그 사람을 어느 쪽에�
 ## 테스트
 
 ```powershell
-.venv\Scripts\python.exe -m unittest tests.test_vision tests.test_situation tests.test_vision_chain -v
+.venv\Scripts\python.exe -m unittest tests.test_vision tests.test_situation tests.test_vision_chain tests.test_vision_links -v
 ```
+
+- 판단 층 형태(`tests/test_vision_links.py`의 `DecisionViewTests` · `BackendReadsTheViewTests`): 창 결과의 `extension.decision_situation`이 창 기록의 상황과 같고 기존 키(`tag` · `evidence_ids`)가 남는지, `observations`의 `gaze` · `face_seen` · `scene_tags`, 값 묶음이 없을 때를 봅니다. 저장소의 backend 판단 층 코드(`rule_table.decide`)를 따로 띄운 Python으로 돌려, 새 형태는 아는 상황으로 읽혀 두리번 태그가 4-2의 멈춤 기준을 낮추고 옛 키는 상황이 없는 창으로 읽히는지 확인합니다. backend 파일이 없으면 건너뜁니다.
+- 터치 입구(같은 파일): 본문 검사(시간대 없는 시각 · 끝이 시작보다 앞 · 정수가 아닌 횟수 · 빈 세션 · 빈 화면), 보고 창의 세션 · 누름 · 정리, 터치 횟수 배치(0인 창 · 안에 든 창 · 시작에 걸친 창 · 빈 구간 · 겹침)와 받은 본문이 같은 배치가 되는지, 그 배치로 '터치 없음' 태그가 정해지는지를 봅니다. 실행기의 창이 받은 터치를 읽어 같은 줄의 재생과 같은 상황을 내는지, 새 세션이 자기 줄만 읽는지, 누름 보고와 새 세션이 얼굴 크기 기준에 닿는지(`FrameChain`), 가짜 카메라로 돌린 `run_live`가 보고 창이 닿은 창에서만 '터치 없음'을 아는지도 봅니다. 답(받음 · 형식 오류 · 첫 프레임 전 · 카메라 멈춤 · `/status` · HTTP의 403 · 404 · 400 · 500)마다 비전 키가 하나도 없는지 확인하고, 허용한 출처의 CORS 머리글 · 사전 요청과 Private Network Access 머리글 · 옛 경로 `/window`의 404, 명령줄 스위치도 봅니다. 첫 세션도 자기 줄만 읽는지, `Host`가 이 입구가 아니면 메서드와 관계없이 403인지, `/status`에 CORS 머리글이 없는지, 음수 · 숫자가 아닌 `Content-Length`가 400인지, 거절한 출처와 `Host`가 한 번씩만 알림 줄을 남기는지, 시작 줄에 `VITE_AI_ENGINE_URL=` 줄이 그대로 있는지, 기간 없는 실행이 처리 시간 줄을 남기지 않는지, `--backend-url`을 주면 콘솔의 판단 칸이 '로컬 규칙표'인지도 봅니다. 프레임 시각은 가짜 시계(테스트가 정한 시스템 시각)입니다.
+- 상황 태그 보내기(같은 파일): 시험 backend(127.0.0.1)로 본문의 키 6개와 경로, 세션 ID의 경로 인코딩, 터치 창이 세션을 알리기 전에는 보내지 않는지, 한 번에 풀린 창들이 느린 backend에도 모두 순서대로 닿는지, 앞 묶음을 보내는 동안 쌓인 묶음 가운데 아직 보내지 않은 묶음은 새 묶음이 통째로 바꾸는지, 실패를 세고 다시 보내지 않는지, backend가 404 · 410으로 답한 세션의 창은 새 세션이 올 때까지 보내지 않고 따로 세는지, 연결이 안 되거나 답이 없는 backend에서도 `run_live`가 모든 프레임과 창을 처리하는지, `--backend-url`이 `--serve`를 요구하는지를 봅니다.
+- 창을 판단하는 때(같은 파일의 `TouchPacedEvaluationTests`): 세션이 알려진 뒤 터치 창마다 그 창이 덮는 1초 구간이 그 터치 창이 온 프레임에서 판단되고(2초 터치 창은 구간 두 개, 2026-11-26부터의 1초 터치 창은 구간 하나) 터치를 빠짐없이 읽는지('터치 없음' 단서가 `column:tap_count`로 모름이 되지 않고 두리번이 나옴), 보낸 묶음의 창이 하나도 빠지지 않고 터치 창마다 바로 뒤따르며 본문 키가 그대로인지, 누름이 있는 창이 그 누름으로 판정한 창이 되는지, 터치가 0인 창에서 일행 상의가 판정되는지, 터치 창이 끊기면 기다리던 구간이 기억 구간 한도에서 풀리고 기다리는 구간 수 · 기억하는 줄(`2 × keep_s − segment_s` 이하) · 함께 남는 터치 보고가 한도 안에 머무는지, 세션이 없으면 전처럼 자기 간격으로 판단하는지, 앞 세션의 터치 창이 새 세션의 구간을 풀지 않는지를 봅니다. 1초 보고의 횟수가 그 보고의 마지막 줄에 놓이는지도 봅니다(`PlaceTouchTests`).
+- 받은 터치 창에 답하는 때(같은 파일의 `SettlingTests`, `HttpTests` · `TagSenderTests` · `TouchEntryTests`의 새 시험): 창 끝과 같거나 그 뒤의 프레임에서만 마치는지(판단할 구간이 없는 프레임 포함), 푼 창이 없으면 바로 마치는지, 시험 backend가 답을 붙잡는 동안은 마치지 않고 답한 뒤에 마치는지, 창 끝 전에 나간 구간이 끝난 뒤에 마치는지, 새 묶음으로 바뀐 묶음은 앞 묶음이 끝난 뒤에 마치는지, 번호가 한 flush에만 넘어가는지, 받은 순서와 끝나는 순서가 다른 두 창이 저마다 자기 끝의 프레임에서 마치고 마친 번호는 1번부터 모두 마친 데까지만 오르는지를 봅니다. 보내기의 `done`이 그 묶음과 앞 묶음이 끝난 뒤 한 번 불리는지(빈 묶음 · 쉬는 보내기 · 끝내는 중 · `close`)도 봅니다. HTTP로는 시험 backend가 그 터치 창이 푼 창을 받고 답한 뒤에 202가 오는지(두 일의 순서), 더 오는 프레임이 없으면 `segment_s` 뒤에 오는지, 카메라 처리가 멈추면 바로 오는지, 거절은 바로 오는지, 답을 기다리는 요청이 있어도 서버를 바로 끌 수 있는지를 봅니다.
+- 시험 도구(같은 파일): 도구의 도우미 함수와 기본값, 그리고 가짜 추론(초당 10장)으로 6.5초 돌려 시험 backend가 세션 `smoke`의 창을 받고 줄마다 구간 · 상황 · 터치 단서 판정 여부를 찍는지, 터치 창이 푼 창이 '터치 단서 판정함(터치 창이 온 뒤)'인지, `live/`에 그림이 없는지를 봅니다.
 
 - 관측값 층: 테스트 안에서 만든 가짜 추론 결과(눈꼬리 위치를 정해 둔 얼굴 점, 몸 점, 검출 상자)로 눈 사이 거리 · 시작 대비 비율 · 얼굴 위치 · 연속 구간 · 몸 점 평균 · 밝기를 계산해 정해진 값과 같은지 봅니다. MediaPipe와 모델 파일 없이 돌아갑니다(numpy · OpenCV만 필요).
 - 상황 층(`tests/test_situation.py`): 테스트 안에서 만든 합성 관측 줄(초당 10장)로 태그마다 맞는 경우 · 빼는 조건 · `unknown` · 대안 · 동점을 보고, 긴 시간 공백 · 값이 빈 열 · 일부 줄이 빠진 열 · 창 이동(상태 유지와 만료) · 창 시작의 터치 · 창 뒤의 줄 · 얼굴과 몸이 함께 끊긴 돌림도 봅니다. 고개 한 번이 사건 하나인지와 검사 규칙(사건 ID · 관찰 줄의 창 · 고정 문구 · 최소 사건 수 · 대안의 근거 · 창과 품질의 형식)을 확인합니다. `PilotParams`에 기본값이 없는지, `situation.py`에 숫자가 없는지도 봅니다. 장면 태그는 값이나 열이 없을 때의 모름 이유, 창 중앙값 비교, 얼굴 접근 줄을 뺀 얼굴 높이, 사용자 교체(다시 잡았고 이어 붙이기도 한 끊김은 거짓)와 사람 안 보임, 사용자가 바뀐 창의 얼굴 · 머리 상자 · 보조기구 값과 상황 태그 3개의 고개 돌림 · 일행 쪽 고개 · 입 움직임 · 몸 · 머묾(새 사용자 줄만 읽음, 다시 잡음 · 이어 붙임 · 자리 잡기 전 바뀜은 앞 줄도 읽음), 장면 태그가 세 태그의 출력을 바꾸지 않는지, 태그 목록의 검사 규칙, 휴대폰 길(구간 수 · 구간 끝 줄 · 탐지기가 건너뛴 줄 · 구간별 사건 종류 · 터치 · 몸 · 손 길의 고개 방향과 머리 길 · 모름)을 봅니다. 테스트의 값은 합성 프레임용이고 기준값 제안이 아닙니다. 표준 라이브러리만 쓰므로 서버 패키지만 깔린 환경에서도 돌아갑니다(`features.py`와 표시 값을 맞춰 보는 1개만 OpenCV가 없으면 건너뜀).
@@ -637,12 +819,16 @@ P1은 머리 크롭 한 장을 보고 카메라가 그 사람을 어느 쪽에�
 | V8 | 녹화 재생과 웹캠 실시간 | `replay.py`, `live.py` | `ReplaySmokeTests`(그린 영상 + 실제 모델; 남은 구간 창, 머리 상자 0), `LiveTests`(창 없음, 가짜 카메라) | `replay`의 마지막 콘솔 줄, `live`의 창마다 한 줄 |
 | V9 | 재료가 빠지면 모름으로 | 모든 층 | `test_without_touch_log_or_values_the_tags_stay_unknown_with_reasons`, `test_missing_sources_leave_their_columns_missing` | `unknown_reason`의 코드 |
 | V10 | 처리 시간을 잰다 | `replay.py`(`meta.json`의 `timing_ms`) | 같은 조건 3번(위 '처리 시간') | '처리 시간'의 표 |
+| V11 | 판단 층이 읽는 키로 상황을 낸다 | `contract_view.py`(`decision_situation` · `observations`) | `DecisionViewTests`, `BackendReadsTheViewTests`(저장소의 backend 판단 층 코드로 읽음) | `windows.jsonl`의 `contract.extension` |
+| V12 | 주문 화면의 터치 통계를 한 방향으로 받아 창 판단에 넣는다(로컬) | `touch_entry.py`, `live.py --serve` | `ParseRequestTests`, `LiveTouchTests`, `PlaceTouchTests`, `TouchEntryTests`, `LiveEntryTests`(가짜 카메라 · 가짜 시계), `TouchPacedEvaluationTests`, `HttpTests` | 답의 `status`(비전 값 없음), 실행기 콘솔의 터치 창마다 한 줄, `windows.jsonl`의 `evaluated` |
+| V13 | 창마다 상황 태그를 backend로 직접 보낸다 | `tag_sender.py`, `live.py --backend-url` | `TagSenderTests`, `LiveSenderTests`(시험 backend), 가짜 카메라 시험 도구(`tools/integration_smoke.py`, `SmokeToolTests`) | `meta.json`의 `tag_sender`, 시험 도구의 `smoke_summary.json` |
 
 검증: 2026-10-28 팀 촬영본(재현 영상 34편)으로 관측값과 지원 판단을 정답 라벨에 대조했습니다(팀 논문 표 1 · 3.2절). 팀 촬영본으로 P1 클래스와 얼굴 각도의 교차표도 확인했습니다. 키오스크 시점의 H1 · P1은 회사 제공 영상 1개(비공개, 저장소 밖)로 봤고, P1은 화면 위 카메라 영상 41개의 교차표로 다시 봤습니다(위 'P1 표시 이름과 한계').
 
 ## 연결과 이어지는 일 (2026-11-22)
 
-- 연결: 재생 · 실시간 실행기까지 이 PR에 있습니다. 주문 화면 · backend와 잇는 두 연결(위 '어디서 돌리나')은 아직 구현하지 않았고 팀 통합에서 구현합니다. 이 프로세스가 backend로 보내는 창의 형식은 팀 통합의 계약 항목입니다.
+- 연결: 세 쪽 끝(주문 화면의 터치 창 보내기, 이 프로세스의 터치 입구와 상황 태그 보내기, backend의 창 받는 곳과 시연 스위치)이 있고, 형식은 `contract/frontend-ai.openapi.json` · `contract/ai-backend.openapi.json`에 있습니다. 남은 일은 4-1의 횟수, backend의 `/v1/analyze` 호출, 장면 태그의 2단계 행입니다(위 '주문 화면 · backend와 잇는 두 연결'의 '아직 남은 것').
+- 창을 판단하는 때: 세션이 알려진 뒤에는 그 구간의 터치가 도착한 다음에 판단하고, 주문 화면이 없으면 자기 간격으로 판단합니다. 짧은 값 묶음의 한계는 위 '주문 화면 · backend와 잇는 두 연결'에 적었습니다.
 - 기준값: 상황 규칙 13개는 값 묶음 파일로 들어갑니다. 장면 태그의 경계값은 카메라마다 서서 쓰는 보정 녹화로 `tools/calibrate_scene.py`가 정하고(평균 + 2 SD, Wu 외 W4A 2021), 저장소 기본값은 비워 둡니다. 출처가 없는 값은 `[파일럿]` 시작값으로 표시합니다(위 '[파일럿] 값과 출처').
 - 터치 매핑: 누름 · 버튼 밖 누름 · 빗나감 뒤 바로 고침 · 되돌아감을 원시 기록에서 세는 방법은 `[설계 제안]`이고 팀 항목 T01 · T02 · T03 · T07 · T08에서 정합니다.
 - 판단 층: 규칙표 v0는 장면 3-1 · 3-2 · 4-1 · 4-2의 지원을 고릅니다. 1-1 · 1-2 · 2-1 · 2-2 · 자리 비움은 장면 태그까지 냅니다. 그 지원 행(시작 지원, 세션 신호)은 아직 구현하지 않았으며 제안(팀 검토 전)입니다.
@@ -652,7 +838,7 @@ P1은 머리 크롭 한 장을 보고 카메라가 그 사람을 어느 쪽에�
 - 처리 위치: 키오스크 PC에서 계산하고 서버에는 값만 보냅니다(루트 README '구성별 책임', 2026-10-16).
 - 표정: blendshape 설정은 입 움직임에만 씁니다(`--blendshapes`, 기본 꺼짐). 감정 이름을 붙이는 판단은 하지 않습니다.
 - 구간 모델: AI Hub Validation으로 한 파일럿입니다.
-- 서버의 판단: ai-engine `/v1/analyze`의 판단은 자리 표시이고, 백엔드 지원 응답은 지금 `preset=none`입니다. 판단 결과를 응답에 싣는 연결은 통합 작업입니다(`backend/README.md`).
+- 서버의 판단: ai-engine `/v1/analyze`의 판단은 자리 표시입니다. 백엔드 지원 응답은 기본값에서 `preset=none`이고, 시연 스위치(`DECISION_SEND_SUPPORT`)를 켰을 때만 규칙표 결정을 싣습니다(`backend/README.md`).
 - 브라우저 실시간 화면(대시보드) · 웹캠 녹화 도구: 시제품에 있고 이 저장소에는 넣지 않았습니다.
 - 상황 태그를 실을 명세 칸과 `StateScores`와의 관계: 팀 회의 안건(V04)입니다.
 

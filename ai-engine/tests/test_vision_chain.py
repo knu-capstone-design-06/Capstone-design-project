@@ -177,6 +177,48 @@ class ParamsTests(unittest.TestCase):   # plain Python: runs with the server pac
             with self.assertRaises(ValueError, msg=repr(bad)):
                 PilotParams(**bad)
 
+    def test_the_aid_reading_defaults_to_the_owner_box_and_its_head_centre_cut_has_no_value(self):
+        """aid_rule (2026-11-26): the default is the owner-box rule of 2026-11-22, head_centre the reading of the
+        kiosk-view detector files; aid_head_min, the cut of that reading, has no value (UNDECIDED). A bundle or a
+        runner option sets them, and the record names where each value came from."""
+        from app.modules.vision.params import (AID_HEAD_BOUNDARIES, AID_RULES, UNDECIDED, Bundle, PilotParams,
+                                               load_bundle, with_options)
+        p = PilotParams()
+        self.assertEqual((AID_RULES, p.aid_rule, AID_HEAD_BOUNDARIES, p.aid_head_min),
+                         (("owner_box", "head_centre", "head_centre_carry"), "owner_box", ("aid_head_min",), None))
+        source = PilotParams.sources()["aid_head_min"]
+        self.assertTrue(source.startswith(UNDECIDED))
+        self.assertIn("no_value_for_model", source)
+        self.assertIn("head_centre", PilotParams.sources()["aid_rule"])
+        for name in ("aid_rule", "aid_head_min"):
+            self.assertNotIn(name, PilotParams.pilot_fields())
+            self.assertEqual(Bundle(p, None).to_dict()["chain"][name]["origin"], "default")
+        self.assertEqual(PilotParams(aid_rule="head_centre", aid_head_min=0.5).aid_head_min, 0.5)
+        for bad in ({"aid_rule": "largest"}, {"aid_rule": None}, {"aid_head_min": 0}, {"aid_head_min": -0.2},
+                    {"aid_head_min": 1.5}, {"aid_head_min": float("nan")}, {"aid_head_min": "0.5"},
+                    {"aid_head_min": True}):
+            with self.assertRaises(ValueError, msg=repr(bad)):
+                PilotParams(**bad)
+        path = os.path.join(tempfile.mkdtemp(), "bundle.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"bundle_id": "t", "chain": sourced({"aid_rule": "head_centre", "aid_head_min": 0.4},
+                                                          "file text")}, f)
+        b = load_bundle(path)
+        rec = b.to_dict()["chain"]
+        self.assertEqual((rec["aid_rule"]["value"], rec["aid_rule"]["origin"], rec["aid_head_min"]["source"]),
+                         ("head_centre", "bundle", "file text"))
+        o = with_options(b, {"aid_head_min": 0.6})
+        rec = o.to_dict()["chain"]
+        self.assertEqual(rec["aid_head_min"], {"value": 0.6, "unit": "score 0~1", "source": "실행 옵션 --aid-head-min",
+                                               "origin": "option"})
+        self.assertEqual((o.chain.aid_rule, rec["aid_rule"]["origin"]), ("head_centre", "bundle"))
+        o2 = with_options(load_bundle(None), {"aid_rule": "head_centre"})
+        self.assertEqual((o2.to_dict()["chain"]["aid_rule"]["origin"], o2.chain.aid_head_min), ("option", None))
+        self.assertIs(with_options(b, {}), b)
+        for bad in ({"aid_head_min": 2.0}, {"aid_rule": "largest"}, {"no_such_value": 1}):
+            with self.assertRaises(ValueError, msg=repr(bad)):
+                with_options(b, bad)
+
     def test_phone_detector_values_are_the_yolox_demos(self):
         from app.modules.vision.params import PilotParams
         p = PilotParams()
@@ -360,6 +402,41 @@ class HeadPostprocessTests(unittest.TestCase):
             custom_metadata_map={"classes": json.dumps(["head"])})})
         with self.assertRaises(ValueError):
             AidDetector("stub.onnx", 0.01, 0.65, session=bad)
+
+    def test_the_per_class_reading_keeps_each_aid_class_channel_with_its_own_nms(self):
+        """per_class (aid_rule head_centre): every class except pedestrian on its own - that class's channel on every
+        anchor, the floor score_min, NMS inside the class - next to the person boxes, which stay as they are. A
+        wheelchair channel under a pedestrian top class is kept; a channel below the floor is not."""
+        import numpy as np
+        from app.inference.aid import AidDetector
+        classes = ["pedestrian", "crutch", "cane", "walker", "wheelchair"]
+        raw = np.zeros((1, 3549, 10), np.float32)
+        a, b, c = 3380 + 6 * 13 + 6, 3380 + 6 * 13 + 7, 3380                 # stride-32 anchors (6, 6), (7, 6), (0, 0)
+        raw[0, a] = [0.5, 0.5, math.log(4.0), math.log(8.0), 0.9, 0.6, 0.0, 0.0, 0.0, 0.5]    # pedestrian 0.54 on top
+        raw[0, b] = [-0.8, 0.5, math.log(4.0), math.log(8.0), 0.8, 0.1, 0.0, 0.0, 0.0, 0.5]   # IoU 0.86 with a
+        raw[0, c] = [0.5, 0.5, math.log(4.0), math.log(8.0), 0.5, 0.1, 0.6, 0.01, 0.0, 0.0]   # crutch 0.3, cane 0.005
+        session = SimpleNamespace(
+            get_inputs=lambda: [SimpleNamespace(name="images", shape=[1, 3, 416, 416])],
+            get_outputs=lambda: [SimpleNamespace(shape=[1, 3549, 10])],
+            get_modelmeta=lambda: SimpleNamespace(custom_metadata_map={"classes": json.dumps(classes)}),
+            run=lambda _o, feed: [raw])
+        img = np.zeros((480, 640, 3), np.uint8)
+        plain = AidDetector("stub.onnx", 0.01, 0.65, session=session)(img)
+        aids = AidDetector("stub.onnx", 0.01, 0.65, session=session, per_class=True)(img)
+        self.assertIsNone(plain.class_boxes)
+        self.assertTrue(np.array_equal(plain.boxes, aids.boxes))             # the person boxes stay as they are
+        self.assertTrue(np.array_equal(plain.class_scores, aids.class_scores))
+        self.assertTrue(np.allclose(aids.scores, [0.54, 0.3]))               # b goes in the class-agnostic NMS
+        self.assertEqual(sorted(aids.class_boxes), ["cane", "crutch", "walker", "wheelchair"])
+        counts = {name: len(scores) for name, (_, scores) in aids.class_boxes.items()}
+        self.assertEqual(counts, {"crutch": 1, "cane": 0, "walker": 0, "wheelchair": 1})
+        boxes, scores = aids.class_boxes["wheelchair"]
+        self.assertTrue(np.allclose(scores, [0.45]))                         # a's channel; b removed inside the class
+        self.assertTrue(np.allclose(boxes[0], aids.boxes[0]))                # the same anchor, the same box
+        boxes, scores = aids.class_boxes["crutch"]
+        self.assertTrue(np.allclose(scores, [0.3]))
+        self.assertTrue(np.allclose(boxes[0], aids.boxes[1]))
+        self.assertEqual(aids.class_boxes["cane"][0].shape, (0, 4))
 
     def test_phone_detector_keeps_the_cell_phone_boxes_of_the_demo_postprocess_with_a_stub_session(self):
         """The phone detector (optional input): each box takes its best COCO class (objectness x class score), the
@@ -1212,6 +1289,96 @@ class ColumnsTests(unittest.TestCase):
         self.assertEqual((out["aid_owner"], out["aid_top_class"], out["aid_kind"]), ("yes", "wheelchair", "wheelchair"))
         self.assertAlmostEqual(out["aid_any_score"], 0.8)
         self.assertAlmostEqual(out["aid_wheelchair_score"], 0.8)
+
+    def test_aid_head_columns_read_the_aid_class_box_that_holds_the_main_users_head_centre(self):
+        """The head_centre reading (aid_rule, the kiosk-view detector files): per class the highest kept box that
+        contains the centre of the main user's head box, the frame's value the highest class; 0.0 when the head box is
+        there and no box contains its centre (a box beside the user, or one that misses the centre); no value without
+        a head box; a tie goes to the class first in the model's order; no per-class boxes is an error."""
+        import numpy as np
+        from app.inference.aid import Aids
+        from app.modules.vision.columns import AID_HEAD_COLUMNS, aid_head_columns
+        classes = ("pedestrian", "crutch", "cane", "walker", "wheelchair")
+        head = (0.40, 0.10, 0.50, 0.30)                                     # centre (0.45, 0.20)
+        user, beside, low = [0.30, 0.05, 0.70, 0.95], [0.75, 0.05, 0.95, 0.95], [0.30, 0.25, 0.70, 0.95]
+
+        def frame(class_boxes):
+            return Aids(np.zeros((0, 4)), np.zeros(0), np.zeros((0, 5)), classes, (640, 480), {},
+                        {c: (np.array(b, float).reshape(-1, 4), np.array(s, float)) for c, (b, s) in
+                         {**{c: ([], []) for c in classes[1:]}, **class_boxes}.items()})
+        self.assertEqual(AID_HEAD_COLUMNS, ("aid_head_score", "aid_head_class", "aid_head_box"))
+        out = aid_head_columns(frame({"wheelchair": ([user, beside], [0.62, 0.9])}), head)
+        self.assertEqual(out, {"aid_head_score": 0.62, "aid_head_class": "wheelchair", "aid_head_box": tuple(user)})
+        out = aid_head_columns(frame({"wheelchair": ([beside, low], [0.9, 0.8])}), head)   # neither holds the centre
+        self.assertEqual(out, {"aid_head_score": 0.0, "aid_head_class": None, "aid_head_box": None})
+        self.assertEqual(aid_head_columns(frame({"wheelchair": ([user], [0.62])}), None),
+                         dict.fromkeys(AID_HEAD_COLUMNS))
+        several = frame({"crutch": ([user], [0.2]), "walker": ([user, low], [0.35, 0.95]),
+                         "wheelchair": ([user], [0.3])})
+        out = aid_head_columns(several, head)                               # the highest class at the centre
+        self.assertEqual((out["aid_head_score"], out["aid_head_class"]), (0.35, "walker"))
+        tie = frame({"cane": ([user], [0.4]), "wheelchair": ([user], [0.4])})
+        self.assertEqual(aid_head_columns(tie, head)["aid_head_class"], "cane")
+        edge = frame({"crutch": ([[0.45, 0.20, 0.60, 0.90]], [0.5])})     # the centre on the box edge counts
+        self.assertEqual(aid_head_columns(edge, head)["aid_head_score"], 0.5)
+        with self.assertRaises(ValueError):
+            aid_head_columns(Aids(np.zeros((0, 4)), np.zeros(0), np.zeros((0, 5)), classes, (640, 480)), head)
+
+    def test_aid_carry_follows_the_users_aid_box_through_rows_without_a_head_box(self):
+        """The head_centre_carry reading (AidCarry): a row with the main user's head box gives aid_head_columns' value
+        and remembers the aid box; rows without the head box follow that box by the head tracker's rule (the highest
+        IoU, at least track_iou_min) and read the matched box's score and class; a box of lower IoU is not taken even
+        with a higher score; a 0.0 head row clears the box; nothing matched for longer than track_max_gap_s ends the
+        carry; a head row of a new main user replaces the box; nothing is carried without a head row first."""
+        import numpy as np
+        from app.inference.aid import Aids
+        from app.modules.vision.columns import AID_CARRY_COLUMNS, AID_HEAD_COLUMNS, AidCarry, aid_head_columns
+        from app.modules.vision.params import PilotParams
+        classes = ("pedestrian", "crutch", "cane", "walker", "wheelchair")
+        p = PilotParams()
+        head = (0.40, 0.10, 0.50, 0.30)                                     # centre (0.45, 0.20)
+        user, moved = [0.30, 0.05, 0.70, 0.95], [0.32, 0.06, 0.72, 0.96]    # IoU about 0.91
+        near = [0.45, 0.05, 0.85, 0.95]                                     # IoU with moved 0.50, user's 0.89
+        other = [0.75, 0.05, 0.98, 0.95]                                    # no overlap with user
+        low = [0.30, 0.25, 0.70, 0.95]                                      # misses the head centre
+
+        def frame(class_boxes):
+            return Aids(np.zeros((0, 4)), np.zeros(0), np.zeros((0, 5)), classes, (640, 480), {},
+                        {c: (np.array(b, float).reshape(-1, 4), np.array(s, float)) for c, (b, s) in
+                         {**{c: ([], []) for c in classes[1:]}, **class_boxes}.items()})
+
+        def value(out):
+            return out["aid_head_score"], out["aid_head_class"], out["aid_head_from"]
+        self.assertEqual(AID_CARRY_COLUMNS, ("aid_head_from",))
+        carry = AidCarry(p.track_iou_min, p.track_max_gap_s)
+        none = dict.fromkeys(AID_HEAD_COLUMNS + AID_CARRY_COLUMNS)
+        seed = frame({"wheelchair": ([user, other], [0.62, 0.9])})
+        self.assertEqual(carry.update(0.0, frame({"wheelchair": ([moved], [0.7])}), None), none)   # no seed yet
+        out = carry.update(0.1, seed, head)                                 # a head row: head_centre's value
+        self.assertEqual({k: out[k] for k in AID_HEAD_COLUMNS}, aid_head_columns(seed, head))
+        self.assertEqual(value(out), (0.62, "wheelchair", "head"))
+        out = carry.update(0.2, frame({"wheelchair": ([other, moved], [0.9, 0.55])}), None)
+        self.assertEqual(value(out) + (out["aid_head_box"],), (0.55, "wheelchair", "carried", tuple(moved)))
+        out = carry.update(0.3, frame({"crutch": ([near], [0.95]), "wheelchair": ([user], [0.4])}), None)
+        self.assertEqual(value(out), (0.4, "wheelchair", "carried"))         # the higher IoU, not the higher score
+        out = carry.update(0.4, frame({"crutch": ([user], [0.3])}), None)     # any aid class
+        self.assertEqual(value(out), (0.3, "crutch", "carried"))
+        self.assertEqual(carry.update(0.5, frame({"wheelchair": ([other], [0.9])}), None), none)  # IoU 0: no value
+        self.assertEqual(value(carry.update(1.4, frame({"wheelchair": ([user], [0.6])}), None)),
+                         (0.6, "wheelchair", "carried"))                     # 1.0 s since the last match: alive
+        self.assertEqual(carry.update(2.5, frame({"wheelchair": ([user], [0.6])}), None), none)   # 1.1 s: ended
+        self.assertEqual(carry.update(2.6, frame({"wheelchair": ([user], [0.6])}), None), none)   # and stays ended
+        carry.update(3.0, seed, head)
+        out = carry.update(3.1, frame({"wheelchair": ([low], [0.8])}), head)
+        self.assertEqual(value(out), (0.0, None, "head"))                    # a 0.0 head row clears the box
+        self.assertEqual(carry.update(3.2, seed, None), none)
+        carry.update(4.0, seed, head)
+        new_head = (0.80, 0.10, 0.90, 0.30)                                  # a new main user inside `other`
+        self.assertEqual(value(carry.update(4.1, seed, new_head)), (0.9, "wheelchair", "head"))
+        out = carry.update(4.2, frame({"wheelchair": ([user, other], [0.95, 0.5])}), None)
+        self.assertEqual((value(out), out["aid_head_box"]), ((0.5, "wheelchair", "carried"), tuple(other)))
+        carry.reset()                                                        # a new touch-log session
+        self.assertEqual(carry.update(4.3, seed, None), none)
 
     def test_main_user_change_records_the_size_of_the_head_that_took_over(self):
         """The owner's suggestion (2026-11-22): a person behind is smaller and becomes the next user by stepping
@@ -2617,6 +2784,116 @@ class FrameChainTests(unittest.TestCase):
         tags = WindowJudge(bundle()).evaluate(rows, 0.2)["situation"]["tags"]
         self.assertEqual({t["name"]: t["unknown_reason"] for t in tags}["aid_use"], "column:aid_owner")
 
+    def test_aid_use_under_the_head_centre_reading_through_the_chain(self):
+        """A stand-in detector output (no model file): a pedestrian box that wins the class-agnostic NMS and, under it,
+        a wheelchair-class box at the main user's head. The default reading reads the pedestrian box (aid_use false,
+        as before); head_centre reads the wheelchair box: true above its cut, false at a higher one, unknown without
+        one (no_value_for_model); the evidence names the class."""
+        import numpy as np
+        from app.inference.aid import Aids
+        from app.modules.vision.chain import FrameChain, WindowJudge
+        from app.modules.vision.params import PilotParams
+        classes = ("pedestrian", "crutch", "cane", "walker", "wheelchair")
+        ped, wheel = [0.30, 0.10, 0.70, 0.95], [0.28, 0.12, 0.72, 0.97]      # both hold the head centre (0.5, 0.4)
+        empty = (np.zeros((0, 4)), np.zeros(0))
+
+        def aids(img):
+            return Aids(np.array([ped]), np.array([0.8]), np.array([[0.8, 0.0, 0.0, 0.0, 0.02]]), classes,
+                        (img.shape[1], img.shape[0]), {"infer": 0.0},
+                        {"crutch": empty, "cane": empty, "walker": empty,
+                         "wheelchair": (np.array([wheel]), np.array([0.6]))})
+
+        def run(**chain):
+            fc = FrameChain(FakeModels([fake_inference() for _ in range(20)]), PilotParams(**chain), FakeHeads(),
+                            aids=aids)
+            rows = [fc.process(f) for f in frames(20)]
+            (tag,) = [t for t in WindowJudge(bundle(**chain)).evaluate(rows, 1.9)["situation"]["tags"]
+                      if t["name"] == "aid_use"]
+            return (tag["status"], tag["unknown_reason"]), {e["obs"]: e["value"] for e in tag["evidence"]}
+        self.assertEqual(run(), ((False, None), {"aid_any_median": 0.02, "rows": 20, "owner_yes_rows": 0}))
+        self.assertEqual(run(aid_rule="head_centre", aid_head_min=0.5),
+                         ((True, None), {"aid_head_median": 0.6, "rows": 20, "aid_class": "wheelchair"}))
+        self.assertEqual(run(aid_rule="head_centre", aid_head_min=0.65)[0], (False, None))
+        self.assertEqual(run(aid_rule="head_centre"), (("unknown", "no_value_for_model"), {}))
+
+    def test_aid_use_under_the_carry_reading_through_the_chain(self):
+        """aid_rule head_centre_carry: the main user's head box on the first 5 rows only, a wheelchair-class box at the
+        user throughout, gone from 1.0 s to 2.0 s and back from 2.1 s. The head rows carry head_centre's values; the
+        rows after them follow the box ('carried') until it is gone, and more than track_max_gap_s (1.0 s) without a
+        match ends the carry, so the box coming back gives no value. The window at 0.9 s is too_few_rows under
+        head_centre (5 of 10 rows) and true under the carry (10 of 10); the default reading writes no aid_head
+        column."""
+        import numpy as np
+        from app.inference.aid import Aids
+        from app.modules.vision.chain import FrameChain, WindowJudge
+        from app.modules.vision.columns import AID_CARRY_COLUMNS, AID_HEAD_COLUMNS
+        from app.modules.vision.params import PilotParams
+        classes = ("pedestrian", "crutch", "cane", "walker", "wheelchair")
+        head, wheel = [0.38, 0.22, 0.62, 0.58], [0.28, 0.12, 0.72, 0.97]   # the wheel box holds the head centre
+        empty = (np.zeros((0, 4)), np.zeros(0))
+
+        def aids_at(k):
+            def aids(img):
+                box = empty if 10 <= k[0] <= 20 else (np.array([wheel]), np.array([0.6]))
+                k[0] += 1
+                return Aids(np.zeros((0, 4)), np.zeros(0), np.zeros((0, 5)), classes, (img.shape[1], img.shape[0]),
+                            {"infer": 0.0}, {"crutch": empty, "cane": empty, "walker": empty, "wheelchair": box})
+            return aids
+
+        def run(**chain):
+            fc = FrameChain(FakeModels([fake_inference() for _ in range(30)]), PilotParams(**chain),
+                            ScheduledHeads([[head]] * 5 + [[]] * 25), aids=aids_at([0]))
+            rows = [fc.process(f) for f in frames(30)]
+            (tag,) = [t for t in WindowJudge(bundle(**chain)).evaluate(rows[:10], 0.9)["situation"]["tags"]
+                      if t["name"] == "aid_use"]
+            return rows, (tag["status"], tag["unknown_reason"]), {e["obs"]: e["value"] for e in tag["evidence"]}
+        old, old_tag, _ = run(aid_rule="head_centre", aid_head_min=0.5)
+        new, new_tag, evidence = run(aid_rule="head_centre_carry", aid_head_min=0.5)
+        self.assertEqual(old_tag, ("unknown", "too_few_rows"))
+        self.assertEqual((new_tag, evidence), ((True, None), {"aid_head_median": 0.6, "rows": 10,
+                                                              "aid_class": "wheelchair"}))
+        for i in range(5):                                       # the head rows: head_centre's values
+            self.assertEqual({k: new[i][k] for k in AID_HEAD_COLUMNS}, {k: old[i][k] for k in AID_HEAD_COLUMNS})
+        self.assertFalse(any(set(AID_CARRY_COLUMNS) & set(r) for r in old))
+        self.assertEqual([r["aid_head_from"] for r in new], ["head"] * 5 + ["carried"] * 5 + [None] * 20)
+        self.assertEqual([r["aid_head_score"] for r in new[5:10]], [0.6] * 5)
+        self.assertEqual({r["aid_head_score"] for r in old[5:]}, {None})
+        default, _, _ = run()
+        self.assertFalse(any(set(AID_HEAD_COLUMNS + AID_CARRY_COLUMNS) & set(r) for r in default))
+
+    def test_a_new_touch_log_session_ends_the_aid_carry(self):
+        """The carried box is per-user state: a change of the touch-log session clears it with the head tracks and the
+        references, so the next session's rows without a head box get no value until a head row of their own."""
+        import numpy as np
+        from app.inference.aid import Aids
+        from app.modules.vision.chain import FrameChain
+        from app.modules.vision.params import PilotParams
+        classes = ("pedestrian", "crutch", "cane", "walker", "wheelchair")
+        empty = (np.zeros((0, 4)), np.zeros(0))
+
+        def aids(img):
+            return Aids(np.zeros((0, 4)), np.zeros(0), np.zeros((0, 5)), classes, (img.shape[1], img.shape[0]),
+                        {"infer": 0.0}, {"crutch": empty, "cane": empty, "walker": empty,
+                                         "wheelchair": (np.array([[0.28, 0.12, 0.72, 0.97]]), np.array([0.6]))})
+
+        class TwoSessions:                                      # session s1 before 1.0 s, s2 from then on
+            def session_at(self, t):
+                return "s1" if t < 1.0 else "s2"
+
+            def session_since(self, t):
+                return 0.0 if t < 1.0 else 1.0
+
+            def counts(self, t0, t1):
+                return None
+
+            def last_press(self, t):
+                return None
+        fc = FrameChain(FakeModels([fake_inference() for _ in range(20)]), PilotParams(aid_rule="head_centre_carry"),
+                        ScheduledHeads([[[0.38, 0.22, 0.62, 0.58]]] * 3 + [[]] * 17), timeline=TwoSessions(),
+                        aids=aids)
+        got = [fc.process(f)["aid_head_from"] for f in frames(20)]
+        self.assertEqual(got, ["head"] * 3 + ["carried"] * 7 + [None] * 10)
+
     def test_the_phone_input_opens_the_3_2_wait_through_the_phone_path(self):
         """The phone input is off by default (columns absent, phone_use unknown); with it, a phone in the main user's
         hand in every segment while the user looks away from the screen, no touch and the body still make phone_use
@@ -2792,6 +3069,37 @@ class FrameChainTests(unittest.TestCase):
         self.assertEqual(row["aid_owner"], "yes")
         self.assertAlmostEqual(row["aid_any_score"], 0.7)
         self.assertGreaterEqual(row["ms_aids"], 0.0)
+
+    def test_the_head_centre_reading_adds_its_columns_and_the_default_reading_does_not(self):
+        """aid_rule head_centre: the chain writes the aid_head columns from the detector's per-class boxes and the main
+        user's head box (FakeHeads: centre (0.5, 0.4)) next to the aid columns, which do not change; the default
+        reading writes the aid columns only, as before. Without the head detector there is no head box: no value."""
+        import numpy as np
+        from app.inference.aid import Aids
+        from app.modules.vision.chain import FrameChain
+        from app.modules.vision.columns import AID_COLUMNS, AID_HEAD_COLUMNS
+        from app.modules.vision.params import PilotParams
+        classes = ("pedestrian", "crutch", "cane", "walker", "wheelchair")
+        box = [0.30, 0.10, 0.70, 0.95]
+        empty = (np.zeros((0, 4)), np.zeros(0))
+
+        def fake_aids(img):                                          # one box, pedestrian on top, a wheelchair channel
+            return Aids(np.array([box]), np.array([0.7]), np.array([[0.7, 0.0, 0.0, 0.0, 0.6]]), classes,
+                        (img.shape[1], img.shape[0]), {"infer": 0.0},
+                        {"crutch": empty, "cane": empty, "walker": empty,
+                         "wheelchair": (np.array([box]), np.array([0.6]))})
+
+        def row(params, heads=None):
+            return FrameChain(FakeModels([fake_inference()]), params, heads, aids=fake_aids).process(frames(1)[0])
+        default = row(PilotParams(), FakeHeads())
+        self.assertFalse(set(AID_HEAD_COLUMNS) & set(default))
+        self.assertEqual((default["aid_owner"], default["aid_top_class"]), ("no", "pedestrian"))
+        head = row(PilotParams(aid_rule="head_centre"), FakeHeads())
+        self.assertEqual({k: head[k] for k in AID_COLUMNS}, {k: default[k] for k in AID_COLUMNS})
+        self.assertEqual({k: head[k] for k in AID_HEAD_COLUMNS},
+                         {"aid_head_score": 0.6, "aid_head_class": "wheelchair", "aid_head_box": tuple(box)})
+        no_heads = row(PilotParams(aid_rule="head_centre"))
+        self.assertEqual({k: no_heads[k] for k in AID_HEAD_COLUMNS}, dict.fromkeys(AID_HEAD_COLUMNS))
 
     def test_a_sustained_lean_stays_face_approach_and_never_becomes_seated_height(self):
         """With a touch log (the reference starts at the first press): 1 s at the normal size, then the face 1.5 times
@@ -3162,12 +3470,156 @@ class ReplayWithFakePerceptionTests(unittest.TestCase):
             again = judge.evaluate(back, rec["t"], segment_s=(rec.get("partial") or {}).get("segment_s"))
             self.assertEqual(phone(again), phone(rec), rec["t"])
 
+    def test_rows_csv_read_back_keeps_the_head_centre_aid_columns_and_tag(self):
+        """The head_centre reading in a replay with a stand-in detector: rows.csv holds the aid_head columns (a value,
+        0.0 once the wheelchair box is gone, blank while the head box is lost), read back they give the same aid_use
+        as the windows judged in memory, and meta.json records the reading and its cut with their origin."""
+        import numpy as np
+        from app.inference.aid import Aids
+        from app.modules.vision.chain import WindowJudge
+        from app.modules.vision.replay import run_replay
+        from app.modules.vision.tools.companion_eval import row_from_csv
+        classes = ("pedestrian", "crutch", "cane", "walker", "wheelchair")
+        box, empty, calls = [0.28, 0.12, 0.72, 0.97], (np.zeros((0, 4)), np.zeros(0)), []
+
+        def aids(img):
+            calls.append(1)
+            wheel = (np.array([box]), np.array([0.6])) if len(calls) <= 20 else empty
+            return Aids(np.zeros((0, 4)), np.zeros(0), np.zeros((0, 5)), classes, (img.shape[1], img.shape[0]),
+                        {"infer": 0.0}, {"crutch": empty, "cane": empty, "walker": empty, "wheelchair": wheel})
+        head = [0.38, 0.22, 0.62, 0.58]
+        folder = tempfile.mkdtemp()
+        out = os.path.join(folder, "out")
+        b = bundle(aid_rule="head_centre", aid_head_min=0.5)
+        meta = run_replay(frames(40), out, b, models=FakeModels([fake_inference() for _ in range(40)]),
+                          detector=ScheduledHeads([[head]] * 12 + [[]] * 4 + [[head]] * 24), aids=aids, session_id="t")
+        self.assertEqual({k: (meta["bundle"]["chain"][k]["value"], meta["bundle"]["chain"][k]["origin"])
+                          for k in ("aid_rule", "aid_head_min")},
+                         {"aid_rule": ("head_centre", "code"), "aid_head_min": (0.5, "code")})
+        with open(os.path.join(out, "windows.jsonl"), encoding="utf-8") as f:
+            recs = [json.loads(line) for line in f]
+        with open(os.path.join(out, "rows.csv"), encoding="utf-8-sig", newline="") as f:
+            back = [row_from_csv(r) for r in csv.DictReader(f)]
+        self.assertEqual([(back[i]["aid_head_score"], back[i]["aid_head_class"]) for i in (10, 13, 18, 25)],
+                         [("0.6", "wheelchair"), (None, None), ("0.6", "wheelchair"), ("0", None)])
+
+        def aid(rec):
+            tag = {t["name"]: t for t in rec["situation"]["tags"]}["aid_use"]
+            return tag["status"], tag["unknown_reason"], [(e["obs"], e["value"]) for e in tag["evidence"]]
+        self.assertEqual({aid(rec)[0] for rec in recs}, {True, False})
+        judge = WindowJudge(b)
+        for rec in recs:
+            again = judge.evaluate(back, rec["t"], segment_s=(rec.get("partial") or {}).get("segment_s"))
+            self.assertEqual(aid(again), aid(rec), rec["t"])
+
+    def test_rows_csv_read_back_keeps_the_carry_column_and_tag(self):
+        """The head_centre_carry reading in a replay with a stand-in detector: the head box on the first 5 of 30 rows,
+        the wheelchair box throughout. rows.csv holds aid_head_from (head, then carried) and the carried values; read
+        back they give the same aid_use as the windows judged in memory, which are true (under head_centre the
+        same input leaves them unknown)."""
+        import numpy as np
+        from app.inference.aid import Aids
+        from app.modules.vision.chain import WindowJudge
+        from app.modules.vision.replay import run_replay
+        from app.modules.vision.tools.companion_eval import row_from_csv
+        classes = ("pedestrian", "crutch", "cane", "walker", "wheelchair")
+        empty = (np.zeros((0, 4)), np.zeros(0))
+
+        def aids(img):
+            return Aids(np.zeros((0, 4)), np.zeros(0), np.zeros((0, 5)), classes, (img.shape[1], img.shape[0]),
+                        {"infer": 0.0}, {"crutch": empty, "cane": empty, "walker": empty,
+                                         "wheelchair": (np.array([[0.28, 0.12, 0.72, 0.97]]), np.array([0.6]))})
+
+        def replay(rule):
+            out = os.path.join(tempfile.mkdtemp(), "out")
+            b = bundle(aid_rule=rule, aid_head_min=0.5)
+            run_replay(frames(30), out, b, models=FakeModels([fake_inference() for _ in range(30)]),
+                       detector=ScheduledHeads([[[0.38, 0.22, 0.62, 0.58]]] * 5 + [[]] * 25), aids=aids,
+                       session_id="t")
+            with open(os.path.join(out, "windows.jsonl"), encoding="utf-8") as f:
+                recs = [json.loads(line) for line in f]
+            with open(os.path.join(out, "rows.csv"), encoding="utf-8-sig", newline="") as f:
+                back = [row_from_csv(r) for r in csv.DictReader(f)]
+            return b, recs, back
+
+        def aid(rec):
+            tag = {t["name"]: t for t in rec["situation"]["tags"]}["aid_use"]
+            return tag["status"], tag["unknown_reason"], [(e["obs"], e["value"]) for e in tag["evidence"]]
+        b, recs, back = replay("head_centre_carry")
+        self.assertEqual([(back[i]["aid_head_score"], back[i]["aid_head_from"]) for i in (2, 5, 29)],
+                         [("0.6", "head"), ("0.6", "carried"), ("0.6", "carried")])
+        self.assertEqual({aid(rec)[0] for rec in recs}, {True})
+        judge = WindowJudge(b)
+        for rec in recs:
+            again = judge.evaluate(back, rec["t"], segment_s=(rec.get("partial") or {}).get("segment_s"))
+            self.assertEqual(aid(again), aid(rec), rec["t"])
+        _, old, old_back = replay("head_centre")
+        self.assertEqual({aid(rec)[0] for rec in old}, {"unknown"})
+        self.assertNotIn("aid_head_from", old_back[0])
+
     def test_load_aids_is_off_without_a_file_and_names_a_missing_one(self):
         from app.modules.vision.params import PilotParams
         from app.modules.vision.replay import load_aids
         self.assertEqual(load_aids(None, PilotParams(), 1, print), (None, {}))
         with self.assertRaises(FileNotFoundError):
             load_aids(os.path.join(tempfile.mkdtemp(), "missing.onnx"), PilotParams(), 1, print)
+
+    def test_load_aids_reads_the_per_class_boxes_only_with_the_head_centre_reading(self):
+        """A stand-in for AidDetector (no model file): per_class follows aid_rule, and the head_centre start line says
+        whether aid_use has a cut."""
+        from unittest import mock
+        from app.modules.vision.params import PilotParams
+        from app.modules.vision.replay import load_aids
+        path = os.path.join(tempfile.mkdtemp(), "stand_in.onnx")
+        with open(path, "wb") as f:
+            f.write(b"stand-in")
+        made = []
+
+        class StandIn:
+            def __init__(self, *args, per_class=False, **kwargs):
+                made.append(per_class)
+                self.classes, self.meta = ("pedestrian", "crutch", "cane", "walker", "wheelchair"), {}
+        lines = []
+        with mock.patch("app.inference.aid.AidDetector", StandIn):
+            for p in (PilotParams(), PilotParams(aid_rule="head_centre"),
+                      PilotParams(aid_rule="head_centre", aid_head_min=0.5)):
+                detector, info = load_aids(path, p, 1, lines.append)
+                self.assertIsInstance(detector, StandIn)
+                self.assertEqual(list(info), ["stand_in.onnx"])
+        self.assertEqual(made, [False, True, True])
+        self.assertEqual(len(lines), 5)                                  # one line, then two lines twice
+        self.assertIn("no_value_for_model", lines[2])
+        self.assertIn("aid_head_min = 0.5", lines[4])
+
+    def test_load_aids_reads_the_per_class_boxes_with_the_carry_reading_and_names_its_rule(self):
+        """head_centre_carry reads the per-class boxes as head_centre does, and its start lines name the reading, the
+        cut and the head tracker's two values it follows the box with; the runners take it as an --aid-rule choice."""
+        from unittest import mock
+        from app.modules.vision.params import PilotParams
+        from app.modules.vision.replay import add_aid_options, aid_values, load_aids
+        import argparse
+        path = os.path.join(tempfile.mkdtemp(), "stand_in.onnx")
+        with open(path, "wb") as f:
+            f.write(b"stand-in")
+        made, lines = [], []
+
+        class StandIn:
+            def __init__(self, *args, per_class=False, **kwargs):
+                made.append(per_class)
+                self.classes, self.meta = ("pedestrian", "crutch", "cane", "walker", "wheelchair"), {}
+        p = PilotParams(aid_rule="head_centre_carry", aid_head_min=0.5)
+        with mock.patch("app.inference.aid.AidDetector", StandIn):
+            load_aids(path, p, 1, lines.append)
+        self.assertEqual(made, [True])
+        self.assertEqual(len(lines), 3)
+        self.assertIn("head_centre_carry", lines[1])
+        self.assertIn("aid_head_min = 0.5", lines[1])
+        self.assertIn(f"track_iou_min {p.track_iou_min:g}", lines[2])
+        self.assertIn(f"{p.track_max_gap_s:g}초", lines[2])
+        ap = argparse.ArgumentParser()
+        add_aid_options(ap)
+        self.assertEqual(aid_values(ap.parse_args(["--aid-rule", "head_centre_carry"])),
+                         {"aid_rule": "head_centre_carry"})
 
     def test_looking_around_tag_and_the_4_2_highlight_end_to_end(self):
         sched = [fake_inference(y) for y in yaw_schedule()]
@@ -3294,6 +3746,49 @@ class LiveTests(unittest.TestCase):
         self.assertFalse(meta["window_shown"])
         with open(os.path.join(folder, "windows.jsonl"), encoding="utf-8") as f:
             self.assertEqual(sum(1 for _ in f), meta["windows"])
+
+    def test_the_aid_reading_options_override_the_bundle_and_say_so(self):
+        """--aid-rule / --aid-head-min next to --aid-model (both runners): unset, the bundle as it is (the owner_box
+        reading, no cut); given, they override it with origin 'option'. Without --aid-model, or with a value the chain
+        refuses, the parser stops before any file is read."""
+        from contextlib import redirect_stderr
+        from app.modules.vision import replay
+        from app.modules.vision.live import parse_args
+        from app.modules.vision.params import load_bundle, with_options
+        base = ["--camera", "0", "--no-window", "--seconds", "1"]
+        plain = load_bundle(None)
+        self.assertEqual(replay.aid_values(parse_args(base + ["--aid-model", "aid.onnx"])), {})
+        self.assertIs(with_options(plain, replay.aid_values(parse_args(base))), plain)
+        a = parse_args(base + ["--aid-model", "aid.onnx", "--aid-rule", "head_centre", "--aid-head-min", "0.4"])
+        self.assertEqual(replay.aid_values(a), {"aid_rule": "head_centre", "aid_head_min": 0.4})
+        chain = with_options(plain, replay.aid_values(a)).to_dict()["chain"]
+        self.assertEqual({k: (chain[k]["value"], chain[k]["origin"], chain[k]["source"])
+                          for k in ("aid_rule", "aid_head_min")},
+                         {"aid_rule": ("head_centre", "option", "실행 옵션 --aid-rule"),
+                          "aid_head_min": (0.4, "option", "실행 옵션 --aid-head-min")})
+        for extra in (["--aid-rule", "head_centre"], ["--aid-head-min", "0.4"],
+                      ["--aid-model", "aid.onnx", "--aid-rule", "largest"],
+                      ["--aid-model", "aid.onnx", "--aid-head-min", "1.5"],
+                      ["--aid-model", "aid.onnx", "--aid-head-min", "0"],
+                      ["--aid-model", "aid.onnx", "--aid-head-min", "nan"]):
+            with self.assertRaises(SystemExit, msg=extra), redirect_stderr(io.StringIO()):
+                parse_args(base + extra)
+        out = os.path.join(tempfile.mkdtemp(), "out")
+        with self.assertRaises(SystemExit), redirect_stderr(io.StringIO()):
+            replay.main(["--video", os.path.join(out, "missing.mp4"), "--out", out, "--aid-rule", "head_centre"])
+        self.assertFalse(os.path.exists(out))                           # stopped before anything was written
+        lines = []                                                      # a cut without the reading is named at start
+        from unittest import mock
+
+        class StandIn:
+            def __init__(self, *args, **kwargs):
+                self.classes, self.meta = ("pedestrian", "crutch", "cane", "walker", "wheelchair"), {}
+        path = os.path.join(tempfile.mkdtemp(), "stand_in.onnx")
+        with open(path, "wb") as f:
+            f.write(b"stand-in")
+        with mock.patch("app.inference.aid.AidDetector", StandIn):
+            replay.load_aids(path, with_options(plain, {"aid_head_min": 0.4}).chain, 1, lines.append)
+        self.assertIn("head_centre 읽기에서만", lines[-1])
 
     def test_both_runners_summarise_every_timing_column(self):
         """meta.json timing_ms of the replay and the live runner carries ms_total and every TIMING_COLUMNS entry
