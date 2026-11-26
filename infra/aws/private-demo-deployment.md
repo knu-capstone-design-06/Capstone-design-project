@@ -1,6 +1,6 @@
 # EC2 비공개 시연 배포 및 검증
 
-학교 AWS의 개발용 EC2에서 저장소의 Docker Compose 구성으로 주문 시연을 실행한다. 시연 PC는 SSM 포트 포워딩을 통해 EC2의 프론트에 접속하고, 브라우저는 같은 출처의 `/backend/` 경로를 사용한다.
+서울 리전(`ap-northeast-2`)의 시연용 EC2에서 Docker Compose로 주문 시연을 실행한다. 기준 호스트는 개인 AWS 계정에서 콘솔로 준비한 Amazon Linux 2023(x86_64) 인스턴스다. 시연 PC는 SSM 포트 포워딩으로 EC2의 프론트에 접속하고, 브라우저는 같은 출처의 `/backend/` 경로를 사용한다.
 
 ```text
 시연 PC 127.0.0.1:18080 → SSM → EC2 127.0.0.1:8080 (frontend)
@@ -10,15 +10,26 @@
 
 ## 1. 호스트 준비
 
-- 학교 계정의 시연 인스턴스와 SSM 접근 권한을 확인한다. 서울 리전의 스택과 SSM 상태 조회는 [EC2 호스트 준비 절차](README.md)를 따른다. 마지막 EC2 생성 시도에서 역할 생성 권한이 거절된 경우 학교 관리자가 스택 상태를 확인하고, 사용할 인스턴스의 SSM이 `Online`이 된 뒤 아래를 실행한다.
-- 시연 PC에 AWS CLI와 Session Manager 플러그인을 준비한다. EC2는 기존 수신 규칙 없는 보안 그룹과 Compose의 루프백 포트 바인딩을 사용한다. [AWS Session Manager 접속 절차](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-sessions-start.html)
-- SSM 셸에서 호스트 초기화 결과와 Compose 플러그인을 확인한다. 기존 템플릿은 Docker Engine을 설치하므로, `docker compose version`이 실패하면 호스트 관리자에게 Compose 플러그인 설치를 요청한다. [Docker Compose 플러그인 설치 문서](https://docs.docker.com/compose/install/linux/)
+1. 서울 리전의 EC2 콘솔에서 시연 인스턴스 한 대를 확인한다. 초기 사양은 `t3.small`과 암호화한 `gp3` 루트 디스크 30 GiB다. 보안 그룹은 인바운드 규칙 0개로 두고 SSM과 패키지 저장소에 연결할 수 있는 아웃바운드 경로를 사용한다. 공인 IPv4를 할당하는 구성에서는 인터넷 게이트웨이로 나가는 경로가 있는 서브넷을 사용한다. [EC2 콘솔 생성 안내](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-launch-instance-wizard.html)
+2. 인스턴스에 `AmazonSSMManagedInstanceCore` 권한을 가진 EC2용 인스턴스 프로파일을 연결한다. 시연 인스턴스가 `Running`이고 상태 검사를 통과하면 EC2 콘솔에서 **연결 → Session Manager**로 셸을 연다. 시연 PC에서 터널을 여는 사용자의 AWS 권한은 대상 인스턴스와 포트 포워딩 세션 문서에 대해 별도로 필요하다. [SSM 인스턴스 권한](https://docs.aws.amazon.com/systems-manager/latest/userguide/setup-instance-permissions.html) · [세션 시작 안내](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-sessions-start.html)
+3. 시연 PC에 AWS CLI v2와 Session Manager 플러그인을 준비한다. 시연 인스턴스가 속한 개인 계정용 프로파일을 사용한다. 예를 들어 브라우저 인증을 사용하는 경우 `aws login --profile capstone-personal --region ap-northeast-2`로 연결한다. [AWS CLI 로그인 안내](https://docs.aws.amazon.com/cli/latest/reference/login/) · [Session Manager 플러그인 설치](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html)
 
-```sh
+콘솔에서 수동 생성한 Amazon Linux 2023 호스트에서는 SSM 셸에서 다음 명령으로 Docker Engine과 Git을 설치한다. Docker가 이미 설치된 호스트에서는 서비스와 버전을 확인한다. [Amazon Linux Docker 설치](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-docker.html)
+
+```bash
 sudo cloud-init status --wait
+sudo dnf install -y docker git
+sudo systemctl enable --now docker
 sudo systemctl is-active docker
 sudo docker info --format '{{.ServerVersion}}'
+```
+
+아래 명령으로 Compose와 이미지 빌드에 사용하는 Buildx 플러그인을 확인한다. 플러그인이 없으면 공식 안내에 따라 설치한 뒤 재확인한다. 아래 배포 명령은 `sudo docker compose`를 사용하므로 수동 설치 시 플러그인을 `/usr/local/lib/docker/cli-plugins`에 둔다. [Docker Compose 수동 설치 안내](https://docs.docker.com/compose/install/linux/#install-the-plugin-manually) · [Docker Buildx 설치 안내](https://github.com/docker/buildx#installing)
+
+```bash
 sudo docker compose version
+sudo docker compose up --help | grep -F -- '--wait-timeout'
+sudo docker buildx version
 ```
 
 ## 2. 실행할 버전과 환경 준비
@@ -88,11 +99,20 @@ curl -fsS http://127.0.0.1:8080/backend/health
 
 각 명령의 성공을 확인하고 다음 명령으로 진행한다. 설정 유효성만 확인할 때는 `config --quiet`를 사용한다. 시작 실패 시 `dc ps`, `dc logs --tail=80 backend frontend ai-engine`으로 원인을 확인하고, 공유하는 로그에서는 인증정보와 세션 식별자를 가린다. [Compose config](https://docs.docker.com/reference/cli/docker/compose/config/) · [Compose up](https://docs.docker.com/reference/cli/docker/compose/up/)
 
-시연 PC의 별도 PowerShell에서 인스턴스 ID를 입력하고 터널을 연다. 브라우저는 `http://127.0.0.1:18080/`을 사용한다.
+시연 PC의 별도 PowerShell에서 AWS CLI 프로파일을 고른다. 첫 명령의 계정 ID를 EC2 콘솔의 계정 ID와 대조한다. 두 계정이 같고 `Online`이 출력되면 포트 포워딩을 연다.
 
 ```powershell
-$instanceId = Read-Host 'SSM Online 상태인 시연 인스턴스 ID'
-aws ssm start-session --profile capstone --region ap-northeast-2 `
+$awsProfile = Read-Host '시연용 개인 AWS CLI 프로파일 이름'
+aws sts get-caller-identity --profile $awsProfile --region ap-northeast-2 --query Account --output text
+$instanceId = Read-Host '위 계정과 서울 리전을 확인한 시연 EC2 인스턴스 ID'
+aws ssm describe-instance-information --profile $awsProfile --region ap-northeast-2 `
+  --filters "Key=InstanceIds,Values=$instanceId" --query 'InstanceInformationList[0].PingStatus' --output text
+```
+
+같은 PowerShell에서 아래 명령을 실행하고 터널이 열린 동안 브라우저에서 `http://127.0.0.1:18080/`을 사용한다.
+
+```powershell
+aws ssm start-session --profile $awsProfile --region ap-northeast-2 `
   --target $instanceId --document-name AWS-StartPortForwardingSession `
   --parameters 'portNumber=8080,localPortNumber=18080'
 ```
