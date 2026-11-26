@@ -34,7 +34,7 @@ sudo docker buildx version
 
 ## 2. 실행할 버전과 환경 준비
 
-SSM 셸에서 승인된 읽기 권한으로 저장소를 `~/capstone-demo/repo`에 준비한다. 배포와 이전 버전 복귀에 같은 Compose 프로젝트 이름을 사용한다. 시연마다 배포 커밋 SHA를 기록한다.
+SSM 셸에서 승인된 읽기 권한으로 저장소를 `~/capstone-demo/repo`에 준비한다. 배포와 이전 버전 복귀에 같은 Compose 프로젝트 이름을 사용한다. 시연마다 배포 커밋 SHA와 `sudo docker version`, `sudo docker compose version`의 서버 및 플러그인 버전을 기록한다.
 
 ```sh
 deploy_root="$HOME/capstone-demo"
@@ -61,7 +61,7 @@ if [ ! -d "$release_dir" ]; then
 fi
 ```
 
-`demo.env`는 호스트의 저장소 밖에 보관한다. 서버 환경변수는 승인된 비밀 저장소에서 가져와 호스트에서 입력하며, 팀과 공유하는 실행 기록에는 설정 이름과 활성화 여부만 남긴다.
+`demo.env`는 호스트의 저장소 밖에 보관한다. 먼저 기본 연결과 터치 주문을 확인한다. 개인 EC2에서 팀의 Supabase 또는 OpenAI를 사용하는 데 팀이 동의한 경우에 DB·음성 설정을 추가한다. 서버 환경변수는 승인된 비밀 저장소에서 가져와 호스트에서 입력하며, 팀과 공유하는 실행 기록에는 설정 이름과 활성화 여부만 남긴다.
 
 | 시연 범위 | 환경변수 |
 | --- | --- |
@@ -119,6 +119,8 @@ aws ssm start-session --profile $awsProfile --region ap-northeast-2 `
 
 ## 4. 시연 검증
 
+서울 리전 선택, EC2 생성, SSM 접속, 앱 실행은 각각 확인한다. 실제 EC2 검증 기록은 서울 인스턴스의 SSM `Online`, 호스트에서의 `/backend/health`, 시연 PC 터널에서의 `/backend/health`를 확인한 뒤 작성한다. 시연 PC에서 실제 접속 확인을 해도 G10에서 브라우저·네트워크·마이크를 별도로 검증한다. 아래는 주문 시연의 확인 범위다.
+
 1. 시연 PC에서 `/backend/health` 응답의 `status=ok`, `service=backend`를 확인한다. 같은 터널에서 저장소의 `backend/`를 작업 위치로 두고 아래 검사를 실행한다. `PASS`와 종료 코드 0은 프록시 경유, 내부 AI 연결, 세션 발급, 특징 전송이 성공했음을 뜻한다. [연결 검사 설명](../../backend/DEPLOYMENT_READINESS.md#연결-스모크-검사)
 
    ```powershell
@@ -163,11 +165,11 @@ aws ssm start-session --profile $awsProfile --region ap-northeast-2 `
    'PASS: 재시작 후 동일 주문 결과'
    ```
 
-   DB 검증 담당자는 해당 테스트 세션의 주문 행이 한 건인지도 확인한다. 검증 기록에는 배포 SHA, 저장 모드, 연결·터치·음성·재전송의 결과와 미실행 항목을 남긴다. [DB 검증 기록](../../docs/DB-Voice-Order-Integration-Verification-2026-11-16.md)
+   DB 검증 담당자는 해당 테스트 세션의 주문 행이 한 건인지도 확인한다. 검증 기록에는 배포 SHA, 서울 리전, 저장 모드, SSM·호스트·터널 연결 결과, 터치·음성·재전송 결과와 미실행 항목을 남긴다. 아래 링크는 이전 개발 PC에서의 검증 기록이다. [DB 검증 기록](../../docs/DB-Voice-Order-Integration-Verification-2026-11-16.md)
 
 ## 5. 이전 버전으로 복귀
 
-배포 뒤 연결이나 주문 검증에 실패하면 시연을 멈추고 마지막으로 검증한 SHA를 선택한다. 앱 복귀의 전제는 이전 버전과 현재 DB 스키마의 호환이다. 스키마가 함께 바뀐 경우에는 별도 DB 복구 판단을 따른다. [백업·복구 절차](../../db/BACKUP_RESTORE.md)
+배포 뒤 연결이나 주문 검증에 실패하면 시연을 멈추고 마지막으로 검증한 SHA를 선택한다. 배포에 사용한 SSM 셸에서 아래를 실행한다. 새 셸에서는 2절의 `deploy_root`, `repo`, `demo_env` 변수와 3절의 `dc` 함수를 다시 설정한다. 앱 복귀의 전제는 이전 버전과 현재 DB 스키마의 호환이다. 스키마가 함께 바뀐 경우에는 별도 DB 복구 판단을 따른다. [백업·복구 절차](../../db/BACKUP_RESTORE.md)
 
 ```sh
 printf '복귀할 마지막 검증 릴리스의 전체 SHA: '
@@ -182,3 +184,5 @@ dc ps
 ```
 
 이전 릴리스에 별도 환경 설정이 필요했다면 그때 사용한 승인된 설정을 적용한다. 복귀 후 같은 터널에서 연결 검사와 새 세션의 모의 주문을 다시 확인한다. 첫 배포에 실패해 검증된 이전 이미지가 없으면 시연을 중단하고 실패 원인을 확인한다.
+
+시연이 끝나면 포트 포워딩을 닫고 다음 검증까지 서버를 보관할지 정한다. EC2를 중지해도 보관하는 EBS 볼륨에는 비용이 발생할 수 있다. [EC2 중지 시 요금 안내](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/how-ec2-instance-stop-start-works.html)
