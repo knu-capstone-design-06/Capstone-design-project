@@ -183,6 +183,18 @@ def reporting(frames_, svc, at):
         yield frame
 
 
+def wait_until(check, seconds=10.0) -> bool:
+    """Polls check() until it holds or `seconds` pass (the 10 s the tests' HTTP calls allow); whether it held."""
+    deadline = time.monotonic() + seconds
+    while not check() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    return bool(check())
+
+
+LONG_WAIT = 30.0   # test value: an answer bound (TouchEntry.settle_s) longer than the 10 s the tests' HTTP calls wait,
+                   # so an answer that waited for the bound shows up as a timeout, however loaded the machine is
+
+
 @unittest.skipUnless(HAS_NUMPY, SKIP)
 class ParseRequestTests(unittest.TestCase):
     def test_a_touch_window_is_read_and_checked(self):
@@ -293,6 +305,16 @@ class PlaceTouchTests(unittest.TestCase):
         self.assertTrue(all(got[t] == (0, 0) for t in got if 1.0 <= t <= 2.0))
         got = self.place([self.R(2.0, 4.0, 2, 0, 0, None)])
         self.assertEqual((got[4.0], got[3.0]), ((2, 0), (None, 0)))   # no miss anywhere: misses are 0
+
+    def test_one_second_reports_put_each_count_on_their_last_row(self):
+        """Reports of 1 s (the order screen's window since 2026-11-26): each count sits on the last row of its own
+        report, the other rows of a report with a press stay blank."""
+        got = self.place([self.R(0.0, 1.0, 0, 0, 0, None), self.R(1.0, 2.0, 1, 0, 0, None),
+                          self.R(2.0, 3.0, 2, 1, 0, None), self.R(3.0, 4.0, 0, 0, 0, None)])
+        self.assertEqual((got[2.0], got[3.0]), ((1, 0), (2, 1)))
+        self.assertTrue(all(got[t] == (None, 0) for t in got if 1.0 < t < 2.0))    # where in (1, 2] was the press?
+        self.assertTrue(all(got[t] == (None, None) for t in got if 2.0 < t < 3.0))
+        self.assertTrue(all(got[t] == (0, 0) for t in got if t == 1.0 or 3.0 < t <= 4.0))
 
     def test_a_window_across_the_start_gaps_and_overlaps_stay_blank(self):
         got = self.place([self.R(0.0, 2.0, 1, 0, 0, None), self.R(2.0, 4.0, 0, 0, 0, None)])
@@ -439,6 +461,34 @@ class TouchEntryTests(unittest.TestCase):
         answers += [svc.receive(window_body(2.7, 4.7))[1], svc.status()]
         for out in answers:
             self.assertEqual(vision_keys(out), set(), out)
+
+    def test_settling_is_monotonic_and_each_number_goes_to_one_flush(self):
+        """The numbers follow the order of acceptance; a flush takes the windows of its copy that have ended by its
+        frame, each once. Window 1 ends after the latest frame: it keeps waiting when 2 is taken, and `settled` (every
+        window up to it settled) stays below it until it is settled too; `settled` never goes down."""
+        from app.modules.vision.touch_entry import TouchState
+        svc = entry(rows_of(facing(30), extra=LIVE))                    # frames to 2.9 s
+        self.assertEqual([svc.accept(window_body(t0, t1))[2] for t0, t1 in ((2.0, 5.0), (0.0, 1.0), (1.0, 2.0))],
+                         [1, 2, 3])
+        self.assertIsNone(svc.accept(window_body(2.0, 1.0))[2])         # a refusal has no number
+        state = svc.touch.state()
+        self.assertEqual(state.accepted, 3)
+        self.assertEqual(svc.due(0.9, state), ())                       # none has ended by 0.9 s
+        before = TouchState(state.reports, state.sessions, state.until, 2)   # a copy taken before window 3
+        self.assertEqual(svc.due(2.9, before), (2,))
+        self.assertEqual(svc.waiting, {1: 5.0, 3: 2.0})                 # 1 has not ended: it does not go with 2
+        self.assertEqual(svc.due(2.9, state), (3,))
+        self.assertEqual(svc.due(2.9, state), ())                       # each number is given once
+        self.assertEqual(svc.settled, 0)                                # given is not settled: the flush settles
+        svc.settle((2, 3))
+        self.assertEqual([svc.wait_settled(n) for n in (2, 3)], [True, True])   # at once
+        self.assertEqual((svc.settled, svc.finished), (0, {2, 3}))     # 1 is not settled
+        self.assertEqual(svc.due(5.0, state), (1,))
+        svc.settle((1,))
+        self.assertEqual([svc.wait_settled(n) for n in (1, 2, 3)], [True, True, True])   # at once
+        svc.settle((2,))
+        self.assertEqual((svc.settled, svc.finished, svc.status()["settling"]),
+                         (3, set(), {"accepted": 3, "settled": 3}))
 
 
 @unittest.skipUnless(HAS_CV2, SKIP)
@@ -687,7 +737,7 @@ class HttpTests(unittest.TestCase):
 
         def broken(body):
             raise KeyError("t_s")
-        self.svc.receive = broken
+        self.svc.accept = broken                  # the method the handler calls (receive = accept without the number)
         code, _, data = self.call("POST", "/touch-windows", window_body(0.9, 2.9))
         self.assertEqual((code, json.loads(data)), (500, {"status": "error", "reason": "KeyError: 't_s'"}))
         self.assertEqual(len(lines), 1)
@@ -718,6 +768,69 @@ class HttpTests(unittest.TestCase):
             self.assertEqual(got.split(b"\r\n", 1)[0].split()[1], code, head)   # answered with no body sent
             self.assertIn(b"Connection: close", got)
         self.assertEqual(self.svc.touch.snapshot(), [])
+
+    # --- the acknowledgement: an accepted window is answered once settled (touch_entry 'Acknowledgement') ----------
+    def timed(self, *args) -> tuple:
+        """self.call with the seconds it took: (code, body, seconds)."""
+        t0 = time.monotonic()
+        code, _, data = self.call(*args)
+        return code, data, time.monotonic() - t0
+
+    def posting(self, body):
+        """POSTs a touch window from another thread, as the order screen does: (thread, [(code, body, seconds)])."""
+        answers = []
+        thread = threading.Thread(target=lambda: answers.append(self.timed("POST", "/touch-windows", body)))
+        thread.start()
+        return thread, answers
+
+    def test_without_a_flush_an_accepted_window_is_answered_after_segment_s(self):
+        """No camera loop runs here, so nothing settles the window: the answer comes at the bound, the same 202."""
+        code, data, seconds = self.timed("POST", "/touch-windows", window_body(1.9, 2.9, session_id="s1"))
+        self.assertEqual((code, json.loads(data)), (202, {"status": "accepted"}))
+        self.assertGreaterEqual(seconds, self.svc.settle_s)
+        self.assertEqual(self.svc.settle_s, bundle().chain.segment_s)   # the bound is the bundle's segment_s
+        self.assertEqual(self.svc.status()["settling"], {"accepted": 1, "settled": 0})
+
+    def test_once_the_camera_loop_stops_a_waiting_answer_is_written_at_once(self):
+        """With the bound raised past the calls' timeout (LONG_WAIT), only the stop can let the answer through."""
+        self.svc.settle_s = LONG_WAIT
+        thread, answers = self.posting(window_body(1.9, 2.9))
+        self.assertTrue(wait_until(lambda: self.svc.touch.state().accepted == 1))
+        self.svc.stop("input ended")
+        thread.join(10)
+        self.assertEqual([a[0] for a in answers], [202])
+        self.assertEqual(self.timed("POST", "/touch-windows", window_body(2.9, 3.9))[0], 503)
+
+    def test_refusals_are_answered_at_once(self):
+        """No refusal waits: with the bound raised past the calls' timeout (LONG_WAIT), a waiting answer would end in
+        the call's timeout instead of its code. The 503 of a stopped camera loop too; nothing is kept."""
+        self.svc.settle_s = LONG_WAIT
+        port = self.server.server_address[1]
+        host = {"Host": f"127.0.0.1:{port}"}
+        cases = [(400, lambda: self.call("POST", "/touch-windows", b"{not json")[0]),
+                 (400, lambda: self.call("POST", "/touch-windows", {"window_start": 1})[0]),
+                 (403, lambda: self.refused("POST", "/touch-windows", {"Origin": "http://elsewhere.test"})[0]),
+                 (404, lambda: self.refused("POST", "/other")[0]),
+                 (411, lambda: self.raw("POST", "/touch-windows", host)[0]),
+                 (400, lambda: self.raw("POST", "/touch-windows", {**host, "Content-Length": "-1"})[0])]
+        for code, send in cases:
+            self.assertEqual(send(), code)
+        self.svc.stop("input ended")
+        self.assertEqual(self.timed("POST", "/touch-windows", window_body(1.9, 2.9))[0], 503)
+        self.assertEqual(self.svc.touch.snapshot(), [])
+
+    def test_a_server_shutdown_with_an_answer_waiting_does_not_hang(self):
+        """shutdown and server_close return while an answer still waits (LONG_WAIT); the answer is then written on
+        its own connection when the camera loop stops."""
+        self.svc.settle_s = LONG_WAIT
+        thread, answers = self.posting(window_body(1.9, 2.9))
+        self.assertTrue(wait_until(lambda: self.svc.touch.state().accepted == 1))
+        self.server.shutdown()
+        self.server.server_close()
+        self.assertTrue(thread.is_alive())                                # returned without the waiting answer
+        self.svc.stop("input ended")
+        thread.join(10)
+        self.assertEqual([a[0] for a in answers], [202])
 
 
 # --- the tag sender -----------------------------------------------------------------------------------------------
@@ -834,6 +947,50 @@ class TagSenderTests(unittest.TestCase):
         self.assertEqual([b["window_end"] for _, b in stub.received], [iso_at(t) for t in (1.0, 2.0, 5.0, 6.0)])
         self.assertEqual({k: stats[k] for k in ("offered", "sent", "failed", "replaced", "unsent_at_close")},
                          {"offered": 6, "sent": 4, "failed": 0, "replaced": 2, "unsent_at_close": 0})
+
+    def test_done_follows_the_release_and_every_release_before_it(self):
+        """A release's done comes once it and every earlier release are finished: a replaced release waits for the one
+        under way, an empty release replaces nothing, an idle or closing sender calls done at once. The counts stay
+        as without done."""
+        from app.modules.vision.tag_sender import TagSender
+        hold = threading.Event()
+        stub = self.stub(hold=hold)
+        sender = TagSender(stub.url, 10.0)                  # test value: the held answer decides, not the timeout
+        calls, last = [], threading.Event()
+        sender.offer_release([payload(1.0)], done=lambda: calls.append(1))
+        self.assertTrue(stub.arrived.wait(10))                     # release 1 is under way, its answer held
+        sender.offer_release([payload(2.0)], done=lambda: calls.append(2))
+        sender.offer_release([payload(3.0)], done=lambda: calls.append(3))   # replaces release 2 unsent
+        sender.offer_release([], done=lambda: (calls.append(4), last.set()))
+        self.assertEqual((calls, sender.stats()["replaced"]), ([], 1))       # 2 is replaced, 1 still under way
+        hold.set()
+        self.assertTrue(last.wait(10))
+        self.assertEqual(calls, [1, 2, 3, 4])
+        self.assertEqual([b["window_end"] for _, b in stub.received], [iso_at(1.0), iso_at(3.0)])
+        sender.offer_release([], done=lambda: calls.append(5))
+        self.assertEqual(calls[-1], 5)                             # nothing under way: at once
+        stats = sender.close()
+        self.assertEqual({k: stats[k] for k in ("offered", "sent", "failed", "replaced", "unsent_at_close")},
+                         {"offered": 3, "sent": 2, "failed": 0, "replaced": 1, "unsent_at_close": 0})
+        sender.offer_release([payload(4.0)], done=lambda: calls.append(6))
+        self.assertEqual((calls[-1], len(stub.received)), (6, 2))   # closing: at once, nothing sent
+
+    def test_close_calls_the_done_of_every_release_left(self):
+        """close gives up while a send is under way: the release in the mailbox and the rest of the one under way are
+        unsent_at_close, and every done is called by the time close returns, once."""
+        from app.modules.vision.tag_sender import TagSender
+        stub = self.stub(delay=5.0)                    # test values: every answer comes after the sender's timeout
+        sender = TagSender(stub.url, 2.0)
+        calls = []
+        sender.offer_release([payload(1.0)], done=lambda: calls.append(1))
+        self.assertTrue(stub.arrived.wait(10))                     # release 1 is under way
+        sender.offer_release([payload(t) for t in (2.0, 3.0, 4.0)], done=lambda: calls.append(2))
+        self.assertEqual(calls, [])
+        stats = sender.close()
+        self.assertEqual(sorted(calls), [1, 2])
+        self.assertGreaterEqual(stats["unsent_at_close"], 2)
+        sender.thread.join(10)                                     # the send under way ends: no second call
+        self.assertEqual(sorted(calls), [1, 2])
 
     def test_a_failed_send_is_counted_and_dropped(self):
         from app.modules.vision.tag_sender import TagSender
@@ -1152,6 +1309,235 @@ class TouchPacedEvaluationTests(unittest.TestCase):
         self.assertEqual(e[3.0], ("touch", 3.0, "b"))
         self.assertEqual(e[4.0], ("touch", 5.0, "b"))               # a's window to 4.0 did not release it
         self.assertEqual(e[5.0], ("touch", 5.0, "b"))
+
+    def test_one_second_touch_windows_release_one_segment_each(self):
+        """The order screen's window of 1 s (since 2026-11-26), one per second, each sent when it ends: each releases
+        the one segment that ends inside it, at the frame after it came, and is settled at that frame."""
+        at = {1: [window_body(-1.0, 0.0, session_id="s1")]}
+        at.update({10 * k: [window_body(k - 1.0, float(k), session_id="s1")] for k in range(1, 6)})
+        seen = []
+        _, svc, recs, _ = paced_run(at, watch=lambda s: seen.append((s.latest_t, s.settled)))
+        ev = {t: (r["evaluated"]["how"], r["evaluated"]["at"], r["evaluated"]["touch_complete"])
+              for t, r in recs.items()}
+        self.assertEqual({t: ev[t] for t in (1.0, 2.0, 3.0, 4.0, 5.0)},
+                         {float(k): ("touch", float(k), True) for k in range(1, 6)})
+        releases = {}
+        for t, (_, at_frame, _) in ev.items():
+            releases.setdefault(at_frame, []).append(t)
+        self.assertEqual([releases[float(k)] for k in range(1, 6)], [[float(k)] for k in range(1, 6)])   # one each
+        self.assertEqual((recs[3.0]["situation"]["name"], recs[4.0]["situation"]["name"]),
+                         ("looking_around", "looking_around"))      # as with the 2 s windows (S1)
+        settled = dict(seen[1:])                                    # latest frame time -> settled before the next
+        self.assertEqual([settled[float(k)] for k in range(1, 6)], [2, 3, 4, 5, 6])   # window (k-1, k] is number k+1
+        self.assertEqual(svc.settled, 6)
+
+
+@unittest.skipUnless(HAS_CV2, SKIP)
+class SettlingTests(unittest.TestCase):
+    """When an accepted touch window is settled (touch_entry 'Acknowledgement'): a flush at or after its end has read
+    it, and the sender has finished that flush's release and the ones before it."""
+
+    def setUp(self):
+        self.stubs = []
+
+    def tearDown(self):
+        for stub in self.stubs:
+            stub.close()
+
+    def stub(self, **kw):
+        self.stubs.append(StubBackend(**kw))
+        return self.stubs[-1]
+
+    def test_a_window_settles_at_the_first_flush_at_or_after_its_end_with_no_segment_pending(self):
+        """(1.0, 1.5] comes while the latest frame is 1.1 s: it releases segment 1.0 at 1.2 s, before its own end, and
+        is settled only by the flush of the frame at 1.5 s, where no segment is pending. Without a sender at once."""
+        at = {1: [window_body(-1.0, 0.0, session_id="s1")], 12: [window_body(1.0, 1.5, session_id="s1")]}
+        seen = []
+        _, svc, recs, _ = paced_run(at, watch=lambda s: seen.append((s.latest_t, s.settled)))
+        settled = dict(seen[1:])
+        self.assertEqual([settled[t] for t in (0.0, 0.1, 1.1, 1.2, 1.4, 1.5, 1.6)], [0, 1, 1, 1, 1, 2, 2])
+        self.assertEqual(recs[1.0]["evaluated"]["how"], "touch")
+        self.assertEqual(recs[1.0]["evaluated"]["at"], 1.2)
+        self.assertTrue(all(t > 1.5 or r["evaluated"]["at"] < 1.5 for t, r in recs.items()))   # none pending at 1.5
+        self.assertEqual(svc.settled, svc.touch.state().accepted)
+
+    def test_a_flush_that_releases_nothing_settles_at_once(self):
+        """Touch windows without a session release nothing to send: with the sender idle, the flush of the frame at
+        the window's end settles it itself."""
+        from app.modules.vision.tag_sender import TagSender
+        stub = self.stub()
+        seen = []
+        meta, _, _, _ = paced_run({12: [window_body(1.0, 1.5)], 30: [window_body(1.5, 3.0)]},
+                                  sender=TagSender(stub.url, bundle().chain.segment_s),
+                                  watch=lambda s: seen.append((s.latest_t, s.settled)))
+        settled = dict(seen[1:])
+        self.assertEqual([settled[t] for t in (1.4, 1.5, 2.9, 3.0)], [0, 1, 1, 2])
+        self.assertEqual((meta["tag_sender"]["offered"], stub.received), (0, []))
+
+    def test_a_window_settles_only_after_the_sender_finished_its_release(self):
+        """The backend holds its answer to the window that touch window (0, 1] released: the window stays unsettled
+        while it holds (frames go on), and is settled once the answer came."""
+        from app.modules.vision.tag_sender import TagSender
+        hold = threading.Event()
+        stub = self.stub(hold=hold)
+        checks = {}
+
+        def watch(svc):
+            if svc.latest_t == 2.0 and not checks:                  # ten frames after the release of frame 10
+                checks["arrived"] = stub.arrived.wait(10)
+                checks["held"] = svc.settled
+                hold.set()
+                checks["after"] = wait_until(lambda: svc.settled >= 2)
+        at = {1: [window_body(-1.0, 0.0, session_id="s1")], 10: [window_body(0.0, 1.0, session_id="s1")]}
+        try:
+            _, svc, recs, _ = paced_run(at, sender=TagSender(stub.url, 10.0), watch=watch)   # test value: the hold
+        finally:                                                                            # decides, not the timeout
+            hold.set()
+        self.assertEqual(checks, {"arrived": True, "held": 1, "after": True})
+        self.assertEqual(recs[1.0]["evaluated"]["at"], 1.0)
+        self.assertEqual(stub.received[0][1]["window_end"], iso_at(1.0))
+        self.assertEqual(svc.settled, 2)
+
+    def test_a_window_whose_segment_went_out_before_its_end_settles_after_that_release(self):
+        """(1.0, 1.5] comes while the latest frame is 1.1 s (a camera behind the order screen's clock): segment 1.0
+        goes out at 1.2 s, before the window's end, and the backend holds its answer. The flush at 1.5 s releases
+        nothing, so it settles once the release before it is finished, not at once."""
+        from app.modules.vision.tag_sender import TagSender
+        hold = threading.Event()
+        stub = self.stub(hold=hold)
+        checks = {}
+
+        def watch(svc):
+            if svc.latest_t == 1.5 and not checks:                  # the frame at the window's end is processed
+                checks["arrived"] = stub.arrived.wait(10)
+                checks["held"] = svc.settled
+                hold.set()
+                checks["after"] = wait_until(lambda: svc.settled >= 2)
+        at = {1: [window_body(-1.0, 0.0, session_id="s1")], 12: [window_body(1.0, 1.5, session_id="s1")]}
+        try:
+            _, _, recs, _ = paced_run(at, sender=TagSender(stub.url, 10.0), watch=watch)   # test value: the hold
+        finally:                                                                         # decides, not the timeout
+            hold.set()
+        self.assertEqual(checks, {"arrived": True, "held": 1, "after": True})
+        self.assertEqual(recs[1.0]["evaluated"]["at"], 1.2)
+        self.assertEqual(stub.received[0][1]["window_end"], iso_at(1.0))
+
+    def test_a_replaced_release_settles_once_the_release_under_way_has_ended(self):
+        """Release 1.0 (touch window 2) is held at the backend; release 2.0 (window 3) waits in the mailbox and release
+        3.0 (window 4) replaces it. Window 3 is not settled while 1.0 is under way, although its release is finished
+        (replaced); once 1.0 is answered, 3 and then 4 are settled, and 2.0 is never sent."""
+        from app.modules.vision.tag_sender import TagSender
+        hold = threading.Event()
+        stub = self.stub(hold=hold)
+        sender = TagSender(stub.url, 10.0)                          # test value: the hold decides, not the timeout
+        checks = {}
+
+        def watch(svc):
+            if svc.latest_t == 3.0 and not checks:
+                checks["arrived"] = stub.arrived.wait(10)
+                checks["held"] = (svc.settled, sender.stats()["replaced"])
+                hold.set()
+                checks["after"] = (wait_until(lambda: svc.settled >= 3), wait_until(lambda: svc.settled >= 4))
+        at = {1: [window_body(-1.0, 0.0, session_id="s1")]}
+        at.update({10 * k: [window_body(k - 1.0, float(k), session_id="s1")] for k in range(1, 4)})
+        try:
+            paced_run(at, sender=sender, watch=watch)
+        finally:
+            hold.set()
+        self.assertEqual(checks, {"arrived": True, "held": (1, 1), "after": (True, True)})
+        self.assertEqual([b["window_end"] for _, b in stub.received[:2]], [iso_at(1.0), iso_at(3.0)])
+        self.assertNotIn(iso_at(2.0), [b["window_end"] for _, b in stub.received])
+
+    def test_windows_accepted_out_of_order_settle_each_at_its_own_end(self):
+        """Two requests in flight at once: (9, 10] is accepted first (number 1), (8, 9] second (number 2). The flush
+        of the frame at 9.5 s settles window 2 and its answer is let through; window 1 is not settled (no frame at or
+        after 10.0 s yet), its answer still waits, and `settled` (every window up to it settled) stays 0. The frame at
+        10.0 s settles window 1, and `settled` becomes 2. Each answer thread waits as the HTTP handler does."""
+        threads, answers, checks = {}, {}, {}
+
+        def answer(svc, number):
+            answers[number] = svc.wait_settled(number)
+
+        def watch(svc):
+            if svc.latest_t == 9.4 and not threads:         # both accepted just before the frame at 9.5 s
+                svc.settle_s = LONG_WAIT
+                for number in (1, 2):
+                    threads[number] = threading.Thread(target=answer, args=(svc, number))
+                    threads[number].start()
+            elif svc.latest_t == 9.5:                       # the flush of the frame at 9.5 s has run
+                threads[2].join(10)
+                checks[9.5] = (dict(answers), threads[1].is_alive(), svc.settled, svc.status()["settling"])
+            elif svc.latest_t == 10.0:
+                threads[1].join(10)
+                checks[10.0] = (dict(answers), svc.settled)
+        n = 102                                                     # frames to 10.1 s
+        _, svc, _, _ = paced_run({95: [window_body(9.0, 10.0), window_body(8.0, 9.0)]}, sched=[fake_inference()] * n,
+                                 watch=watch)
+        self.assertEqual(checks, {9.5: ({2: True}, True, 0, {"accepted": 2, "settled": 0}),
+                                  10.0: ({1: True, 2: True}, 2)})
+        self.assertEqual((svc.waiting, svc.finished), ({}, set()))
+
+    def test_the_answer_comes_after_the_backend_received_the_window_it_released(self):
+        """Over HTTP: the order screen posts (0, 1] once the frame at 1.0 s is processed; the next frame releases
+        segment 1.0 and the backend gets it (holding its answer). The touch window has no answer while the backend
+        holds; it is answered once the backend has answered, while the camera loop is still paused (not stopped) and
+        long before the wait bound (raised to LONG_WAIT here, so the bound cannot be what lets it through)."""
+        from app.modules.vision.live import run_live
+        from app.modules.vision.tag_sender import TagSender
+        from app.modules.vision.touch_entry import start_server
+        hold, looked = threading.Event(), threading.Event()
+        stub = self.stub(hold=hold)
+        svc = entry()
+        svc.settle_s = LONG_WAIT
+        server = start_server(svc, 0)
+        base = f"http://127.0.0.1:{server.server_address[1]}"
+        sender = TagSender(stub.url, 10.0)                          # test value: the hold decides, not the timeout
+        events, faults = [], []
+        sched = [fake_inference(y) for y in yaw_schedule()]
+
+        def order_screen():
+            req = urllib.request.Request(base + "/touch-windows", method="POST",
+                                         data=json.dumps(window_body(0.0, 1.0, session_id="s1")).encode("utf-8"),
+                                         headers={"Content-Type": "application/json"})
+            with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req, timeout=10) as resp:
+                events.append(("answer", resp.status))
+        client = threading.Thread(target=order_screen)
+
+        def frames_():
+            for frame in timed_frames(len(sched)):
+                if frame.index == 1:
+                    svc.receive(window_body(-1.0, 0.0, session_id="s1"))      # names the session
+                if frame.index == 11:                       # the frame at 1.0 s is processed: (0, 1] has ended
+                    client.start()
+                    wait_until(lambda: svc.touch.state().accepted == 2)
+                if frame.index == 12:                       # the camera loop goes on once the test has looked
+                    looked.wait(10)
+                yield frame
+
+        def run():
+            try:
+                run_live(frames_(), bundle(), models=FakeModels(sched), detector=FakeHeads(), direction=FakeDirection(),
+                         print_fn=[].append, entry=svc, sender=sender)
+            except Exception as e:                          # reported below
+                faults.append(e)
+        loop = threading.Thread(target=run)
+        loop.start()
+        paused = {}
+        try:
+            self.assertTrue(stub.arrived.wait(10))
+            events.append(("backend", stub.received[0][1]["window_end"]))
+            self.assertTrue(client.is_alive())              # no answer while the backend holds its own
+        finally:
+            hold.set()
+            client.join(10)
+            paused = {"answered": not client.is_alive(), "stopped": svc.stopped, "settled": svc.settled}
+            looked.set()
+            loop.join(30)
+            server.shutdown()
+            server.server_close()
+        self.assertEqual(faults, [])
+        self.assertEqual(events, [("backend", iso_at(1.0)), ("answer", 202)])
+        self.assertEqual(paused, {"answered": True, "stopped": None, "settled": 2})   # settled: not the stop or bound
 
 
 CONTRACT_DIR = os.path.join(os.path.dirname(AI_ENGINE_DIR), "contract")

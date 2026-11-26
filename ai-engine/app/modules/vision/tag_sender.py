@@ -19,11 +19,13 @@ The camera loop never waits for the backend: offer_release() only puts the windo
 (live.run_live's flush: the segments one touch window released, or a single window) into a one-slot mailbox as one
 item, and one sender thread POSTs that release's windows in time order: the segments of one release are sent together,
 none replaced by its neighbour. A newer release replaces an unsent one as a whole (each of its windows counted as
-replaced); a release's size
-is bounded by the runner's own wait bound. A send that fails (no answer within the
-timeout, a refused connection, an answer outside 2xx, RFC 9110 15.3) is counted and dropped, never retried. The timeout
-is the window cadence (segment_s), so a send does not outlive its window; it bounds each socket operation (connect,
-each read: socket.settimeout through urllib). Standard library only; the connection goes direct (no proxy).
+replaced); a release's size is bounded by the runner's own wait bound. A release may carry a done (offer_release): it is
+called once that release and every release offered before it are finished (posted, failed, skipped, replaced unsent, or
+the sender closing); live.run_live's flush settles its touch windows with it (touch_entry.TouchEntry.settle). A send
+that fails (no answer within the timeout, a refused connection, an answer outside 2xx, RFC 9110 15.3) is counted and
+dropped, never retried. The timeout is the window cadence (segment_s), so a send does not outlive its window; it bounds
+each socket operation (connect, each read: socket.settimeout through urllib). Standard library only; the connection
+goes direct (no proxy).
 A 404 (the backend does not know the session, e.g. after its restart) or 410 (the session's order is completed) is
 not a failed send: it is counted as ended_404 / ended_410, the first answer of each kind is printed once, and the
 windows of that session are not offered (skipped_ended) until a window of another session id comes, the next order.
@@ -82,6 +84,10 @@ class TagSender:
         self.cond = threading.Condition()
         self.slot = None           # the latest unsent release: a list of windows in time order
         self.taken = []            # the rest of the release the thread is posting
+        self.releases = 0          # offer_release calls so far: release k is the k-th
+        self.slot_k = None         # k of the release in the slot
+        self.posting_k = None      # k of the release the thread is posting (until its last send has ended)
+        self.dones = []            # [(k, done)] of the releases whose done is not called yet, in k order
         self.closing = False
         self.abandoned = False     # close() gave up waiting: the thread stops after the send under way
         self.counts = {"offered": 0, "sent": 0, "failed": 0, "replaced": 0, "unsent_at_close": 0,
@@ -107,23 +113,42 @@ class TagSender:
         """One window released alone: a release of one (offer_release)."""
         self.offer_release([payload])
 
-    def offer_release(self, payloads: list):
+    def offer_release(self, payloads: list, done=None):
         """Called by the camera loop with the windows one evaluation released together (live.run_live's flush), in
         time order; never blocks on the network. The release is one mailbox item: a newer release replaces an unsent
         one as a whole (each of its windows counted as replaced), and the thread posts a release's windows in order.
         A window of a session the backend answered 404 (unknown) or 410 (order completed) for is not offered until a
-        window of a new session id comes."""
+        window of a new session id comes.
+        done (optional, no argument) is called once, when this release and every release offered before it are
+        finished: each of their windows posted, failed or skipped, or dropped (replaced unsent, or the sender closing).
+        A release may be empty (payloads []) to carry a done alone; it replaces nothing. done runs in the thread that
+        finishes the last of them (this one when they are finished already, or the sender is closing)."""
         with self.cond:
-            if self.closing or not payloads:
-                return
-            self.counts["offered"] += len(payloads)
-            kept = [p for p in payloads if not self._skip(p)]
-            if not kept:
-                return
-            if self.slot is not None:
-                self.counts["replaced"] += len(self.slot)
-            self.slot = kept
-            self.cond.notify()
+            if self.closing:
+                ready = [] if done is None else [done]
+            else:
+                self.counts["offered"] += len(payloads)
+                kept = [p for p in payloads if not self._skip(p)]
+                self.releases += 1
+                if kept:
+                    if self.slot is not None:
+                        self.counts["replaced"] += len(self.slot)
+                    self.slot, self.slot_k = kept, self.releases
+                    self.cond.notify()
+                if done is not None:
+                    self.dones.append((self.releases, done))
+                ready = self._finished()
+        for call in ready:
+            call()
+
+    def _finished(self) -> list:
+        """With the lock held: takes the dones whose release and every earlier one are finished (no earlier or equal k
+        is in the slot or being posted), in k order; the caller calls them after releasing the lock."""
+        open_k = [k for k in (self.posting_k, self.slot_k) if k is not None]
+        first_open = min(open_k) if open_k else None
+        ready = [d for k, d in self.dones if first_open is None or k < first_open]
+        self.dones = [(k, d) for k, d in self.dones if first_open is not None and k >= first_open]
+        return ready
 
     def _run(self):
         while True:
@@ -133,6 +158,7 @@ class TagSender:
                 if self.slot is None:
                     return
                 self.taken, self.slot = self.slot, None
+                self.posting_k, self.slot_k = self.slot_k, None
             while True:
                 with self.cond:
                     if self.abandoned or not self.taken:
@@ -142,8 +168,13 @@ class TagSender:
                         continue
                 self._post(payload)
             with self.cond:
-                if self.abandoned:
-                    return
+                self.posting_k = None
+                ready = self._finished()
+                abandoned = self.abandoned
+            for call in ready:
+                call()
+            if abandoned:
+                return
 
     def _post(self, payload: dict):
         try:
@@ -195,7 +226,8 @@ class TagSender:
     def close(self) -> dict:
         """After the camera loop: the release in the mailbox and the rest of the one under way still get their sends,
         within one more timeout (the same cadence). The windows not posted by then are counted as unsent_at_close and
-        the thread stops after the send under way, which is open_at_close (its outcome is not counted)."""
+        the thread stops after the send under way, which is open_at_close (its outcome is not counted). Every done not
+        called by then is called here (the sender is closing)."""
         with self.cond:
             self.closing = True
             self.cond.notify()
@@ -208,4 +240,8 @@ class TagSender:
             if self.slot is not None:
                 self.counts["unsent_at_close"] += len(self.slot)
                 self.slot = None
+            self.slot_k = self.posting_k = None
+            ready = self._finished()
+        for call in ready:
+            call()
         return self.stats()

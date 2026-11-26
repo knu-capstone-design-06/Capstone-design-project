@@ -16,23 +16,26 @@ From ai-engine/:
   That is the rules' missing-cue path, not an error.
 - --serve PORT: the local touch entry on 127.0.0.1:PORT (touch_entry.py; PORT 0 = a free port the OS chooses,
   printed at the start). The order screen POSTs each touch window to /touch-windows and gets an acknowledgement only
-  (no vision value goes back). The reported counts are placed on the rows of every window this runner evaluates
-  (touch_entry.place_touch) and anchor the face-size reference's first press; the session of a window is the one
-  its touch windows name. The rule table of the console line reads no touch counts (its touch rows stay closed; the
-  backend judges the support). --allow-origin names an order screen origin, exactly as in its address bar (for
-  example http://127.0.0.1:5173, where frontend/package.json's dev script serves the order screen; http://localhost:5173
-  is another origin), whose page may post the windows; give it once per origin, as often as needed. Each touch window
-  adds one line.
+  (no vision value goes back), written once the tag sender has finished with the windows that touch window released,
+  at most segment_s after it came (touch_entry.py, 'Acknowledgement'). The reported counts are placed on the rows of
+  every window this runner evaluates (touch_entry.place_touch) and anchor the face-size reference's first press; the
+  session of a window is the one its touch windows name. The rule table of the console line reads no touch counts (its
+  touch rows stay closed; the backend judges the support). --allow-origin names an order screen origin, exactly as in
+  its address bar (for example http://127.0.0.1:5173, where frontend/package.json's dev script serves the order screen;
+  http://localhost:5173 is another origin), whose page may post the windows; give it once per origin, as often as
+  needed. Each touch window adds one line.
 - When a window is evaluated. Without --serve, or while no touch window has named a session for the window's end,
   every segment_s on the runner's own cadence, as before. Once a session is known, a segment waits until a touch
   window of that session whose end is at or after the segment's end has arrived (LiveTouch.touch_until), so its
-  'no touch' cues read complete touch; the order screen's 2 s windows thus release two 1 s segments at once, at the
-  first frame after the touch window came. A segment still waiting when its own start is about to leave the kept
-  history (the ring buffer's keep_s, counted from the latest frame) is evaluated as it is (touch missing: the rules'
-  missing-cue path). A waiting segment is also evaluated as it is when a later one is ready (only after a change of
-  session: the older session's windows no longer come), and at the end of the input. Segments are evaluated in
-  time order. While a segment waits, the buffer keeps the rows its window needs (keep_s before its end), so a late
-  window reads the same rows as an immediate one; the buffer thus spans at most keep_s + (keep_s - segment_s).
+  'no touch' cues read complete touch; a touch window of the order screen's own length (1 s since 2026-11-26) thus
+  releases the one segment that ends inside it, at the first frame after the touch window came, and after a late or
+  skipped touch window one window releases several at once. A segment still waiting when its own start is about to
+  leave the kept history (the ring buffer's keep_s, counted from the latest frame) is evaluated as it is (touch
+  missing: the rules' missing-cue path). A waiting segment is also evaluated as it is when a later one is ready (only
+  after a change of session: the older session's windows no longer come), and at the end of the input. Segments are
+  evaluated in time order. While a segment waits, the buffer keeps the rows its window needs (keep_s before its end),
+  so a late window reads the same rows as an immediate one; the buffer thus spans at most keep_s + (keep_s -
+  segment_s).
   Each record says how it was released (record 'evaluated': how, at, session_id, touch_until, touch_complete;
   touch_complete = the rules' touch cue of the situation window is settled, events.window_any_tap is not None: a
   press on a row of it, or a count on every row).
@@ -232,9 +235,11 @@ def run_live(source, bundle, *, models, detector=None, direction=None, show_wind
         """Evaluates the due segments that are ready, in time order (module docstring, 'When a window is
         evaluated'); final = the input ended, every segment goes. The windows released in one call go to the sender
         as one release (TagSender.offer_release), so the segments one touch window released are sent together.
-        One copy of the touch state (LiveTouch.state, taken once here) gives the release its readiness, its rows and
-        its session ids: a window an HTTP thread adds meanwhile is read by the next release."""
-        state = None if entry is None or not pending else entry.touch.state()
+        One copy of the touch state (LiveTouch.state, taken once here, every frame) gives the release its readiness,
+        its rows and its session ids: a window an HTTP thread adds meanwhile is read by the next release. The touch
+        windows in that copy that end at or before t (TouchEntry.due) are settled once the sender has finished this
+        release and the ones before it (the release's done), at once without a sender (TouchEntry.settle)."""
+        state = None if entry is None else entry.touch.state()
         states = [readiness(t_end, state) for t_end, _ in pending]
         last_ready = max((i for i, s in enumerate(states) if s[0] is not None), default=-1)
         release = []
@@ -253,8 +258,12 @@ def run_live(source, bundle, *, models, detector=None, direction=None, show_wind
             body = emit(t_end, ms_frame, seg_len, how, t, session, until, state)
             if body is not None:
                 release.append(body)
-        if release:
-            sender.offer_release(release)
+        numbers = () if entry is None else entry.due(t, state)      # the touch windows this flush settles
+        done = (lambda: entry.settle(numbers)) if numbers else None
+        if sender is not None and (release or done is not None):
+            sender.offer_release(release, done=done)
+        elif done is not None:
+            done()
 
     frames = iter(source)
     sent = None
