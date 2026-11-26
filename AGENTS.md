@@ -63,7 +63,9 @@
 - `src/features/<feature>/`: 기능별 코드(`api/`, `components/`, `hook/`, `types/`, `utils/`, `pages/`)를 둡니다. 외부에는 `index.ts`로 공개할 것만 내보냅니다.
 - `src/shared/`: 두 개 이상의 기능에서 실제로 쓰는 코드만 둡니다. 한 기능에서만 쓰는 코드는 그 기능 폴더에 둡니다.
 - 기능끼리는 서로의 내부 파일을 직접 import하지 않고 `index.ts`를 통해 사용합니다.
-- 프론트엔드는 backend와만 통신합니다. ai-engine과 외부 AI API를 직접 호출하지 않습니다.
+- 프론트엔드가 서버로 보내는 요청은 backend로만 갑니다. ai-engine과 외부 AI API를 직접 호출하지 않습니다.
+- 예외는 하나입니다. 주문 화면은 같은 키오스크 PC의 비전 프로세스에서 비전 창 출력(관측값·상황 태그)을 읽어 `/features` 요청의 `vision` 칸에 실을 수 있습니다. 읽은 값은 backend로만 보내고 화면 결정에 바로 쓰지 않습니다.
+- 터치 통계와 터치 로그는 backend로만 보냅니다. 비전 프로세스로 보내지 않습니다.
 
 ### backend (FastAPI)
 
@@ -71,11 +73,12 @@
 - 요청·응답 형식은 `schemas.py`, DB 모델은 `models.py`, 모듈 전용 예외는 `exceptions.py`, 테스트는 `tests/`에 둡니다.
 - DB·스토리지·외부 API 연결 코드는 `app/infrastructure/`에, 여러 모듈이 쓰는 설정·상수·예외는 `app/common/`에 둡니다.
 - ai-engine과 외부 AI API의 결과는 백엔드가 검증한 뒤 주문 상태나 UI에 반영합니다.
+- 지원을 고르는 판단 층(규칙표·Jev 단계)은 backend에 둡니다. 터치가 들어가는 조건은 backend가 같은 창의 터치 통계로 판정합니다.
 - 외부 AI API(STT·LLM·Jev)는 backend가 호출합니다. ai-engine은 외부 AI API를 호출하지 않습니다.
 
 ### ai-engine (FastAPI)
 
-- `app/modules/<module>/`: 비전 특징 추출, 불편 상태 판단 엔드포인트를 둡니다.
+- `app/modules/<module>/`: 비전 관측·상황 태그와 backend가 부르는 분석 엔드포인트를 둡니다. 지원을 고르는 판단은 하지 않습니다.
 - `app/inference/`: 직접 실행하는 모델의 로딩·추론 코드만 둡니다.
 - 모델 가중치와 대용량 데이터는 Git에 올리지 않고, 저장 위치·버전·사용 방법을 문서로 남깁니다.
 

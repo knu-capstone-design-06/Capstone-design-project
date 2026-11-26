@@ -150,7 +150,7 @@
 
 ### 9.1 자리
 
-backend입니다. 터치 통계는 프론트 → backend로, 비전 창 결과는 ai-engine → backend로 오므로 둘이 만나는 곳이 backend뿐이고, 외부 AI는 backend만 부릅니다(AGENTS.md 4장). 비전의 `jev_request`가 이미 `state`에 상황·화면·터치·시선·세션을 한 덩어리로 넣고 있어, 입력 모양은 그대로 쓰고 **질문만 더합니다**.
+backend입니다. 터치 통계는 프론트 → backend로, 비전 창 결과도 같은 PC의 프론트가 `/features` 요청에 실어 backend로 보내므로(2026-11-25) 둘이 만나는 곳이 backend뿐이고, 외부 AI는 backend만 부릅니다(AGENTS.md 4장). 비전의 `jev_request`가 이미 `state`에 상황·화면·터치·시선·세션을 한 덩어리로 넣고 있어, 입력 모양은 그대로 쓰고 **질문만 더합니다**.
 
 ### 9.2 질문: 상태 점수 5개
 
@@ -259,7 +259,7 @@ backend입니다. 터치 통계는 프론트 → backend로, 비전 창 결과�
 
 실제 키 확인(2026-11-04, 시연 PC 아님): 9장 예시 state로 상태 점수 5개를 물었을 때 응답 0.2~0.5초, 입력 약 900토큰. 비전 단서(`looking_around`)가 있을 때 `hesitation` 0.51, 없을 때 0.76으로, 같은 멈춤을 "찾는 중"으로 읽어 주었습니다.
 
-다음: (1) 비전 단서 입구(`extension` 또는 프론트 요청) 확정 뒤 `situation`·`gaze` 채우기, (2) 터치 확장 계약(#89) 합의 뒤 `options_open` 연결. `pause_s`는 보정 경과(시스템 대기 제외)와 음성 듣는 중 처리를 정한 뒤 연결하고, `fixes_recent`는 프론트 값이 없어 None으로 둠. 2초 창을 5초 근거(`touch_span_s`)로 쓰는 방법도 함께 정함, (3) 기록을 Supabase(#73) 테이블로, (4) 출처 있는 기준으로 임계값을 두고 촬영본으로 확인한 뒤 `StateScores`·`decided_by`를 Jev 답으로 바꾸기, (5) 프론트의 반응 전달이 생기면 `react` 연결.
+다음: (1) 비전 단서 입구는 프론트의 `/features` 요청으로 정했으므로(2026-11-25), `vision` 칸의 상황 태그 형식을 계약에 넣은 뒤 `situation`·`gaze` 채우기, (2) 터치 확장 계약(#89) 합의 뒤 `options_open` 연결. `pause_s`는 보정 경과(시스템 대기 제외)와 음성 듣는 중 처리를 정한 뒤 연결하고, `fixes_recent`는 프론트 값이 없어 None으로 둠. 2초 창을 5초 근거(`touch_span_s`)로 쓰는 방법도 함께 정함, (3) 기록을 Supabase(#73) 테이블로, (4) 출처 있는 기준으로 임계값을 두고 촬영본으로 확인한 뒤 `StateScores`·`decided_by`를 Jev 답으로 바꾸기, (5) 프론트의 반응 전달이 생기면 `react` 연결.
 
 ## 11. 참고 링크
 

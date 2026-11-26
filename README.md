@@ -14,7 +14,7 @@
 |---|---|---|---|
 | 프론트엔드 | dudwlghkd | main `9317b0b` 기준 상품·장바구니·모의 주문, 수동 접근성, 음성 결과의 Cart 재조회(PR #71), 기본 터치 통계와 선택적 확장 전송(PR #72), 키오스크 화면 개편·비모달 지원 안내 바(PR #70)를 반영했습니다. 기존 화면의 개발 PC 실제 음성 주문·DB 저장은 2026-11-16에 1건 검증했습니다. #70 개편 화면·#79 자동 TTS 조합의 실연동 재검증과 실제 AI 제안 생성·G10 검증은 남아 있습니다 | [프론트엔드 README](frontend/README.md), [프론트 MVP 현황](docs/Frontend-MVP-Status.md) |
 | 백엔드·DB | bb-cloud-create | 연결 확인·임시 세션·특징 전송 API를 구현했습니다(메모리 세션). 상품·장바구니·모의 주문 6개 API는 PR #40에서 초안 기준으로 구현했습니다(메모리 저장). 2026-10-14 Docker에서 실제 프론트를 연결한 주요 주문 흐름·응답 유실 재확인을 검증했습니다. G10 실기기·음성·DB 영속성 검증과 남은 계약·정책 합의는 남아 있습니다. Supabase 첫 마이그레이션을 적용했습니다(2026-10-07) | `backend/README.md`, `db/README.md` |
-| ai-engine·음성·Jev | jiwon-L-ee | `/v1/analyze`는 명세 예시 값을 돌려주는 자리 표시입니다. backend의 음성 해석 API(PR #36)와 frontend 독립 음성 입력·잡담 거르기(`ignored`)·해석용 주문 메뉴 조회(PR #42)를 병합했습니다. 주문 화면 연결·MCP 도구 실행은 남아 있으며 Jev는 아직 연동하지 않았습니다 | `ai-engine/README.md`, `docs/Voice-MCP-Implementation.md` |
+| ai-engine·음성·Jev | jiwon-L-ee | `/v1/analyze`는 명세 예시 값을 돌려주는 자리 표시입니다. backend의 음성 해석 API(PR #36)와 frontend 독립 음성 입력·잡담 거르기(`ignored`)·해석용 주문 메뉴 조회(PR #42)를 병합했습니다. 음성 결과의 도구 입력은 별도 MCP 서버 없이 backend 안에서 실행하고, 주문 화면 연결(PR #53)과 응답 자동 읽기(PR #79)를 병합했습니다. 판단 층은 backend에 뼈대와 그림자 Jev 단계(PR #77)가 있으며 응답의 지원 결정은 아직 바꾸지 않습니다 | `ai-engine/README.md`, `docs/Voice-MCP-Implementation.md` |
 | 컴퓨터 비전 | wdragon92 | 관측 뼈대(PR #32, 2026-10-10)와 상황 태그 3개의 규칙 · 출력 형식(PR #35, 2026-10-12)을 병합했습니다. 실행 파이프라인(녹화 재생 · 웹캠 실행기 → 상황 태그 → 규칙표 v0 → 계약 형식)과 머리 탐지기 · 머리 방향 분류기의 ONNX CPU 추론을 구현했습니다(2026-10-23, `feat/vision`; 병합은 PR 검토 뒤). 기준값은 모두 `[파일럿]`이고 값 묶음 파일은 아직 없으며, backend와의 연결은 없습니다. GPU 서버에서 머리 탐지기(2026-10-12)와 머리 방향 분류기(2026-10-14)를 학습했고, 구간 모델 baseline(FACT 끝, ASFormer 진행 중)을 돌리고 있습니다 | `ai-engine/app/modules/vision/README.md` |
 | 인프라 | bb-cloud-create | EC2 템플릿을 검증했습니다(PR #31). 스택은 비용 승인 전이라 만들지 않았습니다 | `infra/aws/README.md` |
 
@@ -95,13 +95,13 @@ PR #79의 `fb192f2`에서는 새 디자인과 자동 TTS를 통합해 프론트 
 
 구조도는 팀의 기존 mermaid에 설계안(2026-10-15 · 16, 비전 담당; 팀 확인은 PR #48 리뷰)에 맞춰 네 곳만 고쳤습니다: 카메라는 키오스크 PC의 ai-engine이 읽고(영상은 PC 밖으로 나가지 않음), backend는 터치 통계·관측값의 분석을 요청하며, 음성 해석은 OpenAI LLM, 비전 모델은 GPU 서버에서 학습·경량화해 탑재합니다. 실행 위치와 역할은 아래 표에 있습니다.
 
-> 목표안 표시(2026-11-04): 구조도에서 ai-engine이 백엔드로 보내는 '목표안: 상황 태그·관측 요약' 화살표, 그리고 판단 층을 backend에 두고 backend가 터치 로그와 비전 창 출력으로 Jev 판단을 받아 접근성 기능을 고르는 배치는 비전 담당이 제안한 목표 구조입니다. 팀 합의와 계약 변경 전이며, 현재 계약은 바뀌지 않았습니다. `contract/backend-ai.openapi.yaml` 0.2.0의 `/v1/analyze`는 `measurable` · `states` · `model_version`을 돌려주고, `contract/frontend-backend.openapi.yaml` 0.4.1의 `/features` 설명은 backend가 ai-engine으로 불편 상태를 판단하고 지원 방식을 정해 돌려준다고 적습니다. 상황 태그와 관측 요약을 backend로 보내는 경로는 정하지 않았습니다.
+> 목표안 표시(2026-11-04): 판단 층을 backend에 두고 backend가 터치 로그와 비전 창 출력으로 Jev 판단을 받아 접근성 기능을 고르는 배치는 비전 담당이 제안한 목표 구조입니다. backend 쪽 뼈대와 그림자 Jev 단계는 PR #77로 구현했고, 계약은 아직 바뀌지 않았습니다. `contract/backend-ai.openapi.yaml` 0.2.0의 `/v1/analyze`는 `measurable` · `states` · `model_version`을 돌려주고, `contract/frontend-backend.openapi.yaml` 0.4.1의 `/features` 설명은 backend가 ai-engine으로 불편 상태를 판단하고 지원 방식을 정해 돌려준다고 적습니다. 상황 태그와 관측 요약은 구조도의 점선처럼 같은 PC의 프론트엔드가 읽어 `/features` 요청에 실어 보냅니다(2026-11-25). `vision` 칸에 상황 태그를 싣는 형식은 아직 계약에 없습니다.
 
 ```mermaid
 flowchart TD
     USER[사용자] --> FE[React 프론트엔드]
     CAMERA[카메라] --> AI
-    AI -.->|관측값| FE
+    AI -.->|관측값·상황 태그: 같은 PC| FE
 
     FE -->|상품·주문·세션·터치 로그·비전 입력·음성 요청| BE[FastAPI 백엔드]
 
@@ -111,7 +111,6 @@ flowchart TD
     BE <--> JEV[Jev API]
     BE <--> VOICE[OpenAI 음성 해석 LLM]
 
-    AI -->|목표안: 상황 태그·관측 요약| BE
     BE -->|검증된 명령·지원 제안·응답| FE
     FE -->|수락·거절·적용 결과| BE
     GPU[GPU 서버: 학습·평가·경량화] -.->|경량화한 모델 탑재| AI
@@ -123,15 +122,15 @@ flowchart TD
 |---|---|
 | 프론트엔드 | 주문 화면, 접근성 기능(큰 글씨 · 큰 버튼 · 간편 화면 · 단계별 안내 · 낮은 화면 · 음성 모드), 로컬 터치 기록, 비전 관측값의 특징 창 전송, Chrome 음성 인식 · backend 요청, 하단 제안 영역의 지원 제안 표시와 수락 · 거절 · 되돌리기 |
 | 백엔드 | 세션 · 주문 · 결정 상태 관리, DB 저장, ai-engine 호출, 외부 AI(OpenAI 음성 해석 · Jev) 호출과 어댑터, 적용 조건 · 명령 검증 |
-| ai-engine | 키오스크 PC에서 비전 관측값(얼굴 · 고개 방향 · 거리 · 주변 사람 · 보조기구)과 상황 태그·근거·측정 품질·'모름'을 만듦(설계안, 운영 배치는 아래 문단). 경량화 · 변환한 모델(ONNX)을 탑재하며, 창 출력을 backend에 전달하는 경로는 미정 |
+| ai-engine | 키오스크 PC에서 비전 관측값(얼굴 · 고개 방향 · 거리 · 주변 사람 · 보조기구)과 상황 태그·근거·측정 품질·'모름'을 만듦(설계안, 운영 배치는 아래 문단). 경량화 · 변환한 모델(ONNX)을 탑재하며, 창 출력은 같은 PC의 프론트엔드가 읽어 `/features` 요청의 `vision` 칸으로 backend에 전달. 프론트엔드에서 터치 통계를 받지 않음 |
 | GPU 서버 | 비전 모델 학습 · 평가 전용(AI Hub · Open Images). 실행 경로에 없으며 학습한 모델을 CPU 추론용으로 경량화 · 변환(ONNX)해 ai-engine에 탑재 |
 | 외부 AI | Jev API(상황 · 선택지 → 선택지별 확률), OpenAI API(인식 문장 → 키오스크 조작 명령). backend만 호출 |
 | Supabase | PostgreSQL: 세션 · 주문 · 결정 기록 저장(첫 마이그레이션 적용, 서비스 연결 전) |
 | Docker Compose | 시연 · 개발: frontend · backend · ai-engine 세 서비스를 한 PC에서 함께 실행 |
 
-목표 구조에서는 판단 층을 backend에 두고, 터치 로그와 비전 창 출력으로 Jev가 판단한 뒤 backend가 접근성 기능을 골라 적용 조건을 확인하고 프론트엔드에 전달합니다. 비전 쪽은 비전 값을 제공하고, 비전 값을 넣었을 때 Jev confidence가 적절히 나오는지 확인하며 전체 파이프라인을 시험하고 안정화합니다. 이 배치는 2026-11-04 비전 담당이 앞선 해석을 바로잡아 제안한 것으로, 팀 합의와 계약 변경 전입니다. 팀 반영은 PR #74 논의와 영향받는 담당자의 리뷰로 확인합니다. 현재 계약(`contract/backend-ai.openapi.yaml` 0.2.0, `contract/frontend-backend.openapi.yaml` 0.4.1)은 그대로이며, 그 계약에서 backend는 ai-engine `/v1/analyze`의 불편 상태 점수(`states`)를 받아 지원 방식을 정합니다. 음성 명령에 따른 주문 변경도 backend가 검증합니다. 프론트엔드는 실제 적용 결과와 사용자 반응을 다시 보내고, 그 반응은 다음 판단에 들어갑니다.
+목표 구조에서는 판단 층을 backend에 두고, 터치 로그와 비전 창 출력으로 Jev가 판단한 뒤 backend가 접근성 기능을 골라 적용 조건을 확인하고 프론트엔드에 전달합니다. 비전 쪽은 비전 값을 제공하고, 비전 값을 넣었을 때 Jev confidence가 적절히 나오는지 확인하며 전체 파이프라인을 시험하고 안정화합니다. 이 배치는 2026-11-04 비전 담당이 앞선 해석을 바로잡아 제안한 것이고, PR #74 논의를 거쳐 backend 쪽 뼈대와 그림자 Jev 단계를 PR #77로 구현했습니다. 계약 변경 전입니다. 현재 계약(`contract/backend-ai.openapi.yaml` 0.2.0, `contract/frontend-backend.openapi.yaml` 0.4.1)은 그대로이며, 그 계약에서 backend는 ai-engine `/v1/analyze`의 불편 상태 점수(`states`)를 받아 지원 방식을 정합니다. 음성 명령에 따른 주문 변경도 backend가 검증합니다. 프론트엔드는 실제 적용 결과와 사용자 반응을 다시 보내고, 그 반응은 다음 판단에 들어갑니다.
 
-실행 위치는 설계안입니다(비전 담당, 2026-10-15; 승용 2026-10-08 "키오스크에서 관측값 계산해서 서버에는 값만 전송"). 비전 값을 backend로 보내는 경로는 프론트엔드의 `/features` 요청에 함께 싣는 안과 ai-engine의 `/v1/analyze` 응답을 확장하는 안 중에서 정합니다. 비전 담당은 프론트 경유안을 선호하며, 실제 키오스크 PC 브라우저에서 로컬 연결을 검증한 뒤 확정합니다. 호출 경로와 기존 특징 전송 골격은 계약 그대로입니다: 프론트엔드는 backend와만 통신하고(frontend-backend 0.4.1), backend ↔ ai-engine은 backend-ai 0.2.0입니다. 상황 태그 · 근거 · '모름' 이유 · 사용자 반응 · Jev 질문 · 확률 필드는 아직 두 계약에 없습니다. 비전 창 출력의 전달 형식과 경로는 팀이 합의한 뒤 `contract/`에 반영합니다. 목표 구조에서는 Jev 질문과 지원 결정을 backend에서 만들며, 규칙표 v0를 어느 범위까지 남길지는 별도로 정합니다. backend는 소형 서버(또는 매장 PC)에서 돌고, 시연은 PC 한 대에서 세 서비스를 Docker Compose로 띄웁니다. 운영 배치는 아직 정하지 않았습니다. 이 README의 키오스크 PC 배치안과 [`infra/deployment-architecture.md`](infra/deployment-architecture.md)의 EC2 동거안(ai-engine을 backend와 같은 EC2에 두는 이전 안) 가운데 어느 쪽도 실기기에서 검증하지 않았고, backend와 ai-engine이 다른 기기에 있을 때의 통신 경로(주소 · 인증 · 보안)도 정하지 않았습니다. 현재 Compose 설정(`AI_ENGINE_URL=http://ai-engine:8001`)은 두 서비스가 같은 Docker 네트워크에 있을 때만 동작합니다. 배치와 경로는 다음 팀 회의 안건으로 올립니다.
+실행 위치는 설계안입니다(비전 담당, 2026-10-15; 승용 2026-10-08 "키오스크에서 관측값 계산해서 서버에는 값만 전송"). 비전 값은 프론트엔드의 `/features` 요청에 실어 backend로 보냅니다(2026-11-25; ai-engine의 `/v1/analyze` 응답을 확장하는 안은 택하지 않음). 주문 화면이 같은 키오스크 PC의 비전 프로세스에서 창 출력을 읽어 `vision` 칸에 싣습니다. 실제 키오스크 PC 브라우저에서 로컬 연결(Local Network Access · CORS)은 아직 검증하지 않았고, 연결이 막히면 `vision: null`로 보내 터치 통계만으로 판단합니다. 호출 경로와 기존 특징 전송 골격은 계약 그대로입니다: 프론트엔드가 서버로 보내는 요청은 backend로만 가고(frontend-backend 0.4.1; 같은 PC의 비전 프로세스에서 창 출력을 읽는 것만 예외, AGENTS.md 4장), backend ↔ ai-engine은 backend-ai 0.2.0입니다. 상황 태그 · 근거 · '모름' 이유 · 사용자 반응 · Jev 질문 · 확률 필드는 아직 두 계약에 없습니다. 비전 창 출력의 전달 형식과 경로는 팀이 합의한 뒤 `contract/`에 반영합니다. 목표 구조에서는 Jev 질문과 지원 결정을 backend에서 만들며, 규칙표 v0를 어느 범위까지 남길지는 별도로 정합니다. backend는 소형 서버(또는 매장 PC)에서 돌고, 시연은 PC 한 대에서 세 서비스를 Docker Compose로 띄웁니다. 운영 배치는 아직 정하지 않았습니다. 이 README의 키오스크 PC 배치안과 [`infra/deployment-architecture.md`](infra/deployment-architecture.md)의 EC2 동거안(ai-engine을 backend와 같은 EC2에 두는 이전 안) 가운데 어느 쪽도 실기기에서 검증하지 않았고, backend와 ai-engine이 다른 기기에 있을 때의 통신 경로(주소 · 인증 · 보안)도 정하지 않았습니다. 현재 Compose 설정(`AI_ENGINE_URL=http://ai-engine:8001`)은 두 서비스가 같은 Docker 네트워크에 있을 때만 동작합니다. 배치와 경로는 다음 팀 회의 안건으로 올립니다.
 
 터치 통계의 계산 위치는 아직 팀 검토 항목입니다. 이 README는 프론트엔드 계산으로 적고, `contract/frontend-backend.openapi.yaml`의 `TouchFeatures`도 프론트엔드 계산입니다(`docs/Touch-Log-Review.md` 5장 T12). 비전 학습 코드의 최종 저장 위치는 팀에서 별도로 정합니다.
 
@@ -139,12 +138,12 @@ flowchart TD
 
 ### 자동 지원
 
-아래 흐름은 목표 구성입니다. 3~5단계의 비전 창 출력 전달과 backend 판단 층은 비전 담당의 목표 구조 제안이며, 팀 합의와 계약 변경 전입니다(위 '시스템 아키텍처').
+아래 흐름은 목표 구성입니다. 3~5단계는 계약 변경 전입니다. 비전 창 출력의 상황 태그를 `vision` 칸에 싣는 형식이 계약에 없고, backend 판단 층은 그림자 모드(PR #77)라 응답을 바꾸지 않습니다(위 '시스템 아키텍처').
 
 1. 프론트엔드가 터치 · 화면 이동 · 실행 결과를 기록합니다.
 2. 키오스크 PC의 ai-engine ① 비전 관측 층이 카메라 영상에서 얼굴 · 고개 방향 · 거리 · 주변 사람 · 보조기구 관측값을 뽑습니다. 영상은 PC 밖으로 나가지 않습니다.
-3. 프론트엔드가 1~3초 창마다 터치 통계를 backend에 보내고, 비전 쪽도 창 출력을 backend에 전달합니다. 비전 값의 전달 경로는 아직 정하지 않았습니다.
-4. ② 상황 태그 층이 관측값과 터치 통계로 상황 태그(뒤에 기다리는 사람 신경 씀 · 일행과 상의 중 · 두리번거림)와 근거 · 측정 품질을 만들고, 근거가 부족하면 '모름'을 냅니다. 비전 쪽이 터치 통계를 언제 어떤 경로로 받을지(프론트엔드가 ai-engine에 보낼지, backend가 ai-engine에 넘길지)와 두 입력의 세션 · 시간 창을 맞추는 방법은 정하지 않았으며, 후속 계약 항목으로 둡니다(아래 'API 및 데이터 계약'). backend가 이 창 출력과 터치 통계를 현재 화면 · 지원 이력과 함께 Jev의 판단 입력으로 구성합니다.
+3. 프론트엔드가 1~3초 창마다 터치 통계를 backend에 보내고, 같은 PC의 비전 프로세스에서 읽은 창 출력을 같은 요청의 `vision` 칸에 싣습니다.
+4. ② 상황 태그 층이 관측값으로 상황 태그(뒤에 기다리는 사람 신경 씀 · 일행과 상의 중 · 두리번거림)와 근거 · 측정 품질을 만들고, 근거가 부족하면 '모름'을 냅니다. 프론트엔드는 터치 통계를 비전 쪽으로 보내지 않습니다. 터치가 들어가는 조건('창 안에 터치 없음', 빗나간 터치)은 backend 판단 층이 같은 요청의 터치 통계로 판정합니다(2026-11-25). 지금 비전 규칙에 있는 터치 조건을 backend로 옮기는 범위와 형식은 후속 계약 항목입니다(아래 'API 및 데이터 계약'). backend가 이 창 출력과 터치 통계를 현재 화면 · 지원 이력과 함께 Jev의 판단 입력으로 구성합니다.
 5. backend가 Jev를 호출하고 판단 결과를 바탕으로 접근성 기능을 고릅니다. Jev 실패 시 규칙표 v0를 fallback으로 쓰는 안은 비전 측 제안이며, 회의에서 정합니다.
 6. backend가 결정을 현재 화면 · 지원 이력과 대조해 적용 조건을 확인합니다.
 7. 프론트엔드가 하단 제안 영역에 지원을 하나씩 제안하고, 묻기면 수락 뒤에, 바로 적용이면 확인 없이 적용합니다.
@@ -158,7 +157,7 @@ Chrome 음성 인식 → 텍스트·후보·신뢰도
 → 상태 조회로 확인 질문·도구 입력 반환
 ```
 
-위 흐름을 처리하는 독립 모듈은 PR #42로 병합했고, PR #53으로 메뉴 화면에 연결해 인식 문장·확인 질문·결과·오류를 표시합니다. 반환된 도구 입력의 MCP 실행·주문 및 UI 반영·응답 자동 TTS는 미연결입니다. PR #58의 수동 화면 읽기는 별도 기능입니다. Chrome 내장 인식(Web Speech API)을 사용하고 Whisper·녹음 파일 전송은 쓰지 않습니다. 수행계획서와 달라진 점은 멘토·팀 공유가 남았습니다([음성 구현 문서](docs/Voice-MCP-Implementation.md)).
+위 흐름을 처리하는 독립 모듈은 PR #42로 병합했고, PR #53으로 메뉴 화면에 연결해 인식 문장·확인 질문·결과·오류를 표시합니다. 반환된 도구 입력은 별도 MCP 서버 없이 backend 안에서 실행해 주문에 반영하고, 응답은 자동으로 읽습니다(PR #79). 음성으로 화면 설정을 바꾸는 연결(`ui_changed`)은 남아 있습니다. PR #58의 수동 화면 읽기는 별도 기능입니다. Chrome 내장 인식(Web Speech API)을 사용하고 Whisper·녹음 파일 전송은 쓰지 않습니다. 수행계획서와 달라진 점은 멘토·팀 공유가 남았습니다([음성 구현 문서](docs/Voice-MCP-Implementation.md)).
 
 ### 지원 결과 피드백
 
@@ -208,7 +207,7 @@ Jev에는 상황 태그와 근거, 터치 통계, 현재 화면과 UI 설정, �
 |---|---|---|
 | 프론트엔드 | React, Vite, TypeScript | 주문·수동 접근성·낮은 화면·로컬 터치 기록·메뉴 화면 음성 입력 구현. 2026-10-14 실제 백엔드를 연결한 주요 주문 흐름·재확인 검증, G10 최종 검증 대기 |
 | 백엔드 | Python, FastAPI | 연결·임시 세션 API 및 초안 기준 주문 API 구현(PR #40). 2026-10-14 실제 프론트를 연결한 주요 주문 흐름·응답 유실 재확인 검증. G10 실기기·음성·DB 영속성 검증 대기 |
-| ai-engine | Python, FastAPI, MediaPipe, ONNX(탑재 모델) | `/v1/analyze`는 명세 예시 값을 돌려주는 자리 표시. 비전 관측·상황 태그와 로컬 재생용 규칙표는 구현했으며 backend에는 미연결. 목표 설계(비전 담당 제안, 팀 합의 · 계약 변경 전)에서 판단 층은 backend에 둠 |
+| ai-engine | Python, FastAPI, MediaPipe, ONNX(탑재 모델) | `/v1/analyze`는 명세 예시 값을 돌려주는 자리 표시. 비전 관측·상황 태그와 로컬 재생용 규칙표는 구현했으며 backend에는 미연결. 판단 층은 backend에 둠(PR #77, 계약 변경 전) |
 | 데이터베이스 | Supabase PostgreSQL | RDS에서 변경 |
 | 영상 처리 | OpenCV | 비전 모듈에서 사용(입력 읽기, 밝기·선명도 계산, 그리기, PR #32) |
 | 얼굴·자세 특징 | MediaPipe 0.10.33 | 비전 모듈 추론 3종(Face Landmarker·Face Detector·Pose Landmarker lite) 구현. 상황 태그 규칙 3개 구현(PR #35), 판단 층 · 서버 연결은 없음 |
@@ -217,8 +216,8 @@ Jev에는 상황 태그와 근거, 터치 통계, 현재 화면과 UI 설정, �
 | 음성 녹음 | Web MediaRecorder API | 쓰지 않음. Chrome 인식만 쓰고 녹음 파일을 서버로 보내지 않음(PR #36, 멘토·팀 공유 전) |
 | STT | Chrome 내장 인식(Web Speech API) | 독립 모듈 구현(PR #42, `frontend/src/features/voice/`), 메뉴 화면 연결(PR #53), 실제 마이크·OpenAI·G10 검증 대기. 수행계획서의 OpenAI Whisper는 쓰지 않으며 예비 경로도 뺌(PR #36, 멘토·팀 공유 전) |
 | 음성 의도 해석 | OpenAI Chat Completions(구조화 출력) | backend가 호출. 모델은 `OPENAI_MODEL`(기본 `gpt-4o-mini`), 실제 키 검증 전 |
-| TTS | 미정(수동 화면 읽기는 브라우저 내장 음성 합성으로 구현) | 2026-10-25 로컬 구현. 실제 G10 음성 재생은 미검증이며 응답 자동 읽기와 그 기술 선정은 남아 있음 |
-| 판단 층 | backend 판단 층(Jev 호출, 접근성 기능 선택) | backend에 두는 안은 비전 담당이 앞선 해석을 정정한 목표 구조 제안(2026-11-04)이며 팀 합의 · 계약 변경 전. 현재 서버 지원 응답은 자리 표시(`decided_by: rule_placeholder`, `preset: none`). 규칙표 v0의 fallback·rule-only baseline 용도는 비전 측 제안이며 회의에서 정함. Jev 효과는 ablation으로 비교 |
+| TTS | 미정(수동 화면 읽기는 브라우저 내장 음성 합성으로 구현) | 2026-10-25 로컬 구현. 응답 자동 읽기는 PR #79로 연결. 실제 G10 음성 재생은 미검증이며 TTS 기술 선정은 남아 있음 |
+| 판단 층 | backend 판단 층(Jev 호출, 접근성 기능 선택) | backend에 둠(비전 담당 제안 2026-11-04; 뼈대와 그림자 Jev 단계는 PR #77로 구현). 계약 변경 전이라 현재 서버 지원 응답은 자리 표시(`decided_by: rule_placeholder`, `preset: none`). 규칙표 v0의 fallback·rule-only baseline 용도는 비전 측 제안이며 회의에서 정함. Jev 효과는 ablation으로 비교 |
 | 실시간 전달 | SSE 또는 WebSocket | 지원 제안·상태 전달. `docs/Voice-MCP-Implementation.md` 3.4는 SSE를 제안(팀 검토 전) |
 | 컨테이너 | Docker, Docker Compose | 시연 · 개발: 세 서비스를 한 PC에서 함께 실행 |
 | 배포 | AWS EC2, AWS Amplify | 제안 구성 |
@@ -318,7 +317,7 @@ Capstone-design/
 | `backend/app/modules` | 업무별 API·서비스·저장 로직 |
 | `backend/app/infrastructure` | DB·스토리지·외부 서비스 연결 |
 | `backend/app/common` | 공통 설정·예외·상수 |
-| `ai-engine/app/modules` | 비전 관측 · 상황 태그. `/v1/analyze`는 현재 명세 예시 값을 돌려주는 자리 표시이며, 판단 층을 backend에 두는 안은 목표 구조 제안(팀 합의 전) |
+| `ai-engine/app/modules` | 비전 관측 · 상황 태그. `/v1/analyze`는 현재 명세 예시 값을 돌려주는 자리 표시이며, 지원을 고르는 판단 층은 backend에 둠(`backend/app/modules/decision/`) |
 | `ai-engine/app/inference` | 직접 실행하는 모델의 로딩·추론 코드 |
 | `db` | DB 변경 이력, 구조, 초기 데이터 |
 | `contract` | API·이벤트·AI 명령 형식과 예시 |
@@ -335,7 +334,7 @@ Capstone-design/
 - 상품·옵션·주문
 - 터치·화면·실행 이벤트
 - 비전 특징과 측정 유효성
-- 비전 쪽의 터치 통계 입력 경로(프론트엔드 또는 backend에서 ai-engine으로)와 시점, 비전 창 출력과 터치 통계의 세션 · 시간 창 맞춤(후속 계약 항목, 미정)
+- `vision` 칸에 실을 비전 창 출력(상황 태그 · 근거 · 측정 품질)의 형식, 비전 규칙의 터치 조건을 backend 판단 층으로 옮기는 범위(후속 계약 항목, 미정)
 - 지원 판단 요청·응답
 - 지원 수락·거절·적용 결과
 - 음성 요청과 구조화된 명령
@@ -449,7 +448,7 @@ Compose의 frontend는 Nginx의 `/backend/` 프록시로 backend를 호출합니
 
 - Jev: 외부 판단 API(https://docs.typesafe.ai). 백엔드가 호출하며, 연동 전에는 응답의 `decided_by`가 `rule_placeholder`입니다.
 - ai-engine: 키오스크 PC에서 비전 관측값과 상황 태그를 만드는 AI 엔진(목표 구조). 현재 계약(backend-ai 0.2.0)의 `/v1/analyze`는 불편 상태 점수를 돌려줍니다. GPU 서버에서 학습하고 CPU 추론용으로 경량화 · 변환한 모델(ONNX)을 탑재합니다.
-- 판단 층: 목표 구조 제안(비전 담당, 2026-11-04; 팀 합의 · 계약 변경 전)에서는 backend에서 터치 로그·비전 창 출력·현재 화면·반응 이력으로 Jev 판단을 요청하고 접근성 기능을 고릅니다. 규칙표 v0를 fallback과 논문의 rule-only baseline으로 남기는 안은 비전 측 제안이며, 회의에서 정합니다.
+- 판단 층: backend에서 터치 통계·비전 창 출력·현재 화면·반응 이력으로 Jev 판단을 요청하고 접근성 기능을 고르는 층입니다(비전 담당 제안 2026-11-04; 뼈대와 그림자 Jev 단계는 PR #77로 구현, 계약 변경 전). 터치가 들어가는 조건도 이 층이 판정합니다. 규칙표 v0를 fallback과 논문의 rule-only baseline으로 남기는 안은 비전 측 제안이며, 회의에서 정합니다.
 - GPU 서버: 비전 모델의 학습 · 평가와 CPU 추론용 경량화 · 변환 전용 서버. 실행 경로에는 없습니다.
 - 상황 태그: 한 시간 창의 관측값이 가리키는 상황의 이름과 그 근거. 상황 태그만으로 지원을 적용하지 않고, 판단 층이 터치 통계와 현재 화면을 함께 보고 지원을 고릅니다.
 - G10: 전시 대상 키오스크 PC(32인치 1080×1920 세로 화면, 카메라 2대). 처리 시간은 아직 재지 않았습니다.
