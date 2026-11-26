@@ -16,6 +16,15 @@
 
 5초 집계, `fixes_recent`·`options_open`·`pause_s`의 판단 연결, 확장의 영구 저장과 화면 지원 활성화는 후속 작업이다. 아래 초안의 정책 상태와 독립 검토 스키마는 검토 당시 기록이다. 구현 기준은 프론트↔백엔드 0.5.0과 내부 분석 계약이다. [프론트 의견](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/89#issuecomment-7123687310) · [AI 의견](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/89#issuecomment-7154567898) · [프론트↔백엔드 OpenAPI](../contract/frontend-backend.openapi.yaml) · [내부 분석 OpenAPI](../contract/backend-ai.openapi.yaml)
 
+### 배포 후 확장 전송을 켜기 전 확인
+
+이전 백엔드도 확장 요청에 `200`을 반환하면서 `touch.interaction`을 버릴 수 있다. 프론트에서 실제로 요청을 보내는 백엔드 배포 경로에 다음 점검을 수행한다.
+
+1. 수신을 지원하는 백엔드를 먼저 배포하고 프론트의 확장 전송은 꺼 둔다. 배포된 백엔드의 `/openapi.json`에 접근할 수 있으면 `POST /api/v1/sessions/{session_id}/features`의 JSON 요청에서 `$ref`를 따라 `touch` 아래에 `interaction`이 있는지 확인한다. FastAPI가 표시하는 앱 버전과 저장소의 계약 문서 버전은 별개다. OpenAPI가 비활성화된 환경에서도 다음 두 요청으로 점검한다.
+2. `POST /api/v1/sessions`로 운영 사용자와 분리된 전용 테스트 세션을 만든다. [합성 요청 예시](touch-interaction-contract-examples.json)의 `base_interaction_request`를 복사하고 `window_start`·`window_end`를 최근 2초의 UTC 시각으로 맞춘다. 발급받은 세션 ID로 `POST /api/v1/sessions/{session_id}/features`를 호출해 `200`을 확인한다.
+3. 동일 테스트 세션에 같은 본문을 보내되 `touch.interaction.schema_version`만 `touch-interaction-v2`로 바꾼다. `422`이고 `detail` 배열에 `loc: ["body", "touch", "interaction", "schema_version"]`인 항목이 있는지 확인한다. 검증 실패 요청은 운영 사용자 세션에서 실행하지 않는다.
+4. 유효 요청과 미지원 버전 요청이 각각 예상대로 응답하면 프론트를 `VITE_TOUCH_INTERACTION_DRAFT=true`로 빌드해 확장 전송을 켠다. 기대 결과와 다르면 플래그를 꺼 둔 상태에서 백엔드의 배포 버전과 프론트의 API 경로를 대조한다.
+
 ## 1. 제안하는 결과와 범위
 
 기존 `POST /api/v1/sessions/{session_id}/features`의 `touch`에 선택형 `interaction` 객체를 추가한다. 기존 필수 정수 5개와 기존 요청은 유지한다. 확장 전체 32개와 중첩 설정 6개의 의미를 명시하여, 수신 모델에서 버리지 않고 백엔드 판단 계층의 관측 근거까지 전달하는 것을 목표로 한다.
