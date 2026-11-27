@@ -15,10 +15,15 @@ info:
     각 상태 표시는 해당 프론트엔드·백엔드 담당자가 구현 변경 시 갱신합니다.
     세션 접근·인증·만료·복원, 멱등성 키 보관·처리 중·실패 정책,
     주문번호 형식·서버 저장 방식은 별도 합의가 필요합니다.
-    명세 추가는 구현 완료나 팀 합의를 뜻하지 않으며 실제 결제·음성·MCP·SSE 연동은 이후 범위입니다.
+    명세 추가는 구현 완료나 팀 합의를 뜻하지 않습니다. 음성 요청 API는 contract/voice.openapi.yaml에 따로 적습니다.
+    실제 결제와 알림 채널(SSE 등) 연동은 이후 범위입니다.
 servers:
   - url: http://localhost:8000
     description: docker compose 로컬 실행
+  - url: http://localhost:8080/backend
+    description: |
+      frontend nginx 프록시 경유 (docker compose). 브라우저 frontend는 backend를 이 경로로만 호출합니다.
+      Vite 개발 서버도 같은 /backend 경로를 backend로 전달합니다.
 
 paths:
   /health:
@@ -59,7 +64,7 @@ paths:
       x-backend-status: implemented
       description: |
         요청 본문 없이 기존 session_id·started_at 응답을 사용합니다.
-        기존 modules/sessions/ 구현을 기준으로 장바구니·주문 연결을 검토합니다.
+        지금 backend는 장바구니·주문 요청의 세션도 이 세션 ID로 확인합니다.
         프론트는 새로고침·새 주문·주문 재시작·결과 재확인 실패 후 처음부터 다시 시작할 때 새 세션을 요청합니다.
         Cart 조회 실패 후 재연결도 새 세션을 요청하며 기존 세션을 재사용하거나 자동 종료하지 않습니다.
         첫 시연에서는 한 세션에 모의 주문 한 건만 만들고 새 주문은 새 세션에서 시작합니다.
@@ -103,14 +108,14 @@ paths:
             schema:
               $ref: "#/components/schemas/FeatureWindowRequest"
             example:
-              screen_id: menu_list
+              screen_id: menu
               window_start: "2026-10-01T10:00:00Z"
               window_end: "2026-10-01T10:00:03Z"
               touch: { tap_count: 6, miss_tap_count: 3, repeat_tap_count: 2, back_count: 0, dwell_ms: 3000 }
               vision: { face_detected: true, face_size_ratio: 0.35, assistive_device: false, confidence: 0.9 }
       responses:
         "200":
-          description: 판단 결과
+          description: 판단 결과. 예시의 support는 형식을 보여 주는 값입니다.
           content:
             application/json:
               schema:
@@ -146,7 +151,7 @@ paths:
       "tags": ["products"]
       "summary": "상품 목록 조회"
       "operationId": "getProducts"
-      "description": "상품 전체를 조회하고 coffee/drink/food를 화면 분류 값으로 표시합니다. 첫 시연은 backend/app/modules/ordering/catalog.py의 고정 17개 상품·현재 가격·온도 옵션을 사용합니다. 프론트는 API의 가격·온도·판매 가능 여부를 사용합니다. 페이지네이션·검색·이미지 API는 포함하지 않습니다."
+      "description": "상품 전체를 조회하고 coffee/drink/food를 화면 분류 값으로 표시합니다. 첫 시연은 고정 17개 상품·현재 가격·온도 옵션을 사용합니다. backend는 DATABASE_URL이 있으면 kiosk.products(시드: db/seed/20261101_demo_catalog.sql)를, 없으면 backend/app/modules/ordering/catalog.py를 읽습니다. 프론트는 API의 가격·온도·판매 가능 여부를 사용합니다. 페이지네이션·검색·이미지 API는 포함하지 않습니다."
       "responses":
         "200":
           "description": "상품 목록."
@@ -755,7 +760,7 @@ components:
           "type": "string"
         "cart":
           "oneOf": [{"$ref":"#/components/schemas/Cart"},{"type":"null"}]
-          "description": "버전·가격 충돌에는 최신 장바구니. 복원할 상태가 없으면 null."
+          "description": "cart_version_conflict, quantity_limit_exceeded(담긴 수량과 합쳐 한도를 넘은 경우), empty_cart에는 최신 장바구니. price_changed는 OrderConflict에 적은 후속 제안입니다. 그 밖의 오류(요청 한 건의 수량이 한도를 넘는 422 invalid_request 포함)에는 null."
     HealthResponse:
       type: object
       required: [status, service]
@@ -802,9 +807,16 @@ components:
       type: object
       required: [screen_id, window_start, window_end, touch]
       properties:
-        screen_id: { type: string, description: 현재 화면 ID }
+        screen_id:
+          type: string
+          description: |
+            현재 화면 ID. 지금 주문 화면은 구간이 끝날 때의 화면(menu 또는 review)을 보냅니다.
+            음성 API는 같은 메뉴 화면을 menu_list로 보냅니다. 공통 화면 ID는 아직 정하지 않았습니다.
         window_start: { type: string, format: date-time }
-        window_end: { type: string, format: date-time }
+        window_end:
+          type: string
+          format: date-time
+          description: window_start보다 늦어야 합니다. 같거나 이르면 422로 거절합니다.
         touch: { $ref: "#/components/schemas/TouchFeatures" }
         vision:
           description: 카메라 측정이 없으면 null
@@ -845,7 +857,11 @@ components:
       required: [session_id, ai_available, support]
       properties:
         session_id: { type: string }
-        ai_available: { type: boolean, description: ai-engine 호출 실패 시 false }
+        ai_available:
+          type: boolean
+          description: |
+            ai-engine 호출이나 응답 검증에 실패하면 false입니다.
+            유효한 응답의 measurable이 false이면 ai_available은 true이고 states는 null입니다.
         states:
           oneOf:
             - $ref: "#/components/schemas/StateScores"
