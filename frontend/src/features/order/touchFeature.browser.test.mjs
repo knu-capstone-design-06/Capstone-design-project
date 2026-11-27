@@ -25,7 +25,14 @@ test('periodic aggregate upload works at kiosk size with normal and enlarged low
         assert.equal(first.touch.tap_count, 0); assert.equal(first.touch.interaction.outside_tap_ratio, null);
         assert.equal(first.vision, null);
         await page.locator('[data-log-target="product:americano"]').click();
-        await page.waitForFunction(() => window.kioskTouchLogDraft?.transmission()?.sent > 1);
+        // options_open is the selection state at a window's end: wait for the window that holds the opening, not the next one.
+        const openedAt = await (await page.waitForFunction(() => {
+          const events = window.kioskTouchLogDraft.read().events;
+          const opened = events.findLast(event => event.kind === 'options_open');
+          const selected = events.findLast(event => event.kind === 'selection_state_change' && event.data.after !== null);
+          return opened && selected ? Math.max(Date.parse(opened.occurredAt), Date.parse(selected.occurredAt)) : null;
+        })).jsonValue();
+        await page.waitForFunction(time => Date.parse(window.kioskTouchLogDraft.transmission().lastWindowEnd) >= time, openedAt);
         const windows = fixture.featureRequests.map(request => request.body);
         assert(windows.some(window => window.touch.interaction?.options_open === true));
         windows.forEach((window, index) => {
@@ -52,7 +59,7 @@ test('page suspension stops samples; a new server session restarts sequence with
     assert.equal(fixture.featureRequests.length, before);
     await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
     await page.locator('[data-log-target="order-restart"]').click();
-    await page.locator('[data-log-target="order-restart-confirm"]').click();
+    await page.locator('[data-log-target="order-restart-confirm"][data-armed="true"]').click();
     await page.waitForFunction(() => window.kioskTouchLogDraft?.read().serverSessionId === 'after' && window.kioskTouchLogDraft.transmission()?.sent > 0);
     const after = fixture.featureRequests.find(r => r.path.includes('/after/'));
     assert.equal(after.body.touch.interaction.window_sequence, 1);
@@ -73,7 +80,7 @@ test('a settings toggle is reflected in consecutive uploads without another touc
     await page.locator('[data-log-target="support:largeButton"]').click();
     const changedAt = await page.evaluate(() => Date.parse(window.kioskTouchLogDraft.read().events
       .findLast(event => event.kind === 'ui_settings_change').occurredAt));
-    await page.waitForFunction(time => Date.parse(window.kioskTouchLogDraft.transmission().lastWindowEnd) >= time + 2000, changedAt);
+    await page.waitForFunction(time => Date.parse(window.kioskTouchLogDraft.transmission().lastWindowEnd) >= time + 1000, changedAt);
     const afterChange = fixture.featureRequests.map(r => r.body).filter(w => Date.parse(w.window_end) >= changedAt);
     assert.equal(afterChange.length, 2);
     assert(afterChange.every(w => w.touch.interaction.ui_settings.large_button));

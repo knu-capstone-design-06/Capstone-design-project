@@ -1081,7 +1081,7 @@ class ResponseInvarianceTests(unittest.TestCase):
             await asyncio.sleep(0.02)   # the round trip: a stamp taken after it is later than this one
             return httpx.Response(200, json={"session_id": payload["session_id"], "measurable": True, "states": self.SCORES, "model_version": "dummy-0.1"})
 
-        app = create_app(Settings(_env_file=None, openai_api_key=None, jev_api_key="jev-secret-value", jev_stages="state_scores"))
+        app = create_app(Settings(_env_file=None, decision_send_support=False, openai_api_key=None, jev_api_key="jev-secret-value", jev_stages="state_scores"))
         real_client = httpx.AsyncClient   # app.main.httpx is this module: keep the class before patching it
         with patch("app.main.httpx.AsyncClient",
                    side_effect=lambda **kw: real_client(base_url="http://ai-engine:8001", transport=httpx.MockTransport(handler))), \
@@ -1122,7 +1122,7 @@ class ResponseInvarianceTests(unittest.TestCase):
             return httpx.Response(200, json={"session_id": payload["session_id"], "measurable": measurable,
                                              "states": answers.pop(0), "model_version": "dummy-0.1"})
 
-        app = create_app(Settings(_env_file=None, openai_api_key=None, jev_api_key="jev-secret-value",
+        app = create_app(Settings(_env_file=None, decision_send_support=False, openai_api_key=None, jev_api_key="jev-secret-value",
                                   jev_stages="state_scores"))
         real_client = httpx.AsyncClient
         bodies = []
@@ -1179,7 +1179,7 @@ class FeaturesEndpointTests(unittest.TestCase):
             "touch": {"tap_count": 1, "miss_tap_count": 0, "repeat_tap_count": 0, "back_count": 1, "dwell_ms": 3000}}
 
     def test_jev_stages_off_keeps_the_app_up_with_the_rule_table_alone(self):
-        settings = Settings(_env_file=None, openai_api_key=None, jev_api_key="jev-secret-value", jev_stages="off", ai_engine_url="http://127.0.0.1:9")
+        settings = Settings(_env_file=None, decision_send_support=False, openai_api_key=None, jev_api_key="jev-secret-value", jev_stages="off", ai_engine_url="http://127.0.0.1:9")
         with TestClient(create_app(settings)) as client:
             self.assertFalse(client.app.state.decision_service.shadow)
             self.assertEqual(client.app.state.decision_service.stage_names, ())
@@ -1187,7 +1187,7 @@ class FeaturesEndpointTests(unittest.TestCase):
     def test_the_response_is_unchanged_while_the_table_runs_beside_it(self):
         for key in (None, "jev-secret-value"):
             with self.subTest(jev_key=bool(key)):
-                settings = Settings(_env_file=None, openai_api_key=None, jev_api_key=key, ai_engine_url="http://127.0.0.1:9",
+                settings = Settings(_env_file=None, decision_send_support=False, openai_api_key=None, jev_api_key=key, ai_engine_url="http://127.0.0.1:9",
                                     jev_stages="state_scores" if key else "off")
                 with TestClient(create_app(settings)) as client:
                     session_id = client.post("/api/v1/sessions").json()["session_id"]
@@ -1211,7 +1211,7 @@ class FeaturesEndpointTests(unittest.TestCase):
         def jev_http(api_key, base_url, timeout_seconds):
             return httpx.AsyncClient(base_url="https://api.typesafe.ai", transport=httpx.MockTransport(slow))
 
-        settings = Settings(_env_file=None, openai_api_key=None, jev_api_key="jev-secret-value", jev_stages="state_scores",
+        settings = Settings(_env_file=None, decision_send_support=False, openai_api_key=None, jev_api_key="jev-secret-value", jev_stages="state_scores",
                             ai_engine_url="http://127.0.0.1:9")
         with unittest.mock.patch("app.main.create_jev_http", jev_http):
             with TestClient(create_app(settings)) as client:
@@ -1238,7 +1238,8 @@ class RetentionTests(unittest.IsolatedAsyncioTestCase):
         repository = self.repository()
         self.used_session(repository)
         self.now[0] = T0 + timedelta(hours=2)
-        self.assertEqual(repository.state("s1").next_id, 1, "no other session touched the repository in between")
+        # Fresh but for its id counter, which goes on (backend review of #107: a decision id is never issued twice).
+        self.assertEqual(repository.state("s1").next_id, 7, "no other session touched the repository in between")
         self.assertEqual(repository.windows("s1"), [])
 
     def test_another_sessions_access_expires_an_idle_session(self):
@@ -1256,7 +1257,8 @@ class RetentionTests(unittest.IsolatedAsyncioTestCase):
         self.now[0] = T0 + RETENTION                        # exactly the retention: still kept
         self.assertEqual(repository.state("s1").next_id, 7)
         self.now[0] = T0 + 2 * RETENTION + timedelta(seconds=1)   # idle one second past it since that access
-        self.assertEqual(repository.state("s1").next_id, 1)
+        self.assertEqual(repository.windows("s1"), [])
+        self.assertEqual(repository.state("s1").next_id, 7, "fresh, its id counter goes on")
 
     async def test_an_answer_arriving_after_the_session_expired_does_not_bring_it_back(self):
         gate = asyncio.Event()
@@ -1276,7 +1278,24 @@ class RetentionTests(unittest.IsolatedAsyncioTestCase):
         await service.drain()
         await http.aclose()
         self.assertEqual((repository.records("s1"), repository.windows("s1")), ([], []))
-        self.assertEqual(repository.state("s1").next_id, 1)
+        self.assertIsNone(repository.state("s1").held)
+        self.assertEqual(repository.state("s1").next_id, 2, "fresh; d0001 was issued, so the counter goes on")
+
+    def test_a_new_decision_after_the_retention_gets_a_new_id_and_a_kept_one_keeps_its_id(self):
+        # Backend review of #107 [P2]: the order screen acts on a decision id once per session.
+        repository = self.repository()
+        service = DecisionService(repository, P, None, stages=())
+        opened = service.observe("s1", ending_at(2, back_count=1), measurable=True)
+        kept = service.observe("s1", ending_at(4), measurable=True)
+        self.assertEqual((opened.transition, opened.decision_id, kept.transition, kept.decision_id),
+                         ("open", "d0001", "keep", "d0001"))
+        self.now[0] = T0 + timedelta(hours=2)                                   # the state expires
+        again = service.observe("s1", ending_at(7202, back_count=1), measurable=True)
+        kept = service.observe("s1", ending_at(7204), measurable=True)
+        self.assertEqual((again.transition, again.decision_id, kept.transition, kept.decision_id),
+                         ("open", "d0002", "keep", "d0002"))
+        other = service.observe("s2", ending_at(7202, back_count=1), measurable=True)
+        self.assertEqual(other.decision_id, "d0001", "each session counts its own")
 
     def test_the_first_window_after_the_retention_reads_no_previous_screen_or_history(self):
         """Expiry comes before the reads of observe(): no previous screen (no progress) and no history."""

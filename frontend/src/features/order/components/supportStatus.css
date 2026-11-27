@@ -1,0 +1,5 @@
+/* 개발용 지원 상태 줄: 개발용 터치 로그 버튼(touchLogPanel.css)과 같은 줄의 왼쪽 끝에 같은 간격·크기로 둡니다(화면 가장자리 16, 주문 바 4 px 위,
+   높이 36). 글자·색은 그 개발 창의 값입니다. 누름을 받지 않습니다. */
+.support-status-line { position: fixed; left: 16px; bottom: calc(var(--order-actions-measured-height, 232px) + 4px); z-index: 100;
+  display: flex; align-items: center; box-sizing: border-box; min-height: 36px; margin: 0; padding: 7px 11px; border-radius: 8px;
+  background: #eef3ee; color: #213c34; font: 13px/1.5 system-ui, sans-serif; pointer-events: none; }

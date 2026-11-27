@@ -31,7 +31,11 @@ export class ApiError extends Error {
   }
 }
 
-/** backend 주소를 실행 환경에서 전달합니다. ai-engine을 직접 호출하지 않습니다. */
+/**
+ * backend 주소를 실행 환경에서 전달합니다. 서버 요청은 backend로만 보냅니다.
+ * 예외는 하나입니다: `VITE_AI_ENGINE_URL`을 주면 주문 기능이 터치 창을 같은 키오스크 PC의 AI 엔진(실시간 실행기의 터치 입구)에
+ * 한 방향으로도 보냅니다(features/order/engineTouchSender.ts). 그 답은 읽지 않습니다.
+ */
 export function createBackendApi(baseUrl: string, fetcher: typeof fetch = fetch) {
   const base = baseUrl.replace(/\/+$/, '');
 

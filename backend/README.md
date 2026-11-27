@@ -1,6 +1,6 @@
 # 백엔드 실행 및 API 현황
 
-Python 3.12 기반 FastAPI 백엔드입니다. 상태·AI 연결 확인, 세션·특징 전송, 상품·장바구니·모의 주문 API를 제공합니다. 음성 요청 접수·해석 API도 등록돼 있습니다. `DATABASE_URL`을 설정하면 세션·상품·장바구니·주문·주문 API의 성공 응답 재생 기록을 Supabase에 저장하고, 비워 두면 기존 프로세스 메모리 방식으로 동작합니다. 음성 요청·대화 기록과 사용자 인증은 DB에 연결하지 않았습니다. `/health` 성공은 프로세스 생존만 뜻하고 DB나 AI 연결 성공을 보장하지 않습니다.
+Python 3.12 기반 FastAPI 백엔드입니다. 상태·AI 연결 확인, 세션·특징 전송, AI 엔진 창 수신, 상품·장바구니·모의 주문 API를 제공합니다. 음성 요청 접수·해석 API도 등록돼 있습니다. `DATABASE_URL`을 설정하면 세션·상품·장바구니·주문·주문 API의 성공 응답 재생 기록을 Supabase에 저장하고, 비워 두면 기존 프로세스 메모리 방식으로 동작합니다. 음성 요청·대화 기록과 사용자 인증은 DB에 연결하지 않았습니다. `/health` 성공은 프로세스 생존만 뜻하고 DB나 AI 연결 성공을 보장하지 않습니다.
 
 ## 프론트 주문 연동 상태
 
@@ -73,8 +73,9 @@ API 문서: http://127.0.0.1:8000/docs
 | JEV_MODEL | jev-1.13.0 | 버전 ID. 별칭(jev-latest)은 실험 기록을 위해 쓰지 않음 |
 | JEV_TIMEOUT_SECONDS | 3 | Jev 호출 한 번의 전체 제한, 재시도 없음 |
 | JEV_STAGES | off | 실험 조건. 창마다 돌릴 Jev 단계를 쉼표로 나열(`state_scores`, `support_choice`, `next_difficulty`). 기본 `off`는 키가 있어도 규칙표만 돌리고 Jev를 부르지 않음 |
+| DECISION_SEND_SUPPORT | false | 시연 스위치. true면 `/features` 응답의 support에 규칙표 결정을 실음(아래 [시연 스위치](#시연-스위치-decision_send_support)). Jev 답은 켜도 기록만 함 |
 
-판단 층(`app/modules/decision/`)은 `/features` 창마다 규칙표 v0를 돌려 세션 상태를 갱신하고, `JEV_API_KEY`가 있고 `JEV_STAGES`에 단계가 있으면 백그라운드에서 그 단계의 질문(`state_scores`: 상태 점수와, 상황을 알 때 규칙표 제안의 적합성; `support_choice`·`next_difficulty`: 지원 고르기·다음 어려움)을 Jev에 물어 기록만 남깁니다(그림자 모드). 응답은 바뀌지 않습니다. 설계와 현황은 [`docs/Jev-Integration.md`](../docs/Jev-Integration.md) 9·10장입니다.
+판단 층(`app/modules/decision/`)은 `/features` 창마다 규칙표(`RULES_VERSION`)를 돌려 세션 상태를 갱신하고, `JEV_API_KEY`가 있고 `JEV_STAGES`에 단계가 있으면 백그라운드에서 그 단계의 질문(`state_scores`: 상태 점수와, 상황을 알 때 규칙표 제안의 적합성; `support_choice`·`next_difficulty`: 지원 고르기·다음 어려움)을 Jev에 물어 기록만 남깁니다(그림자 모드). 기본 설정에서는 응답이 바뀌지 않고, 창 기록에는 짝 지은 엔진 창 정보(`vision_window`)가 더해집니다. `DECISION_SEND_SUPPORT`를 켜면 규칙표 결정이 support에 실립니다. 규칙표가 읽는 상황 태그와 시선은 AI 엔진이 보낸 창에서 옵니다([AI 엔진 창 입구](#ai-엔진-창-입구)). 설계와 현황은 [`docs/Jev-Integration.md`](../docs/Jev-Integration.md) 9·10장입니다.
 
 예: `CORS_ORIGINS=["http://localhost:5173","http://127.0.0.1:5173"]`. 실제 프론트 출처에 맞춰 설정하며 경로나 와일드카드는 허용하지 않습니다. CORS는 GET·POST·PATCH·DELETE를 허용합니다. 기본 허용 출처는 localhost이므로 127.0.0.1에서 직접 교차 출처 요청을 보낼 때는 위 설정이 필요합니다. CORS는 사용자 인증 기능이 아닙니다.
 
@@ -152,7 +153,7 @@ python -m unittest discover -s app/modules -p 'test_*.py' -v
 기존 AI 클라이언트 테스트는 정상 요청·응답, vision 생략/null, 판단 불가, HTTP 오류,
 연결 실패, 전체 타임아웃, 잘못된 응답·세션 불일치, 호출 취소, health 응답과 연결 종료를 확인합니다.
 모듈 테스트는 세션 생성·격리, 입력 검증, AI 점수 검증, 연결 장애와 측정 불가의 구분,
-주문 API와 POST CORS를 확인합니다. 위 Docker 검증은 고정 HTTP 응답을 쓰는 프론트 단위·브라우저 검사와 별도로 실제 서버 응답을 사용했습니다.
+주문 API와 POST CORS를 확인합니다. AI 엔진 창 테스트(`app/modules/sessions/tests/test_vision_windows.py`)는 입구의 검증·거절·보관 기간, 짝 짓기 구간의 경계, 엔진 창을 읽은 장면 3-1·3-2·4-2, 시연 스위치를 켜고 끈 응답, 시험 블록 `touch.interaction`의 시연 대응을 확인합니다. 장면 행 테스트(`app/modules/decision/tests/test_scene_rows.py`, `app/modules/sessions/tests/test_scene_rows_features.py`)는 1-1·1-2·2-1·2-2 행과 4-1의 입력을 규칙표 입력과 실제 `/features`·엔진 창 본문으로 확인합니다. 위 Docker 검증은 고정 HTTP 응답을 쓰는 프론트 단위·브라우저 검사와 별도로 실제 서버 응답을 사용했습니다.
 
 ## 연결 API (0.1.0 형식 유지)
 
@@ -167,7 +168,7 @@ python -m unittest discover -s app/modules -p 'test_*.py' -v
 터치 원시 로그의 통계 계산과 비전 추출은 구현하지 않고 계약에 정의된 특징만 전달합니다.
 주문 완료 세션의 새 특징 요청은 AI 호출 전에 410 `{ "detail": "session_expired" }`로 거절합니다. AI 호출 중 주문이 완료된 경우에도 결과를 반환하지 않고 410으로 처리합니다. 프론트가 이미 수신한 늦은 결과의 화면 적용 차단은 특징 전송 연결 시 함께 확인해야 합니다.
 AI 측정 불가는 ai_available=true, states=null입니다. 통신 오류·타임아웃·잘못된 AI 응답은
-ai_available=false, states=null, model_version=null입니다. 모든 경우 support는
+ai_available=false, states=null, model_version=null입니다. `DECISION_SEND_SUPPORT`가 꺼져 있으면(기본값) 모든 경우 support는
 `{"preset":"none","requires_confirmation":false,"decided_by":"rule_placeholder"}`로 화면을 유지합니다.
 없는 세션은 404 `{"detail":"session not found"}`, 잘못된 입력은 422를 반환합니다.
 
@@ -187,6 +188,87 @@ Invoke-RestMethod -Method Post "$base/api/v1/sessions/$($session.session_id)/fea
 ```
 
 프론트 호출·화면 반영 상태는 [프론트엔드 README](../frontend/README.md)를 확인합니다.
+
+## AI 엔진 창 입구
+
+AI 엔진의 실시간 실행기(`ai-engine/app/modules/vision/tag_sender.py`)가 판단한 창마다 상황 태그를 이 경로로 보냅니다(형식: [`contract/ai-backend.openapi.json`](../contract/ai-backend.openapi.json)). 주문 화면은 비전 값을 전달하지 않으며, `/features`의 `vision` 필드는 이 연결과 관계없이 그대로입니다. 주소 두 개는 서로 다른 프로세스입니다: backend의 `AI_ENGINE_URL`은 ai-engine 앱의 `/v1/analyze`(기본 `http://ai-engine:8001`)이고, 주문 화면의 `VITE_AI_ENGINE_URL`은 실시간 실행기의 터치 입구(`live.py --serve PORT`의 `http://127.0.0.1:<PORT>`, 형식: [`contract/frontend-ai.openapi.json`](../contract/frontend-ai.openapi.json))입니다.
+
+| 요청 | 결과 |
+| --- | --- |
+| POST /api/v1/sessions/{session_id}/vision-windows | 202 `{"status":"accepted"}`. 없는 세션 404, 주문을 마친 세션 410(`/features`와 같은 본문), 형식 오류와 경로와 다른 본문 `session_id`는 422 |
+
+- 본문: `window_start`·`window_end`(시간대가 있는 시각, 끝이 시작보다 뒤), `situation`(규칙표가 읽는 `name`·`evidence`·`confidence`), `observations`(`gaze`: true·false·null, `face_seen`, `scene_tags`), `model_version`입니다. `session_id`는 있을 때만 읽고 경로와 같아야 합니다. 그 밖의 키는 읽지 않습니다.
+- 보관: 판단 층 저장소의 메모리에 세션별로 둡니다. 세션의 다른 판단 기록처럼 1시간 동안 쓰이지 않으면 정리되고, 재시작하면 사라집니다. 엔진 창이 오는 것은 세션을 쓴 것으로 치지 않으므로, 주문 화면이 멈춘 세션은 엔진이 계속 보내도 마지막 사용부터 1시간 뒤 정리됩니다. 판단한 가장 최근 터치 창의 짝 짓기 경계(아래) 이전에 끝난 엔진 창은 도착할 때 버립니다.
+- 짝 짓기: `/features` 창 하나는 같은 세션의 엔진 창 가운데 `touch_start - (touch_end - touch_start) < 엔진 창 끝 <= touch_end`를 만족하는 창을 읽습니다. 시선·얼굴·장면 태그는 그 가운데 가장 늦은 창에서 가져오고, 상황은 그 가운데 상황 태그(`looking_back_with_people_behind`·`consulting_companion`·`looking_around`)를 단 가장 늦은 창에서 가져옵니다. 태그를 단 창이 없으면 가장 늦은 창의 상황(`none`·`unknown`)이고, 가장 늦은 창의 태그는 늘 이깁니다. 짝 짓기 구간은 터치 창 길이의 두 배라 엔진의 1초 구간 두 개가 들어가므로, 한 구간에서만 잡힌 태그도 앞 구간이든 뒤 구간이든 판단에 닿습니다. 주문 화면은 터치 창을 엔진에 먼저 보내고, 엔진이 답한 뒤(답이 없으면 전송기의 확인 주기 한 번 뒤) `/features`를 보냅니다. 엔진은 그 터치 창이 풀어 준 엔진 창을 엔진의 창 간격(`segment_s`) 안에 backend에 넘기면 그 뒤에 답하므로, 같은 구간의 엔진 창은 대개 같은 터치 창의 `/features` 요청이 읽습니다. 늦게 도착한 엔진 창은 다음 요청의 짝 짓기 구간 안에 끝났으면 그 요청이 읽습니다. 넘겨 주기와 읽기는 최선을 다하는 것이고 보장이 아닙니다: 보내기가 실패로 끝난 창은 backend에 닿았는지 알 수 없고, 보내기 전에 바뀐 창과 짝 짓기 구간을 지나 도착한 창은 어느 요청도 읽지 못합니다. 허용 폭은 그 터치 창의 길이뿐이고, 두 시각은 모두 키오스크 PC의 시계입니다. 구간의 앞 경계(`touch_start - (touch_end - touch_start)`)나 그 전에 끝난 엔진 창은 이때 버립니다. 짝 짓기는 세션의 시간축에 놓아 판단하는 창만 합니다. 기록만 하는 창(늦은 창, 시간축을 벗어난 창)은 엔진 창을 읽지 않고 경계도 옮기지 않습니다. 프론트 시계가 옮겨진 것이 확인돼 새 시간축이 시작되면 이전 시간축의 경계를 버리고, 이전 시간축의 마지막 터치 창 끝이나 그 전에 끝난 엔진 창도 버립니다.
+- 짝 지은 창의 `situation`과 `gaze`가 규칙표 입력이 됩니다. 짝이 없으면 둘 다 None이라 엔진 창이 없을 때와 같습니다. 누름·뒤로가기가 없는 창도 짝 지은 창이 얼굴을 보았으면 측정 가능으로 봅니다(ai-engine 자리표시자가 `vision.face_detected`에 쓰는 규칙과 같음). ai-engine 호출은 그대로입니다. 스위치가 꺼져 있으면 ai-engine이 답하지 못한 창은 얼굴이 보여도 측정 불가이고, 켜면 아래 '시연 스위치' 절에 적은 대로 backend가 정합니다.
+- 창 기록(`WindowRecord.vision_window`)에 짝 지은 가장 늦은 창의 시작·끝 시각, 받은 시각, `model_version`, `face_seen`, `scene_tags`와, 상황을 준 창의 끝 시각(`situation_window_end`, 가장 늦은 창이 주었으면 같은 값)을 남깁니다. 스위치의 로그 줄은 두 끝 시각이 다를 때 둘 다 적습니다.
+- `scene_tags`는 창 기록에 남깁니다. 규칙표는 시연 스위치를 켰을 때만 장면 태그를 읽습니다(아래 [장면 행](#장면-행-1-1-1-2-2-1-2-2)).
+
+### 시연 스위치 (DECISION_SEND_SUPPORT)
+
+기본값(false)에서는 `/features` 응답의 support가 언제나 `{"preset":"none","requires_confirmation":false,"decided_by":"rule_placeholder"}`입니다. true로 켜면 그 창에서 규칙표가 내린 결정을 싣습니다.
+
+- `preset`·`requires_confirmation`은 결정의 계약 형식입니다(`Decision.form()`, `decision/schemas.py`의 `CONTRACT_FORM`). 4-1 크게 보기 묻기는 `large_button`·`true`(먼저 물음), 3-1 남은 단계 안내는 `step_guide`·`false`, 3-2 기다림과 4-2 강조는 `none`·`false`입니다. 장면 행의 형식은 [장면 행](#장면-행-1-1-1-2-2-1-2-2)에 적었습니다.
+- 지원이 화면에 떠 있는 동안(열기·바꾸기·유지)에는 `name`(지원 이름), `decision_id`, `steps_left`, `target_id`, `message_id`를 더합니다. 값이 없는 필드는 빠집니다.
+- `decision_id`는 규칙표 결정의 ID입니다. 유지되는 결정은 매 응답에 같은 ID로 다시 오고, 새로 열거나 바꾼 결정은 새 ID로 옵니다. 주문 화면이 반복된 응답과 새 결정을 가르도록 싣습니다.
+- 유지되는 결정의 `steps_left`·`target_id`·`message_id`는 지금 답하는 창의 입력으로 규칙표의 `execution()`이 다시 구합니다. 그래서 옵션 창이 열린 메뉴에서 시작한 4-2는 옵션 창이 닫힌 창의 응답에서 대상 없이 오고, 옵션 창이 다시 열린 창의 응답에서는 `cart-add`를 가리킵니다. 열리거나 바뀐 결정은 처음부터 그 창의 값입니다.
+- 측정 가능 여부는 backend가 정합니다. 창에 누름이나 뒤로가기가 있거나, 짝 짓기 구간(앞 경계 `touch_start - (touch_end - touch_start)` 뒤) 안에 끝난 같은 세션의 앞 터치 창에 누름이나 뒤로가기가 있거나, 짝 지은 엔진 창 가운데 가장 늦은 창이나 상황을 준 창이 얼굴을 보았으면 측정 가능입니다(ai-engine 자리표시자의 규칙을 짝 짓기 구간에서 읽음). 누름 근거와 카메라 근거를 판단이 읽는 엔진 창과 같은 구간에서 읽으므로, 1초 창에서 누름이 든 창 다음 창에 처음 온 단서도 그 누름과 만납니다. 앞 터치 창은 판단한 창만 셉니다. 기록만 한 늦은 창과 프론트 시계가 옮겨지기 전의 창은 세지 않습니다. 앞 구간에 태그와 얼굴이 있고 뒤 구간에서 얼굴이 사라진 창(뒤나 일행 쪽으로 몸을 돌린 경우)도 측정 가능입니다. 그래서 `/v1/analyze`가 꺼지거나 늦거나 잘못된 점수를 주어도 판단 층이 돈 창의 결정이 응답에 실립니다. `ai_available`·`states`·`model_version`은 그대로 ai-engine 분석의 결과입니다.
+- 거두기, 열리는 행이 없는 창, 기록만 하는 늦은 창, 판단 층 오류에서는 기본값을 보냅니다.
+- 스위치를 켜면 `/features` 창마다 로그 한 줄(INFO, `app.modules.sessions.service`)을 남깁니다. 세션, 창 끝, 전이, 지원 이름, 장면, 측정 가능 여부, 짝 지은 엔진 창의 끝과 상황 이름(없으면 None)입니다. uvicorn은 자기 로거만 설정하므로, 스위치를 켠 앱이 이 로거에 콘솔 출력을 하나 붙입니다. 새 2-2 사건 ID를 실은 엔진 창마다 같은 로거에 한 줄(`new customer event`: 세션, 엔진 창 끝, ID)을 더 남겨, 사건이 됐는지(`pending`) 기억만 했는지와 그 까닭(첫 누름 없음, 앞 엔진 창 없음, 앞 창이 첫 누름 창 끝 전에 끝남)을 보입니다.
+- `decided_by`는 켜도 `rule_placeholder`입니다. Jev 답은 응답을 기다리게 하지 않고 기록만 하므로, 제때 유효한 답이 없어도 규칙표 결과가 그대로 나갑니다.
+- 4-1이 읽는 빗나간 뒤 바로 고친 횟수(`fixes_recent`)는 시험 블록 `touch.scene_signals`에서 옵니다([장면 행](#장면-행-1-1-1-2-2-1-2-2)). 블록이 없으면 None이라 4-1은 열리지 않습니다.
+
+스위치를 켜면 주문 화면이 `/features`의 `touch`에 함께 보내는 시험 블록 `touch.interaction`(`schema_version` `touch-interaction-pilot-v1`, `frontend/src/features/order/interactionFeatures.ts`)에서 두 값을 규칙표 입력으로 읽습니다. 이 대응은 시연용입니다. 멈춘 시간은 `docs/Touch-Interaction-Contract-Proposal.md` 4.3절(표 아래 문단)이 제안한 대응을 그대로 따르고, 최종 정의는 팀의 터치 계약이 정합니다(`docs/Jev-Integration.md` 10장 '다음'의 남은 항목, 같은 합의안). 주문 화면은 `VITE_TOUCH_INTERACTION_DRAFT=true`(Vite를 시작할 때 읽음)일 때만 이 블록을 보내므로, 멈춘 시간으로 여는 4-2와 옵션 창 대상에는 이 설정이 필요합니다.
+
+- `options_open`은 입력 `options_open`이 됩니다. 메뉴 화면에서 옵션 창이 열려 있으면 4-2 강조가 담기 버튼(`target_id` `cart-add`)을 가리킵니다.
+- 멈춘 시간은 입력 `pause_s`(초)가 됩니다. 주문 처리·음성 처리·안내 음성 시간을 뺀 경과 `since_last_input_excluding_system_busy_ms`를 1000으로 나눈 값만 쓰고, 그 값이 없으면 None입니다. 원래 경과(`since_last_input_ms`)나 `dwell_ms`로 대신하지 않습니다.
+- `voice_phase`가 `listening`이거나 `microphone_active`가 true이면 `pause_s`는 None입니다. 이용자가 말하는 시간은 위 보정값에서 빠지지 않기 때문입니다.
+- 스위치가 꺼져 있거나, 블록이 없거나, 읽는 네 필드나 `schema_version`의 형식이 맞지 않으면 두 입력은 None입니다. 그래서 기본 모드에서는 두 입력이 지금처럼 비어 있습니다. 형식이 틀린 블록도 요청을 실패시키지 않으며, 블록은 ai-engine으로 보내지 않습니다.
+
+시험 블록이 없는 창(옵션 창 상태를 모름)에서 뒤로가기 뒤 메뉴 화면의 4-2 예:
+
+```json
+{"preset":"none","requires_confirmation":false,"decided_by":"rule_placeholder","name":"highlight_next_action","decision_id":"d0001","steps_left":2}
+```
+
+### 장면 행 (1-1, 1-2, 2-1, 2-2)
+
+시연 스위치를 켜면 규칙표가 AI 엔진 창의 장면 태그, 주문 화면의 시험 블록, 세션 장바구니를 읽어 아래 행을 엽니다. 스위치가 꺼져 있으면 이 입력을 읽지 않으므로 결정과 응답이 이 행들을 더하기 전과 같습니다. 순위가 작은 행이 먼저 열립니다. backend는 화면의 대답을 받지 않으므로(반응을 받는 경로가 아직 없음), 묻기는 대답이 있었든 없었든 `no_response_s`(10초, 파일럿 값) 동안 붙잡고 그 뒤에 거둡니다. 붙잡은 동안에는 그보다 순위가 앞선 3-2 기다림 말고는 다른 행이 열리지 않고(2-2 포함), 거둔 뒤에는 표의 범위 안에서 다시 묻지 않습니다. 규칙표 버전(`RULES_VERSION`)은 이 행들과 4-2의 옵션 창 조건을 더하면서 `rule_table_v1`이 됐고, 스위치를 끈 기록에도 이 버전이 남습니다. Jev 질문 버전(`QUESTIONS_VERSION`)은 2-1 행의 질문과 그 state 키를 더하면서 `jev_questions_v2`가 됐습니다.
+
+| 장면 | 지원 이름 | 형식 | 순위 | 여는 조건 | 다시 묻지 않는 범위 |
+| --- | --- | --- | --- | --- | --- |
+| 2-2 새 손님 | `continue_or_new_order` | 묻기 | 0 | 이 창에 누름이 있고, 세션 장바구니에 메뉴가 있고, 아직 쓰이지 않은 이용자 바뀜(`user_changed`) 사건이 있음(아래 '이용자 바뀜 사건') | 그 사건 |
+| 1-2 앉은 높이 | `lower_screen` | 묻기 | 1 | `seated_height`가 참이거나, `aid_use`가 참이고 근거의 보조기구가 휠체어(`aid_class` `wheelchair`)임. 세션에 누름이 있었고 옵션 창이 닫혀 있으며, 주문 화면이 묻기를 띄울 수 있음(`can_offer`가 거짓이 아님) | 세션 |
+| 1-1 보조기구 | `voice_order` | 묻기 | 1 | `aid_use`가 참(보조기구 종류와 관계없음). 세션에 누름이 있었고 옵션 창이 닫혀 있으며, 주문 화면이 묻기를 띄울 수 있고(`can_offer`가 거짓이 아님) 메뉴 화면임. 1-2와 함께 열릴 수 있으면 1-2를 먼저 묻고, 그 묻기가 끝난 뒤 물음 | 세션 |
+| 4-1 손 떨림 | `large_button` | 묻기 | 4 | 조건은 그대로이고 `fixes_recent`가 시험 블록에서 옴. 2-1의 크게 보기 묻기와 서로 막음 | 화면 방문 |
+| 2-1 저시력 | `large_text` | 묻기 | 6 | 최근 `touch_span_s` 안에 확대 시도가 있고 남은 단계가 있음. 4-1의 크게 보기 묻기와 서로 막음 | 화면 방문 |
+| 4-2 헤맴 | `highlight_next_action` | 바로 적용(조용히) | 7 | 메뉴 화면에서 옵션 창이 닫힌 것을 알면(`options_open` false) 열지 않음. 아직 고른 것이 없어 가리킬 대상이 없기 때문이며, 비전 규칙표와 다른 점으로 담당자 확인 전임. 뒤로가기는 옵션 창이 닫힌 메뉴 화면에 닿으므로, 뒤로가기가 든 창도 메뉴 화면에서 끝나고 옵션 창이 닫힌 것을 알면 열지 않음(옵션 창이 열린 채 끝나면 `cart-add`를 가리키며 열림). 메뉴 화면이 아닌 화면에서 끝난 창과 옵션 창 상태를 모르는 창에서는 비전 규칙표처럼 열림 | 화면 방문 |
+| 2-1 저시력 | `highlight_large_view_help` | 바로 적용(조용히) | 8 | `face_approach`가 참, 세션에 누름이 있었고 옵션 창이 닫혀 있으며 남은 단계가 있음. 크게 보기가 켜져 있거나 거절되지 않았음 | 화면 방문 |
+
+- 크게 보기는 글자와 버튼을 함께 키우는 지원 하나입니다. `large_text`(2-1)와 `large_button`(4-1)은 그 지원을 묻는 두 행의 이름입니다. 한쪽이 떠 있거나 켜졌거나 거절됐거나 같은 화면 방문에서 거둬졌으면 다른 쪽도 열리지 않습니다.
+- 장면 태그: 짝 짓기 구간 안의 엔진 창 가운데 한 창이라도 참이면 참입니다. 그렇지 않으면 가장 늦은 창이 거짓일 때 거짓이고, 그 밖에는 모름입니다. 모름인 태그는 행을 열지 않습니다. `aid_use`의 보조기구 종류는 그 태그를 참으로 준 창의 근거(`aid_head` 사건의 `aid_class`)에서 읽습니다. 종류가 없으면(이전 읽기 방식의 `aid_score` 사건) 1-2의 휠체어 조건만 거짓이고 1-1은 그대로 열립니다.
+- 이용자 바뀜 사건: `user_changed`가 참인 엔진 창은 짝 지을 때가 아니라 backend에 도착할 때, 그 태그 근거의 엔진 사건 ID(`main_user_changed@<프레임>`)로 세션에 남깁니다. 그래서 측정할 수 없는 구간에 온 사건도 잃지 않습니다.
+  - 엔진의 상황 창(`window_s`)이 구간(`segment_s`)보다 길어 창이 겹치므로, 손님이 한 번 바뀌면 이어지는 엔진 창 여러 개(창 3초·구간 1초이면 세 개쯤)에서 같은 ID로 참입니다. 세션이 이미 받은 ID는 그 바뀜을 다시 본 것이라 새 사건이 아닙니다. 사건 ID는 엔진 실시간 실행기의 한 번 실행 안에서만 서로 다르므로, 주문 화면 세션 하나 안에서 엔진을 다시 시작하면 새 바뀜이 세션이 이미 받은 ID를 달고 올 수 있고, 그 바뀜은 사건으로 치지 않습니다.
+  - backend는 받은 ID를 모두 기억하고, 세션의 첫 누름 뒤에 받은 ID 가운데 그 ID를 처음 받은 엔진 창 바로 앞에 받은 엔진 창이 첫 누름이 든 `/features` 창이 끝난 때나 그 뒤에 끝났을 때만 사건으로 둡니다. 앞 창은 그 ID를 싣지 않았으므로 바뀜은 앞 창이 끝난 뒤에 일어났고, 사이에 잃은 창이 있어도 이 판단은 맞습니다. 앞 창이 첫 누름 창이 끝나기 전에 끝났거나 세션의 첫 엔진 창이면 그 ID는 기억만 합니다(2-2를 놓치는 쪽이 덜 나쁨).
+  - 사건 ID가 없는 참 태그는 같은 바뀜인지 가를 수 없어 사건으로 치지 않습니다. 엔진은 이 태그가 참일 때 늘 이 ID를 근거에 붙입니다.
+  - 사건 뒤의 첫 누름이 행이 열리든 아니든 그 사건을 씁니다. 장바구니에 메뉴가 있으면 2-2를 묻고, 비어 있거나 모르면 묻지 않고 사건만 씁니다. 다른 묻기를 붙잡은 동안의 누름은 사건을 쓰지 않고, 그 묻기를 거둔 뒤의 첫 누름이 정합니다.
+- 장바구니: 누름이 있는 창에서 backend가 가진 세션 장바구니의 총수량을 읽습니다. 요청에 새 필드는 없습니다.
+- 켜진 설정: 시험 블록 `touch.interaction`의 `ui_settings`(`large_text`·`large_button`·`low_screen`)와 `voice_enabled`가 true인 지원은 이미 켜진 것으로 보고 묻지 않습니다. 블록이 없거나 이 부분의 형식이 맞지 않으면 모름으로 보고, 행은 블록이 없을 때처럼 엽니다.
+- 응답: `large_text`는 `preset` `large_text`와 `requires_confirmation` true입니다. `lower_screen`·`voice_order`·`continue_or_new_order`는 맞는 프리셋이 없어 `preset` `none`, `requires_confirmation` true와 `name`으로 묻습니다. `highlight_large_view_help`는 `preset` `none`, `requires_confirmation` false, `name`과 `target_id` `support-toggle`(화면 도움 입구)입니다.
+
+시험 블록 `touch.scene_signals`(형식: 계약의 `TouchSceneSignals`)는 `touch.interaction`과 따로 오는 블록입니다.
+
+- 키는 `schema_version` `touch-scene-signals-pilot-v1`, `near_miss_fix_count`, `zoom_attempt_count`, `can_offer`이고 모두 있어야 합니다. 두 횟수는 0 이상의 정수나 null입니다. 주문 화면은 `VITE_TOUCH_INTERACTION_DRAFT=true`일 때만 보내고, backend는 스위치를 켰을 때만 읽습니다. 스위치가 꺼져 있으면 받기만 하고, 어느 쪽이든 ai-engine으로 보내지 않습니다.
+- `can_offer`는 주문 화면이 그 창을 만든 때 묻기를 띄울 수 있었는지(참·거짓·null)입니다. 화면 자신의 조건(옵션·화면 도움·장바구니·처음으로 창과 미리보기 카드가 닫혀 있고, 말로 주문이 꺼져 있고, 안내 메시지가 없고, 주문을 바꿀 수 있음)을 그대로 씁니다. 거짓인 창에서는 1-1과 1-2를 열지 않습니다. 세션에서 한 번만 묻는 두 묻기가 화면에 보이지 않은 채 거둬지지 않게 하려는 것입니다. 다른 행은 이 값을 읽지 않습니다.
+- `fixes_recent`는 같은 세션에서 끝 시각이 최근 `touch_span_s`(5초, 파일럿 값) 안에 드는 `/features` 창들의 `near_miss_fix_count` 합입니다. 창 단위로 세므로, 이어지는 창에서 합이 덮는 시간은 1초 창에서 약 5초(2초 창에서는 약 6초)입니다. 그 창 가운데 하나라도 블록이 없거나 값이 null이면 None이고, 4-1은 열리지 않습니다.
+- `zoom_attempt`는 같은 창들의 `zoom_attempt_count` 합이 1 이상이면 true, 0이면 false입니다. 합이 None이면 None입니다.
+- 다른 `schema_version`이나 형식이 맞지 않는 블록은 읽지 않고, 요청도 실패시키지 않습니다.
+
+첫 누름 뒤 장바구니에 메뉴가 있는 세션에서 이용자 바뀜 뒤 누른 창의 응답 예:
+
+```json
+{"preset":"none","requires_confirmation":true,"decided_by":"rule_placeholder","name":"continue_or_new_order","decision_id":"d0001","steps_left":2}
+```
 
 ## 참고
 

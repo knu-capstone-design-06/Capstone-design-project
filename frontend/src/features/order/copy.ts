@@ -55,3 +55,9 @@ export const hintCopy = {
   'cart-remove': "빼려는 메뉴 옆 '삭제'를 눌러 주세요",
 };
 export type HintKind = keyof typeof hintCopy;
+
+/**
+ * 시연 스위치의 3-1 남은 단계 안내입니다(steps_left = 주문이 끝나기 전까지 남은 화면 수).
+ * 문구는 주문 화면 디자인 명세의 힌트 문구 "앞으로 2단계 남았어요"에서 수만 바꿉니다.
+ */
+export const stepsLeftCopy = (steps: number) => `앞으로 ${steps}단계 남았어요`;

@@ -1,14 +1,67 @@
-import type { FeatureWindowRequest, TouchFeatures } from '../../shared/api/types.ts';
+import type { FeatureWindowRequest, SceneSignals, TouchFeatures } from '../../shared/api/types.ts';
 import type { FeatureLog, LogEvent } from './touchLog.ts';
 import { measureTouchPilot, touchPilotPolicy } from './touchLogFeatures.ts';
 import { observedWaitMs, voiceBusy, voicePhase } from './interactionWait.ts';
+import { doubleClickMs } from './utils/timing.ts';
 
 const object = (value: unknown): Record<string, unknown> => value && typeof value === 'object' ? value as Record<string, unknown> : {};
 const at = (event: LogEvent) => Date.parse(event.occurredAt);
 const data = (event: LogEvent) => object(event.data);
 const busy = (state: Record<string, unknown>) => state.status === 'loading' || state.status === 'saving';
 const last = (events: LogEvent[], predicate: (event: LogEvent) => boolean) => [...events].reverse().find(predicate);
-export const FEATURE_WINDOW_MS = 2000;
+// 보내는 터치 창의 길이이자 다음 창까지의 간격: AI 엔진의 창 간격(비전 segment_s 1초 [파일럿])과 같게 두어 양쪽이 시간을 같은 길이로 자르고, 창은 겹치지 않습니다(backend는 최근 구간의 창별 횟수를 더하고, 엔진은 두 창에 걸친 줄을 비움).
+export const FEATURE_WINDOW_MS = 1000;
+
+// 누름(pointer_start)의 대상 정보: target 필드가 있는지, 버튼 밖(null)인지, 닿은 버튼의 ID, 가장 가까운 후보의 ID, 시작 좌표
+const hasTarget = (press: LogEvent) => 'target' in data(press);
+const missed = (press: LogEvent) => hasTarget(press) && data(press).target === null;
+const targetId = (press: LogEvent) => { const id = object(data(press).target).id; return typeof id === 'string' && id ? id : null; };
+const candidateIds = (press: LogEvent) => {
+  const list = data(press).nearestCandidates;
+  return Array.isArray(list) ? list.map(candidate => object(candidate).id).filter((id): id is string => typeof id === 'string' && id !== '') : [];
+};
+const startPoint = (press: LogEvent) => {
+  const p = object(data(press).start);
+  return typeof p.x === 'number' && Number.isFinite(p.x) && typeof p.y === 'number' && Number.isFinite(p.y) ? { x: p.x, y: p.y } : null;
+};
+
+/**
+ * touch.scene_signals(touch-scene-signals-pilot-v1): backend의 장면 행이 읽는 이 구간((from, 끝])의 두 수입니다. 셀 수 없으면 null입니다.
+ * events는 이 세션의 기록(구간 끝까지, 기록 순서)이고, historyTrimmed는 보관 기록의 앞부분이 빠졌는지입니다.
+ * near_miss_fix_count(4-1): 구간 안의 누름 가운데 바로 앞 누름을 고친 누름의 수입니다. 앞 누름이 어느 버튼에도 닿지 않았고(target null)
+ *   이 누름(같은 세션의 다음 누름)이 앞 누름의 가장 가까운 후보(nearestCandidates) 가운데 하나에 닿으면 고친 것입니다. 시간·거리 한계는
+ *   없습니다(비전 모듈 ai-engine/app/modules/vision/touch.py의 near_miss_fix_count 정의를 고친 누름의 구간에서 셈). 구간 안에 target 필드가
+ *   없는 누름이 있거나, 구간 안 누름의 앞 누름이 빠진 기록에 있었을 수 있으면 null입니다.
+ * zoom_attempt_count(2-1): 확대 시도(글자를 두 번 누름)의 수입니다. 연달은 두 누름이 둘 다 버튼에 닿지 않고, 둘째가 첫째에서 두 번 클릭
+ *   간격(doubleClickMs) 안이며 같은 자리 거리(touchPilotPolicy.repeatPx) 안이면 둘째 누름의 구간에서 하나로 셉니다. 메뉴 이름과 가격은
+ *   상품 버튼 안에 있으므로 제목·안내·빈 곳의 글자만 셉니다. 세 번 누르면 연달은 두 쌍이라 둘입니다. 구간 안에 target 필드나 시작 좌표가 없는
+ *   누름이 있거나 같은 자리 거리가 정해지지 않았으면 null입니다. 두 손가락 벌리기는 브라우저 확대에 맡겨 기록되지 않으므로 세지 않습니다.
+ * can_offer(1-1·1-2): 화면이 이 구간을 만든 때 묻기를 띄울 수 있었는지(OrderPage의 canOfferSupport)이며 전송기가 넘깁니다. 모르면 null입니다.
+ */
+export function measureSceneSignals(events: LogEvent[], from: number, historyTrimmed: boolean, canOffer: boolean | null = null): SceneSignals {
+  const presses = events.filter(e => e.kind === 'pointer_start');
+  const { repeatPx } = touchPilotPolicy;
+  let fixes: number | null = 0;
+  let zooms: number | null = repeatPx === null || !Number.isFinite(repeatPx) ? null : 0;
+  presses.forEach((press, index) => {
+    if (at(press) <= from) return;
+    const before = index > 0 ? presses[index - 1] : null;
+    if (!hasTarget(press)) { fixes = null; zooms = null; return; }
+    if (fixes !== null) {
+      if (!before && historyTrimmed) fixes = null;
+      else if (before && missed(before)) { const id = targetId(press); if (id && candidateIds(before).includes(id)) fixes++; }
+    }
+    if (zooms !== null) {
+      const b = startPoint(press);
+      if (!b) { zooms = null; return; }
+      if (!before || !missed(before) || !missed(press) || at(press) - at(before) > doubleClickMs) return;
+      const a = startPoint(before);
+      if (!a) zooms = null;
+      else if (Math.hypot(a.x - b.x, a.y - b.y) <= repeatPx!) zooms++;
+    }
+  });
+  return { schema_version: 'touch-scene-signals-pilot-v1', near_miss_fix_count: fixes, zoom_attempt_count: zooms, can_offer: canOffer };
+}
 
 export function featureInputLookbackStart(end: number) {
   return end - FEATURE_WINDOW_MS - (touchPilotPolicy.repeatMs ?? 0);
@@ -18,8 +71,11 @@ export function hasFeatureHistory(saved: FeatureLog, end: number) {
   return saved.discardedThrough === undefined || saved.discardedThrough <= featureInputLookbackStart(end);
 }
 
-/** Existing local pilot policy, with observable interaction counts. No discomfort labels. */
-export function buildTouchFeatureWindow(saved: FeatureLog, now: number, sequence: number, observedAt = now): FeatureWindowRequest | null {
+/**
+ * Existing local pilot policy, with observable interaction counts. No discomfort labels.
+ * canOffer: the screen's own gate for showing an ask while this window is built (touch.scene_signals.can_offer); null = not known.
+ */
+export function buildTouchFeatureWindow(saved: FeatureLog, now: number, sequence: number, observedAt = now, canOffer: boolean | null = null): FeatureWindowRequest | null {
   if (!saved.serverSessionId || !hasFeatureHistory(saved, now)) return null;
   const pilot = measureTouchPilot(saved, now, FEATURE_WINDOW_MS, undefined, observedAt);
   // The existing five required integer fields cannot represent unobserved values.
@@ -113,6 +169,8 @@ export function buildTouchFeatureWindow(saved: FeatureLog, now: number, sequence
           low_screen: settings.lowScreen === true, high_contrast: settings.highContrast === true,
         },
       },
+      // touch.interaction의 형제 블록입니다. 전송기가 파일럿 설정(VITE_TOUCH_INTERACTION_DRAFT)에서만 보냅니다.
+      scene_signals: measureSceneSignals(events, pilot.from, saved.discardedThrough !== undefined, canOffer),
     },
   };
 }

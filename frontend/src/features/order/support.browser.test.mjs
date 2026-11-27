@@ -279,7 +279,7 @@ test('제안은 처음으로 확인 창이 열린 동안 기다리고, 그사이
     await page.evaluate(() => window.kioskSupportDraft.previewEnlargement());
     await page.waitForTimeout(300);
     assert.equal(await page.locator('.offer-card').count(), 0, '처음으로 확인 창이 열린 동안 제안은 뜨지 않음');
-    await target(page, 'order-restart-cancel').click();
+    await page.locator('[data-log-target="order-restart-cancel"][data-armed="true"]').click();
     await page.locator('.offer-card[data-armed="true"]').waitFor();
     await page.waitForTimeout(300);
     assert.equal(await page.locator('.offer-card').count(), 1, '창을 닫은 누름은 제안을 닫지 않음');

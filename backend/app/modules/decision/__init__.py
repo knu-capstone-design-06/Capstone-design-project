@@ -3,5 +3,6 @@
 Every window the frontend sends (/features) gives the rule table one input line; the
 table opens, keeps, replaces or withdraws one support per session, and in shadow mode Jev
 is asked about the state and the proposal and only the record is kept. The screen still
-follows the placeholder result until thresholds are agreed (docs/Jev-Integration.md).
+follows the placeholder result until thresholds are agreed (docs/Jev-Integration.md), except
+with the demonstration switch DECISION_SEND_SUPPORT, which sends the rule table's decision.
 """

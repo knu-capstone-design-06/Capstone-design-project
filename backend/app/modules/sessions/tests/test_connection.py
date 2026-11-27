@@ -47,7 +47,7 @@ class ConnectionTests(unittest.TestCase):
                 "model_version": "dummy-0.1",
             })
 
-        self.app = create_app(Settings(_env_file=None, ai_engine_timeout_seconds=0.05))
+        self.app = create_app(Settings(_env_file=None, decision_send_support=False, ai_engine_timeout_seconds=0.05))
         http = httpx.AsyncClient(base_url="http://ai-engine:8001",
                                  transport=httpx.MockTransport(handler))
         patcher = patch("app.main.httpx.AsyncClient", return_value=http)
@@ -179,7 +179,7 @@ class ConnectionTests(unittest.TestCase):
 
     def test_sessions_do_not_leak_between_app_instances(self):
         session = self.session()["session_id"]
-        other = create_app(Settings(_env_file=None))
+        other = create_app(Settings(_env_file=None, decision_send_support=False))
         other_http = AsyncClient(base_url="http://ai-engine:8001")
         with patch("app.main.httpx.AsyncClient", return_value=other_http):
             with TestClient(other) as client:

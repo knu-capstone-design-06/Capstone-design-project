@@ -135,7 +135,7 @@ for (const [preset, css, key] of [
     assert.equal(await page.locator(':modal').count(), 0, '제안 뒤의 화면을 비활성화하지 않음');
     assert.deepEqual(Object.keys(requests[0]).sort(), ['screen_id', 'touch', 'vision', 'window_end', 'window_start']);
     assert.equal(requests[0].screen_id, 'menu'); assert.equal(requests[0].vision, null);
-    assert.equal(Date.parse(requests[0].window_end) - Date.parse(requests[0].window_start), 2000);
+    assert.equal(Date.parse(requests[0].window_end) - Date.parse(requests[0].window_start), 1000);
     assert.deepEqual(Object.keys(requests[0].touch).sort(), ['back_count', 'dwell_ms', 'miss_tap_count', 'repeat_tap_count', 'tap_count']);
     assert(Object.values(requests[0].touch).every(value => Number.isSafeInteger(value) && value >= 0));
     if (process.env.SUPPORT_SCREENSHOT_DIR && preset === 'large_text') {
@@ -166,7 +166,7 @@ test('분류 연속 터치와 주문 확인·뒤로가기를 이어지는 구간
     const { page, requests, fixture, errors } = await open(browser, async () => decision('none'), {}, steps);
     const featureRequest = predicate => page.waitForRequest(req => req.url().endsWith('/features') && predicate(req.postDataJSON()));
     await featureRequest(() => true);
-    // 2초보다 짧은 간격으로 2초 이상 계속 바꿉니다. 전송 타이머를 매번 다시 시작하면 누름을 보낼 수 없습니다.
+    // 1초보다 짧은 간격으로 1초 이상 계속 바꿉니다. 전송 타이머를 매번 다시 시작하면 누름을 보낼 수 없습니다.
     for (let i = 0; i < 6; i++) {
       await target(page, i % 2 === 0 ? 'category:커피' : 'category:전체').click();
       await page.waitForTimeout(450);
@@ -206,7 +206,10 @@ test('배경·Escape는 같은 화면 상태에서만 제안을 숨기고 명시
   try {
     const { page, fixture, errors } = await open(browser, async () => decision('large_text'));
     async function noOfferAfterNextResponse() {
-      await page.waitForResponse(response => response.url().endsWith('/features') && response.ok());
+      // 조작 뒤에 끝난 창의 응답을 기다립니다. 조작 전에 끝난 창의 응답은 제안에 쓰이지 않으므로(전송기의 offerSince), 그 응답으로는 이 검사가 확인되지 않습니다.
+      const since = await page.evaluate(() => Date.now());
+      await page.waitForResponse(response => response.url().endsWith('/features') && response.ok()
+        && Date.parse(response.request().postDataJSON().window_end) >= since);
       await page.waitForTimeout(100);
       assert.equal(await dialog(page).count(), 0);
       assert.equal(await page.locator('.kiosk.large-text').count(), 0);
@@ -299,9 +302,43 @@ test('새 서버 세션에서는 자동 적용을 해제하고 같은 종류의 
     const { page, fixture, errors } = await open(browser, async route => decision('large_text', { session_id: new URL(route.request().url()).pathname.split('/').at(-2) }), {}, [...bootstrap('support-session'), ...bootstrap('new-session')]);
     await dialog(page).waitFor(); await answer(page, 'accept');
     await target(page, 'order-restart').click();
-    await target(page, 'order-restart-confirm').click();
+    await page.locator('[data-log-target="order-restart-confirm"][data-armed="true"]').click();
     await page.waitForFunction(() => !document.querySelector('.kiosk.large-text'));
     await dialog(page).waitFor(); await answer(page, 'decline'); fixture.verify(); assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
+test('2-2 결정이 연 처음부터 주문 창은 열린 옵션 창을 담지 않고 닫은 뒤 뜨고, 뜬 직후 [처음부터 주문하기]를 받지 않으며, 두 번 클릭 간격이 지난 뒤에는 받는다', async () => {
+  const browser = await chromium.launch(options);
+  try {
+    const swap = { preset: 'none', requires_confirmation: true, decided_by: 'rule_placeholder', name: 'continue_or_new_order', decision_id: 'd0001', steps_left: 2 };
+    let pressed = false; // 상품을 눌러 옵션 창이 열린 뒤의 응답부터 2-2 결정을 싣습니다.
+    const { page, fixture, errors } = await open(browser, async route => {
+      const session = new URL(route.request().url()).pathname.split('/').at(-2);
+      return { session_id: session, ai_available: true,
+        support: session === 'support-session' && pressed ? swap : { preset: 'none', requires_confirmation: false, decided_by: 'rule_placeholder' } };
+    }, {}, [...bootstrap('support-session'), ...bootstrap('new-session')]);
+    // 그 결정을 부른 누름: 상품을 눌러 옵션 창을 엽니다.
+    const optionsOpen = page.locator('dialog[open] [data-log-target="options-close"]');
+    await target(page, 'product:americano').click();
+    await optionsOpen.waitFor();
+    pressed = true;
+    const opened = page.locator('dialog[aria-labelledby="restart-title"][open]');
+    await opened.waitFor();
+    assert.equal(await optionsOpen.count(), 0, '옵션 창은 담지 않고 닫힘');
+    // 창이 뜬 직후의 누름(닫힌 옵션 창을 누르던 손가락): 보호 중이라 대답이 되지 않습니다.
+    const armedWhenPressed = await page.evaluate(() => {
+      const button = document.querySelector('dialog[open] [data-log-target="order-restart-confirm"]');
+      const armed = button.dataset.armed;
+      button.click();
+      return armed;
+    });
+    assert.equal(armedWhenPressed, 'false', '검사의 전제: 누른 때 보호 중');
+    assert.equal(await opened.count(), 1, '창이 그대로 열려 있음');
+    assert.equal(await page.evaluate(() => window.kioskTouchLogDraft.read().serverSessionId), 'support-session', '새 주문이 시작되지 않음');
+    await page.locator('[data-log-target="order-restart-confirm"][data-armed="true"]').click();
+    await page.waitForFunction(() => window.kioskTouchLogDraft.read().serverSessionId === 'new-session');
+    fixture.verify(); assert.deepEqual(errors, []);
   } finally { await browser.close(); }
 });
 

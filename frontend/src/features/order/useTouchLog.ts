@@ -10,6 +10,11 @@ import type { TouchLogObservation } from './touchLogObservation.ts';
 import { backendApi } from '../../shared/api/index.ts';
 import { createTouchFeatureTransport } from './touchFeatureTransport.ts';
 import type { TransmissionState } from './touchFeatureTransport.ts';
+import { createEngineTouchSender } from './engineTouchSender.ts';
+
+// 같은 PC의 AI 엔진 주소(비전 실시간 실행기 --serve의 터치 입구, 실행기가 시작할 때 찍는 http://127.0.0.1:<포트>)를 주면
+// /features와 같은 터치 창을 그 엔진의 /touch-windows에도 보냅니다. backend의 AI_ENGINE_URL(ai-engine 앱)과는 다른 주소입니다. 없으면 보내지 않습니다.
+const engineTouchSend = createEngineTouchSender(import.meta.env.VITE_AI_ENGINE_URL);
 
 type DraftInspector = { read: () => SavedLog; summarize: () => RawTouchSummary; features: (policy?: TouchPilotPolicy) => ReturnType<typeof measureTouchPilot>; exportJson: () => void; status: () => string | null; transmission: () => TransmissionState | null };
 declare global { interface Window { kioskTouchLogDraft?: DraftInspector } }
@@ -64,7 +69,7 @@ export function useTouchLog(screen: string, category: string, productId: string 
   const previousObservation = useRef<TouchLogObservation | null>(null);
   const interruptGestures = useRef<() => void>(() => {});
   const [transport] = useState(() => createTouchFeatureTransport(
-    backendApi.sendFeatureWindow, () => tracker.current?.readForFeatures() ?? null,
+    backendApi.sendFeatureWindow, () => tracker.current?.readForFeatures() ?? null, undefined, engineTouchSend,
   ));
 
   // effect에서 초기화하고 StrictMode 재설정에서도 세션·방문을 유지합니다.

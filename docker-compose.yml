@@ -31,6 +31,8 @@ services:
       JEV_MODEL: ${JEV_MODEL:-}
       JEV_TIMEOUT_SECONDS: ${JEV_TIMEOUT_SECONDS:-}
       JEV_STAGES: ${JEV_STAGES:-}
+      # Demonstration switch: true = the /features answer carries the rule table's decision. Empty = off.
+      DECISION_SEND_SUPPORT: ${DECISION_SEND_SUPPORT:-}
     depends_on:
       ai-engine:
         condition: service_healthy

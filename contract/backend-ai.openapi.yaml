@@ -4,7 +4,8 @@ info:
   version: 0.2.0
   description: |
     FastAPI backend와 ai-engine 사이의 내부 API 명세입니다.
-    ai-engine은 Docker 내부 네트워크에서만 접근하며 외부에 포트를 공개하지 않습니다.
+    이 명세는 backend가 ai-engine FastAPI 앱(/health, /v1/analyze)을 부르는 내부 연결입니다. 이 앱은 Docker 내부 네트워크에서만 접근하며 외부에 포트를 공개하지 않습니다.
+    AI 엔진 실행기가 backend로 보내는 상황 태그는 ai-backend.openapi.json, 주문 화면이 보내는 터치 창은 frontend-ai.openapi.json에 적습니다.
     ai-engine은 자체 모델 추론(비전 특징, 불편 상태 판단)만 하고 DB·외부 AI API를 쓰지 않습니다. (AGENTS.md 4장)
     지금 /v1/analyze는 점수를 계산하지 않고 이 명세의 예시 값을 돌려주는 자리 표시입니다(ai-engine/app/inference/placeholder.py).
 servers:
