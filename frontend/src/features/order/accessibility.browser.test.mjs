@@ -173,32 +173,24 @@ test('화면 읽기를 중단·다시 재생하고 화면 이동 때 이전 안�
   } finally { await browser.close(); }
 });
 
-test('파일럿 기본값과 기준 변경·집계 내보내기는 원시 입력을 추가하지 않는다', async () => {
+test('콘솔의 파일럿 기본값 조회와 기준 변경은 원시 입력을 추가하지 않는다', async () => {
   const browser = await chromium.launch(launch);
   try {
     const page = await browser.newPage({ viewport: { width: 1080, height: 1920 } });
     const fixture = await installOrderResponses(page, bootstrap('pilot-controls'));
     await page.goto(url);
     await page.waitForFunction(() => window.kioskTouchLogDraft?.read().serverSessionId === 'pilot-controls');
-    await page.getByRole('button', { name: '터치 로그 보기', exact: true }).click();
-    await page.getByText('파일럿 기준 선택 · 팀 계약과 별개', { exact: true }).click();
-    assert.equal(await page.getByLabel('반복 시간(ms)', { exact: true }).inputValue(), '800');
-    assert.equal(await page.getByLabel('반복 거리(CSS px)', { exact: true }).inputValue(), '24');
-    assert.equal(await page.getByLabel('체류 시간 정의').inputValue(), 'foreground_visit');
-    await page.waitForFunction(() => document.querySelector('[data-touch-feature="tap_count"]')?.textContent === '0');
-    assert.notEqual(await page.locator('[data-touch-feature="dwell_ms"]').textContent(), '미산출');
+    await page.waitForFunction(() => window.kioskTouchLogDraft.features().features.tap_count === 0);
+    const defaults = await page.evaluate(() => window.kioskTouchLogDraft.features());
+    assert.equal(defaults.policy.repeatMs, 800);
+    assert.equal(defaults.policy.repeatPx, 24);
+    assert.equal(defaults.policy.dwellMode, 'foreground_visit');
+    assert.notEqual(defaults.features.dwell_ms, null);
     const ids = await page.evaluate(() => window.kioskTouchLogDraft.read().events.map(e => e.id));
-    await page.getByLabel('반복 시간(ms)', { exact: true }).fill('500');
-    const downloadEvent = page.waitForEvent('download');
-    await page.getByRole('button', { name: '파일럿 집계 내보내기', exact: true }).click();
-    const download = await downloadEvent;
-    assert.equal(download.suggestedFilename(), 'touch-features-pilot.json');
-    const stream = await download.createReadStream();
-    const chunks = []; for await (const chunk of stream) chunks.push(chunk);
-    const exported = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-    assert.equal(exported.policy.repeatMs, 500);
-    assert.equal(exported.features.tap_count, 0);
-    assert.equal(exported.serverSessionId, 'pilot-controls');
+    const changed = await page.evaluate(() => window.kioskTouchLogDraft.features({ repeatMs: 500, repeatPx: 24, dwellMode: 'foreground_visit' }));
+    assert.equal(changed.policy.repeatMs, 500);
+    assert.equal(changed.features.tap_count, 0);
+    assert.equal(await page.evaluate(() => window.kioskTouchLogDraft.features().policy.repeatMs), 800);
     assert.deepEqual(await page.evaluate(() => window.kioskTouchLogDraft.read().events.map(e => e.id)), ids);
     fixture.verify();
   } finally { await browser.close(); }

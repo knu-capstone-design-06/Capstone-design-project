@@ -106,7 +106,7 @@ test('동시 접촉의 연결·지속 시간과 취소·중단을 기록하며 �
   } finally { await browser.close(); }
 });
 
-test('원시 요약의 대상·종료 기록과 재방문 표시를 확인하고 새 세션은 이전 입력을 제외한다', async () => {
+test('원시 요약의 대상·종료 기록과 재방문을 확인하고 새 세션은 이전 입력을 제외한다', async () => {
   const browser = await chromium.launch(launchOptions);
   try {
     const page = await browser.newPage({ viewport: { width: 1080, height: 1920 } });
@@ -134,59 +134,47 @@ test('원시 요약의 대상·종료 기록과 재방문 표시를 확인하고
     assert.equal(result.counts.outsideTargetPresses, 1);
     assert.equal(result.counts.releases, 5);
     assert.equal(result.counts.cancellations, 1);
+    assert.equal(result.outsidePressRatio, 1 / 6);
     assert.deepEqual(result.visits.map(visit => visit.screen), ['menu', 'review', 'menu']);
     const ids = await page.evaluate(() => window.kioskTouchLogDraft.read().events.map(event => event.id));
-    await page.getByRole('button', { name: '터치 로그 보기', exact: true }).click();
-    await page.waitForFunction(() => document.querySelector('[data-touch-count="presses"]')?.textContent === '6');
-    assert.equal(await page.locator('[data-touch-count="disabledTargetPresses"]').innerText(), '1');
-    assert.match(await page.locator('[data-touch-outside-ratio]').innerText(), /16\.7% \(1 \/ 누름 시작 6\)/);
-    await page.locator('.touch-log-visits > summary').click();
-    assert.equal(await page.locator('.touch-log-visits tbody tr').count(), 3);
+    await page.evaluate(() => window.kioskTouchLogDraft.summarize());
     assert.deepEqual(await page.evaluate(() => window.kioskTouchLogDraft.read().events.map(event => event.id)), ids);
     await page.reload();
     await page.waitForFunction(() => window.kioskTouchLogDraft?.read().serverSessionId === 'summary-second');
     assert.equal(await page.evaluate(() => window.kioskTouchLogDraft.summarize().counts.presses), 0);
     assert.equal(await page.evaluate(() => window.kioskTouchLogDraft.read().events.filter(event => event.kind === 'pointer_start').length), 6);
-    await page.getByRole('button', { name: '터치 로그 보기', exact: true }).click();
-    await page.waitForFunction(() => document.querySelector('[data-touch-count="presses"]')?.textContent === '0');
-    assert.match(await page.locator('[data-touch-outside-ratio]').innerText(), /산출 안 함 · 누름 기록 없음/);
+    assert.equal(await page.evaluate(() => window.kioskTouchLogDraft.summarize().outsidePressRatio), null);
     responses.verify();
   } finally { await browser.close(); }
 });
 
-test('원시 요약은 기본·확대·낮은 화면에서 넘치지 않고 방문 표와 최근 기록에 접근할 수 있다', async t => {
+test('기본·큰 글씨·큰 버튼·낮은 화면에 개발용 로그 UI가 없고 터치 수집은 유지된다', async t => {
   const browser = await chromium.launch(launchOptions);
   try {
-    for (const viewport of [{ width: 1080, height: 1920 }, { width: 1920, height: 1080 }, { width: 1365, height: 768 }, { width: 390, height: 844 }]) {
-      for (const enlarged of [false, true]) for (const lowScreen of [false, true]) {
-        const label = `${viewport.width}x${viewport.height}-${enlarged ? 'large' : 'default'}-${lowScreen ? 'low' : 'normal'}`;
+    const viewport = { width: 1080, height: 1920 };
+    for (const largeText of [false, true]) {
+      for (const largeButton of [false, true]) for (const lowScreen of [false, true]) {
+        const label = `text-${largeText}-button-${largeButton}-${lowScreen ? 'low' : 'normal'}`;
         await t.test(label, async () => {
           const page = await browser.newPage({ viewport });
           try {
             await page.route('https://fonts.googleapis.com/**', route => route.abort());
             await page.addInitScript(settings => localStorage.setItem('kiosk-ui-settings-v1', JSON.stringify(settings)), {
-              largeText: enlarged, largeButton: enlarged, simpleScreen: false, stepGuide: false, lowScreen,
+              largeText, largeButton, simpleScreen: false, stepGuide: false, lowScreen,
             });
             const responses = await installOrderResponses(page, bootstrap(`summary-${label}`));
             await page.goto(url);
             await page.waitForFunction(() => Boolean(window.kioskTouchLogDraft?.read().serverSessionId));
             await page.locator('[data-log-target="category:커피"]').click();
-            await page.getByRole('button', { name: '터치 로그 보기', exact: true }).click();
-            await page.locator('.touch-log-visits > summary').click();
-            const panel = page.locator('.touch-log-panel');
-            await page.waitForFunction(() => document.querySelector('[data-touch-count="presses"]')?.textContent === '1');
-            const bounds = await panel.boundingBox();
-            assert(bounds.x >= 0 && bounds.x + bounds.width <= viewport.width && bounds.y >= 0 && bounds.y + bounds.height <= viewport.height);
-            assert(await panel.evaluate(element => element.scrollWidth <= element.clientWidth));
-            await page.locator('.touch-log-visits table').scrollIntoViewIfNeeded();
-            const table = await page.locator('.touch-log-visits table').boundingBox();
-            assert(table.y >= bounds.y && table.y < bounds.y + bounds.height);
-            await page.getByRole('heading', { name: '최근 기록 20개 · 최신순' }).scrollIntoViewIfNeeded();
-            const screenshotDir = process.env.TOUCH_LOG_SUMMARY_SCREENSHOT_DIR;
-            if (screenshotDir && viewport.width === 1080 && (!lowScreen || enlarged)) {
+            assert.equal(await page.locator('.touch-log-tools, #touch-log-panel').count(), 0);
+            assert.equal(await page.getByRole('button', { name: '터치 로그 보기', exact: true }).count(), 0);
+            assert.equal(await page.evaluate(() => window.kioskTouchLogDraft.summarize().counts.presses), 1);
+            assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+            assert.equal(await page.evaluate(() => document.documentElement.scrollHeight), viewport.height);
+            const screenshotDir = process.env.TOUCH_LOG_SCREENSHOT_DIR;
+            if (screenshotDir) {
               await mkdir(screenshotDir, { recursive: true });
-              await panel.evaluate(element => { element.scrollTop = 0; });
-              await page.screenshot({ path: join(screenshotDir, `summary-${enlarged ? 'large' : 'default'}-${lowScreen ? 'low' : 'normal'}.png`) });
+              await page.screenshot({ path: join(screenshotDir, `${label}.png`) });
             }
             responses.verify();
           } finally { await page.close(); }
@@ -350,21 +338,19 @@ test('주변 후보는 화면·컨테이너에서 보이는 부분만 사용하�
       });
       window.scrollTo(0, 0);
     });
-    await page.getByRole('button', { name: '터치 로그 보기', exact: true }).click();
-    await page.waitForFunction(() => document.querySelector('.touch-log-summary')?.innerText.includes('보관 중인 현재 세션 누름'));
     await page.evaluate(() => {
       for (let i = 0; i < 1010; i++) {
         document.scrollingElement.scrollTop = i % 2;
         document.dispatchEvent(new Event('scroll'));
       }
     });
-    await page.waitForFunction(() => document.querySelector('.touch-log-summary strong')?.textContent === '1000');
-    assert.match(await page.locator('.touch-log-summary').innerText(), /보관 중인 현재 세션 누름 0/);
+    assert.equal(await page.evaluate(() => window.kioskTouchLogDraft.read().events.length), 1000);
+    assert.equal(await page.evaluate(() => window.kioskTouchLogDraft.summarize().counts.presses), 0);
     responses.verify();
   } finally { await browser.close(); }
 });
 
-test('개발 확인 창은 수집을 오염시키지 않고 표시 정지·재개·내보내기를 제공한다', async () => {
+test('개발용 로그 UI 없이 콘솔의 기록 조회·요약·JSON 내보내기를 유지한다', async () => {
   const browser = await chromium.launch(launchOptions);
   try {
     const page = await browser.newPage({ viewport: { width: 1100, height: 800 } });
@@ -373,34 +359,19 @@ test('개발 확인 창은 수집을 오염시키지 않고 표시 정지·재�
     await page.waitForFunction(() => window.kioskTouchLogDraft);
     await page.waitForFunction(() => window.kioskTouchLogDraft.read().serverSessionId === 'log-tools');
     const read = () => page.evaluate(() => window.kioskTouchLogDraft.read());
-    const originalIds = (await read()).events.map(event => event.id);
-    await page.getByRole('button', { name: '터치 로그 보기', exact: true }).click();
-    await page.locator('.touch-log-events button').first().waitFor();
-    await page.locator('.touch-log-events button').last().click();
-    await page.locator('.touch-log-detail summary').click();
-    assert.deepEqual((await read()).events.map(event => event.id), originalIds);
-    await page.getByRole('button', { name: '표시 일시정지', exact: true }).click();
-    const frozen = await page.locator('.touch-log-summary').innerText();
+    assert.equal(await page.locator('.touch-log-tools, #touch-log-panel').count(), 0);
     await page.locator('[data-log-target="category:커피"]').click();
     assert((await read()).events.some(event => event.kind === 'category_change'));
-    await new Promise(resolve => setTimeout(resolve, 600));
-    assert.equal(await page.locator('.touch-log-summary').innerText(), frozen);
-    await page.getByRole('button', { name: '표시 재개', exact: true }).click();
-    await page.waitForFunction(value => document.querySelector('.touch-log-summary')?.innerText !== value, frozen);
-    assert.notEqual(await page.locator('.touch-log-summary').innerText(), frozen);
     const beforeTools = (await read()).events.map(event => event.id);
-    await page.locator('.touch-log-events').evaluate(element => { element.scrollTop = 100; });
+    assert.equal((await page.evaluate(() => window.kioskTouchLogDraft.summarize())).counts.presses, 1);
     const downloadEvent = page.waitForEvent('download');
-    await page.getByRole('button', { name: 'JSON 내보내기', exact: true }).click();
+    await page.evaluate(() => window.kioskTouchLogDraft.exportJson());
     const download = await downloadEvent;
     assert.equal(download.suggestedFilename(), 'touch-log-draft.json');
+    const stream = await download.createReadStream();
+    const chunks = []; for await (const chunk of stream) chunks.push(chunk);
+    assert.deepEqual(JSON.parse(Buffer.concat(chunks).toString('utf8')), await read());
     assert.deepEqual((await read()).events.map(event => event.id), beforeTools);
-    if (process.env.TOUCH_LOG_SCREENSHOT) await page.screenshot({ path: process.env.TOUCH_LOG_SCREENSHOT });
-    await page.setViewportSize({ width: 390, height: 700 });
-    const bounds = await page.locator('.touch-log-panel').boundingBox();
-    assert(bounds.x >= 0 && bounds.x + bounds.width <= 390 && bounds.y >= 0 && bounds.y + bounds.height <= 700);
-    await page.getByRole('button', { name: '터치 로그 창 닫기', exact: true }).click();
-    assert.equal(await page.locator('#touch-log-panel').count(), 0);
     responses.verify();
     if (process.env.TOUCH_LOG_PRODUCTION_URL) {
       await page.goto(process.env.TOUCH_LOG_PRODUCTION_URL);
