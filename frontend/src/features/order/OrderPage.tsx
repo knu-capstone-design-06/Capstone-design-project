@@ -4,7 +4,7 @@ import type { CartItem, Product, Temperature } from '../../shared/api/index.ts';
 import { categoryLabels, initialSettings, MAX_QUANTITY, readSettings, settingsStorageKey, temperatureLabel } from './model.ts';
 import type { Settings } from './model.ts';
 import { OrderController } from './orderController.ts';
-import { hintCopy, orderCopy, supportCopy } from './copy.ts';
+import { hintCopy, orderCopy, restartCopy, supportCopy } from './copy.ts';
 import type { HintKind } from './copy.ts';
 import { createSampleOrderApi } from './sampleOrderApi.ts';
 import { useTouchLog } from './useTouchLog.ts';
@@ -84,6 +84,18 @@ export function OrderPage() {
   const [storageWarning, setStorageWarning] = useState(false);
   const [orderNumber, setOrderNumber] = useState('');
   const [restartOpen, setRestartOpen] = useState(false);
+  // [처음으로] 확인 창의 대답은 창이 뜬 뒤 두 번 클릭 간격 동안 누름을 받지 않고, 그동안 받지 않은 누름은 보호를 다시 시작합니다([처음으로]를 연달아 누른 손가락이 대답이 되지 않게, 하단 주문 바와 같은 방식).
+  const [restartOpens, setRestartOpens] = useState(0);
+  const restartArmed = useArmedAfter(restartOpens);
+  // 서버 제안을 받아들였을 때와 [원래대로]로 되돌렸을 때 잠깐 뜨는 알림: 그 세션에서만 보입니다. 알림을 띄운 누름이 그 알림을 닫지 않게,
+  // 알림이 뜬 시각과 마지막으로 시작된 누름의 시각을 적어 두고 그 누름보다 먼저 뜬 알림만 '다음 터치'로 닫습니다.
+  const [supportNotice, setSupportNotice] = useState<{ sessionId: string; text: string; at: number } | null>(null);
+  const lastPress = useRef(0);
+  useEffect(() => {
+    const mark = () => { lastPress.current = performance.now(); };
+    document.addEventListener('pointerdown', mark, true);
+    return () => document.removeEventListener('pointerdown', mark, true);
+  }, []);
   const [cartSheetOpen, setCartSheetOpen] = useState(false);
   const [autoOffClosed, setAutoOffClosed] = useState(false);
   // 버튼 강조 힌트: 고리와 그 한 줄 안내는 그 조작을 쓰거나 화면이 바뀔 때까지 남습니다(안내는 누름을 받지 않음).
@@ -279,12 +291,13 @@ export function OrderPage() {
   // 고객이 한 일의 알림(담았어요·수량을 바꿨어요·뺐어요·적용)은 잠깐 떴다가 briefNoticeMs가 지나거나 다음 터치에 닫힙니다.
   // 말로 주문이 오래 말이 없어 꺼지면 그 사실도 알림으로 보입니다.
   const autoOffShown = !voice.enabled && voice.autoOff !== null && !autoOffClosed;
-  const appliedNotice = enlargementPreview.applied ? supportCopy.enlarge.applied : '';
+  const appliedNotice = (supportNotice?.sessionId === sessionId ? supportNotice.text : '') || (enlargementPreview.applied ? supportCopy.enlarge.applied : '');
   const hintLine = hint && !(hint === 'option-add' && selected) ? hintCopy[hint] : '';
   const notice = screen === 'complete' ? '' : appliedNotice || hintLine || state.notice || (autoOffShown ? voiceAutoOffNotice : '');
   const noticeIcon = appliedNotice ? 'check_circle' : hintLine ? 'pan_tool_alt' : null;
   useNextTouch((appliedNotice !== '' || state.notice !== '' || autoOffShown) && !feedback, touchLog.root, () => {
     controller.clearNotice(); setAutoOffClosed(true); enlargementPreview.closeApplied();
+    setSupportNotice(current => current && current.at < lastPress.current ? null : current);
   });
   // 고리를 둘 조작: 담기 힌트는 옵션 시트의 [담기], 빼기 힌트는 가장 최근 줄의 [삭제](장바구니가 버튼 뒤에 있으면 [담은 메뉴 보기])
   const newestLine = cartLines.find(line => !line.removed)?.item;
@@ -320,14 +333,14 @@ export function OrderPage() {
   const briefShown = !feedback && !hintLine && (appliedNotice !== '' || state.notice !== '');
   useEffect(() => {
     if (!briefShown) return;
-    const timer = setTimeout(() => { controller.clearNotice(); enlargementPreview.closeApplied(); }, briefNoticeMs);
+    const timer = setTimeout(() => { controller.clearNotice(); enlargementPreview.closeApplied(); setSupportNotice(null); }, briefNoticeMs);
     return () => clearTimeout(timer);
   }, [briefShown, appliedNotice, state.notice]);
   const standingTop = standing !== null && settings.largeText;
   // 키오스크의 제안은 시트가 열려 있거나 오류·처리 중 안내가 있는 동안 기다리고, 그 밖의 다음 터치에 닫힙니다.
   const offerCard = enlargementPreview.offer && !sheetOpen && !supportOpen && !restartOpen && !feedback ? <OfferCard onAccept={enlargementPreview.accept} onDecline={enlargementPreview.decline} /> : null;
   useNextTouch(offerCard !== null, touchLog.root, enlargementPreview.decline, '.offer-card');
-  const supportCard = backendSupport.preset ? <SupportConfirmSheet key={backendSupport.preset} preset={backendSupport.preset} onAccept={backendSupport.accept} onDecline={backendSupport.decline} onDismiss={backendSupport.dismiss} /> : null;
+  const supportCard = backendSupport.preset ? <SupportConfirmSheet key={backendSupport.preset} preset={backendSupport.preset} onAccept={() => { backendSupport.accept(); if (sessionId && backendSupport.preset) setSupportNotice({ sessionId, text: supportCopy.applied[backendSupport.preset], at: performance.now() }); }} onDecline={backendSupport.decline} onDismiss={backendSupport.dismiss} /> : null;
   const messagePlace = <MessagePlace feedback={sheetOpen ? null : feedback} offer={null} notice={notice} kiosk={noticeIcon} standing={standingTop ? null : standing} />;
   const pageProducts = pageItems(menuProducts, menuPage, menuSize);
   // 메뉴 화면에는 비워 두는 안내 영역이 없습니다. 안내와 버튼이 있는 카드는 상품 목록 위에 뜨는 자리(쪽 넘김 줄 18 px 위)에 섭니다.
@@ -340,6 +353,17 @@ export function OrderPage() {
   // 하단 바의 보호: 바를 덮던 창(옵션·장바구니·화면 도움·처음으로 확인)이나 오류 안내가 닫히거나 화면이 바뀌면, 두 번 클릭 간격 동안
   // [처음으로]와 주요 버튼이 누름을 받지 않습니다. 옵션 창의 [취소]·[담기]가 그 두 버튼과 같은 자리라, 같은 자리를 연달아 누르던
   // 손가락이 담기 → 주문 확인 → 주문하기로 이어지지 않게 합니다.
+  // [원래대로]: 키오스크가 켠 화면 지원(개발용 크게 보기 시안, 서버 제안을 받아들여 켠 설정)이 있는 동안 [화면 도움] 줄에 섭니다.
+  // 고객이 화면 도움에서 직접 켠 설정은 건드리지 않고, 같은 세션에서 이미 답한 제안은 다시 뜨지 않습니다(useBackendSupport).
+  const automaticOn = automaticSettings.sessionId === sessionId
+    && (Object.keys(automaticSettings.values) as (keyof Settings)[]).some(key => automaticSettings.values[key] && !manualSettings[key]);
+  function undoSupports() {
+    enlargementPreview.reset();
+    if (!automaticOn || !sessionId) return;
+    setAutomaticSettings({ sessionId: '', values: {} });
+    // 처리 중·오류 안내가 떠 있으면 되돌림 알림을 두지 않습니다(그 안내가 닫힌 뒤에 뒤늦게 뜨지 않게). 화면이 바뀐 것이 곧 결과입니다.
+    setSupportNotice(feedback ? null : { sessionId, text: supportCopy.reverted, at: performance.now() });
+  }
   const barCovered = sheetOpen || supportOpen || restartOpen || state.message !== '';
   const barBefore = useRef({ screen, covered: barCovered });
   const [barChange, setBarChange] = useState(0);
@@ -382,13 +406,13 @@ export function OrderPage() {
       {screen !== 'complete' && <div className="support-confirm-slot">{supportCard ?? offerCard}</div>}
       <ActionBar total={screen === 'complete' || lowMenu ? null : sum}
         cartButton={cartInBar ? { ref: cartOpener, amount: lowMenu ? sum : null, onClick: () => setCartSheetOpen(true) } : null}
-        restart={screen === 'complete' ? null : { ref: restartTrigger, disabled: busy || state.status === 'uncertain', onClick: () => { voiceController.setEnabled(false); setRestartOpen(true); } }}
+        restart={screen === 'complete' ? null : { ref: restartTrigger, disabled: busy || state.status === 'uncertain', onClick: () => { voiceController.setEnabled(false); setRestartOpens(count => count + 1); setRestartOpen(true); } }}
         primary={{ target: screen === 'complete' ? 'new-order' : screen === 'menu' ? 'review-open' : 'simulate-payment',
           label: screen === 'complete' ? '새 주문 시작' : screen === 'menu' ? '주문 확인' : '주문하기',
           disabled: screen === 'complete' ? busy : !count || writeDisabled,
           onClick: () => { if (screen === 'complete') { enlargementPreview.reset(); void startNewOrder(); } else if (screen === 'menu') openReview(); else void controller.checkout(); } }}
         armed={barArmed} onBlockedPress={() => setBarChange(count => count + 1)} />
-      <EntryRow supportOpen={supportOpen} onToggleSupport={() => setSupportOpen(!supportOpen)} onUndo={enlargementPreview.largeView ? enlargementPreview.reset : null} />
+      <EntryRow supportOpen={supportOpen} onToggleSupport={() => setSupportOpen(!supportOpen)} onUndo={enlargementPreview.largeView || automaticOn ? undoSupports : null} />
     </section>
     <HelpSheet ref={helpDialog} settings={settings} combined={combinedEnlargement}
       onToggle={key => { setManualSettings(current => ({ ...current, [key]: !settings[key] })); clearAutomaticSettings([key]); }}
@@ -402,11 +426,11 @@ export function OrderPage() {
     <CartSheet ref={cartDialog} open={cartSheetOpen} lines={cartLines} count={count} total={sum} actions={lineActions}
       status={feedback ?? (notice ? <p className="sheet-status" role="status">{notice}</p> : null)}
       reviewDisabled={!count || writeDisabled} onClose={closeCartSheet} onReview={openReview} />
-    <dialog ref={restartDialog} className="options-dialog" aria-labelledby="restart-title" onCancel={event => { event.preventDefault(); closeRestart(); }}>
-      <h2 id="restart-title">처음부터 주문할까요?</h2>
-      <p>담은 메뉴를 비우고 새 주문을 시작합니다. 화면 도움 설정은 유지합니다.</p>
-      <div className="order-feedback-actions"><button data-log-target="order-restart-cancel" onClick={closeRestart}>계속 주문하기</button>
-        <button data-log-target="order-restart-confirm" disabled={busy || state.status === 'uncertain'} onClick={() => { setRestartOpen(false); void startNewOrder(true); }}>처음부터 주문하기</button></div>
+    <dialog ref={restartDialog} className="confirm-dialog" aria-labelledby="restart-title" aria-describedby="restart-description" onCancel={event => { event.preventDefault(); closeRestart(); }}>
+      <div><h2 id="restart-title" className="sheet-name">처음부터 주문할까요?</h2>
+        <div id="restart-description" className="sheet-support"><p className="confirm-fact">{restartCopy.cart(count, sum)}</p>{Object.values(manualSettings).some(Boolean) && <p className="sheet-desc">{restartCopy.keep}</p>}</div></div>
+      <div className="order-feedback-actions"><button data-log-target="order-restart-cancel" data-armed={restartArmed} onClick={() => { if (restartArmed) closeRestart(); else setRestartOpens(count => count + 1); }}>계속 주문하기</button>
+        <button data-log-target="order-restart-confirm" data-armed={restartArmed} disabled={busy || state.status === 'uncertain'} onClick={() => { if (restartArmed) { setRestartOpen(false); void startNewOrder(true); } else setRestartOpens(count => count + 1); }}>처음부터 주문하기</button></div>
     </dialog>
   </div><TouchLogPanel /></>;
 }

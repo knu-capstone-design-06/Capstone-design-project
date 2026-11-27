@@ -20,13 +20,23 @@ body:has(.kiosk.high-contrast) { background: #000; }
 .kiosk .primary:disabled { color: var(--ui-muted); background: var(--ui-canvas); border-color: transparent; }
 /* 아래 32 px 여백은 장바구니·주문 묶음·안내 영역이 스스로 둡니다. */
 .kiosk main { padding: 0 var(--side); }
-.kiosk .options-dialog p { font-size: 1em; }
-.kiosk .options-dialog p { color: var(--ui-muted); }
 .kiosk .menu-section { min-width: 0; }
-.kiosk .options-dialog { color: var(--ui-ink); background: var(--ui-surface); border-color: var(--ui-line); }
 .kiosk .order-restart, .kiosk .order-confirm { position: sticky; bottom: 0; z-index: 1; }
 .kiosk .order-feedback-actions { position: sticky; bottom: 0; background: var(--ui-canvas); padding-block: 8px; }
-.kiosk .options-dialog { width: min(900px, calc(100% - 32px)); border: 2px solid var(--ui-line); }
+/* [처음으로] 확인 창: 화면 가운데에 뜨는 질문 창입니다(<dialog>, 여는 쪽은 OrderPage). 떠 있는 안내 카드와 같은 틀(화면 여백 안쪽의 내용 폭, 기준 폭 1080에서 984,
+   테두리를 포함한 안쪽 여백 32, 모서리 24)에 제목(M 굵게), 비워질 내용과 안내(S), 같은 너비의 대답 둘(키오스크 버튼 88)을 둡니다. 덮개는 시트와 같습니다. */
+.kiosk .confirm-dialog { width: min(984px, calc(100% - 2 * var(--side))); max-width: none; max-height: calc(100dvh - 2 * var(--between)); overflow-y: auto; overscroll-behavior-y: contain;
+  padding: calc(var(--between) - var(--bw)); border: var(--bw) solid var(--ui-line); border-radius: var(--r-float); color: var(--ui-ink); background: var(--ui-surface); box-shadow: var(--shadow-float);
+  font: inherit; font-size: var(--fs-s); line-height: var(--lh); }
+.kiosk .confirm-dialog[open] { display: flex; flex-direction: column; gap: var(--between); }
+.kiosk .confirm-dialog::backdrop { background: var(--scrim); }
+.kiosk .confirm-dialog .confirm-fact { margin: 0; font-size: var(--fs-s); color: var(--ui-ink); }
+.kiosk .confirm-dialog .sheet-desc { margin-top: var(--pad-1); }
+.kiosk .confirm-dialog .order-feedback-actions button { min-height: var(--h-kiosk); padding: var(--pad-1) var(--in); font-size: var(--fs-m); line-height: var(--lh); }
+/* 낮은 화면: 아래 조작 영역의 위 끝에서부터 섭니다(분류 탭 줄을 다 덮음). 1080×1920에서는 큰 글씨에서도 대답이 하단 주문 바의 [처음으로]와 같은 자리에 서지 않습니다.
+   더 낮은 창에서 겹칠 때의 연속 입력은 OrderPage의 시간 보호가 막습니다. */
+.kiosk.low-screen .confirm-dialog { inset-block: calc(100dvh - var(--low-screen-height)) auto; max-height: calc(var(--low-screen-height) - var(--between)); }
+@media (max-width: 760px) { .kiosk .confirm-dialog { width: calc(100% - 2 * var(--in)); padding: calc(var(--in) - var(--bw)); } }
 .kiosk.low-screen .order-actions { max-height: min(45dvh, calc(var(--low-screen-height) * .4)); }
 .kiosk.low-screen > main { scroll-padding-bottom: 24px; }
 @media (max-width: 760px) {

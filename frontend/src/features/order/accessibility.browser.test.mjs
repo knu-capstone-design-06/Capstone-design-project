@@ -122,13 +122,13 @@ test('처음으로의 취소는 장바구니를 보존하고 확인하면 새 �
     await page.waitForFunction(() => window.kioskTouchLogDraft?.read().serverSessionId === 'reset-before');
     const before = await page.evaluate(() => window.kioskTouchLogDraft.read().sessionId);
     await target(page, 'order-restart').click();
-    await target(page, 'order-restart-cancel').click();
+    await page.locator('[data-log-target="order-restart-cancel"][data-armed="true"]').click();
     assert.equal(await page.evaluate(() => window.kioskTouchLogDraft.read().sessionId), before);
     assert(await target(page, 'review-open').isEnabled());
     // 창이 닫힌 뒤 두 번 클릭 간격 동안 하단 바는 누름을 받지 않습니다.
     await page.locator('[data-log-target="order-restart"][data-armed="true"]').waitFor();
     await target(page, 'order-restart').click();
-    await target(page, 'order-restart-confirm').click();
+    await page.locator('[data-log-target="order-restart-confirm"][data-armed="true"]').click();
     await page.waitForFunction(() => window.kioskTouchLogDraft.read().serverSessionId === 'reset-after');
     assert.notEqual(await page.evaluate(() => window.kioskTouchLogDraft.read().sessionId), before);
     await page.locator('.order-progress').waitFor({ state: 'hidden' });
@@ -306,7 +306,7 @@ test('화면 읽기는 열린 옵션·처음으로 확인 창만 읽고 닫으�
     const restartText = await page.evaluate(() => window.__dialogTexts.at(-1));
     assert.match(restartText, /처음부터 주문할까요/);
     assert.doesNotMatch(restartText, /메뉴 선택/);
-    await target(page, 'order-restart-cancel').click();
+    await page.locator('[data-log-target="order-restart-cancel"][data-armed="true"]').click();
     await page.waitForFunction(() => window.__dialogTexts.length === 5);
     assert.match(await page.evaluate(() => window.__dialogTexts.at(-1)), /메뉴 선택/);
     fixture.verify();

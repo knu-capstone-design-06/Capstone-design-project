@@ -327,8 +327,8 @@ test('명시적으로 켠 개발 샘플은 서버 없이 17개 메뉴·주문·�
       await click(page, 'simulate-payment');
       await page.locator('.order-number').waitFor();
       assert.equal(await page.locator('.done-title').innerText(), '주문이 끝났어요');
-      assert.match(await page.locator('.order-number').getAttribute('data-order-number'), /^DEV-SAMPLE-\d+$/);
-      assert.match(await page.locator('.order-number').innerText(), /^DEV-SAMPLE-\d+$/, '개발 샘플 주문번호의 접두사를 유지함');
+      assert.equal(await page.locator('.order-number').getAttribute('data-order-number'), 'DEMO-001');
+      assert.equal(await page.locator('.order-number').innerText(), 'DEMO-001', '샘플 주문번호는 DEMO-가 붙은 그대로 보임');
       await screenshot(page, `sample-complete-${large ? 'large' : 'default'}`);
       await click(page, 'new-order'); await ready(page);
       await page.waitForFunction(id => window.kioskTouchLogDraft.read().serverSessionId !== id, first);

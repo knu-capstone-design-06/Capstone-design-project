@@ -1,3 +1,5 @@
+import { money } from './model.ts';
+
 /** 고객 화면의 안내 문구입니다. 서버 오류 상세는 고객에게 그대로 표시하지 않습니다. */
 export const orderCopy = {
   preparing: '주문을 준비하고 있어요.',
@@ -40,6 +42,15 @@ export function orderErrorCopy(code: string, ended: boolean): string {
   return ended ? orderCopy.ended : errors[code] ?? orderCopy.failed;
 }
 
+/** [처음으로] 확인 창의 안내입니다. 어느 대답을 누르면 무엇이 지워지는지 담은 수와 금액으로 알리고, 담은 메뉴가 없으면 그 대답이 하는 일만 알립니다. */
+export const restartCopy = {
+  cart: (count: number, amount: number) => count > 0
+    ? `'처음부터 주문하기'를 누르면 담은 메뉴 ${count}개(${money(amount)})가 모두 지워져요.`
+    : "'처음부터 주문하기'를 누르면 처음 화면으로 돌아가요.",
+  // 고객이 화면 도움에서 고른 설정이 켜져 있을 때만 보입니다. 키오스크가 제안해서 켠 설정은 새 주문에서 끝나므로 말하지 않습니다.
+  keep: '화면 도움에서 고른 설정은 그대로예요.',
+};
+
 /** 키오스크가 먼저 띄우는 화면 지원의 문구입니다. '버튼을 크게 했어요.'는 임시로 정한 문구입니다. */
 export const supportCopy = {
   // 크게 보기(큰 글씨와 큰 버튼을 함께)의 질문과 적용 알림입니다. 둘 다 임시 문구입니다.
@@ -47,11 +58,16 @@ export const supportCopy = {
   accept: '크게 하기',
   decline: '이대로 두기',
   undo: '원래대로',
+  // 서버 제안을 받아들였을 때 잠깐 뜨는 적용 알림입니다(제안의 질문과 같은 말). 임시로 정한 문구입니다.
+  applied: { large_text: '글씨를 크게 바꿨어요.', large_button: '버튼을 크게 바꿨어요.', simple_screen: '간편한 화면으로 바꿨어요.', step_guide: '주문 순서 안내를 켰어요.' },
+  // [원래대로]로 키오스크가 켠 설정을 껐을 때의 알림입니다. 임시로 정한 문구입니다.
+  reverted: '바꾸기 전 화면으로 돌아갔어요.',
 };
 
 /** 버튼 강조 힌트의 한 줄 안내입니다. 계약에 힌트를 주는 필드가 아직 없어 개발용 시험 장치로만 띄웁니다. */
 export const hintCopy = {
-  'option-add': "아래 '담기'를 눌러 주세요",
+  // 기본 크기의 옵션 시트 말풍선은 \n에서 두 줄로 나눔(white-space: pre). 줄바꿈을 따르지 않는 다른 자리에서는 빈칸 하나로 보임
+  'option-add': "아래 '담기'를\n눌러 주세요",
   'cart-remove': "빼려는 메뉴 옆 '삭제'를 눌러 주세요",
 };
 export type HintKind = keyof typeof hintCopy;
