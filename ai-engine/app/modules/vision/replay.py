@@ -23,6 +23,11 @@ From ai-engine/ (runtime environment: requirements.txt + app/modules/vision/requ
   box) and --aid-head-min SCORE gives the aid_use cut of the two head_centre readings (params.py aid_head_min; no
   default: without it aid_use stays unknown, no_value_for_model). Both override the value bundle, need --aid-model and
   are recorded in meta.json with origin 'option'.
+- Wheelchair confirm step (--aid-confirm-model READER.onnx, repeatable, optional; aid_confirm.py): a window's
+  aid_use true with the class wheelchair stays true only when the confirm reader also reads a wheelchair in that
+  window (--aid-confirm-min SCORE, default 0.5: the reader's own decision point, the cut of every table of the
+  measurement); otherwise aid_use becomes false. Several files: the mean of their softmax probabilities. Needs
+  --aid-model with --aid-rule head_centre or head_centre_carry. Off without the option: every output as before.
 - Windows: one every segment_s from the first frame; the rows after the last full window get one shorter window at
   the last frame (its record has 'partial': {segment_s}; meta last_window_partial_s), so the end of the take is judged.
 - Outputs in --out: windows.jsonl, rows.csv (one line per processed frame), meta.json (inputs, bundle with sources,
@@ -163,6 +168,68 @@ def load_aids(path: str | None, params, threads: int, log):
                                                "attribution": detector.meta.get("attribution")}}
 
 
+CONFIRM_MIN_DEFAULT = 0.5   # the reader's own decision point: the cut of every table of the crop reader measurement
+
+
+def add_aid_confirm_options(ap):
+    """--aid-confirm-model (repeatable) and --aid-confirm-min: the wheelchair confirm step (aid_confirm.py)."""
+    ap.add_argument("--aid-confirm-model", action="append", default=None, metavar="READER.onnx",
+                    help="wheelchair confirm reader ONNX (repeatable: the mean of the files' probabilities; optional, "
+                         "off unless given, weights not in the repository; needs --aid-model with a head_centre "
+                         "reading)")
+    ap.add_argument("--aid-confirm-min", type=float, default=CONFIRM_MIN_DEFAULT, metavar="SCORE",
+                    help="the confirm cut on the window median of the reader's wheelchair probability (default "
+                         f"{CONFIRM_MIN_DEFAULT:g}: the reader's own decision point, the measurement's cut)")
+    ap.add_argument("--aid-confirm-hold", action="store_true",
+                    help="after the reader agrees with a wheelchair window, keep the user's later wheelchair windows "
+                         "without reading until the engine ends the user's stretch (a new touch session, a new main "
+                         "user, a window with no main user box or with no rows; aid_confirm.py); needs "
+                         "--aid-confirm-model")
+    ap.add_argument("--aid-confirm-hold-user", action="store_true",
+                    help="after the reader agrees with a wheelchair window, every later window of the same user "
+                         "answers aid_use true, whatever the engine's own window answer is, until the same four ends "
+                         "(a new touch session, a new main user, a window with no main user box or with no rows; "
+                         "includes --aid-confirm-hold; aid_confirm.py); needs --aid-confirm-model")
+
+
+def check_aid_confirm_options(error, a, bundle_rule: str):
+    """Stops (error(message), for example ap.error) when --aid-confirm-model comes without --aid-model or without a
+    head_centre reading, names a missing file, or comes with a cut outside [0, 1]."""
+    if getattr(a, "aid_confirm_hold", False) and not a.aid_confirm_model:
+        error("--aid-confirm-hold needs --aid-confirm-model")
+    if getattr(a, "aid_confirm_hold_user", False) and not a.aid_confirm_model:
+        error("--aid-confirm-hold-user needs --aid-confirm-model")
+    if not a.aid_confirm_model:
+        return
+    if not a.aid_model:
+        error("--aid-confirm-model needs --aid-model")
+    if bundle_rule not in AID_HEAD_RULES:
+        error(f"--aid-confirm-model needs --aid-rule head_centre or head_centre_carry (now {bundle_rule})")
+    for path in a.aid_confirm_model:
+        if not os.path.isfile(path):
+            error(f"--aid-confirm-model: no file {path}")
+    if not 0.0 <= a.aid_confirm_min <= 1.0:
+        error("--aid-confirm-min must lie in [0, 1]")
+
+
+def load_aid_confirm(paths, cut: float, bundle, threads: int, log, hold: bool = False, hold_user: bool = False):
+    """The wheelchair confirm step of --aid-confirm-model, or None (off without a file). Returns (step or None,
+    {file: info})."""
+    if not paths:
+        return None, {}
+    from app.inference.aid_confirm import AidConfirmReader
+    from .aid_confirm import AidConfirm
+    reader = AidConfirmReader(paths, threads)
+    step = AidConfirm(reader, cut, history_s(bundle) + bundle.chain.segment_s, hold, hold_user, log=log)
+    log(f"휠체어 확인 분류기 켬: 파일 {len(paths)}개(여러 개면 확률 평균). 휠체어로 판정한 창은 같은 창에서 분류기의 "
+        f"휠체어 확률 중앙값이 {cut:g}를 넘을 때만 유지합니다"
+        + ("; 한 번 맞으면 같은 사용자의 뒤 휠체어 창은 다시 읽지 않고 유지합니다" if hold and not hold_user else "")
+        + ("; 한 번 맞으면 같은 사용자의 뒤 창은 엔진 답과 관계없이 보조기구 사용 참으로 답합니다" if hold_user else "")
+        + ("(새 세션 · 사용자 교체 · 주 사용자 상자 없는 창 · 줄 없는 창에서 끝나고 다시 확인)" if hold or hold_user else ""))
+    return step, {os.path.basename(p): {"bytes": os.path.getsize(p), "sha256": sha256(p), "role": "aid_confirm"}
+                  for p in paths}
+
+
 def add_aid_options(ap):
     """--aid-rule and --aid-head-min, next to --aid-model (params.py aid_rule, aid_head_min). Unset: the value
     bundle's value (by default the owner_box reading and no cut)."""
@@ -244,14 +311,15 @@ def write_rows(path: str, rows: list):
 def run_replay(source, out_dir: str, bundle, *, timeline=None, models=None, detector=None, direction=None,
                blendshapes: bool = False, max_seconds: float | None = None, session_id: str = "replay",
                model_info: dict | None = None, settings: dict | None = None, log=print, aids=None,
-               phones=None) -> dict:
+               phones=None, aid_confirm=None) -> dict:
     """Run the chain over a frame source (sources.VideoFileSource or any iterable of sources.Frame) and write the
     outputs. models = MediaPipe models (or a fake with .infer(frame)); detector / direction = perception models or
     None. Returns the meta dict (also written to meta.json)."""
     os.makedirs(out_dir, exist_ok=True)
     chain = FrameChain(models, bundle.chain, detector, direction, timeline, blendshapes=blendshapes,
-                       source_kind=SOURCE_KIND.get(getattr(source, "kind", ""), ""), aids=aids, phones=phones)
-    judge = WindowJudge(bundle, timeline, session_id=session_id)
+                       source_kind=SOURCE_KIND.get(getattr(source, "kind", ""), ""), aids=aids, phones=phones,
+                       aid_confirm=aid_confirm)
+    judge = WindowJudge(bundle, timeline, session_id=session_id, aid_confirm=aid_confirm)
     keep_s = history_s(bundle)
     rows, recent, records = [], deque(), []
     next_t, partial_s = None, None
@@ -312,6 +380,8 @@ def run_replay(source, out_dir: str, bundle, *, timeline=None, models=None, dete
                        "frames": frame_counts, "session_resets": session_resets},
             "last_window_partial_s": None if partial_s is None else round(partial_s, 4),
             "jev_questions_recorded": len(judge.jev.log)}
+    if aid_confirm is not None:
+        meta["aid_confirm"] = aid_confirm.summary()
     with open(os.path.join(out_dir, "meta.json"), "w", encoding="utf-8") as f:
         json.dump(jsonable(meta), f, ensure_ascii=False, indent=2)
     return meta
@@ -343,6 +413,7 @@ def main(argv=None) -> int:
     ap.add_argument("--aid-model", default=None,
                     help="walking-aid detector ONNX (optional; off unless given, weights not in the repository)")
     add_aid_options(ap)
+    add_aid_confirm_options(ap)
     ap.add_argument("--phone-model", default=None,
                     help="COCO YOLOX-Nano ONNX for the phone (optional; off unless given, weights not in the "
                          "repository; without --touch-log phone_use is never true, as the companion "
@@ -354,6 +425,7 @@ def main(argv=None) -> int:
     if os.path.isfile(os.path.join(a.out, "windows.jsonl")) and not a.overwrite:
         ap.error(f"{a.out} already holds a replay - choose another --out or add --overwrite")
     bundle = with_options(load_bundle(a.params), aid_values(a))
+    check_aid_confirm_options(ap.error, a, bundle.chain.aid_rule)
     timeline = None
     if a.touch_log:
         from .touch import load_timeline
@@ -372,12 +444,18 @@ def main(argv=None) -> int:
             info[name] = {"bytes": os.path.getsize(p), "sha256": sha256(p)}
     aids, aid_info = load_aids(a.aid_model, bundle.chain, a.threads, print)
     info.update(aid_info)
+    aid_confirm, confirm_info = load_aid_confirm(a.aid_confirm_model, a.aid_confirm_min, bundle, a.threads, print,
+                                                 a.aid_confirm_hold, a.aid_confirm_hold_user)
+    info.update(confirm_info)
     phones, phone_info = load_phones(a.phone_model, bundle.chain, a.threads, print)
     info.update(phone_info)
     models = MediaPipeModels(a.models, blendshapes=a.blendshapes)
     settings = {"step": a.step, "width": a.width, "threads": a.threads, "blendshapes": a.blendshapes,
                 "heads": detector is not None, "head_direction": direction is not None, "aids": aids is not None,
                 "phones": phones is not None,
+                **({"aid_confirm": {"files": len(a.aid_confirm_model), "cut": a.aid_confirm_min,
+                                    "hold": a.aid_confirm_hold, "hold_user": a.aid_confirm_hold_user}}
+                   if aid_confirm is not None else {}),
                 "face_landmarker": "VIDEO, num_faces=1, transformation matrix on, blendshapes "
                                    + ("on" if a.blendshapes else "off"),
                 "touch_log": a.touch_log, "start_offset_s": a.start_offset, "params_file": a.params}
@@ -386,7 +464,7 @@ def main(argv=None) -> int:
         meta = run_replay(source, a.out, bundle, timeline=timeline, models=models, detector=detector,
                           direction=direction, blendshapes=a.blendshapes, max_seconds=a.max_seconds,
                           session_id=a.session_id or os.path.splitext(os.path.basename(a.video))[0],
-                          model_info=info, settings=settings, aids=aids, phones=phones)
+                          model_info=info, settings=settings, aids=aids, phones=phones, aid_confirm=aid_confirm)
     finally:
         models.close()
     tm = meta["timing_ms"].get("ms_chain") or {}

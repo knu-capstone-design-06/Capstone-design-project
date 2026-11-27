@@ -53,6 +53,8 @@ From ai-engine/:
 - --aid-model AID.onnx (optional) with --aid-rule owner_box | head_centre | head_centre_carry and --aid-head-min
   SCORE: as in replay.py (the reading of the walking-aid detector and the aid_use cut of the two head_centre
   readings, which has no default; they override the value bundle and are recorded in meta.json with origin 'option').
+- --aid-confirm-model READER.onnx (repeatable) with --aid-confirm-min SCORE: the wheelchair confirm step, as in
+  replay.py (aid_confirm.py); off without it.
 - A run with neither --seconds nor --out (unbounded, e.g. the kiosk's all-day run) keeps no per-frame or per-window
   timing rows (RunTiming(keep=False)); at exit it prints the frame and window counts, the stop reason and the tag
   sender's counts, with no timing percentiles; with --serve it says so in one start line (unbounded_note). The local
@@ -64,6 +66,7 @@ import argparse
 import json
 import os
 import sys
+import threading
 import time
 from collections import deque
 
@@ -71,8 +74,9 @@ from .chain import SOURCE_KIND, FrameChain, WindowJudge, history_s
 from .events import window_any_tap
 from .judgment.jev_stub import ShadowJev
 from .params import load_bundle, with_options
-from .replay import (MODELS_DIR, TIMING_COLUMNS, add_aid_options, add_frame_counts, aid_values, check_aid_options,
-                     environment, jsonable, load_aids, load_perception, load_phones, timing_summary)
+from .replay import (MODELS_DIR, TIMING_COLUMNS, add_aid_confirm_options, add_aid_options, add_frame_counts,
+                     aid_values, check_aid_confirm_options, check_aid_options, environment, jsonable, load_aid_confirm,
+                     load_aids, load_perception, load_phones, timing_summary)
 from .tag_sender import TagSender, check_base_url, vision_window
 
 WINDOW = "vision chain live (q = stop)"   # ASCII: OpenCV window titles may not show Korean on Windows
@@ -98,6 +102,55 @@ def window_line(rec: dict, ms_frame: float | None, local: bool = False) -> str:
     ms = "-" if ms_frame is None else f"{ms_frame:.0f}"
     return (f"[{rec['t']:7.1f}초] 상황 {name} | 머리 {heads} · 뒤 {behind} · 동행 프레임 {v['companion_frames']} · "
             f"입 {mouth} · 화면 봄 {gaze} | {'로컬 규칙표' if local else '판단'} {decision} | 프레임 처리 {ms} ms")
+
+
+class ReleaseWorker:
+    """One worker thread that runs queued releases in the order they were queued (the wheelchair confirm step: a
+    window's reads must not stop the frame loop, and a later window never overtakes an earlier one). A reader error
+    does not reach it (aid_confirm.py, 'Reader errors'). Any other exception in a release stops the worker: later
+    releases are skipped, run_live's frame loop stops at its next frame (error), and finish() waits for the queue and
+    returns the exception, so run_live closes the entry, the sender and meta.json before it raises it. queued = the
+    queue times (time.perf_counter) of the releases with windows not finished yet, oldest first (oldest_queued)."""
+
+    def __init__(self):
+        import queue
+        self.q = queue.Queue()
+        self.error = None
+        self.queued = deque()
+        self.thread = threading.Thread(target=self._run, name="aid-confirm-release", daemon=True)
+        self.thread.start()
+
+    def _run(self):
+        while True:
+            item = self.q.get()
+            if item is None:
+                return
+            job, queued = item
+            if self.error is None:
+                try:
+                    job()
+                except BaseException as e:      # kept for finish(); later releases are skipped
+                    self.error = e
+            if queued is not None:
+                self.queued.popleft()
+
+    def put(self, job, queued=None):
+        """queued = the release's queue time when it has windows (oldest_queued), None otherwise."""
+        if queued is not None:
+            self.queued.append(queued)
+        self.q.put((job, queued))
+
+    def oldest_queued(self):
+        """The queue time of the oldest release with windows not finished yet, or None (read on the frame thread)."""
+        try:
+            return self.queued[0]
+        except IndexError:                      # the worker finished it meanwhile
+            return None
+
+    def finish(self):
+        self.q.put(None)
+        self.thread.join()
+        return self.error
 
 
 class RunTiming:
@@ -176,7 +229,7 @@ def _draw(img, row: dict, text: str):
 def run_live(source, bundle, *, models, detector=None, direction=None, show_window: bool = False,
              out_dir: str | None = None, blendshapes: bool = False, print_fn=print, aids=None,
              model_info: dict | None = None, phones=None, entry=None, sender=None, on_window=None,
-             timing: RunTiming | None = None) -> dict:
+             timing: RunTiming | None = None, aid_confirm=None) -> dict:
     """Run the chain on a live frame source (sources.LiveCameraSource or any iterable of sources.Frame). entry = a
     touch_entry.TouchEntry (the runner's touch entry): it gets every processed row (frames need Frame.epoch_s), its
     reported touch windows are the chain's touch input and are placed on the rows of every window evaluated here
@@ -190,8 +243,8 @@ def run_live(source, bundle, *, models, detector=None, direction=None, show_wind
         raise ValueError("the tag sender needs the touch entry: a window's session comes from its touch windows")
     chain = FrameChain(models, bundle.chain, detector, direction, None if entry is None else entry.touch,
                        blendshapes=blendshapes, source_kind=SOURCE_KIND.get(getattr(source, "kind", ""), ""),
-                       aids=aids, phones=phones)
-    judge = WindowJudge(bundle, None, session_id="live", jev=UnloggedJev())
+                       aids=aids, phones=phones, aid_confirm=aid_confirm)
+    judge = WindowJudge(bundle, None, session_id="live", jev=UnloggedJev(), aid_confirm=aid_confirm)
     seg_s = bundle.chain.segment_s
     keep_s = history_s(bundle) + seg_s
     timing = RunTiming() if timing is None else timing
@@ -213,12 +266,28 @@ def run_live(source, bundle, *, models, detector=None, direction=None, show_wind
         until = state.touch_until(session)
         return ("touch" if until is not None and until >= t_end else None), session, until
 
-    def emit(t_end, ms_frame, seg_len, how, at, session, until, state):
-        rows = list(buf) if entry is None else entry.window_rows(list(buf), t_end, state)
-        rec = judge.evaluate(rows, t_end, segment_s=seg_len)
+    def window_rows(t_end, state):
+        return list(buf) if entry is None else entry.window_rows(list(buf), t_end, state)
+
+    def emit(t_end, ms_frame, seg_len, how, at, session, until, state, rows=None, images=None, queued=None):
+        """Evaluates one window and passes it on. rows / images / queued: taken in the frame loop when the
+        wheelchair confirm step runs the window on the release worker (flush)."""
+        if rows is None:
+            rows = window_rows(t_end, state)
+        rec = judge.evaluate(rows, t_end, segment_s=seg_len, confirm_images=images, confirm_session=session)
+        delay = None
+        if queued is not None:
+            delay = time.perf_counter() - queued
+            delays.append((rec.get("aid_confirm") is not None, delay))
+            if delay > seg_s:                  # the next window was already due: the worker is behind
+                late["n"] += 1
+                late_line(t_end, delay, True)
         w0 = t_end - (bundle.situation.window_s if bundle.situation is not None else (seg_len or seg_s))
         rec["evaluated"] = {"how": how, "at": round(at, 4), "session_id": session, "touch_until": until,
                             "touch_complete": window_any_tap(rows, (w0, t_end)) is not None}   # the rules' own cue
+        if aid_confirm is not None:      # per window, so a run stopped without meta.json still shows them
+            rec["evaluated"].update(release_delay_s=None if delay is None else round(delay, 4),
+                                    reader_calls_total=aid_confirm.reads)
         timing.window(rec)
         print_fn(window_line(rec, ms_frame, local=sender is not None))
         if out:
@@ -231,6 +300,20 @@ def run_live(source, bundle, *, models, detector=None, direction=None, show_wind
             on_window(rec, body)
         return body
 
+    def late_line(t_end, age, released):
+        """The one line per run that says the confirm step is behind: from emit when a window comes back later than
+        segment_s after it was queued, or earlier from the frame loop when the oldest queued release is older than
+        segment_s and not back yet (the same criterion). The test and set of 'printed' is one step under late_lock:
+        the worker thread and the frame thread may both come here."""
+        with late_lock:
+            if late["printed"]:
+                return
+            late["printed"] = True
+        what = (f"{age:.2f}초 뒤에 내보냈습니다" if released
+                else f"{age:.2f}초가 지나도록 아직 내보내지 못했습니다")
+        print_fn(f"휠체어 확인 단계가 늦습니다: [{t_end:.1f}초] 창을 대기열에 넣고 {what}(창 간격 {seg_s:g}초보다 김). "
+                 "이 실행에서 한 번만 찍고, 횟수는 meta.json aid_confirm.releases_later_than_segment에 남깁니다.")
+
     def flush(t, ms_frame, final=False):
         """Evaluates the due segments that are ready, in time order (module docstring, 'When a window is
         evaluated'); final = the input ended, every segment goes. The windows released in one call go to the sender
@@ -241,6 +324,7 @@ def run_live(source, bundle, *, models, detector=None, direction=None, show_wind
         release and the ones before it (the release's done), at once without a sender (TouchEntry.settle)."""
         state = None if entry is None else entry.touch.state()
         states = [readiness(t_end, state) for t_end, _ in pending]
+        jobs = []
         last_ready = max((i for i, s in enumerate(states) if s[0] is not None), default=-1)
         release = []
         for i, (how, session, until) in enumerate(states):
@@ -255,16 +339,40 @@ def run_live(source, bundle, *, models, detector=None, direction=None, show_wind
                 else:
                     break
             pending.popleft()
+            if worker is not None:                     # the confirm step: rows and images now, the window later
+                rows = window_rows(t_end, state)
+                jobs.append((t_end, ms_frame, seg_len, how, t, session, until, state, rows,
+                             aid_confirm.snapshot(rows), time.perf_counter()))
+                continue
             body = emit(t_end, ms_frame, seg_len, how, t, session, until, state)
             if body is not None:
                 release.append(body)
         numbers = () if entry is None else entry.due(t, state)      # the touch windows this flush settles
-        done = (lambda: entry.settle(numbers)) if numbers else None
-        if sender is not None and (release or done is not None):
-            sender.offer_release(release, done=done)
-        elif done is not None:
-            done()
 
+        def offer(release):
+            done = (lambda: entry.settle(numbers)) if numbers else None
+            if sender is not None and (release or done is not None):
+                sender.offer_release(release, done=done)
+            elif done is not None:
+                done()
+        if worker is None:
+            offer(release)
+        elif jobs or numbers:                          # in queue order: after the windows queued before
+
+            def run_release(jobs=jobs):
+                bodies = [emit(*job[:8], rows=job[8], images=job[9], queued=job[10]) for job in jobs]
+                offer([b for b in bodies if b is not None])
+            worker.put(run_release, (jobs[0][0], jobs[0][10]) if jobs else None)
+
+    delays = []                           # (window checked by the confirm step, seconds from queued to released)
+    late = {"n": 0, "printed": False}     # windows released later than segment_s after queueing; the one line
+    late_lock = threading.Lock()
+    worker = ReleaseWorker() if aid_confirm is not None else None
+    release_error = None
+    if aid_confirm is not None and entry is not None:
+        aid_confirm.first_session_resets = True   # FrameChain resets the main user at the first named session too
+    if aid_confirm is not None and bundle.chain.aid_head_min is not None and bundle.situation is not None:
+        aid_confirm.start_readahead(bundle.chain.aid_head_min, bundle.situation.window_s)   # aid_confirm.py
     frames = iter(source)
     sent = None
     try:
@@ -278,6 +386,8 @@ def run_live(source, bundle, *, models, detector=None, direction=None, show_wind
                 floor = t - keep_s if not pending else min(t - keep_s, pending[0][0] - keep_s)
                 while buf and float(buf[0]["t_s"]) < floor:   # a waiting segment keeps the rows its window needs
                     buf.popleft()
+                if aid_confirm is not None:   # its crops and values stay as long as the buffer keeps the rows
+                    aid_confirm.kept_from = float(buf[0]["t_s"])
                 if entry is not None:
                     entry.add_row(row, frame, kept_from=float(buf[0]["t_s"]))
                 if next_t is None:
@@ -286,6 +396,13 @@ def run_live(source, bundle, *, models, detector=None, direction=None, show_wind
                     pending.append((next_t, None))
                     next_t += seg_s
                 flush(t, row.get("ms_chain"))
+                if worker is not None and worker.error is not None:   # ReleaseWorker: stop, then close as usual
+                    stop_reason = f"release worker error: {type(worker.error).__name__}"
+                    break
+                if worker is not None and not late["printed"]:        # the worker behind: say so before it is back
+                    oldest = worker.oldest_queued()
+                    if oldest is not None and time.perf_counter() - oldest[1] > seg_s:
+                        late_line(oldest[0], time.perf_counter() - oldest[1], False)
                 if show_window:
                     import cv2
                     cv2.imshow(WINDOW, _draw(frame.image, row, f"t={t:.1f}s"))
@@ -303,6 +420,10 @@ def run_live(source, bundle, *, models, detector=None, direction=None, show_wind
         if last_t is not None:
             flush(last_t, None, final=True)
     finally:
+        if worker is not None:                # the queued windows first: they still go to the sender
+            release_error = worker.finish()   # returned, raised only after meta.json (below)
+        if aid_confirm is not None:
+            aid_confirm.stop_readahead()
         close = getattr(frames, "close", None)
         if close:
             close()
@@ -326,9 +447,20 @@ def run_live(source, bundle, *, models, detector=None, direction=None, show_wind
             "source": {k: getattr(source, k) for k in ("name", "size_wh", "reported_fps", "time_source")
                        if hasattr(source, k)},
             "tag_sender": sent}
+    if aid_confirm is not None:
+        meta["aid_confirm"] = aid_confirm.summary()
+        for name, sel in (("release_delay_s_checked", True), ("release_delay_s_other", False)):
+            d = sorted(x for c, x in delays if c is sel)
+            meta["aid_confirm"][name] = ({"n": len(d), "p50": round(d[len(d) // 2], 4), "max": round(d[-1], 4)}
+                                         if d else {"n": 0})
+        meta["aid_confirm"]["releases_later_than_segment"] = late["n"]
+        meta["aid_confirm"]["release_error"] = (None if release_error is None
+                                                else f"{type(release_error).__name__}: {release_error}")
     if out_dir:
         with open(os.path.join(out_dir, "meta.json"), "w", encoding="utf-8") as f:
             json.dump(jsonable(meta), f, ensure_ascii=False, indent=2)
+    if release_error is not None:             # loud, after the entry, the sender and meta.json are closed
+        raise release_error
     return meta
 
 
@@ -351,6 +483,7 @@ def parse_args(argv=None):
     ap.add_argument("--aid-model", default=None,
                     help="walking-aid detector ONNX (optional; off unless given, weights not in the repository)")
     add_aid_options(ap)
+    add_aid_confirm_options(ap)
     ap.add_argument("--phone-model", default=None,
                     help="COCO YOLOX-Nano ONNX for the phone (optional; off unless given, weights not in the "
                          "repository; without --serve live has no touch log, so phone_use is never true, as the companion "
@@ -391,6 +524,10 @@ def main(argv=None) -> int:
             pass
     a = parse_args(argv)
     bundle = with_options(load_bundle(a.params), aid_values(a))
+
+    def stop(message):
+        raise SystemExit(f"error: {message}")
+    check_aid_confirm_options(stop, a, bundle.chain.aid_rule)
     if a.out:
         os.makedirs(a.out, exist_ok=True)
     import cv2
@@ -400,6 +537,9 @@ def main(argv=None) -> int:
     detector, direction, info = load_perception(a.models, bundle.chain, a.threads, not a.no_heads, print)
     aids, aid_info = load_aids(a.aid_model, bundle.chain, a.threads, print)
     info.update(aid_info)                        # every model file in meta.json, as replay.py writes it
+    aid_confirm, confirm_info = load_aid_confirm(a.aid_confirm_model, a.aid_confirm_min, bundle, a.threads, print,
+                                                 a.aid_confirm_hold, a.aid_confirm_hold_user)
+    info.update(confirm_info)
     phones, phone_info = load_phones(a.phone_model, bundle.chain, a.threads, print)
     info.update(phone_info)
     models = MediaPipeModels(a.models, blendshapes=a.blendshapes)
@@ -424,7 +564,8 @@ def main(argv=None) -> int:
         print(f"카메라 {a.camera} 시작 — 창마다 한 줄씩 나옵니다", flush=True)
         meta = run_live(source, bundle, models=models, detector=detector, direction=direction,
                         show_window=not a.no_window, out_dir=a.out, blendshapes=a.blendshapes, aids=aids,
-                        model_info=info, phones=phones, entry=entry, sender=sender, timing=timing)
+                        model_info=info, phones=phones, entry=entry, sender=sender, timing=timing,
+                        aid_confirm=aid_confirm)
     finally:
         if server is not None:
             server.shutdown()

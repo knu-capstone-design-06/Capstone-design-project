@@ -65,7 +65,7 @@ class FrameChain:
     timing (ms_heads, ms_head_dir, ms_chain = wall time of this whole step, cpu_ms_chain = process CPU time)."""
 
     def __init__(self, models, params, heads=None, direction=None, timeline=None, blendshapes: bool = False,
-                 source_kind: str = "", aids=None, phones=None):
+                 source_kind: str = "", aids=None, phones=None, aid_confirm=None):
         from .features import Observer          # OpenCV; imported here so the window part loads without it
         self.capture = _Capture(models)
         self.observer = Observer(self.capture)
@@ -73,6 +73,7 @@ class FrameChain:
         self.heads, self.direction, self.timeline = heads, direction, timeline
         self.aids = aids                        # walking-aid detector (app/inference/aid.py) or None: columns absent
         self.phones = phones                    # phone detector (app/inference/phone.py) or None: columns absent
+        self.aid_confirm = aid_confirm          # wheelchair confirm step (aid_confirm.py) or None: off
         self.phone_k = 0                        # processed frames since the start: the detector runs every
                                                 # params.phone_every-th of them
         self.blendshapes = bool(blendshapes)
@@ -106,6 +107,8 @@ class FrameChain:
                 self.pitch_ref.reset()
                 self.change.reset()
                 self.aid_carry.reset()
+                if self.aid_confirm is not None:   # its hold starts only on rows from here on (aid_confirm.py)
+                    self.aid_confirm.reset = (t, session)
             if session is not None:
                 self.session = session
         row, _ = self.observer.process(frame, source_kind=self.source_kind)
@@ -145,6 +148,8 @@ class FrameChain:
                 row.update(C.aid_head_columns(aids, row.get("primary_box")))
             elif self.p.aid_rule == HEAD_CENTRE_CARRY:   # the same, followed through the rows without the head box
                 row.update(self.aid_carry.update(t, aids, row.get("primary_box")))
+            if self.aid_confirm is not None:    # the confirm reader's input image of the main user (no reading)
+                self.aid_confirm.add_row(row, frame.image, aids)
             row["ms_aids"] = sum(aids.ms.values())
         if self.phones is not None:             # the main user's phone: the head box and the pose's hands
             if self.phone_k % self.p.phone_every == 0:
@@ -346,8 +351,9 @@ class WindowJudge:
     """Per-window evaluation with the session state of the rule table carried from window to window; a new sessionId
     in the touch log starts the state again and limits the rows to that session (tree section 4 ①)."""
 
-    def __init__(self, bundle, timeline=None, session_id: str = "replay", jev=None):
+    def __init__(self, bundle, timeline=None, session_id: str = "replay", jev=None, aid_confirm=None):
         self.b = bundle
+        self.aid_confirm = aid_confirm        # wheelchair confirm step (aid_confirm.py) or None: off
         self.timeline = timeline
         self.session_id = session_id          # the contract view's session_id
         self.state = R.SessionState()
@@ -378,9 +384,13 @@ class WindowJudge:
         return seg, recent, {"name": screen, "steps_left": steps_left, "pause_s": pause,
                              "options_open": tl.options_open_at(t_end)}, progress, flags
 
-    def evaluate(self, rows: list, t_end: float, segment_s: float | None = None) -> dict:
+    def evaluate(self, rows: list, t_end: float, segment_s: float | None = None, confirm_images=None,
+                 confirm_session: str | None = None) -> dict:
         """One window record. segment_s = the length of this window's segment (rows and touch counts); default the
-        bundle's segment_s. A shorter one (the input's last stretch) is recorded as record['partial']."""
+        bundle's segment_s. A shorter one (the input's last stretch) is recorded as record['partial'].
+        confirm_images = AidConfirm.snapshot of the rows (the wheelchair confirm step read later on live.py's release
+        worker); None = the step's kept images now. confirm_session = the session id the window's release names
+        (live.py, where this judge has no touch log): the confirm step's hold ends at a new one (aid_confirm.py)."""
         w0 = time.perf_counter()
         p, sp = self.b.chain, self.b.situation
         seg_len = p.segment_s if segment_s is None else segment_s
@@ -398,6 +408,7 @@ class WindowJudge:
             rows = [r for r in rows if float(r["t_s"]) >= session_start]
         seg_rows = [r for r in rows if t_end - seg_len < float(r["t_s"]) <= t_end]
         turns = None                                   # head turns of the window (observation only)
+        confirm = None                                 # the wheelchair confirm step's result (aid_confirm.py)
         gaze = facing(seg_rows, sp)                    # the rule table's gaze gate
         away = away_from_screen(seg_rows, sp)          # phone_use's hand path
         if sp is None:
@@ -410,6 +421,9 @@ class WindowJudge:
                                  head_approach_ratio_min=p.head_approach_ratio_min, segment_s=p.segment_s,
                                  away=away, aid_rule=p.aid_rule, aid_head_min=p.aid_head_min)
             reasons = unknown_reasons(rows, t_end, sp) if out["name"] == UNKNOWN else []
+            if self.aid_confirm is not None:   # before the rule table reads the tags
+                confirm = self.aid_confirm.check(out, rows, t_end, sp, p, confirm_images, session_reset,
+                                                 confirm_session)
             turns = [{"event_id": e["event_id"], "kind": e["kind"], "t_start": e["t_start"], "t_end": e["t_end"],
                       "obs": e["obs"]} for e in events if e["kind"] in TURN_KINDS]
         situation = situation_view(out, reasons)
@@ -451,6 +465,8 @@ class WindowJudge:
         }
         if seg_len != p.segment_s:
             record["partial"] = {"segment_s": round(seg_len, 4)}
+        if self.aid_confirm is not None:
+            record["aid_confirm"] = confirm
         record["contract"] = to_contract(record, self.session_id)
         record["ms_window"] = (time.perf_counter() - w0) * 1000.0
         return record

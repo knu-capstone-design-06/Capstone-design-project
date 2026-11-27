@@ -3875,5 +3875,1290 @@ class ReplaySmokeTests(unittest.TestCase):
         self.assertIn("blendshapes off", meta["settings"]["face_landmarker"])
 
 
+@unittest.skipUnless(HAS_CV2, SKIP)
+class AidConfirmTests(unittest.TestCase):
+    """The wheelchair confirm step (aid_confirm.py, app/inference/aid_confirm.py) with stand-in readers: the reader's
+    crop, the mean of several files, and in a replay a wheelchair window kept or withdrawn by the reader."""
+
+    CLASSES = ("pedestrian", "crutch", "cane", "walker", "wheelchair")
+    PERSON = [0.28, 0.12, 0.72, 0.97]
+
+    class Session:
+        """A stand-in ONNX session: input 'input' (1, 3, 8, 8) and fixed logits."""
+
+        def __init__(self, logits):
+            self.logits = logits
+
+        def get_inputs(self):
+            return [SimpleNamespace(name="input", shape=[1, 3, 8, 8])]
+
+        def run(self, _names, feed):
+            import numpy as np
+            assert feed["input"].shape == (1, 3, 8, 8) and feed["input"].dtype == np.float32
+            return [np.array([self.logits], np.float32)]
+
+    class Reader:
+        """A stand-in reader: P(wheelchair) = p for every crop; counts its reads."""
+
+        def __init__(self, p):
+            import numpy as np
+            self.p = np.array([1.0 - p, 0.0, 0.0, 0.0, p])
+            self.ms = []
+
+        def crop(self, bgr, box_px):
+            import numpy as np
+            return np.zeros((8, 8, 3), np.uint8)
+
+        def probs(self, image):
+            self.ms.append(0.0)
+            return self.p
+
+    def aids(self, img):
+        import numpy as np
+        from app.inference.aid import Aids
+        empty = (np.zeros((0, 4)), np.zeros(0))
+        return Aids(np.array([self.PERSON]), np.array([0.6]), np.array([[0.1, 0, 0, 0, 0.6]]), self.CLASSES,
+                    (img.shape[1], img.shape[0]), {"infer": 0.0},
+                    {"crutch": empty, "cane": empty, "walker": empty,
+                     "wheelchair": (np.array([self.PERSON]), np.array([0.6]))})
+
+    def replay(self, confirm=None):
+        from app.modules.vision.replay import run_replay
+        out = os.path.join(tempfile.mkdtemp(), "out")
+        b = bundle(aid_rule="head_centre_carry", aid_head_min=0.5)
+        meta = run_replay(frames(30), out, b, models=FakeModels([fake_inference() for _ in range(30)]),
+                          detector=ScheduledHeads([[[0.38, 0.22, 0.62, 0.58]]] * 5 + [[]] * 25), aids=self.aids,
+                          session_id="t", **({} if confirm is None else {"aid_confirm": confirm}))
+        with open(os.path.join(out, "windows.jsonl"), encoding="utf-8") as f:
+            recs = [json.loads(line) for line in f]
+        return b, recs, meta
+
+    @staticmethod
+    def aid(rec):
+        tag = {t["name"]: t for t in rec["situation"]["tags"]}["aid_use"]
+        return tag["status"], tag["unknown_reason"]
+
+    class MetaSession(Session):
+        """A stand-in session with export metadata; keeps the last input it was given."""
+
+        def __init__(self, logits, meta):
+            super().__init__(logits)
+            self.meta, self.seen = meta, None
+
+        def get_modelmeta(self):
+            return SimpleNamespace(custom_metadata_map=self.meta)
+
+        def run(self, names, feed):
+            self.seen = feed["input"]
+            return super().run(names, feed)
+
+    def test_reader_takes_mean_and_std_from_the_file_metadata_and_falls_back_to_imagenet(self):
+        """A file whose metadata names mean / std (as a PE-Core export would: 0.5, 0.5) gets (x / 255 - 0.5) / 0.5; a
+        file without metadata gets the measured ResNet-18 reader's ImageNet values; wrong classes are refused."""
+        import numpy as np
+        from app.inference.aid_confirm import CLASSES, MEAN, STD, AidConfirmReader
+        img = np.full((8, 8, 3), 255, np.uint8)
+        img[:, :, 1] = 0
+        pe = self.MetaSession([0.0] * 5, {"mean": "[0.5, 0.5, 0.5]", "std": "[0.5, 0.5, 0.5]",
+                                          "classes": json.dumps(list(CLASSES)), "output": "logits"})
+        plain = self.MetaSession([0.0] * 5, {})
+        AidConfirmReader([], sessions=[pe, plain]).probs(img)
+        np.testing.assert_allclose(pe.seen[0, :, 0, 0], [1.0, -1.0, 1.0], atol=1e-6)
+        np.testing.assert_allclose(plain.seen[0, :, 0, 0], [(1.0 - MEAN[0]) / STD[0], (0.0 - MEAN[1]) / STD[1],
+                                                            (1.0 - MEAN[2]) / STD[2]], atol=1e-6)
+        with self.assertRaises(ValueError):
+            AidConfirmReader([], sessions=[self.MetaSession([0.0] * 5, {"classes": '["a", "b", "c", "d", "e"]'})])
+        with self.assertRaises(ValueError):
+            AidConfirmReader([], sessions=[self.MetaSession([0.0] * 5, {"mean": "[0.5, 0.5, 0.5]"})])
+
+    def test_live_reads_checked_windows_on_a_worker_in_window_order_with_the_same_answers(self):
+        """run_live with the step: the windows come in time order and are as many as without it; a reader that reads
+        0.9 leaves every situation and decision as without the step, one that reads 0.1 makes aid_use false. The
+        reads (each 20 ms here) run on the release worker, and meta gives the release delays."""
+        import time as _time
+        from app.modules.vision.aid_confirm import AidConfirm
+        from app.modules.vision.chain import history_s
+        from app.modules.vision.live import run_live
+        outer = self
+
+        class Slow(self.Reader):
+            def probs(self, image):
+                _time.sleep(0.02)
+                return super().probs(image)
+
+        def live(confirm):
+            folder = tempfile.mkdtemp()
+            b = bundle(aid_rule="head_centre_carry", aid_head_min=0.5)
+            meta = run_live(frames(30), b, models=FakeModels([fake_inference() for _ in range(30)]),
+                            detector=ScheduledHeads([[[0.38, 0.22, 0.62, 0.58]]] * 5 + [[]] * 25), aids=outer.aids,
+                            show_window=False, out_dir=folder, print_fn=lambda line: None, aid_confirm=confirm)
+            with open(os.path.join(folder, "windows.jsonl"), encoding="utf-8") as f:
+                return b, [json.loads(line) for line in f], meta
+        b, off, _ = live(None)
+        keep = history_s(b) + b.chain.segment_s
+        _, kept, meta = live(AidConfirm(Slow(0.9), 0.5, keep))
+        _, dropped, meta_low = live(AidConfirm(Slow(0.1), 0.5, keep))
+        for recs in (kept, dropped):
+            self.assertEqual([r["t"] for r in recs], [r["t"] for r in off])
+        self.assertEqual([(r["situation"], r["decision"]) for r in kept], [(r["situation"], r["decision"]) for r in off])
+        self.assertEqual({self.aid(r) for r in off}, {(True, None)})
+        self.assertEqual({self.aid(r) for r in dropped}, {(False, None)})
+        self.assertEqual(meta["aid_confirm"]["reads"], 30)
+        self.assertEqual(meta_low["aid_confirm"]["release_delay_s_checked"]["n"], len(dropped))
+        self.assertGreater(meta_low["aid_confirm"]["release_delay_s_checked"]["max"], 0.0)
+
+    def test_hold_keeps_later_wheelchair_windows_without_reading_after_one_agreement(self):
+        """With the hold the reader reads only the first wheelchair window's rows: the later windows are kept as held
+        (no read), and the answers equal the step without the hold when the reader agrees; without an agreement the
+        hold changes nothing."""
+        from app.modules.vision.aid_confirm import AidConfirm
+        from app.modules.vision.chain import history_s
+        b, off, _ = self.replay()
+        keep = history_s(b) + b.chain.segment_s
+        _, plain, meta_plain = self.replay(AidConfirm(self.Reader(0.9), 0.5, keep))
+        reader = self.Reader(0.9)
+        _, held, meta = self.replay(AidConfirm(reader, 0.5, keep, hold=True))
+        self.assertEqual([self.aid(r) for r in held], [self.aid(r) for r in plain])
+        self.assertEqual([r["aid_confirm"]["held"] for r in held], [False] + [True] * (len(held) - 1))
+        first = held[0]["aid_confirm"]["reads"]
+        self.assertEqual(len(reader.ms), first)                     # no reader call after the agreement
+        self.assertLess(meta["aid_confirm"]["reads"], meta_plain["aid_confirm"]["reads"])
+        self.assertEqual(meta["aid_confirm"]["windows_held"], len(held) - 1)
+        _, low, _ = self.replay(AidConfirm(self.Reader(0.1), 0.5, keep, hold=True))
+        self.assertEqual({self.aid(r) for r in low}, {(False, None)})
+        self.assertFalse(any(r["aid_confirm"]["held"] for r in low))
+
+    def test_hold_ends_at_a_new_main_user_or_a_new_session(self):
+        """A held step keeps a wheelchair window without reading; a window whose user_changed tag brings a
+        main_user_changed event not seen before, or a new touch session, needs a new agreement (here no rows: not
+        confirmed). The same change event in the next window does not end the hold again."""
+        from app.modules.vision.aid_confirm import AidConfirm
+        from app.modules.vision.params import PilotParams
+
+        def out(change_ids=()):
+            return {"tags": [{"name": "user_changed", "status": True if change_ids else False,
+                              "evidence": [{"event_id": i, "obs": "track", "value": 1, "t": 1.0} for i in change_ids],
+                              "unknown_reason": None},
+                             {"name": "aid_use", "status": True, "unknown_reason": None,
+                              "evidence": [{"event_id": "aid_head@1", "obs": "aid_class", "value": "wheelchair",
+                                            "t": 1.0}]}]}
+        sp, cp = sit_params(), PilotParams()
+        step = AidConfirm(self.Reader(0.9), 0.5, 10.0, hold=True)
+        step.held = True
+        self.assertTrue(step.check(out(), [], 3.0, sp, cp)["held"])
+        r = step.check(out(["main_user_changed@7"]), [], 4.0, sp, cp)
+        self.assertEqual((r["held"], r["confirmed"]), (False, False))
+        step.held = True
+        self.assertTrue(step.check(out(["main_user_changed@7"]), [], 5.0, sp, cp)["held"])   # seen before
+        r = step.check(out(), [], 6.0, sp, cp, session_reset=True)
+        self.assertEqual((r["held"], r["confirmed"]), (False, False))
+        self.assertEqual(step.reader.ms, [])
+
+    def fading_aids(self, wheelchair_frames):
+        """A stand-in detector whose wheelchair box holds the head centre on the first wheelchair_frames calls only
+        (then only the person box): the engine's own answer turns from wheelchair to no aid."""
+        import numpy as np
+        from app.inference.aid import Aids
+        empty = (np.zeros((0, 4)), np.zeros(0))
+        calls = []
+
+        def aids(img):
+            calls.append(1)
+            wc = (np.array([self.PERSON]), np.array([0.6])) if len(calls) <= wheelchair_frames else empty
+            return Aids(np.array([self.PERSON]), np.array([0.6]), np.array([[0.1, 0, 0, 0, 0.6]]), self.CLASSES,
+                        (img.shape[1], img.shape[0]), {"infer": 0.0},
+                        {"crutch": empty, "cane": empty, "walker": empty, "wheelchair": wc})
+        return aids
+
+    def replay_fading(self, confirm, n=60, wheelchair_frames=30):
+        from app.modules.vision.replay import run_replay
+        out = os.path.join(tempfile.mkdtemp(), "out")
+        b = bundle(aid_rule="head_centre_carry", aid_head_min=0.5)
+        meta = run_replay(frames(n), out, b, models=FakeModels([fake_inference() for _ in range(n)]),
+                          detector=ScheduledHeads([[[0.38, 0.22, 0.62, 0.58]]] * n),
+                          aids=self.fading_aids(wheelchair_frames), session_id="t",
+                          **({} if confirm is None else {"aid_confirm": confirm}))
+        with open(os.path.join(out, "windows.jsonl"), encoding="utf-8") as f:
+            return b, [json.loads(line) for line in f], meta
+
+    def test_user_hold_answers_every_later_window_and_keeps_the_engine_reading(self):
+        """The engine answers wheelchair while the box holds, then no aid. Without the user hold those later windows
+        stay false; with it they answer true after the first agreement, without a reader call, and the record keeps the
+        engine's own status and class (evidence unchanged) beside hold_user true. Without an agreement nothing is
+        added."""
+        from app.modules.vision.aid_confirm import AidConfirm
+        from app.modules.vision.chain import history_s
+        b, off, _ = self.replay_fading(None)
+        keep = history_s(b) + b.chain.segment_s
+        self.assertIn((False, None), {self.aid(r) for r in off})
+        reader = self.Reader(0.9)
+        _, user, meta = self.replay_fading(AidConfirm(reader, 0.5, keep, hold_user=True))
+        reads_at_agreement = user[0]["aid_confirm"]["reads"]
+        self.assertEqual(len(reader.ms), reads_at_agreement)              # no reader call after the agreement
+        self.assertEqual({self.aid(r)[0] for r in user}, {True})
+        for o, u in zip(off, user):
+            tag_o = {t["name"]: t for t in o["situation"]["tags"]}["aid_use"]
+            tag_u = {t["name"]: t for t in u["situation"]["tags"]}["aid_use"]
+            self.assertEqual(tag_u["evidence"], tag_o["evidence"])     # the engine's own evidence
+            if u["aid_confirm"].get("held"):
+                self.assertTrue(u["aid_confirm"]["hold_user"])
+                self.assertEqual(u["aid_confirm"]["engine_status"], tag_o["status"])
+        self.assertGreater(meta["aid_confirm"]["windows_user_held"], 0)
+        _, plain, _ = self.replay_fading(AidConfirm(self.Reader(0.9), 0.5, keep, hold=True))
+        self.assertEqual([self.aid(r) for r in plain], [self.aid(r) for r in off])
+        _, none, _ = self.replay_fading(AidConfirm(self.Reader(0.1), 0.5, keep, hold_user=True))
+        self.assertNotIn(True, {self.aid(r)[0] for r in none})              # every wheelchair window withdrawn
+        self.assertFalse(any((r.get("aid_confirm") or {}).get("held") for r in none))
+
+    def test_user_hold_ends_at_a_new_main_user_or_a_new_session(self):
+        """A user-held step answers a no-aid window true without reading; a new main_user_changed event or a new
+        touch session ends it (that window keeps the engine's own answer)."""
+        from app.modules.vision.aid_confirm import AidConfirm
+        from app.modules.vision.params import PilotParams
+
+        def out(change_ids=()):
+            return {"tags": [{"name": "user_changed", "status": True if change_ids else False,
+                              "evidence": [{"event_id": i, "obs": "track", "value": 1, "t": 1.0} for i in change_ids],
+                              "unknown_reason": None},
+                             {"name": "aid_use", "status": False, "unknown_reason": None,
+                              "evidence": [{"event_id": "aid_head@1", "obs": "aid_class", "value": None, "t": 1.0}]}]}
+        sp, cp = sit_params(), PilotParams()
+        step = AidConfirm(self.Reader(0.9), 0.5, 10.0, hold_user=True)
+        step.held = True
+        o = out()
+        r = step.check(o, [], 3.0, sp, cp)
+        self.assertEqual((r["hold_user"], r["engine_status"], o["tags"][1]["status"]), (True, False, True))
+        o = out(["main_user_changed@7"])
+        self.assertEqual(step.check(o, [], 4.0, sp, cp), {"confirmed": None, "held": False, "hold_end": "user_changed"})
+        self.assertIs(o["tags"][1]["status"], False)
+        step.held = True
+        o = out()
+        self.assertEqual(step.check(o, [], 5.0, sp, cp, session_reset=True)["hold_end"], "session")
+        self.assertIs(o["tags"][1]["status"], False)
+        self.assertEqual(step.reader.ms, [])
+
+    def live_sessions(self, confirm, n=80, heads=None, at=None, aids=None):
+        """run_live on the fake camera with the touch entry; at = touch windows by frame (default: 1 s windows of
+        session s1 up to 4 s, then of s2); heads = the head boxes per frame (default: one head throughout); aids =
+        the stand-in detector (default self.aids)."""
+        from test_vision_links import entry, reporting, timed_frames, window_body
+        from app.modules.vision.live import run_live
+        if at is None:
+            at = {10 * k: [window_body(k - 1.0, float(k), session_id="s1" if k <= 4 else "s2")]
+                  for k in range(1, n // 10)}
+        folder = tempfile.mkdtemp()
+        b = bundle(aid_rule="head_centre_carry", aid_head_min=0.5)
+        svc = entry(b=b)
+        meta = run_live(reporting(timed_frames(n), svc, at), b, models=FakeModels([fake_inference() for _ in range(n)]),
+                        detector=ScheduledHeads(heads or [[[0.38, 0.22, 0.62, 0.58]]] * n), aids=aids or self.aids,
+                        show_window=False, out_dir=folder, print_fn=lambda line: None, entry=svc, aid_confirm=confirm)
+        with open(os.path.join(folder, "windows.jsonl"), encoding="utf-8") as f:
+            return b, [json.loads(line) for line in f], meta
+
+    def test_live_hold_ends_at_a_new_touch_session(self):
+        """Through run_live with two session ids (the judge there has no touch log, so session_reset stays false):
+        after the reader agreed in session s1, the first window of s2 is not held, and no window of s2 is held before
+        a new agreement in s2; the hold ended there with the signal 'session'. The same for the engine-wheelchair hold
+        and the user hold. s1 lasts 9 s and s2 10 s: a hold starts only on a window whose rows all lie at or after the
+        chain's reset, so in s2 (reset at 10 s) the agreement that starts it is a read window whose span
+        starts at or after 10 s, and every s2 window after it is held (assert_hold_restarts_after_reset)."""
+        from test_vision_links import window_body
+        from app.modules.vision.aid_confirm import AidConfirm
+        from app.modules.vision.chain import history_s
+        b = bundle(aid_rule="head_centre_carry", aid_head_min=0.5)
+        keep = history_s(b) + b.chain.segment_s
+        at = {10 * k: [window_body(k - 1.0, float(k), session_id="s1" if k <= 9 else "s2")] for k in range(1, 20)}
+        for flags in ({"hold": True}, {"hold_user": True}):
+            step = AidConfirm(self.Reader(0.9), 0.5, keep, **flags)
+            _, recs, meta = self.live_sessions(step, n=200, at=at)
+            sessions = [r["evaluated"]["session_id"] for r in recs]
+            self.assertEqual(set(sessions) - {None}, {"s1", "s2"}, flags)
+            s1 = [r for r in recs if r["evaluated"]["session_id"] == "s1"]
+            s2 = [r for r in recs if r["evaluated"]["session_id"] == "s2"]
+            self.assertTrue(any((r["aid_confirm"] or {}).get("held") for r in s1), flags)    # held in s1
+            first = s2[0]["aid_confirm"]
+            self.assertEqual((first["held"], first["hold_end"]), (False, "session"), flags)
+            self.assertEqual(step.reset[1], "s2", flags)
+            self.assert_hold_restarts_after_reset(s2, step.reset[0], b.situation.window_s, flags)
+            self.assertEqual(meta["aid_confirm"]["hold_ends"], {"session": 1}, flags)
+
+    def assert_hold_restarts_after_reset(self, windows, reset_t, window_s, label):
+        """In one session's windows (time order): some window is held; the first held one follows a read window that
+        agreed (confirmed, not held) and whose whole span lies at or after the chain's reset of that session; no
+        window before that agreement is held, and every window after it is."""
+        held = [i for i, r in enumerate(windows) if (r["aid_confirm"] or {}).get("held")]
+        self.assertTrue(held, label)
+        i = held[0]
+        self.assertGreater(i, 0, label)
+        agree = windows[i - 1]
+        self.assertEqual((agree["aid_confirm"]["confirmed"], agree["aid_confirm"]["held"]), (True, False), label)
+        self.assertGreaterEqual(agree["t"] - window_s, reset_t - 1e-6, (label, agree["t"], reset_t))
+        self.assertEqual(held, list(range(i, len(windows))), label)
+
+    def test_both_holds_end_at_a_window_with_no_main_user_box_or_no_frames(self):
+        """A held step (user hold, then engine-wheelchair hold): a window whose aid_use is unknown with the engine's
+        reason no_main_user_box or no_frames keeps that unknown and ends the hold (hold_end = that reason), so the next
+        no-aid window keeps the engine's false and the next wheelchair window needs a new agreement. Another unknown
+        reason (too_few_rows) does not end it."""
+        from app.modules.vision.aid_confirm import AidConfirm
+        from app.modules.vision.params import PilotParams
+
+        def out(status, reason=None, cls=None):
+            return {"tags": [{"name": "user_changed", "status": False, "evidence": [], "unknown_reason": None},
+                             {"name": "aid_use", "status": status, "unknown_reason": reason,
+                              "evidence": [{"event_id": "aid_head@1", "obs": "aid_class", "value": cls, "t": 1.0}]}]}
+        sp, cp = sit_params(), PilotParams()
+        step = AidConfirm(self.Reader(0.9), 0.5, 10.0, hold_user=True)
+        step.held = True
+        o = out("unknown", "no_main_user_box")
+        r = step.check(o, [], 3.0, sp, cp)
+        self.assertEqual((r["held"], r["hold_end"]), (False, "no_main_user_box"))
+        self.assertEqual((o["tags"][1]["status"], o["tags"][1]["unknown_reason"]), ("unknown", "no_main_user_box"))
+        o = out(False)
+        self.assertIsNone(step.check(o, [], 4.0, sp, cp))
+        self.assertIs(o["tags"][1]["status"], False)
+        o = out("unknown", "too_few_rows")                      # another unknown reason does not end it
+        step.held = True
+        self.assertTrue(step.check(o, [], 5.0, sp, cp)["held"])
+        self.assertIs(o["tags"][1]["status"], True)
+        o = out("unknown", "no_frames")                         # a window with no rows is never forced true
+        r = step.check(o, [], 6.0, sp, cp)
+        self.assertEqual((r["held"], r["hold_end"], o["tags"][1]["status"]), (False, "no_frames", "unknown"))
+        engine = AidConfirm(self.Reader(0.9), 0.5, 10.0, hold=True)
+        for reason in ("no_main_user_box", "no_frames"):
+            engine.held = True
+            r = engine.check(out("unknown", reason), [], 3.0, sp, cp)
+            self.assertEqual((r["held"], r["hold_end"]), (False, reason))
+            r = engine.check(out(True, cls="wheelchair"), [], 4.0, sp, cp)   # no rows: not confirmed, not held
+            self.assertEqual((r["held"], r["confirmed"]), (False, False))
+        self.assertEqual(step.reader.ms + engine.reader.ms, [])
+        self.assertEqual(engine.summary()["hold_ends"], {"no_main_user_box": 1, "no_frames": 1})
+
+    def test_live_user_hold_ends_where_the_main_user_leaves(self):
+        """Through run_live: the user and the detector's boxes are there for 3 s, then nothing. The user hold agreed
+        while the user was there; the first window whose aid_use is unknown with no_main_user_box is not held, and no
+        window after it."""
+        import numpy as np
+        from app.inference.aid import Aids
+        from app.modules.vision.aid_confirm import AidConfirm
+        from app.modules.vision.chain import history_s
+        b = bundle(aid_rule="head_centre_carry", aid_head_min=0.5)
+        keep = history_s(b) + b.chain.segment_s
+        n, calls = 160, []
+        empty = (np.zeros((0, 4)), np.zeros(0))
+
+        def leaving(img):
+            calls.append(1)
+            if len(calls) <= 30:
+                return self.aids(img)
+            return Aids(np.zeros((0, 4)), np.zeros(0), np.zeros((0, 5)), self.CLASSES, (img.shape[1], img.shape[0]),
+                        {"infer": 0.0}, {"crutch": empty, "cane": empty, "walker": empty, "wheelchair": empty})
+        heads = [[[0.38, 0.22, 0.62, 0.58]]] * 30 + [[]] * (n - 30)
+        _, recs, _ = self.live_sessions(AidConfirm(self.Reader(0.9), 0.5, keep, hold_user=True), n=n, heads=heads,
+                                        at={}, aids=leaving)
+        reasons = [self.aid(r)[1] for r in recs]
+        self.assertIn("no_main_user_box", reasons)
+        k = reasons.index("no_main_user_box")
+        self.assertTrue(any((r["aid_confirm"] or {}).get("held") for r in recs[:k]))
+        self.assertEqual(recs[k]["aid_confirm"]["hold_end"], "no_main_user_box")
+        self.assertFalse(any((r["aid_confirm"] or {}).get("held") for r in recs[k:]))
+
+    class PixelReader:
+        """A stand-in reader whose crop carries the frame's pixel value (pixel_frames: the frame index) and whose
+        P(wheelchair) depends on it (0.5 to 0.95 in steps of 0.05), so a window's median depends on which rows it reads;
+        order = the pixel values in the order they were read."""
+
+        def __init__(self, delay_s=0.0):
+            self.ms, self.order, self.delay_s = [], [], delay_s
+
+        def crop(self, bgr, box_px):
+            import numpy as np
+            return np.full((8, 8, 3), int(bgr[0, 0, 0]), np.uint8)
+
+        def probs(self, image):
+            import time as _time
+            import numpy as np
+            if self.delay_s:
+                _time.sleep(self.delay_s)
+            k = int(image[0, 0, 0])
+            self.ms.append(0.0)
+            self.order.append(k)
+            p = 0.5 + 0.05 * (k % 10)
+            return np.array([1.0 - p, 0.0, 0.0, 0.0, p])
+
+    @staticmethod
+    def pixel_frames(times):
+        """Fake camera frames at the given times whose pixels hold their index (< 256), with a wall time."""
+        import numpy as np
+        from test_vision_links import EPOCH0
+        from app.modules.vision.sources import Frame
+        return [Frame(i, round(t, 6), np.full((120, 160, 3), i, np.uint8), str(i), 0.0, EPOCH0 + t)
+                for i, t in enumerate(times)]
+
+    class Watched:
+        """Wraps an AidConfirm's check: at the entry of every check of an engine-wheelchair window that is not held,
+        records the valued rows of the window (those with a crop) that were neither read nor submitted yet."""
+
+        def __init__(self, step):
+            self.step, self.missing, self.checked = step, [], 0
+            inner = step.check
+
+            def check(out, rows, t_end, sp, cp, images=None, *rest):
+                tag = next(t for t in out["tags"] if t["name"] == "aid_use")
+                cls = next((e["value"] for e in tag["evidence"] if e["obs"] == "aid_class"), None)
+                if tag["status"] is True and cls == "wheelchair" and not step.held:
+                    self.checked += 1
+                    valued = [int(r["frame_idx"]) for r in rows if t_end - sp.window_s <= float(r["t_s"]) <= t_end
+                              and int(r["frame_idx"]) in (images or {})]
+                    self.missing += [k for k in valued if k not in step.futures and k not in step.wheelchair]
+                return inner(out, rows, t_end, sp, cp, images, *rest)
+            step.check = check
+
+    def test_live_hold_ends_at_the_first_named_session(self):
+        """Through run_live with the touch entry: no touch window for the first 4 s (the windows are released on the
+        runner's cadence, session none, and the reader agrees there), then session s1. The first s1 window carries
+        hold_end session and no s1 window is held before a new agreement (both holds): FrameChain resets the main-user
+        tracker there, so no change event could end it. s1 lasts 10 s, so the hold starts again on a read window whose
+        span lies after the reset (assert_hold_restarts_after_reset)."""
+        from test_vision_links import window_body
+        from app.modules.vision.aid_confirm import AidConfirm
+        from app.modules.vision.chain import history_s
+        b = bundle(aid_rule="head_centre_carry", aid_head_min=0.5)
+        keep = history_s(b) + b.chain.segment_s
+        at = {10 * k: [window_body(k - 1.0, float(k), session_id="s1")] for k in range(5, 15)}
+        for flags in ({"hold": True}, {"hold_user": True}):
+            step = AidConfirm(self.Reader(0.9), 0.5, keep, **flags)
+            _, recs, meta = self.live_sessions(step, n=150, at=at)
+            before = [r for r in recs if r["evaluated"]["session_id"] is None]
+            s1 = [r for r in recs if r["evaluated"]["session_id"] == "s1"]
+            self.assertTrue(any((r["aid_confirm"] or {}).get("held") for r in before), flags)
+            self.assertEqual((s1[0]["aid_confirm"]["held"], s1[0]["aid_confirm"].get("hold_end")), (False, "session"))
+            self.assertEqual(step.reset[1], "s1", flags)
+            self.assert_hold_restarts_after_reset(s1, step.reset[0], b.situation.window_s, flags)
+            self.assertEqual(meta["aid_confirm"]["hold_ends"], {"session": 1}, flags)
+
+    def test_live_user_hold_ends_at_a_user_change_the_chain_itself_finds(self):
+        """Through run_live: user A (wheelchair) for 3 s, then nobody (no head, no body) for 1.5 s (above the head
+        track's max gap, below the window), then user B elsewhere whom the detector reads as no aid. The chain gives
+        a main_user_changed event; the user hold ends at the first window whose user_changed is true, and the windows
+        after it keep the engine's own answer."""
+        from app.modules.vision.aid_confirm import AidConfirm
+        from app.modules.vision.chain import history_s
+        from app.modules.vision.live import run_live
+        n = 110
+        heads = [[[0.38, 0.22, 0.62, 0.58]]] * 30 + [[]] * 15 + [[[0.05, 0.25, 0.25, 0.55]]] * (n - 45)
+        sched = ([fake_inference() for _ in range(30)] + [fake_inference(face=False, body=False) for _ in range(15)]
+                 + [fake_inference() for _ in range(n - 45)])
+        b = bundle(aid_rule="head_centre_carry", aid_head_min=0.5)
+        keep = history_s(b) + b.chain.segment_s
+        folder = tempfile.mkdtemp()
+        run_live(frames(n), b, models=FakeModels(sched), detector=ScheduledHeads(heads), aids=self.fading_aids(30),
+                 show_window=False, out_dir=folder, print_fn=lambda line: None,
+                 aid_confirm=AidConfirm(self.Reader(0.9), 0.5, keep, hold_user=True))
+        with open(os.path.join(folder, "windows.jsonl"), encoding="utf-8") as f:
+            recs = [json.loads(line) for line in f]
+        changed = [i for i, r in enumerate(recs)
+                   if {t["name"]: t for t in r["situation"]["tags"]}["user_changed"]["status"] is True]
+        self.assertTrue(changed)
+        k = changed[0]
+        self.assertTrue(any((r["aid_confirm"] or {}).get("held") for r in recs[:k]))
+        self.assertEqual(recs[k]["aid_confirm"]["hold_end"], "user_changed")
+        for r in recs[k:]:
+            self.assertFalse((r["aid_confirm"] or {}).get("held"), r["t"])
+            self.assertIsNot(self.aid(r)[0], True, r["t"])
+
+    def test_a_late_release_reads_the_same_rows_and_median_as_replay(self):
+        """Through run_live with the touch entry: the touch windows of s1 come 2 s late up to 8 s and then stop, so the
+        later windows wait until their start is about to leave the kept history (kept_history). Every window whose
+        span starts after the session start gives the same aid_confirm rows and median as the replay of the same
+        frames, with no error."""
+        from test_vision_links import entry, reporting, window_body
+        from app.modules.vision.aid_confirm import AidConfirm
+        from app.modules.vision.chain import history_s
+        from app.modules.vision.live import run_live
+        from app.modules.vision.replay import run_replay
+        n = 170
+        b = bundle(aid_rule="head_centre_carry", aid_head_min=0.5)
+        keep = history_s(b) + b.chain.segment_s
+        heads = [[[0.38, 0.22, 0.62, 0.58]]] * n
+
+        def recs_of(folder):
+            with open(os.path.join(folder, "windows.jsonl"), encoding="utf-8") as f:
+                return {r["t"]: r for r in (json.loads(line) for line in f)}
+        out = os.path.join(tempfile.mkdtemp(), "out")
+        run_replay(self.pixel_frames([i * DT for i in range(n)]), out, b,
+                   models=FakeModels([fake_inference() for _ in range(n)]), detector=ScheduledHeads(heads),
+                   aids=self.aids, session_id="t", aid_confirm=AidConfirm(self.PixelReader(), 0.5, keep))
+        replay = recs_of(out)
+        folder, svc = tempfile.mkdtemp(), entry(b=b)
+        at = {10 * (k + 2): [window_body(k - 1.0, float(k), session_id="s1")] for k in range(1, 9)}
+        run_live(reporting(self.pixel_frames([i * DT for i in range(n)]), svc, at), b,
+                 models=FakeModels([fake_inference() for _ in range(n)]), detector=ScheduledHeads(heads),
+                 aids=self.aids, show_window=False, out_dir=folder, print_fn=lambda line: None, entry=svc,
+                 aid_confirm=AidConfirm(self.PixelReader(), 0.5, keep))
+        live = recs_of(folder)
+        hows = {live[t]["evaluated"]["how"] for t in live if t > b.situation.window_s}
+        self.assertTrue({"touch", "kept_history"} <= hows, hows)
+        compared = 0
+        for t, r in live.items():
+            if t <= b.situation.window_s or t not in replay or r.get("partial"):
+                continue
+            a, e = r["aid_confirm"], replay[t]["aid_confirm"]
+            self.assertEqual((a["rows"], a["median"]), (e["rows"], e["median"]), (t, r["evaluated"]["how"]))
+            self.assertNotIn("error", a)
+            compared += 1
+        self.assertGreaterEqual(compared, 5)
+
+    def test_readahead_has_every_valued_row_submitted_before_the_check_and_backfills_in_time_order(self):
+        """Through run_live: the detector reads a wheelchair only from frame 20 on. At the entry of every check of an
+        engine-wheelchair window, every row of the window with a crop is already read or submitted (this fails when
+        read-ahead does nothing), and the reader reads the rows before frame 20 first, oldest first."""
+        import numpy as np
+        from app.inference.aid import Aids
+        from app.modules.vision.aid_confirm import AidConfirm
+        from app.modules.vision.chain import history_s
+        from app.modules.vision.live import run_live
+        empty = (np.zeros((0, 4)), np.zeros(0))
+        calls, n, k0 = [], 60, 20
+
+        def from_k(img):
+            calls.append(1)
+            wc = (np.array([self.PERSON]), np.array([0.6])) if len(calls) > k0 else empty
+            return Aids(np.array([self.PERSON]), np.array([0.6]), np.array([[0.1, 0, 0, 0, 0.6]]), self.CLASSES,
+                        (img.shape[1], img.shape[0]), {"infer": 0.0},
+                        {"crutch": empty, "cane": empty, "walker": empty, "wheelchair": wc})
+        b = bundle(aid_rule="head_centre_carry", aid_head_min=0.5)
+        keep = history_s(b) + b.chain.segment_s
+        reader = self.PixelReader()
+        step = AidConfirm(reader, 0.5, keep)
+        watched = self.Watched(step)
+        run_live(self.pixel_frames([i * DT for i in range(n)]), b,
+                 models=FakeModels([fake_inference() for _ in range(n)]),
+                 detector=ScheduledHeads([[[0.38, 0.22, 0.62, 0.58]]] * n), aids=from_k, show_window=False,
+                 out_dir=tempfile.mkdtemp(), print_fn=lambda line: None, aid_confirm=step)
+        self.assertGreater(watched.checked, 0)
+        self.assertEqual(watched.missing, [])
+        self.assertEqual(reader.order[:k0 + 1], list(range(k0 + 1)))       # back-fill of the span, oldest first
+        self.assertEqual(reader.order, sorted(reader.order))
+        self.assertEqual(len(reader.order), len(set(reader.order)))         # every row once
+
+    def test_a_slow_reader_with_the_tag_sender_keeps_order_count_and_settles(self):
+        """Through run_live with the touch entry and the real tag sender to a stand-in backend, a reader of 30 ms per
+        call and frames paced at half real time: the windows arrive in time order, as many as the windows with a
+        session, nothing is replaced or left unsent, and every touch window is settled."""
+        import time as _time
+        from test_vision_links import StubBackend, entry, reporting, timed_frames, window_body
+        from app.modules.vision.aid_confirm import AidConfirm
+        from app.modules.vision.chain import history_s
+        from app.modules.vision.live import run_live
+        from app.modules.vision.tag_sender import TagSender
+        stub = StubBackend()
+        self.addCleanup(stub.close)
+        n = 60
+        b = bundle(aid_rule="head_centre_carry", aid_head_min=0.5)
+        keep = history_s(b) + b.chain.segment_s
+        svc = entry(b=b)
+        sender = TagSender(stub.url, b.chain.segment_s)
+
+        def paced(frames_):
+            for f in frames_:
+                _time.sleep(DT / 2)
+                yield f
+        at = {10 * k: [window_body(k - 1.0, float(k), session_id="s1")] for k in range(1, 6)}
+        folder = tempfile.mkdtemp()
+        meta = run_live(paced(reporting(timed_frames(n), svc, at)), b,
+                        models=FakeModels([fake_inference() for _ in range(n)]),
+                        detector=ScheduledHeads([[[0.38, 0.22, 0.62, 0.58]]] * n), aids=self.aids, show_window=False,
+                        out_dir=folder, print_fn=lambda line: None, entry=svc, sender=sender,
+                        aid_confirm=AidConfirm(self.PixelReader(delay_s=0.03), 0.5, keep))
+        with open(os.path.join(folder, "windows.jsonl"), encoding="utf-8") as f:
+            recs = [json.loads(line) for line in f]
+        with_session = [r for r in recs if r["evaluated"]["session_id"] is not None]
+        s = meta["tag_sender"]
+        self.assertEqual((s["replaced"], s["unsent_at_close"], s["failed"]), (0, 0, 0))
+        self.assertEqual(len(stub.received), len(with_session))
+        ends = [body["window_end"] for _, body in stub.received]
+        self.assertEqual(ends, sorted(ends))
+        settling = svc.status()["settling"]
+        self.assertEqual(settling["settled"], settling["accepted"])
+
+    def test_both_holds_end_at_an_empty_window_through_the_runner_and_the_cut_is_strict(self):
+        """Through run_live: (a) the engine-wheelchair hold ends where the user and the detector's boxes have left
+        (no_main_user_box); (b) a camera gap of 8 s gives windows with no rows (no_frames): both holds end there and
+        such a window is never answered true; (c) a reader at exactly the cut (0.5 at 0.5) withdraws every window,
+        with the reason median."""
+        import numpy as np
+        from app.inference.aid import Aids
+        from app.modules.vision.aid_confirm import AidConfirm
+        from app.modules.vision.chain import history_s
+        from app.modules.vision.live import run_live
+        b = bundle(aid_rule="head_centre_carry", aid_head_min=0.5)
+        keep = history_s(b) + b.chain.segment_s
+        empty = (np.zeros((0, 4)), np.zeros(0))
+        n, calls = 160, []
+
+        def leaving(img):
+            calls.append(1)
+            if len(calls) <= 30:
+                return self.aids(img)
+            return Aids(np.zeros((0, 4)), np.zeros(0), np.zeros((0, 5)), self.CLASSES, (img.shape[1], img.shape[0]),
+                        {"infer": 0.0}, {"crutch": empty, "cane": empty, "walker": empty, "wheelchair": empty})
+        heads = [[[0.38, 0.22, 0.62, 0.58]]] * 30 + [[]] * (n - 30)
+        _, recs, meta = self.live_sessions(AidConfirm(self.Reader(0.9), 0.5, keep, hold=True), n=n, heads=heads,
+                                           at={}, aids=leaving)
+        self.assertEqual(meta["aid_confirm"]["hold_ends"], {"no_main_user_box": 1})
+        k = [self.aid(r)[1] for r in recs].index("no_main_user_box")
+        self.assertEqual(recs[k]["aid_confirm"]["hold_end"], "no_main_user_box")
+
+        def gap_run(flags, reader):
+            times = [i * DT for i in range(40)] + [12.0 + i * DT for i in range(40)]
+            folder = tempfile.mkdtemp()
+            meta = run_live(self.pixel_frames(times), b, models=FakeModels([fake_inference() for _ in range(80)]),
+                            detector=ScheduledHeads([[[0.38, 0.22, 0.62, 0.58]]] * 80), aids=self.aids,
+                            show_window=False, out_dir=folder, print_fn=lambda line: None,
+                            aid_confirm=AidConfirm(reader, 0.5, keep, **flags))
+            with open(os.path.join(folder, "windows.jsonl"), encoding="utf-8") as f:
+                return [json.loads(line) for line in f], meta
+        for flags in ({"hold": True}, {"hold_user": True}):
+            recs, meta = gap_run(flags, self.Reader(0.9))
+            empty_windows = [r for r in recs if self.aid(r)[1] == "no_frames"
+                             or (r["aid_confirm"] or {}).get("engine_unknown_reason") == "no_frames"]
+            self.assertTrue(empty_windows, flags)
+            self.assertEqual(empty_windows[0]["aid_confirm"]["hold_end"], "no_frames")
+            self.assertEqual({self.aid(r) for r in empty_windows}, {("unknown", "no_frames")}, flags)   # never true
+            self.assertEqual(meta["aid_confirm"]["hold_ends"], {"no_frames": 1}, flags)
+            after = [r for r in recs if r["t"] > empty_windows[-1]["t"] and (r["aid_confirm"] or {}).get("confirmed")]
+            self.assertFalse(after[0]["aid_confirm"]["held"], flags)              # a new agreement first
+        recs, meta = gap_run({}, self.Reader(0.5))
+        checked = [r for r in recs if r["aid_confirm"] is not None]
+        self.assertTrue(checked)
+        for r in checked:
+            self.assertEqual((r["aid_confirm"]["confirmed"], r["aid_confirm"]["reason"]), (False, "median"))
+            self.assertEqual(r["aid_confirm"]["median"], 0.5)
+
+    def test_a_reader_error_makes_the_window_not_confirmed_and_the_run_goes_on(self):
+        """A reader whose read raises: every checked window is not confirmed (aid_use false) with aid_confirm.error,
+        one log line for the run, the run ends normally and meta.json counts the errors. Each record carries its
+        release delay and the reader calls so far."""
+        from app.modules.vision.aid_confirm import AidConfirm
+        from app.modules.vision.chain import history_s
+        from app.modules.vision.live import run_live
+
+        class Broken(self.Reader):
+            def probs(self, image):
+                raise OSError("reader broke")
+        logged = []
+        b = bundle(aid_rule="head_centre_carry", aid_head_min=0.5)
+        keep = history_s(b) + b.chain.segment_s
+        folder = tempfile.mkdtemp()
+        meta = run_live(frames(30), b, models=FakeModels([fake_inference() for _ in range(30)]),
+                        detector=ScheduledHeads([[[0.38, 0.22, 0.62, 0.58]]] * 30), aids=self.aids,
+                        show_window=False, out_dir=folder, print_fn=lambda line: None,
+                        aid_confirm=AidConfirm(Broken(0.9), 0.5, keep, log=logged.append))
+        with open(os.path.join(folder, "windows.jsonl"), encoding="utf-8") as f:
+            recs = [json.loads(line) for line in f]
+        self.assertTrue(recs)
+        self.assertEqual({self.aid(r) for r in recs}, {(False, None)})
+        for r in recs:
+            self.assertEqual(r["aid_confirm"]["confirmed"], False)
+            self.assertIn("OSError: reader broke", r["aid_confirm"]["error"])
+            self.assertIsInstance(r["evaluated"]["release_delay_s"], float)
+            self.assertIsInstance(r["evaluated"]["reader_calls_total"], int)
+        self.assertEqual(len(logged), 1)
+        self.assertEqual(meta["aid_confirm"]["reader_errors"], len(recs))
+        self.assertIsNone(meta["aid_confirm"]["release_error"])
+        self.assertTrue(os.path.exists(os.path.join(folder, "meta.json")))
+        _, off, _ = self.live_sessions(None, n=30, at={})
+        self.assertFalse(any("release_delay_s" in r["evaluated"] or "reader_calls_total" in r["evaluated"]
+                             for r in off))
+
+    def test_an_error_in_a_release_still_closes_the_entry_and_writes_meta(self):
+        """Any other exception on the release worker (here on_window) stops the frame loop, and run_live still stops
+        the touch entry and writes meta.json (release_error) before it raises the exception."""
+        from test_vision_links import entry, timed_frames
+        from app.modules.vision.aid_confirm import AidConfirm
+        from app.modules.vision.chain import history_s
+        from app.modules.vision.live import run_live
+        b = bundle(aid_rule="head_centre_carry", aid_head_min=0.5)
+        keep = history_s(b) + b.chain.segment_s
+        folder, svc = tempfile.mkdtemp(), entry(b=b)
+
+        def boom(rec, body):
+            raise ValueError("release broke")
+        with self.assertRaises(ValueError):
+            run_live(timed_frames(40), b, models=FakeModels([fake_inference() for _ in range(40)]),
+                     detector=ScheduledHeads([[[0.38, 0.22, 0.62, 0.58]]] * 40), aids=self.aids, show_window=False,
+                     out_dir=folder, print_fn=lambda line: None, entry=svc, on_window=boom,
+                     aid_confirm=AidConfirm(self.Reader(0.9), 0.5, keep))
+        with open(os.path.join(folder, "meta.json"), encoding="utf-8") as f:
+            meta = json.load(f)
+        self.assertIn("ValueError: release broke", meta["aid_confirm"]["release_error"])
+        self.assertIn("release worker error", meta["stop_reason"])
+        self.assertIsNotNone(svc.status()["camera"]["stopped"])
+
+    def test_readahead_reads_only_rows_of_a_wheelchair_span_and_keeps_the_answers(self):
+        """run_live with read-ahead: a detector that never reads a wheelchair gives no reader call; one that reads a
+        wheelchair gives the same answers as the window-end reading, and the checks wait for few reads."""
+        import numpy as np
+        from app.inference.aid import Aids
+        from app.modules.vision.aid_confirm import AidConfirm
+        from app.modules.vision.chain import history_s
+        from app.modules.vision.live import run_live
+        empty = (np.zeros((0, 4)), np.zeros(0))
+
+        def no_wheelchair(img):
+            return Aids(np.array([self.PERSON]), np.array([0.6]), np.array([[0.6, 0, 0, 0, 0.1]]), self.CLASSES,
+                        (img.shape[1], img.shape[0]), {"infer": 0.0},
+                        {"crutch": empty, "cane": empty, "walker": empty, "wheelchair": empty})
+
+        def live(aids, confirm):
+            folder = tempfile.mkdtemp()
+            b = bundle(aid_rule="head_centre_carry", aid_head_min=0.5)
+            meta = run_live(frames(30), b, models=FakeModels([fake_inference() for _ in range(30)]),
+                            detector=ScheduledHeads([[[0.38, 0.22, 0.62, 0.58]]] * 30), aids=aids,
+                            show_window=False, out_dir=folder, print_fn=lambda line: None, aid_confirm=confirm)
+            with open(os.path.join(folder, "windows.jsonl"), encoding="utf-8") as f:
+                return b, [json.loads(line) for line in f], meta
+        b, _, _ = live(no_wheelchair, None)
+        keep = history_s(b) + b.chain.segment_s
+        reader = self.Reader(0.9)
+        _, recs, meta = live(no_wheelchair, AidConfirm(reader, 0.5, keep))
+        self.assertEqual((reader.ms, meta["aid_confirm"]["reads"]), ([], 0))
+        step = AidConfirm(self.Reader(0.1), 0.5, keep)
+        watched = self.Watched(step)                      # every valued row submitted before its check
+        _, ahead, meta = live(self.aids, step)
+        self.assertGreater(watched.checked, 0)
+        self.assertEqual(watched.missing, [])
+        self.assertTrue(meta["aid_confirm"]["readahead"])
+        self.assertEqual({self.aid(r) for r in ahead}, {(False, None)})
+        self.assertEqual(meta["aid_confirm"]["reads"], 30)
+
+    # --- a hold starts only after the chain's reset; the reader behind the frames ----------------------------------
+    class ByPlace:
+        """A stand-in reader that reads by where the person box is: 0.9 for a box at the left (the wheelchair user W),
+        0.1 elsewhere (the ordinary person O)."""
+
+        def __init__(self):
+            self.ms = []
+
+        def crop(self, bgr, box_px):
+            import numpy as np
+            cx = (box_px[0] + box_px[2]) / 2.0 / bgr.shape[1]
+            return np.full((8, 8, 3), 200 if cx < 0.3 else 50, np.uint8)
+
+        def probs(self, image):
+            import numpy as np
+            self.ms.append(0.0)
+            p = 0.9 if int(image[0, 0, 0]) == 200 else 0.1
+            return np.array([1.0 - p, 0.0, 0.0, 0.0, p])
+
+    W_HEAD, O_HEAD = [0.05, 0.25, 0.25, 0.55], [0.38, 0.22, 0.62, 0.58]
+    W_BODY, O_BODY = [0.0, 0.10, 0.30, 0.97], [0.33, 0.12, 0.72, 0.97]
+
+    def two_people(self, img):
+        """The detector stand-in of two people: W's box with a wheelchair channel, O's box without."""
+        import numpy as np
+        from app.inference.aid import Aids
+        empty = (np.zeros((0, 4)), np.zeros(0))
+        return Aids(np.array([self.W_BODY, self.O_BODY]), np.array([0.6, 0.6]),
+                    np.array([[0.1, 0, 0, 0, 0.6], [0.6, 0, 0, 0, 0.1]]), self.CLASSES, (img.shape[1], img.shape[0]),
+                    {"infer": 0.0}, {"crutch": empty, "cane": empty, "walker": empty,
+                                     "wheelchair": (np.array([self.W_BODY]), np.array([0.6]))})
+
+    def test_live_holds_do_not_start_on_rows_before_the_first_sessions_reset(self):
+        """Through run_live with the touch entry (first case): W (wheelchair) is the main user from the start
+        and stays in view; O stands at the kiosk from 3 s; the page's first touch window of s1 arrives at 5 s, where
+        FrameChain resets and chooses O. The first s1 window's rows are mostly W's rows from before the reset, so it
+        is confirmed, but no s1 window may be held or user-held, and every s1 answer equals plain confirmation's."""
+        from test_vision_links import window_body
+        from app.modules.vision.aid_confirm import AidConfirm
+        from app.modules.vision.chain import history_s
+        b = bundle(aid_rule="head_centre_carry", aid_head_min=0.5)
+        keep = history_s(b) + b.chain.segment_s
+        n = 110
+        at = {10 * k: [window_body(k - 1.0, float(k), session_id="s1")] for k in range(5, 11)}
+        heads = [[self.W_HEAD]] * 30 + [[self.W_HEAD, self.O_HEAD]] * (n - 30)
+
+        def s1_of(flags):
+            step = AidConfirm(self.ByPlace(), 0.5, keep, **flags)
+            _, recs, _ = self.live_sessions(step, n=n, heads=heads, at=at, aids=self.two_people)
+            return [r for r in recs if r["evaluated"]["session_id"] == "s1"], step
+        plain, _ = s1_of({})
+        self.assertTrue(plain and plain[0]["aid_confirm"]["confirmed"])     # the case: W's rows agree at first
+        for flags in ({"hold": True}, {"hold_user": True}):
+            s1, step = s1_of(flags)
+            self.assertIs(step.held, False, flags)    # also a latent hold that no later wheelchair window would show
+            self.assertEqual([self.aid(r) for r in s1], [self.aid(r) for r in plain], flags)
+            for r in s1:
+                ac = r["aid_confirm"] or {}
+                self.assertFalse(ac.get("held") or ac.get("hold_user"), (flags, r["t"], ac))
+
+    def test_live_holds_do_not_start_on_the_few_rows_before_a_second_sessions_reset(self):
+        """Through run_live with the touch entry (second case): the detector reads a wheelchair on every frame,
+        the reader 0.9 on frames 48 to 50 only. Session s2 starts at 4.75 s and its first touch window arrives at 5.8 s,
+        so the window ending 5.0 s reads three rows, all before the chain's reset. It is confirmed, but no s2 window is
+        held or user-held, and every s2 answer equals plain confirmation's."""
+        import numpy as np
+        from test_vision_links import window_body
+        from app.modules.vision.aid_confirm import AidConfirm
+        from app.modules.vision.chain import history_s
+        b = bundle(aid_rule="head_centre_carry", aid_head_min=0.5)
+        keep = history_s(b) + b.chain.segment_s
+        n = 110
+
+        class Burst(self.PixelReader):
+            def probs(self, image):
+                p = 0.9 if 48 <= int(image[0, 0, 0]) <= 50 else 0.1
+                self.ms.append(0.0)
+                return np.array([1.0 - p, 0.0, 0.0, 0.0, p])
+        at = {10 * k: [window_body(k - 1.0, float(k), session_id="s1")] for k in range(1, 5)}
+        at.update({58 + 10 * j: [window_body(4.75 + j, 5.75 + j, session_id="s2")] for j in range(0, 5)})
+
+        def s2_of(flags):
+            from test_vision_links import entry, reporting
+            from app.modules.vision.live import run_live
+            folder, svc = tempfile.mkdtemp(), entry(b=b)
+            run_live(reporting(self.pixel_frames([i * DT for i in range(n)]), svc, at), b,
+                     models=FakeModels([fake_inference() for _ in range(n)]),
+                     detector=ScheduledHeads([[self.O_HEAD]] * n), aids=self.aids, show_window=False, out_dir=folder,
+                     print_fn=lambda line: None, entry=svc, aid_confirm=AidConfirm(Burst(), 0.5, keep, **flags))
+            with open(os.path.join(folder, "windows.jsonl"), encoding="utf-8") as f:
+                return [r for r in (json.loads(line) for line in f) if r["evaluated"]["session_id"] == "s2"]
+        plain = s2_of({})
+        self.assertEqual((plain[0]["t"], plain[0]["aid_confirm"]["confirmed"]), (5.0, True))
+        for flags in ({"hold": True}, {"hold_user": True}):
+            s2 = s2_of(flags)
+            self.assertEqual([self.aid(r) for r in s2], [self.aid(r) for r in plain], flags)
+            for r in s2:
+                ac = r["aid_confirm"] or {}
+                self.assertFalse(ac.get("held") or ac.get("hold_user"), (flags, r["t"], ac))
+
+    def test_live_hold_does_not_start_when_the_first_touch_window_comes_during_a_frame(self):
+        """Through run_live with the touch entry, the usual ordering of the first session: the page's first
+        touch window of s1 arrives while FrameChain processes frame 50 (here from inside the detector call, after the
+        chain read the frame's session), so the same loop iteration releases the window ending 5.0 s naming s1 while
+        the chain's reset is still to come (frame 51); the check runs before frame 51 is processed. Its rows are all
+        from before the reset: it is confirmed but not held, and no s1 window is held (both holds)."""
+        import threading
+        from test_vision_links import entry, timed_frames, window_body
+        from app.modules.vision.aid_confirm import AidConfirm
+        from app.modules.vision.chain import history_s
+        from app.modules.vision.live import run_live
+        b = bundle(aid_rule="head_centre_carry", aid_head_min=0.5)
+        keep = history_s(b) + b.chain.segment_s
+        n = 70
+        for flags in ({"hold": True}, {"hold_user": True}):
+            svc, calls, checked = entry(b=b), [], threading.Event()
+
+            def aids(img):
+                calls.append(1)
+                if len(calls) == 51:          # frame 50, inside process: after its session read
+                    self.assertEqual(svc.receive(window_body(4.0, 5.0, session_id="s1"))[0], 202)
+                elif len(calls) > 51 and (len(calls) - 1) % 10 == 0:
+                    svc.receive(window_body((len(calls) - 1) / 10 - 1.0, (len(calls) - 1) / 10, session_id="s1"))
+                return self.aids(img)
+
+            def on_window(rec, body):
+                if rec["evaluated"]["session_id"] == "s1":
+                    checked.set()
+
+            def ordered(frames_):             # frame 51 only after the s1 window was checked on the worker
+                for f in frames_:
+                    if f.index == 51:
+                        self.assertTrue(checked.wait(10.0))   # a test bound only
+                    yield f
+            step = AidConfirm(self.Reader(0.9), 0.5, keep, **flags)
+            folder = tempfile.mkdtemp()
+            run_live(ordered(timed_frames(n)), b, models=FakeModels([fake_inference() for _ in range(n)]),
+                     detector=ScheduledHeads([[[0.38, 0.22, 0.62, 0.58]]] * n), aids=aids, show_window=False,
+                     out_dir=folder, print_fn=lambda line: None, entry=svc, on_window=on_window, aid_confirm=step)
+            with open(os.path.join(folder, "windows.jsonl"), encoding="utf-8") as f:
+                s1 = [r for r in (json.loads(line) for line in f) if r["evaluated"]["session_id"] == "s1"]
+            self.assertEqual((s1[0]["t"], s1[0]["aid_confirm"]["confirmed"]), (5.0, True), flags)
+            self.assertEqual(step.reset[1], "s1")             # the reset came after that check
+            for r in s1:
+                ac = r["aid_confirm"] or {}
+                self.assertFalse(ac.get("held"), (flags, r["t"], ac))
+
+    def test_live_hold_does_not_carry_into_a_second_session_whose_first_touch_window_comes_during_a_frame(self):
+        """Through run_live with the touch entry: s1 (touch windows to 7 s) is held first; the first touch
+        window of s2 arrives while FrameChain processes frame 90 (from inside the detector call, after the chain read
+        the frame's session), and frame 91 (the chain's reset of s2) is processed only after the s2 window was checked.
+        The stored reset is still s1's and every row of the s2 windows lies after it, so only the session match keeps
+        the hold from starting: no s2 window is held (both holds), and the hold is not on at the end."""
+        import threading
+        from test_vision_links import entry, timed_frames, window_body
+        from app.modules.vision.aid_confirm import AidConfirm
+        from app.modules.vision.chain import history_s
+        from app.modules.vision.live import run_live
+        b = bundle(aid_rule="head_centre_carry", aid_head_min=0.5)
+        keep = history_s(b) + b.chain.segment_s
+        n = 150
+        for flags in ({"hold": True}, {"hold_user": True}):
+            svc, calls, checked = entry(b=b), [], threading.Event()
+
+            def aids(img):
+                calls.append(1)
+                if len(calls) - 1 == 90:      # inside process(frame 90): after its session read
+                    self.assertEqual(svc.receive(window_body(8.0, 9.0, session_id="s2"))[0], 202)
+                return self.aids(img)
+
+            def on_window(rec, body):
+                if rec["evaluated"]["session_id"] == "s2":
+                    checked.set()
+
+            def source():
+                for f in timed_frames(n):
+                    k = f.index
+                    if 1 <= k // 10 <= 7 and k % 10 == 0:
+                        svc.receive(window_body(k / 10 - 1.0, k / 10, session_id="s1"))
+                    if k > 90 and k % 10 == 0:
+                        svc.receive(window_body(k / 10 - 1.0, k / 10, session_id="s2"))
+                    if k == 91:
+                        self.assertTrue(checked.wait(10.0))   # a test bound only
+                    yield f
+            step = AidConfirm(self.Reader(0.9), 0.5, keep, **flags)
+            folder = tempfile.mkdtemp()
+            run_live(source(), b, models=FakeModels([fake_inference() for _ in range(n)]),
+                     detector=ScheduledHeads([[[0.38, 0.22, 0.62, 0.58]]] * n), aids=aids, show_window=False,
+                     out_dir=folder, print_fn=lambda line: None, entry=svc, on_window=on_window, aid_confirm=step)
+            with open(os.path.join(folder, "windows.jsonl"), encoding="utf-8") as f:
+                recs = [json.loads(line) for line in f]
+            s1 = [r for r in recs if r["evaluated"]["session_id"] == "s1"]
+            s2 = [r for r in recs if r["evaluated"]["session_id"] == "s2"]
+            self.assertTrue(any((r["aid_confirm"] or {}).get("held") for r in s1), flags)       # held in s1
+            self.assertEqual((s2[0]["t"], s2[0]["aid_confirm"]["hold_end"]), (9.0, "session"), flags)
+            self.assertEqual(step.reset[1], "s2", flags)
+            for r in s2:
+                ac = r["aid_confirm"] or {}
+                self.assertFalse(ac.get("held"), (flags, r["t"], ac))
+            self.assertIs(step.held, False, flags)
+
+    def test_replay_hold_with_a_two_session_touch_log_ends_and_starts_again_in_the_new_session(self):
+        """A replay with a touch log of two sessions (s2 from 9.55 s) under each hold: held in s1, the first s2 window
+        ends the hold (session) and agrees again on s2's own rows (the window reads only rows of its session, all at
+        or after the chain's reset), the later s2 windows are held, and every answer equals plain confirmation's (the
+        reset rule changes no answer, so replay parity stays)."""
+        from app.modules.vision.aid_confirm import AidConfirm
+        from app.modules.vision.chain import history_s
+        from app.modules.vision.replay import run_replay
+        from app.modules.vision.touch import load_timeline
+        n = 150
+        b = bundle(aid_rule="head_centre_carry", aid_head_min=0.5)
+        keep = history_s(b) + b.chain.segment_s
+
+        def replay(flags):
+            folder = tempfile.mkdtemp()
+            video = os.path.join(folder, "take.mp4")
+            events = [(-1000, "session_start", "menu", None), (-900, "screen_enter", "menu", None),
+                      (9500, "session_end", "menu", {"reason": "server_session_change"}),
+                      (9550, "session_start", "menu", {"reason": "server_session_change"}, "s2")]
+            out = os.path.join(folder, "out")
+            meta = run_replay(frames(n), out, b, timeline=load_timeline(touch_log(folder, events, video), video),
+                              models=FakeModels([fake_inference() for _ in range(n)]),
+                              detector=ScheduledHeads([[[0.38, 0.22, 0.62, 0.58]]] * n), aids=self.aids,
+                              session_id="t", aid_confirm=AidConfirm(self.Reader(0.9), 0.5, keep, **flags))
+            with open(os.path.join(out, "windows.jsonl"), encoding="utf-8") as f:
+                return [json.loads(line) for line in f], meta
+        plain, _ = replay({})
+        for flags in ({"hold": True}, {"hold_user": True}):
+            recs, meta = replay(flags)
+            self.assertEqual([self.aid(r) for r in recs], [self.aid(r) for r in plain], flags)
+            k = next(i for i, r in enumerate(recs) if r["session_reset"])
+            self.assertTrue(any(r["aid_confirm"]["held"] for r in recs[:k]), flags)
+            first = recs[k]["aid_confirm"]
+            self.assertEqual((first["hold_end"], first["confirmed"], first["held"]), ("session", True, False), flags)
+            self.assertTrue(all(r["aid_confirm"]["held"] for r in recs[k + 1:]), flags)
+            self.assertEqual(meta["aid_confirm"]["hold_ends"], {"session": 1}, flags)
+
+    @staticmethod
+    def pixel_row(k, wheelchair=True):
+        """A row of frame k (t = k x DT) with the main user's head box and the detector's own reading of it, and its
+        frame whose pixels hold k (PixelReader)."""
+        import numpy as np
+        row = {"t_s": round(k * DT, 6), "frame_idx": k, "primary_box": [0.38, 0.22, 0.62, 0.58],
+               "aid_head_class": "wheelchair" if wheelchair else None, "aid_head_score": 0.6 if wheelchair else 0.0}
+        return row, np.full((120, 160, 3), k, np.uint8)
+
+    def test_readahead_after_a_hold_end_backfills_only_that_windows_rows(self):
+        """Read-ahead stops while held; at the hold's end trigger_until is cleared and the back-fill
+        starts at the ending window's first row (readahead_from). A wheelchair row soon after (inside the span the
+        trigger before the hold had opened) back-fills that window's rows and no older row."""
+        from app.modules.vision.aid_confirm import AidConfirm
+        from app.modules.vision.params import PilotParams
+        reader = self.PixelReader()
+        step = AidConfirm(reader, 0.5, 100.0, hold=True)
+        step.start_readahead(0.5, sit_params().window_s)
+        rows = {}
+        for k in range(0, 21):                     # rows 0 to 9 no wheelchair, 10 a trigger; then held
+            if k == 11:
+                step.held = True
+            row, img = self.pixel_row(k, wheelchair=k >= 10)
+            rows[k] = row
+            step.add_row(row, img, self.aids(img))
+        out = {"tags": [{"name": "user_changed", "status": False, "evidence": [], "unknown_reason": None},
+                        {"name": "aid_use", "status": False, "unknown_reason": None,
+                         "evidence": [{"event_id": "aid_head@1", "obs": "aid_class", "value": None, "t": 1.0}]}]}
+        ended = step.check(out, [rows[k] for k in range(15, 21)], 2.0, sit_params(), PilotParams(), session_reset=True)
+        self.assertEqual(ended["hold_end"], "session")
+        row, img = self.pixel_row(21)
+        step.add_row(row, img, self.aids(img))
+        step.stop_readahead()
+        self.assertEqual(reader.order, list(range(0, 11)) + list(range(15, 22)))
+
+    class GatedReader(PixelReader):
+        """A PixelReader whose read of frame `gate` waits until go is set (started is set when it begins), so the
+        reader thread is busy while the frame thread goes on."""
+
+        def __init__(self, gate=0):
+            import threading
+            super().__init__()
+            self.gate, self.started, self.go = gate, threading.Event(), threading.Event()
+
+        def probs(self, image):
+            if int(image[0, 0, 0]) == self.gate:
+                self.started.set()
+                self.go.wait(10.0)              # a test bound only: go is always set by the test
+            return super().probs(image)
+
+    def test_a_pruned_rows_queued_read_is_cancelled_and_a_waiting_check_reads_it_again(self):
+        """The reader thread is busy with row 0 and rows 1 to 4 are queued. A check waits on row 1's
+        read when the frame thread prunes rows 0 to 2: the queued reads of rows 1 and 2 are cancelled (row 2 is never
+        read), the check catches the cancel and reads row 1 again from its own images, the running read of row 0
+        finishes without leaving a value for the pruned row, and no future of a pruned row stays in the table."""
+        import threading
+        from app.modules.vision.aid_confirm import AidConfirm
+        reader = self.GatedReader(gate=0)
+        step = AidConfirm(reader, 0.5, 1.05)      # keep_s: rows older than t - 1.05 s are pruned
+        step.start_readahead(0.5, sit_params().window_s)
+        images = {}
+        for k in range(0, 5):
+            row, img = self.pixel_row(k)
+            step.add_row(row, img, self.aids(img))
+            images[k] = step.images[k][1]
+        self.assertTrue(reader.started.wait(10.0))
+        queued = dict(step.futures)
+        asked = threading.Event()
+
+        class Telling(dict):
+            def get(self, key, default=None):
+                value = dict.get(self, key, default)
+                if key == 1:
+                    asked.set()
+                return value
+        step.futures = Telling(step.futures)
+        got = {}
+
+        def check_row_1():
+            try:
+                got["value"] = step._value(1, {1: images[1]})
+            except BaseException as e:          # recorded for the assertion below
+                got["error"] = e
+        waiting = threading.Thread(target=check_row_1)
+        waiting.start()
+        self.assertTrue(asked.wait(10.0))
+        row, img = self.pixel_row(13)            # t 1.3: floor 0.25 prunes rows 0, 1 and 2
+        step.add_row(row, img, self.aids(img))
+        self.assertTrue(queued[1].cancelled() and queued[2].cancelled())
+        reader.go.set()
+        waiting.join(10.0)
+        step.stop_readahead()
+        self.assertEqual(set(got), {"value"}, got)
+        self.assertAlmostEqual(got["value"], 0.55)
+        self.assertNotIn(2, reader.order)
+        self.assertEqual(sorted(reader.order), [0, 1, 3, 4, 13])
+        self.assertNotIn(0, step.wheelchair)       # read after its prune: no value kept
+        self.assertLessEqual(set(step.futures), set(step.images))
+
+    def test_a_reader_error_pruned_between_test_and_lookup_still_reads_as_an_error(self):
+        """_value reads a row's error with one lookup (.get), so a prune on the frame thread between
+        a membership test and a lookup cannot raise a KeyError in the check; the row stays a reader error."""
+        from app.modules.vision.aid_confirm import AidConfirm
+
+        class Vanishing(dict):
+            def __contains__(self, key):         # the frame thread prunes the row right after the test
+                hit = dict.__contains__(self, key)
+                self.pop(key, None)
+                return hit
+        step = AidConfirm(self.Reader(0.9), 0.5, 10.0)
+        step.failed = Vanishing({5: "OSError: reader broke"})
+        with self.assertRaisesRegex(RuntimeError, "reader broke"):
+            step._value(5, {})
+
+    def test_a_reader_behind_the_frames_is_reported_from_the_frame_loop_and_counted(self):
+        """The reader thread blocks on its first read, frames go on (paced). The frame loop sees the oldest
+        queued release older than segment_s and prints the late line before any window has come back; after the
+        reader is let go, the late windows are counted in meta.json aid_confirm.releases_later_than_segment and the
+        line is not printed again."""
+        import time as _time
+        from app.modules.vision.aid_confirm import AidConfirm
+        from app.modules.vision.chain import history_s
+        from app.modules.vision.live import run_live
+        b = bundle(aid_rule="head_centre_carry", aid_head_min=0.5)
+        keep = history_s(b) + b.chain.segment_s
+        reader = self.GatedReader(gate=0)
+        lines, seen_blocked = [], []
+        n = 45
+
+        def paced(frames_):                       # 50 ms per frame while the reader is blocked, then at once
+            for f in frames_:
+                if not reader.go.is_set() and any("aid_confirm.releases_later_than_segment" in x for x in lines):
+                    seen_blocked.append(f.index)
+                    reader.go.set()
+                if not reader.go.is_set():
+                    _time.sleep(0.05)
+                yield f
+            reader.go.set()
+        meta = run_live(paced(self.pixel_frames([i * DT for i in range(n)])), b,
+                        models=FakeModels([fake_inference() for _ in range(n)]),
+                        detector=ScheduledHeads([[[0.38, 0.22, 0.62, 0.58]]] * n), aids=self.aids,
+                        show_window=False, out_dir=tempfile.mkdtemp(), print_fn=lines.append,
+                        aid_confirm=AidConfirm(reader, 0.5, keep))
+        self.assertTrue(seen_blocked)                         # printed while the reader was still blocked
+        late = [x for x in lines if "aid_confirm.releases_later_than_segment" in x]
+        self.assertEqual(len(late), 1)
+        self.assertIn("아직 내보내지 못했습니다", late[0])
+        self.assertGreaterEqual(meta["aid_confirm"]["releases_later_than_segment"], 1)
+
+    def test_a_reader_slower_than_the_frames_gives_the_replays_rows_and_medians(self):
+        """The reader-behind run made short (a 2 s window, so rows leave the kept history after
+        3.5 s): a reader of 10 ms per read and frames as fast as the chain runs, so the release worker falls far behind,
+        rows of queued windows are pruned and their queued reads cancelled. Every window gives the replay's rows,
+        median and answer, with no error, in time order; the late line comes once and its count is in meta; no future
+        of a pruned row stays in the table."""
+        from app.modules.vision.aid_confirm import AidConfirm
+        from app.modules.vision.chain import history_s
+        from app.modules.vision.live import run_live
+        from app.modules.vision.params import Bundle, PilotParams
+        from app.modules.vision.replay import run_replay
+        n = 70
+        b = Bundle(PilotParams(aid_rule="head_centre_carry", aid_head_min=0.5), sit_params(window_s=2.0), "test")
+        keep = history_s(b) + b.chain.segment_s
+        heads = [[[0.38, 0.22, 0.62, 0.58]]] * n
+        out = os.path.join(tempfile.mkdtemp(), "out")
+        run_replay(self.pixel_frames([i * DT for i in range(n)]), out, b,
+                   models=FakeModels([fake_inference() for _ in range(n)]), detector=ScheduledHeads(heads),
+                   aids=self.aids, session_id="t", aid_confirm=AidConfirm(self.PixelReader(), 0.5, keep),
+                   log=lambda *a: None)
+        with open(os.path.join(out, "windows.jsonl"), encoding="utf-8") as f:
+            replay = {r["t"]: r for r in (json.loads(line) for line in f)}
+        step, lines, folder = AidConfirm(self.PixelReader(delay_s=0.01), 0.5, keep), [], tempfile.mkdtemp()
+        meta = run_live(self.pixel_frames([i * DT for i in range(n)]), b,
+                        models=FakeModels([fake_inference() for _ in range(n)]), detector=ScheduledHeads(heads),
+                        aids=self.aids, show_window=False, out_dir=folder, print_fn=lines.append, aid_confirm=step)
+        with open(os.path.join(folder, "windows.jsonl"), encoding="utf-8") as f:
+            live = [json.loads(line) for line in f]
+        self.assertEqual([r["t"] for r in live], sorted(r["t"] for r in live))
+        compared = 0
+        for r in live:
+            if r.get("partial"):
+                continue
+            a, e = r["aid_confirm"], replay[r["t"]]["aid_confirm"]
+            self.assertNotIn("error", a)
+            self.assertEqual((a["rows"], a["median"], a["confirmed"]), (e["rows"], e["median"], e["confirmed"]), r["t"])
+            compared += 1
+        self.assertGreaterEqual(compared, 5)
+        late = [x for x in lines if "aid_confirm.releases_later_than_segment" in x]
+        self.assertEqual(len(late), 1)
+        self.assertGreater(meta["aid_confirm"]["releases_later_than_segment"], 0)
+        self.assertLessEqual(set(step.futures), set(step.images))
+
+    def test_crop_box_widens_the_person_box_by_the_margin_and_clips_it(self):
+        from app.inference.aid_confirm import MARGIN_PX, crop_box
+        self.assertEqual(MARGIN_PX, 20)
+        self.assertEqual(crop_box((30.4, 40.6, 80.2, 100.0), (160, 120)), (10, 20, 101, 120))
+        self.assertEqual(crop_box((-50, -50, -30, -30), (160, 120)), (0, 0, 160, 120))   # nothing left: whole frame
+
+    def test_reader_means_the_softmax_of_its_files_and_cuts_rgb(self):
+        import numpy as np
+        from app.inference.aid_confirm import AidConfirmReader, softmax
+        a, b = [2.0, 0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 0.0, 3.0]
+        r = AidConfirmReader([], sessions=[self.Session(a), self.Session(b)])
+        p = r.probs(np.zeros((8, 8, 3), np.uint8))
+        np.testing.assert_allclose(p, (softmax(np.array(a)) + softmax(np.array(b))) / 2)
+        self.assertAlmostEqual(float(p.sum()), 1.0)
+        img = np.zeros((40, 40, 3), np.uint8)
+        img[:, :, 2] = 200                                     # BGR: the red channel last
+        crop = r.crop(img, (10, 10, 20, 20))
+        self.assertEqual(crop.shape, (8, 8, 3))
+        self.assertEqual(int(crop[0, 0, 0]), 200)              # RGB: red first
+
+    def test_reader_refuses_a_file_with_another_output_size(self):
+        from app.inference.aid_confirm import AidConfirmReader
+        with self.assertRaises(ValueError):
+            AidConfirmReader([], sessions=[self.Session([0.0, 1.0])])
+        with self.assertRaises(ValueError):
+            AidConfirmReader([], sessions=[])
+
+    def test_replay_keeps_a_wheelchair_window_the_reader_confirms_and_withdraws_the_others(self):
+        """The same replay three times: without the step every window is true with the class wheelchair; a reader
+        that reads P(wheelchair) 0.9 keeps them (records carry aid_confirm, confirmed); one that reads 0.1 makes
+        them false. Each row is read once; without the step no record or meta carries aid_confirm."""
+        from app.modules.vision.aid_confirm import AidConfirm
+        from app.modules.vision.chain import history_s
+        b, off, meta_off = self.replay()
+        self.assertEqual({self.aid(r) for r in off}, {(True, None)})
+        self.assertFalse(any("aid_confirm" in r for r in off))
+        self.assertNotIn("aid_confirm", meta_off)
+        keep = history_s(b) + b.chain.segment_s
+        _, kept, meta = self.replay(AidConfirm(self.Reader(0.9), 0.5, keep))
+        self.assertEqual([self.aid(r) for r in kept], [self.aid(r) for r in off])
+        self.assertTrue(all(r["aid_confirm"]["confirmed"] for r in kept))
+        self.assertEqual(meta["aid_confirm"]["windows_checked"], len(kept))
+        self.assertEqual(meta["aid_confirm"]["windows_withdrawn"], 0)
+        self.assertEqual(meta["aid_confirm"]["reads"], 30)                 # every row once, though windows overlap
+        _, dropped, meta = self.replay(AidConfirm(self.Reader(0.1), 0.5, keep))
+        self.assertEqual({self.aid(r) for r in dropped}, {(False, None)})
+        self.assertFalse(any(r["aid_confirm"]["confirmed"] for r in dropped))
+        self.assertEqual(meta["aid_confirm"]["windows_withdrawn"], len(dropped))
+
+    def test_person_box_is_the_detector_box_around_the_head_or_the_carried_box(self):
+        """A head row reads the best-scoring box that holds the head centre; a carried row the box with the highest
+        IoU to the carried aid box; a row with neither has no crop."""
+        import numpy as np
+        from app.inference.aid import Aids
+        from app.modules.vision.aid_confirm import person_box
+        aids = Aids(np.array([[0.0, 0.0, 0.3, 0.3], [0.2, 0.1, 0.8, 0.9], [0.25, 0.1, 0.75, 0.95]]),
+                    np.array([0.9, 0.4, 0.7]), np.zeros((3, 5)), self.CLASSES, (160, 120), {})
+        self.assertEqual(person_box(aids, {"primary_box": (0.4, 0.2, 0.6, 0.4)}), (0.25, 0.1, 0.75, 0.95))
+        self.assertEqual(person_box(aids, {"primary_box": None, "aid_head_from": "carried",
+                                           "aid_head_box": (0.2, 0.1, 0.8, 0.9)}), (0.2, 0.1, 0.8, 0.9))
+        self.assertIsNone(person_box(aids, {"primary_box": None, "aid_head_from": None, "aid_head_box": None}))
+
+    def test_runner_options_need_the_aid_model_and_a_head_reading(self):
+        import argparse
+        from app.modules.vision.replay import CONFIRM_MIN_DEFAULT, add_aid_confirm_options, check_aid_confirm_options
+        ap = argparse.ArgumentParser()
+        ap.add_argument("--aid-model", default=None)
+        add_aid_confirm_options(ap)
+        path = os.path.join(tempfile.mkdtemp(), "reader.onnx")
+        with open(path, "wb") as f:
+            f.write(b"stand-in")
+        errors = []
+        a = ap.parse_args([])
+        self.assertEqual((a.aid_confirm_model, a.aid_confirm_min), (None, CONFIRM_MIN_DEFAULT))
+        check_aid_confirm_options(errors.append, a, "owner_box")              # off: nothing to check
+        check_aid_confirm_options(errors.append, ap.parse_args(["--aid-confirm-model", path]), "head_centre_carry")
+        check_aid_confirm_options(errors.append, ap.parse_args(["--aid-model", "d.onnx", "--aid-confirm-model", path]),
+                                  "owner_box")
+        check_aid_confirm_options(errors.append, ap.parse_args(["--aid-model", "d.onnx", "--aid-confirm-model",
+                                                                path + ".missing"]), "head_centre")
+        check_aid_confirm_options(errors.append, ap.parse_args(["--aid-model", "d.onnx", "--aid-confirm-model", path,
+                                                                "--aid-confirm-model", path]), "head_centre_carry")
+        self.assertEqual(len(errors), 3)
+        self.assertIn("needs --aid-model", errors[0])
+        self.assertIn("head_centre", errors[1])
+        self.assertIn("no file", errors[2])
+        held = []
+        check_aid_confirm_options(held.append, ap.parse_args(["--aid-model", "d.onnx", "--aid-confirm-hold"]),
+                                  "head_centre_carry")
+        self.assertEqual(held, ["--aid-confirm-hold needs --aid-confirm-model"])
+        user = []
+        check_aid_confirm_options(user.append, ap.parse_args(["--aid-model", "d.onnx", "--aid-confirm-hold-user"]),
+                                  "head_centre_carry")
+        self.assertEqual(user, ["--aid-confirm-hold-user needs --aid-confirm-model"])
+        self.assertFalse(ap.parse_args([]).aid_confirm_hold)
+
+
 if __name__ == "__main__":
     unittest.main()
