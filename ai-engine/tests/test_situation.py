@@ -18,6 +18,7 @@ from app.modules.vision.situation import DISPLAY_TEXT, NONE, TAGS, UNKNOWN, asse
 
 NAN = float("nan")
 DT = 0.1                                     # synthetic frame interval (s)
+PITCH_TEST = 20.0   # head_down_pitch_min of these tests: an arbitrary round value, not a calibration
 SEEN, NOT_SEEN = "보임", "못 봄"
 SITUATION_PY = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                             "app", "modules", "vision", "situation.py")
@@ -86,6 +87,23 @@ def companion_window(*turns, mouth=0.3):
 def around_window(drop=()):
     """Two off-screen turns (right, then left) with the face seen, no touch, body still, nobody behind."""
     return rows_of(face(5), sweep(+1), face(5), sweep(-1), face(5), drop=drop)
+
+
+def golden_windows():
+    """(name, rows, PilotParams overrides, landmarker num_faces) of the windows whose three-tag output is pinned to the
+    code before the scene tags (tests/data/situation_golden_main.json, made from origin/main)."""
+    return [
+        ("behind", put(rows_of(face(5), look_back(), face(5), look_back(), face(5)), 0, 30, people_behind_count=1),
+         {}, 1),
+        ("companion", companion_window(sweep(+1)), {}, 1),
+        ("companion_two_faces", companion_window(sweep(+1)), {}, 2),
+        ("around", around_window(), {}, 1),
+        ("around_min_events_4", around_window(), {"min_events": 4}, 1),
+        ("around_no_companion_column", around_window(drop=("companion_box",)), {}, 1),
+        ("facing", rows_of(face(10)), {}, 1),
+        ("gone", rows_of(face(5), [(10, GONE)], face(5)), {}, 1),
+        ("short_window", companion_window(sweep(+1)), {"window_s": 1.9}, 1),
+    ]
 
 
 def run(rows, params=P, num_faces=1):
@@ -609,6 +627,533 @@ class LookingAroundTests(unittest.TestCase):
         out, _ = run(rows)
         self.assertEqual(out["name"], UNKNOWN)
         self.assertEqual([a["name"] for a in out["alternatives"]], [AROUND])
+
+
+class SceneCueTests(unittest.TestCase):
+    """events.observe_scene: the measurements of the scene tags (values made for these frames)."""
+
+    def test_face_height_is_the_median_of_the_main_user_face_rows_without_the_near_ones(self):
+        from app.modules.vision.events import observe_scene
+        rows = put(rows_of(face(10), extra={**OPTIONAL, "face_cy": 0.5, "iod_ratio_user": 1.0}), 6, 9,
+                   face_cy=0.8, iod_ratio_user=1.4)                    # frames 6-9: leaning in, the face lower
+        put(rows, 0, 0, face_cy=None, iod_ratio_user=None)             # someone else's face: blank values
+        c = observe_scene(rows, (0.0, 0.9))
+        (height,) = c.of("face_height")
+        self.assertEqual(height["obs"], {"face_cy_median": 0.5, "rows": 9})   # 5 x 0.5 and 4 x 0.8 -> 0.5
+        c = observe_scene(rows, (0.0, 0.9), approach_ratio_min=1.3)
+        (height,) = c.of("face_height")
+        self.assertEqual((height["obs"], c.near_rows), ({"face_cy_median": 0.5, "rows": 5}, 4))
+        (size,) = c.of("face_size")
+        self.assertEqual(size["obs"], {"iod_ratio_median": 1.0, "rows": 9})
+        self.assertEqual(observe_scene(rows_of(face(3)), (0.0, 0.2)).of("face_height", "face_size"), [])
+
+    def test_a_new_main_user_track_and_a_window_with_nobody_seen(self):
+        from app.modules.vision.events import observe_scene
+        rows = rows_of(face(4), [(6, GONE)], face(4), extra={**OPTIONAL, "primary_track": 1, "head_count": 1})
+        put(rows, 4, 9, primary_track=None, head_count=0)
+        put(rows, 10, 13, primary_track=2)
+        put(rows, 10, 10, main_user_prev_track=1, main_user_gap_s=0.7, main_user_body_kept="False",
+            main_user_body_gap_s=0.6)
+        c = observe_scene(rows, (0.0, 1.3))
+        (change,) = c.of("main_user_changed")
+        self.assertEqual(change["obs"], {"track": 2, "previous_track": 1, "gap_s": 0.7, "body_kept": False,
+                                         "body_gap_s": 0.6, "previous_h": None, "new_h": None, "h_ratio": None, "new_was_role": None,
+                                         "new_rel_dist": None, "new_growth": None, "reacquired": None,
+                                         "previous_settled": None, "stitched": None, "new_start_s": None,
+                                         "start_shift": None, "start_size": None})
+        self.assertTrue(c.track_measured)
+        self.assertEqual(c.of("nothing_seen"), [])                     # people seen in part of the window
+        (nothing,) = observe_scene(rows, (0.4, 0.9)).of("nothing_seen")
+        self.assertEqual((nothing["t_start"], nothing["t_end"]), (0.4, 0.9))
+        put(rows, 6, 6, head_count=1)                                  # a head box: somebody is there
+        self.assertEqual(observe_scene(rows, (0.4, 0.9)).of("nothing_seen"), [])
+        put(rows, 6, 6, head_count=0, aid_count=1, aid_person_count=1)   # a person box of the aid detector: somebody
+        self.assertEqual(observe_scene(rows, (0.4, 0.9)).of("nothing_seen"), [])
+        put(rows, 6, 6, aid_person_count=0)                            # only a recording-floor box: nobody
+        self.assertEqual(len(observe_scene(rows, (0.4, 0.9)).of("nothing_seen")), 1)
+        put(rows, 6, 6, aid_count=0, face_count=1)                     # a face-detector box only: somebody
+        self.assertEqual(observe_scene(rows, (0.4, 0.9)).of("nothing_seen"), [])
+        put(rows, 6, 6, face_count=0)
+        put(rows, 6, 6, aid_count="")                                  # a blank change cell is no change
+        self.assertEqual(len(observe_scene(put(rows, 0, 13, main_user_prev_track=""), (0.0, 1.3)).of(
+            "main_user_changed")), 0)
+        self.assertFalse(observe_scene(rows_of(face(3)), (0.0, 0.2)).track_measured)
+
+
+    def test_seated_height_falls_back_to_the_head_box_where_the_face_cannot_tell(self):
+        """The face decides when it can; where it cannot (no face seen, as a seated user low in the frame), the main
+        user's head box decides with the head detector and a head value; without a box it cannot tell; without the
+        head value the face's reason stands."""
+        from app.modules.vision.events import observe_scene
+        from app.modules.vision.situation import seated_height
+        rows = rows_of([(10, GONE)], extra={**OPTIONAL, "primary_track": 1, "head_count": 1,
+                                            "primary_box": "0.40;0.60;0.60;0.90"})       # centre 0.75, no face
+        sc = observe_scene(rows, (0.0, 0.9))
+        self.assertEqual(seated_height(sc, 0.6, 0.5, seated_head_cy_min=0.7)[0], True)
+        self.assertEqual(seated_height(sc, 0.6, 0.5, seated_head_cy_min=0.8)[0], False)
+        self.assertEqual(seated_height(sc, 0.6, 0.5)[2], "no_main_user_face")          # face rule without the value
+        nobox = observe_scene(put(rows, 0, 9, primary_box=None), (0.0, 0.9))
+        self.assertEqual(seated_height(nobox, 0.6, 0.5, seated_head_cy_min=0.7)[2], "no_main_user_box")
+        faced = observe_scene(rows_of(face(10), extra={**OPTIONAL, "primary_track": 1, "head_count": 1,
+                                                       "face_in_primary": True, "face_cy": 0.5,
+                                                       "primary_box": "0.40;0.60;0.60;0.90"}), (0.0, 0.9))
+        self.assertEqual(seated_height(faced, 0.6, 0.5, seated_head_cy_min=0.7)[0], False)  # the face decides
+
+    def test_the_head_box_fallback_leaves_out_a_head_grown_by_a_lean(self):
+        """The head-box fallback of seated_height: rows whose head box is larger than the user's own reference beyond
+        head_approach_ratio_min (a lean brings the head closer and lower) do not count; a seated user's head at
+        operating distance (ratio about 1) does."""
+        from app.modules.vision.events import observe_scene
+        from app.modules.vision.situation import seated_height
+        rows = rows_of([(10, GONE)], extra={**OPTIONAL, "primary_track": 1, "head_count": 1,
+                                            "primary_box": "0.40;0.60;0.60;0.90", "head_ratio_user": 1.4})
+        lean = observe_scene(rows, (0.0, 0.9), head_approach_ratio_min=1.2)
+        self.assertEqual((seated_height(lean, 0.6, 0.5, seated_head_cy_min=0.7)[2], lean.head_near_rows),
+                         ("head_near", 10))                          # the box is there on every row: not 'no box'
+        seated = observe_scene(put(rows, 0, 9, head_ratio_user=1.0), (0.0, 0.9), head_approach_ratio_min=1.2)
+        self.assertIs(seated_height(seated, 0.6, 0.5, seated_head_cy_min=0.7)[0], True)
+
+    def test_face_approach_does_not_count_a_bowed_head(self):
+        """A larger face while the head is pitched down beyond the camera's head-down boundary is bowing (a phone,
+        the counter), not leaning in to read: the window is judged False (as the company-video check counted it);
+        facing the screen it is an approach."""
+        from app.modules.vision.events import observe_scene
+        from app.modules.vision.situation import face_approach
+        rows = rows_of(face(10), extra={**OPTIONAL, "iod_ratio_user": 1.4, "dpitch_user_deg": 30.0})
+        sc = observe_scene(rows, (0.0, 0.9))
+        status, events, reason = face_approach(sc, 1.2, 0.5, head_down_pitch_min=PITCH_TEST)
+        self.assertEqual((status, reason), (False, None))
+        self.assertEqual(sorted(e["kind"] for e in events), ["face_size", "head_pitch"])
+        unchanged = observe_scene(rows_of(face(10), extra={**OPTIONAL, "iod_ratio_user": 1.0,   # bowed, not grown
+                                                           "dpitch_user_deg": 30.0}), (0.0, 0.9))
+        self.assertEqual(face_approach(unchanged, 1.2, 0.5, head_down_pitch_min=PITCH_TEST)[::2], (False, None))
+        self.assertIs(face_approach(sc, 1.2, 0.5)[0], True)                        # no head-down value: not gated
+        level = observe_scene(put(rows, 0, 9, dpitch_user_deg=5.0), (0.0, 0.9))
+        self.assertIs(face_approach(level, 1.2, 0.5, head_down_pitch_min=PITCH_TEST)[0], True)
+
+    def test_the_head_down_gate_needs_the_share_of_the_window(self):
+        """The head-down gate reads a pitch median only when it stands on face_visible_min of the window's frames, as
+        the boundary was calibrated: two bowed face rows before the landmarker loses the leaning face do not hide the
+        approach (True asks no share)."""
+        from app.modules.vision.events import observe_scene
+        from app.modules.vision.situation import face_approach
+        rows = rows_of(face(2), [(8, GONE)], extra={**OPTIONAL, "iod_ratio_user": 1.4, "dpitch_user_deg": 30.0})
+        sc = observe_scene(rows, (0.0, 0.9))
+        self.assertEqual(face_approach(sc, 1.2, 0.5, head_down_pitch_min=PITCH_TEST)[::2], (True, None))
+
+    def test_change_evidence_reads_the_same_from_rows_csv_and_a_data_frame(self):
+        """Track ids from rows.csv are text ('2') and a data frame gives NaN for an empty cell: the evidence carries
+        the same int ids as a replay and None for the empty role, and the output passes its check."""
+        from app.modules.vision.events import observe_scene
+        rows = rows_of(face(4), extra={**OPTIONAL, "primary_track": "2", "head_count": 1})
+        put(rows, 1, 1, main_user_prev_track="1", main_user_gap_s=1.2, main_user_new_was_role=float("nan"))
+        (change,) = observe_scene(rows, (0.0, 0.3)).of("main_user_changed")
+        self.assertEqual((change["obs"]["track"], change["obs"]["previous_track"], change["obs"]["new_was_role"]),
+                         (2, 1, None))
+        out, _ = assess(rows, rows[-1]["t_s"], P, landmarker_num_faces=1)
+        self.assertIs(out["tags"][2]["status"], True)
+
+    @staticmethod
+    def changed_rows(before: dict, after: dict, **flags):
+        """20 frames (0.0-1.9 s): main-user track 1 with the values `before` on frames 0-13, track 2 with `after` from
+        frame 14, which carries the change (the earlier user settled, not reacquired, not stitched; flags override)."""
+        rows = rows_of(face(20), extra={**OPTIONAL, "primary_track": 1, "head_count": 1, "face_in_primary": True,
+                                        **before})
+        put(rows, 14, 19, primary_track=2, **after)
+        return put(rows, 14, 14, main_user_prev_track=1, main_user_prev_settled=True, main_user_reacquired=False,
+                   main_user_stitched=False, **flags)
+
+    KEPT = ({"main_user_reacquired": True}, {"main_user_stitched": True}, {"main_user_prev_settled": False})
+
+    def test_after_a_change_of_user_the_face_measures_read_the_new_user_only(self):
+        """face_height, face_size, head_pitch (and face_rows, near_rows) after a change of user: the earlier user's
+        lower face and bowed head do not reach the new user's seated_height and face_approach. A reacquired or
+        stitched track, or a swap before the earlier user settled, keeps the history."""
+        from app.modules.vision.events import observe_scene
+        from app.modules.vision.situation import face_approach, seated_height
+        rows = self.changed_rows({"face_cy": 0.9, "iod_ratio_user": 1.5, "dpitch_user_deg": 30.0},
+                                 {"face_cy": 0.3, "iod_ratio_user": 1.5, "dpitch_user_deg": 0.0})
+        sc = observe_scene(rows, (0.0, 1.9))
+        self.assertEqual([e["obs"] for e in sc.of("face_height", "face_size", "head_pitch")],
+                         [{"face_cy_median": 0.3, "rows": 6}, {"iod_ratio_median": 1.5, "rows": 6},
+                          {"dpitch_median": 0.0, "rows": 6}])
+        self.assertEqual((sc.face_rows, observe_scene(rows, (0.0, 1.9), approach_ratio_min=1.2).near_rows), (6, 6))
+        self.assertIs(seated_height(sc, 0.6)[0], False)                   # the new user stands
+        self.assertIs(face_approach(sc, 1.2, head_down_pitch_min=PITCH_TEST)[0], True)   # leaning in, not bowed
+        for flags in self.KEPT:
+            kept = observe_scene(put([dict(r) for r in rows], 14, 14, **flags), (0.0, 1.9))
+            self.assertEqual((kept.face_rows, seated_height(kept, 0.6)[0],
+                              face_approach(kept, 1.2, head_down_pitch_min=PITCH_TEST)[0]), (20, True, False), flags)
+
+    def test_after_a_change_of_user_the_head_box_measures_read_the_new_user_only(self):
+        """head_height and head_size (and head_near_rows) after a change of user: the earlier user's low head box does
+        not reach the new user's seated_height (head-box path); reacquire / stitch / a first-approach swap keep it."""
+        from app.modules.vision.events import observe_scene
+        from app.modules.vision.situation import seated_height
+        rows = self.changed_rows({"primary_box": "0.40;0.60;0.60;0.90", "head_ratio_user": 1.4},   # centre 0.75
+                                 {"primary_box": "0.40;0.10;0.60;0.40", "head_ratio_user": 1.0})   # centre 0.25
+        sc = observe_scene(rows, (0.0, 1.9))
+        self.assertEqual([e["obs"] for e in sc.of("head_height", "head_size")],
+                         [{"head_cy_median": 0.25, "rows": 6}, {"head_ratio_median": 1.0, "rows": 6}])
+        self.assertEqual(observe_scene(rows, (0.0, 1.9), head_approach_ratio_min=1.2).head_near_rows, 0)
+        self.assertIs(seated_height(sc, None, seated_head_cy_min=0.5)[0], False)
+        for flags in self.KEPT:
+            kept = put([dict(r) for r in rows], 14, 14, **flags)
+            self.assertEqual((observe_scene(kept, (0.0, 1.9), head_approach_ratio_min=1.2).head_near_rows,
+                              seated_height(observe_scene(kept, (0.0, 1.9)), None, seated_head_cy_min=0.5)[0]),
+                             (14, True), flags)
+
+    def test_after_a_change_of_user_the_aid_score_reads_the_new_user_only(self):
+        """aid_score (and aid_anchor_rows) after a change of user: the earlier user's walking aid does not reach the new
+        user's aid_use; reacquire / stitch / a first-approach swap keep it."""
+        from app.modules.vision.events import observe_scene
+        from app.modules.vision.situation import aid_use
+        rows = self.changed_rows({"aid_owner": "yes", "aid_any_score": 0.8}, {"aid_owner": "no", "aid_any_score": 0.1})
+        sc = observe_scene(rows, (0.0, 1.9))
+        (score,) = sc.of("aid_score")
+        self.assertEqual((score["obs"], sc.aid_anchor_rows),
+                         ({"aid_any_median": 0.1, "rows": 6, "owner_yes_rows": 0}, 6))
+        self.assertIs(aid_use(sc, 0.5)[0], False)
+        for flags in self.KEPT:
+            kept = observe_scene(put([dict(r) for r in rows], 14, 14, **flags), (0.0, 1.9))
+            self.assertEqual((kept.aid_anchor_rows, aid_use(kept, 0.5)[0]), (20, True), flags)
+
+    def test_only_the_main_users_face_counts_when_the_head_detector_ran(self):
+        """A face matched to no head box while the main user's track lives (face_in_primary None) may be someone
+        else's: it gives no face height and no face size. True (also 'True' read back from rows.csv) counts."""
+        from app.modules.vision.events import observe_scene
+        rows = rows_of(face(10), extra={**OPTIONAL, "face_cy": 0.8, "iod_ratio_user": 1.8, "primary_track": 1,
+                                        "face_in_primary": None})
+        c = observe_scene(rows, (0.0, 0.9), approach_ratio_min=1.2)
+        self.assertEqual((c.of("face_height", "face_size"), c.face_rows), ([], 0))
+        put(rows, 0, 9, face_in_primary="True")
+        c = observe_scene(rows, (0.0, 0.9), approach_ratio_min=1.2)
+        self.assertEqual(len(c.of("face_size")), 1)
+
+
+class UserChangeCueTests(unittest.TestCase):
+    """The three tags' cues of the main user after a change of user in the window (events.user_since): the earlier
+    user's behaviour does not reach the new user's tag; a reacquired or stitched track, or a swap before the earlier
+    user settled, keeps it (values made for these frames)."""
+    KEPT = ({"main_user_reacquired": True}, {"main_user_stitched": True}, {"main_user_prev_settled": False})
+
+    @staticmethod
+    def change_at(rows, k, **flags):
+        """Main-user track 1 before frame k, track 2 from it; frame k carries the change (settled, not reacquired, not
+        stitched; flags override)."""
+        put(rows, 0, len(rows) - 1, primary_track=1, head_count=1)
+        put(rows, k, len(rows) - 1, primary_track=2)
+        return put(rows, k, k, **{"main_user_prev_track": 1, "main_user_prev_settled": True,
+                                  "main_user_reacquired": False, "main_user_stitched": False, **flags})
+
+    def test_after_a_change_of_user_the_head_turns_read_the_new_user_only(self):
+        """The earlier user's two off-screen sweeps do not make the new user looking_around."""
+        def window(**flags):                     # 13 frames of the earlier user, then 27 of the new one
+            return self.change_at(rows_of(face(2), sweep(+1), face(2), sweep(-1), face(28)), 13, **flags)
+        out, events = run(window())
+        self.assertEqual((out["name"], set(kinds(events)) & {"yaw_sweep_offscreen", "look_back"}), (NONE, set()))
+        for flags in self.KEPT:
+            out, events = run(window(**flags))
+            self.assertEqual((out["name"], kinds(events).count("yaw_sweep_offscreen")), (AROUND, 2), flags)
+
+    def test_after_a_change_of_user_the_companion_cues_read_the_new_user_only(self):
+        """The earlier user's turn toward the companion and mouth motion do not make the new user consult the
+        companion; the companion box (a scene cue) still counts on every row."""
+        def window(**flags):
+            rows = companion_window(sweep(+1)) + rows_of(face(30), extra={**OPTIONAL, "companion_box": RIGHT_BOX})
+            for i, r in enumerate(rows):
+                r.update(frame_idx=i, t_s=round(i * DT, 6))
+            return self.change_at(rows, 19, **flags)
+        out, events = run(window())
+        self.assertEqual((out["name"], set(kinds(events)) & {"yaw_toward_companion", "mouth_moving"}), (NONE, set()))
+        self.assertIn("companion_present", kinds(events))
+        for flags in self.KEPT:
+            self.assertEqual(run(window(**flags))[0]["name"], COMPANION, flags)
+
+    def test_after_a_change_of_user_the_body_and_presence_checks_read_the_new_user_only(self):
+        """body_still (also phone_use's body condition), track_conf, face_visible_ratio and the dwell after a change:
+        the earlier user's moving shoulders do not make the new user move; the ratios count the new user's rows over
+        the window's frames."""
+        def window(**flags):
+            rows = rows_of(face(40))
+            for i in range(20):
+                rows[i]["shoulder_cx"] = 0.40 + 0.01 * i                  # the earlier user walks off
+            c = observe_window(self.change_at(rows, 20, **flags), (0.0, 3.9), P, landmarker_num_faces=1)
+            (dwell,) = c.of("dwell_no_touch")
+            return c.body_still, c.track_conf, c.face_visible_ratio, dwell["t_start"]
+        self.assertEqual(window(), (True, 0.5, 0.5, 2.0))
+        for flags in self.KEPT:
+            self.assertEqual(window(**flags), (False, 1.0, 1.0, 0.0), flags)
+
+
+class SceneTagTests(unittest.TestCase):
+    """The second list `tags` of situation.assess (values made for these frames, not proposals)."""
+
+    @staticmethod
+    def tags(out):
+        return {t["name"]: (t["status"], t["unknown_reason"]) for t in out["tags"]}
+
+    def test_without_values_or_columns_the_tags_say_why_they_cannot_tell(self):
+        from app.modules.vision.situation import SCENE_TAGS
+        out, events = run(rows_of(face(10)))
+        self.assertEqual([t["name"] for t in out["tags"]], list(SCENE_TAGS))
+        self.assertEqual(self.tags(out), {"seated_height": (UNKNOWN, "no_value_for_camera"),
+                                          "face_approach": (UNKNOWN, "no_value"),
+                                          "user_changed": (UNKNOWN, "column:primary_track"),
+                                          "none_seen": (False, None), "aid_use": (UNKNOWN, "column:aid_owner"),
+                                          "phone_use": (UNKNOWN, "column:phone_owner")})
+        self.assertEqual([t["display_text"] for t in out["tags"]],
+                         ["앉은 높이", "얼굴 접근", "사용자 교체 가능성", "카메라에 사람이 안 보임", "보조기구 사용 중",
+                          "잠시 딴 일 중(휴대폰)"])
+        self.assertEqual(check_output(out, events, P), [])
+
+    def test_seated_height_and_face_approach_compare_window_medians(self):
+        from app.modules.vision.situation import assess
+        rows = rows_of(face(10), extra={**OPTIONAL, "face_cy": 0.7, "iod_ratio_user": 1.0})
+        t = rows[-1]["t_s"]
+        out, _ = assess(rows, t, P, landmarker_num_faces=1, seated_face_cy_min=0.6, approach_ratio_min=1.2)
+        self.assertEqual(self.tags(out)["seated_height"], (True, None))
+        self.assertEqual(self.tags(out)["face_approach"], (False, None))
+        (item,) = [e for e in out["tags"][0]["evidence"] if e["obs"] == "face_cy_median"]
+        self.assertEqual(item["value"], 0.7)
+        out, _ = assess(rows, t, P, landmarker_num_faces=1, seated_face_cy_min=0.75)
+        self.assertEqual(self.tags(out)["seated_height"], (False, None))
+        out, _ = assess(rows, t, P, landmarker_num_faces=1, seated_face_cy_min=0.7, approach_ratio_min=1.0)
+        self.assertEqual((self.tags(out)["seated_height"], self.tags(out)["face_approach"]),
+                         ((False, None), (False, None)))               # equal to the value is not above it
+        lean = put(rows_of(face(10), extra={**OPTIONAL, "face_cy": 0.5, "iod_ratio_user": 1.0}), 3, 9,
+                   face_cy=0.8, iod_ratio_user=1.4)              # 7 of 10 rows leaning in: the face lower and larger
+        out, _ = assess(lean, t, P, landmarker_num_faces=1, seated_face_cy_min=0.6, approach_ratio_min=1.2)
+        self.assertEqual(self.tags(out)["face_approach"], (True, None))
+        self.assertEqual(self.tags(out)["seated_height"], (UNKNOWN, "too_few_rows"))   # 3 of 10 rows left, < 0.6
+        out, _ = assess(lean, t, P, landmarker_num_faces=1, seated_face_cy_min=0.6)
+        self.assertEqual(self.tags(out)["seated_height"], (True, None))    # no approach value: nothing left out
+        away = rows_of(face(10), extra={**OPTIONAL, "face_cy": None, "iod_ratio_user": None})
+        out, _ = assess(away, t, P, landmarker_num_faces=1, seated_face_cy_min=0.6, approach_ratio_min=1.2)
+        self.assertEqual((self.tags(out)["seated_height"], self.tags(out)["face_approach"]),
+                         ((UNKNOWN, "no_main_user_face"), (UNKNOWN, "no_main_user_face")))
+        unref = rows_of(face(10), extra={**OPTIONAL, "face_cy": 0.7, "iod_ratio_user": None})
+        out, _ = assess(unref, t, P, landmarker_num_faces=1, seated_face_cy_min=0.6, approach_ratio_min=1.2)
+        self.assertEqual(self.tags(out)["face_approach"], (UNKNOWN, "no_reference"))   # a face, no reference yet
+        near = rows_of(face(10), extra={**OPTIONAL, "face_cy": 0.8, "iod_ratio_user": 1.4})
+        out, _ = assess(near, t, P, landmarker_num_faces=1, seated_face_cy_min=0.6, approach_ratio_min=1.2)
+        self.assertEqual(self.tags(out)["seated_height"], (UNKNOWN, "face_near"))      # every face row leans in
+
+    def test_user_changed_and_none_seen(self):
+        rows = rows_of(face(5), [(10, GONE)], face(5), extra={**OPTIONAL, "primary_track": 1, "head_count": 1})
+        put(rows, 5, 14, primary_track=None, head_count=0)
+        put(rows, 15, 19, primary_track=2)
+        put(rows, 15, 15, main_user_prev_track=1, main_user_gap_s=1.1, main_user_body_kept=False)
+        out, _ = run(rows)
+        self.assertEqual(self.tags(out)["user_changed"], (True, None))
+        self.assertEqual(self.tags(out)["none_seen"], (False, None))
+        changed = out["tags"][2]["evidence"]
+        self.assertEqual({e["obs"]: e["value"] for e in changed if e["value"] is not None},
+                         {"track": 2, "previous_track": 1, "gap_s": 1.1, "body_kept": False})
+        out, _ = assess(rows, 1.4, dataclasses.replace(P, window_s=0.9), landmarker_num_faces=1)
+        self.assertEqual(self.tags(out)["none_seen"], (True, None))        # 0.5 .. 1.4 s: nothing seen
+        self.assertEqual(self.tags(out)["user_changed"], (False, None))    # the column on every row, no change
+
+    def test_the_scene_columns_do_not_leak_into_the_three_tags(self):
+        """Scene columns, with a track change on the second row that is not a new user (reacquired in the same place),
+        leave the three tags, their evidence and their events as they are. With the change counted as a new user the
+        scene tags follow its cut: the earlier user's first row (standing, near, no aid) is not read, and the new
+        user's rows make seated_height, aid_use true and face_approach false (the three tags then read the new user's
+        rows too: test_after_a_change_of_user_the_three_tags_read_the_new_user_only)."""
+        from app.modules.vision.situation import assess
+        windows = [put(rows_of(face(5), look_back(), face(5), look_back(), face(5)), 0, 30, people_behind_count=1),
+                   companion_window(sweep(+1)), around_window(), rows_of(face(10))]
+        for rows in windows:
+            t = rows[-1]["t_s"]
+            plain, plain_events = assess(rows, t, P, landmarker_num_faces=1)
+            marked = [dict(r) for r in rows]
+            for i, r in enumerate(marked):          # scene columns that move the scene tags
+                r.update(face_cy=0.9, iod_ratio_user=1.1, primary_track=1 + (i >= 1),
+                         head_count=1, aid_owner="yes", aid_any_score=0.8)
+            marked[0].update(face_cy=0.3, iod_ratio_user=1.5, aid_owner="no", aid_any_score=0.1)   # the earlier user
+            marked[1].update(main_user_prev_track=1, main_user_gap_s=0.1, main_user_body_kept=True)
+            same = [dict(r) for r in marked]
+            same[1].update(main_user_reacquired=True)   # the same user found again: no cut
+            kept, kept_events = assess(same, t, P, landmarker_num_faces=1, seated_face_cy_min=0.6,
+                                       approach_ratio_min=1.2, aid_use_min=0.5)
+            self.assertEqual({k: v for k, v in kept.items() if k != "tags"},
+                             {k: v for k, v in plain.items() if k != "tags"})
+            self.assertEqual(kept_events, plain_events)
+            out, events = assess(marked, t, P, landmarker_num_faces=1, seated_face_cy_min=0.6,
+                                 approach_ratio_min=1.2, aid_use_min=0.5)
+            self.assertEqual([t["status"] for t in out["tags"]], [True, False, True, False, True, UNKNOWN])
+            scene = {t["name"]: {e["obs"]: e["value"] for e in t["evidence"]} for t in out["tags"]}
+            self.assertEqual((scene["seated_height"]["face_cy_median"], scene["aid_use"]["aid_any_median"],
+                              scene["face_approach"]["iod_ratio_median"]), (0.9, 0.8, 1.1))   # row 0 not read
+            self.assertEqual((scene["aid_use"]["rows"], scene["aid_use"]["owner_yes_rows"]), (len(rows) - 1,) * 2)
+
+    def test_aid_use_reads_the_main_users_box_only_when_the_detector_ran(self):
+        from app.modules.vision.situation import assess
+        rows = rows_of(face(10), extra={**OPTIONAL, "aid_owner": "yes", "aid_any_score": 0.7})
+        t = rows[-1]["t_s"]
+
+        def tag(rows, **values):
+            out, _ = assess(rows, t, P, landmarker_num_faces=1, **values)
+            return self.tags(out)["aid_use"]
+        self.assertEqual(tag(rows, aid_use_min=0.5), (True, None))
+        self.assertEqual(tag(rows, aid_use_min=0.9), (False, None))
+        self.assertEqual(tag(rows), (UNKNOWN, "no_value"))                      # no value given (a bundle's null)
+        others = rows_of(face(10), extra={**OPTIONAL, "aid_owner": "no", "aid_any_score": 0.1})
+        self.assertEqual(tag(others, aid_use_min=0.5), (False, None))           # an aid on someone else: not counted
+        mixed = rows_of(face(10), extra={**OPTIONAL, "aid_owner": "no", "aid_any_score": 0.4})   # pedestrian on top
+        self.assertEqual(tag(mixed, aid_use_min=0.35), (True, None))    # the score decides, as the validation rule
+        few = put(rows_of(face(10), extra={**OPTIONAL, "aid_owner": "yes", "aid_any_score": None}), 0, 2,
+                  aid_any_score=0.7)                                            # 3 rows of 10 carry the score
+        self.assertEqual(tag(few, aid_use_min=0.5), (UNKNOWN, "too_few_rows"))
+        nobox = rows_of(face(10), extra={**OPTIONAL, "aid_owner": "no", "aid_any_score": None})
+        self.assertEqual(tag(nobox, aid_use_min=0.5), (UNKNOWN, "no_user_box"))
+        noanchor = rows_of(face(10), extra={**OPTIONAL, "aid_owner": "unknown", "aid_any_score": None})
+        self.assertEqual(tag(noanchor, aid_use_min=0.5), (UNKNOWN, "no_anchor"))
+        self.assertEqual(tag(rows_of(face(10)), aid_use_min=0.5), (UNKNOWN, "column:aid_owner"))   # detector off
+
+    def test_a_stitched_track_break_is_no_change(self):
+        rows = rows_of(face(5), face(5), extra={**OPTIONAL, "primary_track": 1, "head_count": 1})
+        put(rows, 5, 9, primary_track=2)
+        put(rows, 5, 5, main_user_prev_track=1, main_user_gap_s=1.1, main_user_body_kept=True,
+            main_user_reacquired=False, main_user_stitched=True, main_user_new_start_s=0.1)   # broke in place
+        out, _ = run(rows)
+        self.assertEqual(self.tags(out)["user_changed"], (False, None))
+        evidence = {e["obs"]: e["value"] for e in out["tags"][2]["evidence"]}
+        self.assertEqual(evidence, {})                             # the stitched switch is no evidence of a change
+        put(rows, 5, 5, main_user_stitched=False)
+        self.assertEqual(self.tags(run(rows)[0])["user_changed"], (True, None))
+        put(rows, 5, 5, main_user_stitched=None)                    # no boundary: counted as before
+        self.assertEqual(self.tags(run(rows)[0])["user_changed"], (True, None))
+        put(rows, 5, 5, main_user_stitched=True, main_user_reacquired=True)   # both: the stitch's time bound decides
+        self.assertEqual(self.tags(run(rows)[0])["user_changed"], (False, None))
+
+    def test_phone_use_needs_the_phone_in_min_events_segments_no_touch_and_a_still_body(self):
+        """phone_use (3-2's phone path): the phone at the main user in at least min_events (3 here) of the window's
+        segment_s segments, no touch in the window, the body still; three-valued like the tags. The phone in the hand
+        counts only while the main user does not face the screen (away True); the phone at the head counts whatever
+        the head direction."""
+        from app.modules.vision.situation import assess
+        rows = rows_of(face(40), extra={**OPTIONAL, "phone_owner": "no", "phone_at": None, "phone_score": None})
+        t = rows[-1]["t_s"]                                      # 3.9 s; window 20 s holds four 1-s segments
+
+        def tag(rows, window_s=4.0, away=True):
+            out, _ = assess(rows, t, dataclasses.replace(P, window_s=window_s), landmarker_num_faces=1,
+                            segment_s=1.0, away=away)           # assess runs check_output with the scene events
+            return self.tags(out)["phone_use"], {t["name"]: t for t in out["tags"]}["phone_use"]["evidence"]
+        self.assertEqual(tag(rows)[0], (False, None))
+        put(rows, 5, 5, phone_owner="yes", phone_at="hand", phone_score=0.4)       # segment (-0.1, 0.9]
+        put(rows, 15, 15, phone_owner="yes", phone_at="head", phone_score=0.5)     # (0.9, 1.9]
+        self.assertEqual(tag(rows)[0], (False, None))            # two of four segments, < 3
+        put(rows, 25, 25, phone_owner="yes", phone_at="hand", phone_score=0.6)     # (1.9, 2.9]
+        status, evidence = tag(rows)
+        self.assertEqual(status, (True, None))
+        kinds = {round(e["t"], 1): e["event_id"].split("@")[0] for e in evidence}
+        self.assertEqual(kinds, {0.5: "phone_in_hand", 1.5: "phone_at_head", 2.5: "phone_in_hand"})   # per segment
+        self.assertEqual(tag(rows, away=False)[0], (False, None))   # facing the screen: the hand rows do not count
+        self.assertEqual(tag(rows, away=None)[0], (UNKNOWN, "gaze_unknown"))   # the hand path needs the direction
+        at_head = put([dict(r) for r in rows], 5, 25, phone_at="head")
+        self.assertEqual(tag(at_head, away=False)[0], (True, None))   # a call: the head path reads no direction
+        self.assertEqual(tag(at_head, away=None)[0], (True, None))
+        self.assertEqual(tag(put([dict(r) for r in rows], 33, 33, tap_count=1))[0], (False, None))   # a touch
+        self.assertEqual(tag(put([dict(r) for r in rows], 30, 39, shoulder_cx=0.9))[0], (False, None))   # moved
+        strided = put([dict(r) for r in rows], 0, 39, phone_owner=None)        # the detector did not run there ...
+        for k in (5, 15, 25, 30, 35):
+            strided[k].update(rows[k])                                         # ... except on these rows
+        self.assertEqual(tag(strided)[0], (True, None))          # blank rows are skipped, not 'cannot tell'
+        two = put([dict(r) for r in strided], 25, 25, phone_owner="no")        # two 'yes', the rest 'no' and blank
+        self.assertEqual(tag(two)[0], (False, None))             # the blank rows add no 'cannot tell' segment
+        self.assertEqual(tag(put(strided, 25, 39, phone_owner=None))[0], (UNKNOWN, "phone_owner_unknown"))   # 2 yes, 2 not run
+        unsure = put([dict(r) for r in rows], 20, 29, phone_owner="unknown")   # segment 3 cannot tell
+        self.assertEqual(tag(unsure)[0], (UNKNOWN, "phone_owner_unknown"))
+        self.assertEqual(tag(put([dict(r) for r in rows], 0, 39, tap_count=None))[0], (UNKNOWN, "column:tap_count"))
+        edges = put(rows_of(face(40), extra={**OPTIONAL, "phone_owner": "no", "phone_at": None}), 19, 19,
+                    phone_owner="yes", phone_at="head")                        # t 1.9: the end of (0.9, 1.9]
+        put(edges, 29, 29, phone_owner="yes", phone_at="head")                 # t 2.9: the end of (1.9, 2.9]
+        put(edges, 39, 39, phone_owner="yes", phone_at="head")                 # t 3.9: the end of (2.9, 3.9]
+        self.assertEqual(tag(edges)[0], (True, None))            # a row on a segment's end belongs to that segment
+        out, _ = assess(rows, t, dataclasses.replace(P, window_s=4.0), landmarker_num_faces=1)   # no segment_s
+        self.assertEqual(self.tags(out)["phone_use"], (UNKNOWN, "no_segments"))
+
+    def test_reacquisition_unknown_reasons_and_frames_first(self):
+        from app.modules.vision.events import observe_scene
+        from app.modules.vision.situation import scene_tags
+        rows = rows_of(face(5), face(5), extra={**OPTIONAL, "primary_track": 1, "head_count": 1})
+        put(rows, 5, 9, primary_track=2)
+        put(rows, 5, 5, main_user_prev_track=1, main_user_gap_s=1.3, main_user_body_kept=True,
+            main_user_reacquired=True)                                       # the same place: a cap, not a new user
+        out, _ = run(rows)
+        self.assertEqual(self.tags(out)["user_changed"], (UNKNOWN, "reacquired_same_place"))
+        put(rows, 5, 5, main_user_reacquired=False)
+        self.assertEqual(self.tags(run(rows)[0])["user_changed"], (True, None))
+        put(rows, 5, 5, main_user_prev_settled=False)                       # during the first approach: no change
+        self.assertEqual(self.tags(run(rows)[0])["user_changed"], (False, None))
+        put(rows, 5, 5, main_user_prev_settled="True")
+        nohead = rows_of([(10, GONE)])                                       # nobody seen, no head detector
+        self.assertEqual(self.tags(run(nohead)[0])["none_seen"], (UNKNOWN, "column:head_count"))
+        empty = scene_tags(observe_scene(rows, (5.0, 6.0)), seated_face_cy_min=0.6, approach_ratio_min=1.2,
+                           aid_use_min=0.5, min_share=0.6)
+        self.assertEqual({t["unknown_reason"] for t in empty}, {"no_frames"})
+        few = put(rows_of(face(10), extra={**OPTIONAL, "face_cy": None, "iod_ratio_user": None}), 0, 2,
+                  face_cy=0.9, iod_ratio_user=1.5)                            # 3 face rows of 10
+        tags = self.tags(assess(few, few[-1]["t_s"], P, landmarker_num_faces=1, seated_face_cy_min=0.6,
+                                approach_ratio_min=1.2)[0])
+        self.assertEqual((tags["seated_height"], tags["face_approach"]),
+                         ((UNKNOWN, "face_near"), (True, None)))    # the lean loses the face: no share asked
+        lost = put(rows_of(face(10), extra={**OPTIONAL, "face_cy": None, "iod_ratio_user": None}), 0, 0,
+                   face_cy=0.5, iod_ratio_user=1.0)                           # one face row, then the face is lost
+        tags = self.tags(assess(lost, lost[-1]["t_s"], P, landmarker_num_faces=1, seated_face_cy_min=0.6,
+                                approach_ratio_min=1.2)[0])
+        self.assertEqual(tags["face_approach"], (UNKNOWN, "too_few_rows"))   # False needs the share
+
+    def test_check_rules_for_the_tags(self):
+        from app.modules.vision.events import observe_scene
+        rows = rows_of(face(10), extra={**OPTIONAL, "face_cy": 0.7})
+        out, events = assess(rows, rows[-1]["t_s"], P, landmarker_num_faces=1, seated_face_cy_min=0.6)
+        scene = observe_scene(rows, out["window_s"]).events
+        self.assertEqual(check_output(out, events, P, scene_events=scene), [])
+        self.assertTrue(check_output(out, events, P))                       # its evidence needs the scene events
+
+        def broken(**over):
+            tags = [dict(t) for t in out["tags"]]
+            tags[0].update(over)
+            return check_output({**out, "tags": tags}, events, P, scene_events=scene)
+        self.assertTrue(broken(status="maybe"))
+        self.assertTrue(broken(status=1))
+        self.assertTrue(broken(status=1.0))                                     # equal to True, but not a bool
+        self.assertTrue(broken(display_text="휠체어"))
+        self.assertTrue(broken(unknown_reason="no_value"))                 # a reason with a definite status
+        self.assertTrue(broken(status=UNKNOWN, unknown_reason=None))
+        self.assertTrue(broken(unknown_reason={}))                         # any reason with a definite status
+        self.assertTrue(broken(status=UNKNOWN, unknown_reason=""))         # unknown needs a non-empty text
+        self.assertTrue(broken(status=UNKNOWN, unknown_reason={}))
+        self.assertTrue(check_output({**out, "tags": out["tags"][::-1]}, events, P, scene_events=scene))
+        self.assertTrue(check_output({k: v for k, v in out.items() if k != "tags"}, events, P))
+
+
+class GoldenOutputTests(unittest.TestCase):
+    """The three tags' output against the code before the scene tags: tests/data/situation_golden_main.json was made
+    by origin/main's events.py and situation.py (a3143a5) on golden_windows(). Here the new code runs on the same windows with
+    every scene column set and every scene value given, and must give the same output outside `tags`. The track
+    change in the middle is marked reacquired: a change that brings a new user cuts the main user's cues by design
+    (events.user_since; SceneCueTests and the round-5 tests)."""
+
+    def test_the_three_tags_match_the_code_before_the_scene_tags(self):
+        import json
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "situation_golden_main.json")
+        with open(path, encoding="utf-8") as f:
+            golden = json.load(f)
+        windows = golden_windows()
+        self.assertEqual(sorted(golden), sorted(name for name, *_ in windows))
+        for name, rows, over, faces in windows:
+            marked = [dict(r, face_cy=0.9, iod_ratio_user=1.5, primary_track=1 + (i >= len(rows) // 2), head_count=1,
+                           aid_owner="yes", aid_any_score=0.8, aid_count=1) for i, r in enumerate(rows)]
+            marked[len(rows) // 2].update(main_user_prev_track=1, main_user_gap_s=0.1, main_user_body_kept=True,
+                                          main_user_reacquired=True)   # not a new user: the main user's cues stay
+            out, events = assess(marked, rows[-1]["t_s"], dataclasses.replace(P, **over), landmarker_num_faces=faces,
+                                 seated_face_cy_min=0.6, approach_ratio_min=1.2, aid_use_min=0.5)
+            out = json.loads(json.dumps({k: v for k, v in out.items() if k != "tags"}))
+            self.assertEqual(out, golden[name]["output"], name)
+            self.assertEqual([e["event_id"] for e in events], golden[name]["event_ids"], name)
 
 
 class UnknownAndAlternativesTests(unittest.TestCase):

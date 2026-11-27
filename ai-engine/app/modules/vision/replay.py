@@ -46,7 +46,7 @@ MODELS_DIR = os.path.join(CODE_DIR, "models")
 H1_ONNX = "h1_head_yolox_nano_416.onnx"
 P1_ONNX = "p1_head_direction_resnet18_56.onnx"
 TOUCH_ROW_COLUMNS = ("tap_count", "miss_tap_count")
-TIMING_COLUMNS = ("ms_heads", "ms_head_dir", "ms_chain", "cpu_ms_chain")
+TIMING_COLUMNS = ("ms_heads", "ms_head_dir", "ms_aids", "ms_phones", "ms_chain", "cpu_ms_chain")
 
 
 def sha256(path: str) -> str:
@@ -95,11 +95,12 @@ def percentiles(values: list) -> dict | None:
 
 def timing_summary(rows: list, records: list) -> dict:
     later = rows[1:]   # the first frame loads models and caches (render.timing_stats convention)
-    out = {k: percentiles([r.get(k) for r in later]) for k in ("ms_total", "ms_heads", "ms_head_dir", "ms_chain",
-                                                               "cpu_ms_chain")}
+    out = {k: percentiles([r.get(k) for r in later]) for k in ("ms_total",) + TIMING_COLUMNS}
     out["ms_window"] = percentiles([r.get("ms_window") for r in records])
     out["note"] = ("ms_total = MediaPipe set + features (features.Observer); ms_heads = H1 pre + infer + post; "
-                   "ms_head_dir = P1 crop + infer (main user only); ms_chain = the whole per-frame step (wall); "
+                   "ms_head_dir = P1 crop + infer (main user only); ms_aids = walking-aid detector pre + infer + post; "
+                   "ms_phones = phone detector pre + infer + post (frames it ran on); "
+                   "ms_chain = the whole per-frame step (wall); "
                    "cpu_ms_chain = process CPU time of that step (all threads); ms_window = situation + rule table "
                    "per window; first frame left out")
     return out
@@ -126,6 +127,35 @@ def load_perception(models_dir: str, params, threads: int, heads_on: bool, log) 
     elif detector is not None:
         log(f"P1 카메라 시점 분류기 파일이 없습니다({p1}): head_dir_* 열은 비어 있습니다")
     return detector, direction, info
+
+
+def load_aids(path: str | None, params, threads: int, log):
+    """The walking-aid detector of --aid-model, or None (off unless a file is given; the weights are not in this
+    repository). Returns (detector or None, {file: info})."""
+    if not path:
+        return None, {}
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"--aid-model: no file {path}")
+    from app.inference.aid import AidDetector
+    detector = AidDetector(path, params.aid_score_min, params.aid_nms_iou, threads)
+    log(f"보조기구 탐지기 켬: 클래스 {', '.join(detector.classes)}. 키오스크 시점 정확도는 재지 않았습니다")
+    return detector, {os.path.basename(path): {"bytes": os.path.getsize(path), "sha256": sha256(path),
+                                               "licence": detector.meta.get("licence"),
+                                               "attribution": detector.meta.get("attribution")}}
+
+
+def load_phones(path: str | None, params, threads: int, log):
+    """The phone detector of --phone-model (the COCO YOLOX-Nano ONNX of the YOLOX release), or None (off unless a file
+    is given; the weights are not in this repository). Returns (detector or None, {file: info})."""
+    if not path:
+        return None, {}
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"--phone-model: no file {path}")
+    from app.inference.phone import PhoneDetector
+    detector = PhoneDetector(path, params.phone_score_min, params.phone_nms_iou, threads)
+    log("휴대폰 탐지기 켬(COCO 'cell phone'). 키오스크 시점 정확도는 재지 않았습니다")
+    return detector, {os.path.basename(path): {"bytes": os.path.getsize(path), "sha256": sha256(path),
+                                               "licence": "Apache-2.0 (YOLOX, Megvii)"}}
 
 
 def environment() -> dict:
@@ -163,13 +193,14 @@ def write_rows(path: str, rows: list):
 
 def run_replay(source, out_dir: str, bundle, *, timeline=None, models=None, detector=None, direction=None,
                blendshapes: bool = False, max_seconds: float | None = None, session_id: str = "replay",
-               model_info: dict | None = None, settings: dict | None = None, log=print) -> dict:
+               model_info: dict | None = None, settings: dict | None = None, log=print, aids=None,
+               phones=None) -> dict:
     """Run the chain over a frame source (sources.VideoFileSource or any iterable of sources.Frame) and write the
     outputs. models = MediaPipe models (or a fake with .infer(frame)); detector / direction = perception models or
     None. Returns the meta dict (also written to meta.json)."""
     os.makedirs(out_dir, exist_ok=True)
     chain = FrameChain(models, bundle.chain, detector, direction, timeline, blendshapes=blendshapes,
-                       source_kind=SOURCE_KIND.get(getattr(source, "kind", ""), ""))
+                       source_kind=SOURCE_KIND.get(getattr(source, "kind", ""), ""), aids=aids, phones=phones)
     judge = WindowJudge(bundle, timeline, session_id=session_id)
     keep_s = history_s(bundle)
     rows, recent, records = [], deque(), []
@@ -259,6 +290,13 @@ def main(argv=None) -> int:
     ap.add_argument("--blendshapes", action="store_true",
                     help="blendshapes on (default off, decision list 2026-10-10 §16); off: mouth_motion stays blank")
     ap.add_argument("--no-heads", action="store_true", help="no H1 / P1: head columns stay missing")
+    ap.add_argument("--aid-model", default=None,
+                    help="walking-aid detector ONNX (optional; off unless given, weights not in the repository)")
+    ap.add_argument("--phone-model", default=None,
+                    help="COCO YOLOX-Nano ONNX for the phone (optional; off unless given, weights not in the "
+                         "repository; without --touch-log phone_use is never true, as the companion "
+                         "path needs the touch counts too: false where the phone part or the body-still part is "
+                         "false, otherwise unknown (column:tap_count when the phone part holds))")
     ap.add_argument("--overwrite", action="store_true")
     a = ap.parse_args(argv)
     if os.path.isfile(os.path.join(a.out, "windows.jsonl")) and not a.overwrite:
@@ -280,9 +318,14 @@ def main(argv=None) -> int:
         p = os.path.join(a.models, name)
         if os.path.isfile(p):
             info[name] = {"bytes": os.path.getsize(p), "sha256": sha256(p)}
+    aids, aid_info = load_aids(a.aid_model, bundle.chain, a.threads, print)
+    info.update(aid_info)
+    phones, phone_info = load_phones(a.phone_model, bundle.chain, a.threads, print)
+    info.update(phone_info)
     models = MediaPipeModels(a.models, blendshapes=a.blendshapes)
     settings = {"step": a.step, "width": a.width, "threads": a.threads, "blendshapes": a.blendshapes,
-                "heads": detector is not None, "head_direction": direction is not None,
+                "heads": detector is not None, "head_direction": direction is not None, "aids": aids is not None,
+                "phones": phones is not None,
                 "face_landmarker": "VIDEO, num_faces=1, transformation matrix on, blendshapes "
                                    + ("on" if a.blendshapes else "off"),
                 "touch_log": a.touch_log, "start_offset_s": a.start_offset, "params_file": a.params}
@@ -291,7 +334,7 @@ def main(argv=None) -> int:
         meta = run_replay(source, a.out, bundle, timeline=timeline, models=models, detector=detector,
                           direction=direction, blendshapes=a.blendshapes, max_seconds=a.max_seconds,
                           session_id=a.session_id or os.path.splitext(os.path.basename(a.video))[0],
-                          model_info=info, settings=settings)
+                          model_info=info, settings=settings, aids=aids, phones=phones)
     finally:
         models.close()
     tm = meta["timing_ms"].get("ms_chain") or {}

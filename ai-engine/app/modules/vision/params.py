@@ -7,7 +7,17 @@ Two kinds live here:
   source: it is a start value to be replaced from sources or public data before the 2026-10-28 recording, or reported
   per value bundle (decision list 2026-10-13, items 3 and 19). The three role boundaries (ROLE_BOUNDARIES) have no
   value at all (None, source UNDECIDED): the roles they decide stay 'unknown' until a bundle gives a value, and the
-  cues behind them are still written every frame (columns.py).
+  cues behind them are still written every frame (columns.py). The five scene-tag boundaries (SCENE_BOUNDARIES) are
+  the same: their method is fixed (SCENE_METHOD), their value depends on the camera and comes from a bundle. A None
+  value leaves its part unjudged (situation.py): without approach_ratio_min face_approach says 'unknown'; seated_height
+  has a face part (seated_face_cy_min) and a head-box part (seated_head_cy_min, with the head detector), either decides
+  alone when the other is None, and it says 'unknown' only when both are None or the face value is None without the
+  head detector; the two gates head_down_pitch_min and head_approach_ratio_min are not applied when None. The two
+  stitch boundaries of the user
+  change (STITCH_BOUNDARIES, columns.MainUserChange) are the same kind: method STITCH_METHOD, value per camera from a
+  bundle; without one a broken main-user track is never stitched (the behaviour before 2026-11-22). The hand-point
+  limit of the phone columns (HAND_BOUNDARIES, columns.phone_columns) has no value either: without one no hand box
+  is built and the phone path's hand half is held (a phone away from the heads is 'unknown'); the head half runs.
 - events.PilotParams (re-exported here as SituationParams): the 13 values of the events and situation rules. They keep
   NO defaults on purpose (vision README '상황 층'; tests/test_situation.py checks it), so they only come from a value
   bundle file (load_bundle). Without one the runners still run and the situation output is 'unknown'.
@@ -47,6 +57,18 @@ MOUTH_AND_JAW_DIALS = (
 PRIMARY_RULES = ("face_then_largest", "largest")
 UNDECIDED = "정할 수 없음(결정 3 · 19): 값 묶음 곡선으로 보고"
 ROLE_BOUNDARIES = ("companion_rel_dist_max", "companion_lateral_min", "behind_rel_dist_min")   # None = no value yet
+SCENE_BOUNDARIES = ("seated_face_cy_min", "approach_ratio_min", "seated_head_cy_min", "head_down_pitch_min",
+                    "head_approach_ratio_min")   # None = no value yet (situation.py scene tags)
+AID_BOUNDARIES = ("aid_use_min", "aid_person_min")   # None allowed (no value); defaults: [파일럿] values from a public set
+STITCH_BOUNDARIES = ("stitch_shift_max", "stitch_size_max")   # None = no value yet (columns.MainUserChange: no stitch)
+HAND_BOUNDARIES = ("hand_vis_min",)   # None = no value yet (columns.phone_columns: no hand box, the hand path held)
+SCENE_METHOD = ("정하는 방법 = 그 카메라 앞에서 서서 보통으로 쓰는 녹화(평가 촬영본과 따로 찍은 것)의 창 중앙값(창 길이 = "
+                "값 묶음의 window_s)으로 기준선 평균 + 2 SD(Wu 외, W4A 2021의 기준선 ± 2 SD; 조사 22 §2-1 · §2-11), "
+                "tools/calibrate_scene.py")
+STITCH_METHOD = ("정하는 방법 = 그 카메라 앞에서 서서 보통으로 쓰는 녹화에서 같은 주 사용자 트랙의 머리 상자가 "
+                 "track_max_gap_s(트랙 잇기가 건너는 가장 긴 시간) 안에 움직인 위치 차 · 크기 차(상자 하나와 그 뒤 "
+                 "track_max_gap_s 안의 같은 트랙 마지막 상자)의 평균 + 2 SD(Wu 외, W4A 2021의 기준선 + 2 SD; 조사 84 §4-3 "
+                 "'트랙 안 상자 변화의 위쪽 꼬리'), tools/calibrate_scene.py")
 
 
 def _p(default, source: str, unit: str = ""):
@@ -99,6 +121,91 @@ class PilotParams:
               "작은 상자', 값과 상관없이 늘 봄) 동행자가 아님. 값이 없으면 주 사용자보다 작은 머리가 뒤 사람인지 모름",
         "primary head height / head height")
 
+    # --- scene tags of situation.py (seated height 1-2, face approach 2-1; 2026-11-22) ------------------------
+    seated_face_cy_min: float | None = _p(
+        None, f"{UNDECIDED}. 카메라마다 다름: 앉은 높이(seated_height) = 창 안 주 사용자 얼굴 중심의 세로 위치(face_cy) "
+              f"중앙값이 이 값보다 큼(트리 표 3-가 1-2 '얼굴 높이 낮음'). {SCENE_METHOD}. 값이 없으면 얼굴 높이로는 "
+              f"판정하지 않음(머리 탐지기를 켜고 seated_head_cy_min이 있으면 머리 상자로 판정, 그 밖에는 앉은 높이는 모름)",
+        "face_cy (0 = top, 1 = bottom)")
+    seated_head_cy_min: float | None = _p(
+        None, f"{UNDECIDED}. 카메라마다 다름: 앉은 높이(seated_height) = 창 안 주 사용자 머리 상자(H1)의 세로 가운데 "
+              f"중앙값이 이 값보다 큼(트리 표 3-가 1-2, 얼굴을 못 봐도 읽음). 얼굴 높이(seated_face_cy_min)가 먼저 판정하고, "
+              f"얼굴 높이로 판정하지 못한 창(seated_face_cy_min이 없음, 주 사용자 얼굴 줄이 없음, 얼굴 줄이 모두 가까움으로 "
+              f"빠짐, 줄이 적음)만 머리 탐지기를 켜고 이 값이 있으면 머리 상자로 판정. {SCENE_METHOD}. 값이 없거나 머리 "
+              f"탐지기가 없으면 얼굴 높이로만 판정",
+        "head-box centre y (0 = top, 1 = bottom)")
+    head_down_pitch_min: float | None = _p(
+        None, f"{UNDECIDED}. 카메라마다 다름: 얼굴 접근(face_approach)에서 고개 숙임을 빼는 경계. 창 안 주 사용자 "
+              f"dpitch_user_deg(같은 주 사용자의 첫 얼굴 대비 고개 숙임, + = 아래: 부호는 features.head_angles_deg의 pitch, "
+              f"비전 README 'CSV 열'의 고개 방향 줄; columns.PitchRef, iod_ratio_user와 같은 기준점) "
+              f"중앙값(창 프레임의 face_visible_min 이상의 줄에서 낸 것)이 "
+              f"이 값보다 크면 그 창은 얼굴 접근으로 세지 "
+              f"않음(휴대폰 · 카운터를 보려고 숙인 것은 화면을 읽으려고 다가간 것이 아님). {SCENE_METHOD}. 값이 없으면 거르지 않음",
+        "deg (+ = down)")
+    head_approach_ratio_min: float | None = _p(
+        None, f"{UNDECIDED}. 카메라마다 다름: 앉은 높이의 머리 상자 대신 판정에서 다가간 줄을 빼는 경계. 주 사용자 머리 상자 높이 ÷ "
+              f"같은 사용자의 기준(head_ratio_user, iod_ratio_user와 같은 기준점)이 이 값보다 큰 줄은 머리 상자 세로 가운데 "
+              f"중앙값에 넣지 않음(다가가면 머리가 커지고, 조작 거리에 앉은 사용자는 커지지 않음). {SCENE_METHOD}. 값이 없으면 빼지 않음",
+        "head height / reference head height")
+    approach_ratio_min: float | None = _p(
+        None, f"{UNDECIDED}. 얼굴 접근(face_approach) = 창 안 iod_ratio_user(주 사용자의 눈 사이 거리 ÷ 기준점부터의 "
+              f"중앙값) 중앙값이 이 값보다 큼(트리 표 3-가 2-1 '시작 대비 눈 사이 거리 비 커짐'). {SCENE_METHOD}. 값이 "
+              "없으면 얼굴 접근은 모름", "iod_px / reference iod_px")
+    stitch_shift_max: float | None = _p(
+        None, f"{UNDECIDED}. 카메라마다 다름: 사용자 교체(user_changed)에서 끊긴 주 사용자 트랙을 같은 사람으로 잇는 경계 "
+              "1(위치). 새 주 사용자 트랙이 앞 트랙의 마지막 머리 상자 뒤 track_max_gap_s 안에 처음 잡혔고, 그 첫 상자의 "
+              "중심이 앞 트랙 마지막 상자 중심에서 떨어진 거리(가로 차 ÷ 앞 상자 폭과 세로 차 ÷ 앞 상자 높이의 유클리드 "
+              "거리: R-CNN 상자 변화량 tx, ty, Girshick 외 CVPR 2014 부록 C)가 이 값 이하이고 크기(stitch_size_max)도 "
+              "경계 안이면 같은 사람으로 이음(모양 없이 위치와 시간만으로 트랙을 잇는 StrongSORT AFLink, Du 외 IEEE TMM "
+              f"2023과 같은 생각). {STITCH_METHOD}. 값이 없으면 잇지 않음", "box widths / heights")
+    stitch_size_max: float | None = _p(
+        None, f"{UNDECIDED}. 카메라마다 다름: 끊긴 주 사용자 트랙을 같은 사람으로 잇는 경계 2(크기). 새 트랙 첫 상자 "
+              "높이 ÷ 앞 트랙 마지막 상자 높이의 자연로그 절댓값(R-CNN 상자 변화량 th, Girshick 외 CVPR 2014 부록 C)이 "
+              f"이 값 이하. {STITCH_METHOD}. 값이 없으면 잇지 않음", "|ln(height / height)|")
+
+    # --- walking-aid detector (app/inference/aid.py; optional input, off unless its ONNX file is given) ----------
+    aid_score_min: float = _p(
+        0.01, "관행값: 보조기구 탐지기 평가 설정의 점수 하한(YOLOX 평가 conf 0.01, ONNX 메타데이터 postprocess). 상자와 "
+              "클래스 점수를 기록하려는 하한이고, 쓴다 · 안 쓴다를 가르는 값이 아님", "score 0~1")
+    aid_nms_iou: float = _p(
+        0.65, "관행값: YOLOX 6ddff48 yolox/exp/yolox_base.py nmsthre 기본값(보조기구 탐지기 평가와 같은 IoU). 사람 하나에 "
+              "상자 하나를 남기려고 클래스를 가리지 않고 적용", "IoU 0~1")
+    aid_use_min: float | None = _p(
+        0.350, f"{PILOT} 시작값, 공개 자료에서 잰 값: 보조기구 사용(aid_use) = 창 안 주 사용자 사람 상자의 보조기구 "
+               "점수(aid_any_score: 목발 · 지팡이 · 보행기 · 휠체어의 objectness x 클래스 점수 가운데 가장 큰 값, "
+               "'보조기구를 쓰는 사람') 중앙값이 이 값 초과(트리 표 3-가 1-1, 휠체어는 aid_kind로 1-2). 값 = TU Graz "
+               "Crossroad Camera Dataset - Mobility Aid Users v1.0 검증 분할에서 F1이 가장 큰 점수 기준 0.3501(같은 점수 "
+               "규칙 '보조기구 전체, 최댓값'; 모델 aid_det joint_416, 입력 416). 시험 분할에 그대로 적용하면 정밀도 "
+               "0.698 · 재현율 0.736(사람 상자 3,966개). 그 공개 자료의 보조기구 사용자 비율에 맞춘 값이고(PMMA 검증 "
+               "분할은 0.480), 키오스크 시점 값이 아님", "score 0~1")
+    aid_person_min: float | None = _p(
+        0.390, f"{PILOT} 시작값, 공개 자료에서 잰 값: 보조기구 탐지기의 사람 상자를 사람으로 세는 점수(objectness x "
+               "가장 큰 클래스 점수)의 하한. 이 값을 넘는 상자만 '사람이 보임'(none_seen)과 주 사용자 상자 고르기에 "
+               "쓰고, 그 아래 상자(aid_score_min까지)는 기록만 함. 값 = TU Graz Crossroad Camera Dataset - Mobility Aid "
+               "Users v1.0 검증 분할의 '사람 아무나' 과제에서 F1이 가장 큰 점수 기준 0.38998(F1 0.813, 정밀도 0.841, "
+               "재현율 0.786; 모델 aid_det joint_416, 입력 416). PMMA 검증 분할은 0.479, 키오스크 시점 값이 아님",
+        "score 0~1")
+
+    # --- phone detector (app/inference/phone.py; optional input, off unless its ONNX file is given) -------------
+    phone_score_min: float = _p(
+        0.3, "관행값: YOLOX ONNX Runtime 데모(commit 6ddff48, demo/ONNXRuntime/onnx_inference.py)의 --score_thr 기본값 "
+             "0.3(점수가 이 값 이상인 상자만 그림, yolox/utils/visualize.py). 키오스크 시점 값 아님", "score 0~1")
+    phone_nms_iou: float = _p(
+        0.45, "관행값: 같은 데모의 multiclass_nms(nms_thr=0.45, 클래스를 가리지 않는 판)", "IoU 0~1")
+    phone_every: int = _p(
+        1, "규칙: 머리 탐지기처럼 처리하는 프레임마다 돎(1). 휴대폰 길은 segment_s(1초) 구간마다 탐지가 한 번만 있어도 "
+           "그 구간을 세므로, 처리 속도가 초당 f장이면 이 값은 f x segment_s 이하여야 구간마다 한 번 이상 돎(초당 "
+           "10장이면 10 이하). 값 묶음으로 올리면 탐지기 비용이 그만큼 줄지만, 팀 휴대폰 테이크(초당 10장, 합성 터치 조건 C0)에서 "
+           "5로 올리면 기다림이 열린 테이크가 5편 가운데 4편에서 3편으로, phone_use가 참인 창이 34개에서 14개로 "
+           "줄었음(2026-11-22). 휴대폰이 있어야 하는 구간 수는 새 "
+           "값을 두지 않고 같은 값 묶음의 상황 값 min_events를 다시 씀: 세 상황 태그가 근거 사건 수로 쓰는 값과 같은 "
+           "규칙이고, 그 값의 출처 표시는 값 묶음 파일에, 이 읽기의 표시는 비전 README '휴대폰 입력'에 있음", "frames")
+    hand_vis_min: float | None = _p(
+        None, f"{UNDECIDED}. 휴대폰 손 길의 손 점 하한: 주 사용자 몸 점(Pose Landmarker)의 손 점은 visibility(그 점이 "
+              "가려지지 않고 화면 안에 보일 가능성, MediaPipe landmark.py)가 이 값 이상일 때만 손 상자에 넣음. 이 값이 "
+              "있으면 visibility가 없는 점(NaN)도 넣지 않음. 값이 없으면 손 점의 위치를 확인할 수 없어 손 상자를 만들지 "
+              "않음: 손 길은 판정하지 않고(머리에 걸치지 않은 휴대폰은 unknown) 머리 길은 그대로 돎", "visibility 0~1")
+
     # --- runners (replay.py, live.py) -------------------------------------------------------------------------
     segment_s: float = _p(
         1.0, f"계약 sendFeatureWindow의 '1~3초 구간' 안에서 고른 {PILOT} 값: 창 결과 한 줄의 간격이자 터치 횟수 · "
@@ -135,11 +242,16 @@ class PilotParams:
             if f.name == "primary_rule":
                 if value not in PRIMARY_RULES:
                     raise ValueError(f"PilotParams.primary_rule must be one of {PRIMARY_RULES}, got {value!r}")
-            elif f.name in ROLE_BOUNDARIES:
+            elif f.name in ROLE_BOUNDARIES + SCENE_BOUNDARIES + AID_BOUNDARIES + STITCH_BOUNDARIES + HAND_BOUNDARIES:
                 if value is not None and (isinstance(value, bool) or not isinstance(value, numbers.Real)
                                           or not math.isfinite(value) or value <= 0):
                     raise ValueError(f"PilotParams.{f.name} must be None (no value yet) or a finite number > 0, "
                                      f"got {value!r}")
+                if f.name in AID_BOUNDARIES + HAND_BOUNDARIES and value is not None and value > 1:
+                    raise ValueError(f"PilotParams.{f.name} is a score and must be at most 1, got {value!r}")
+                if f.name in ("approach_ratio_min", "head_approach_ratio_min") and value is not None and value <= 1:
+                    raise ValueError(f"PilotParams.{f.name} is a size ratio to the user's own reference (1 = "
+                                     f"the same size) and must be above 1, got {value!r}")
             elif f.name == "mouth_dials":
                 if not value or not all(isinstance(v, str) and v for v in value):
                     raise ValueError(f"PilotParams.mouth_dials must be a non-empty list of blendshape names, got {value!r}")
@@ -153,7 +265,8 @@ class PilotParams:
                 if isinstance(value, bool) or not isinstance(value, numbers.Real) or not math.isfinite(value) \
                         or value <= 0:
                     raise ValueError(f"PilotParams.{f.name} must be a finite number > 0, got {value!r}")
-                if f.name in ("head_score_min", "head_nms_iou", "track_iou_min") and value > 1:
+                if f.name in ("head_score_min", "head_nms_iou", "track_iou_min", "aid_score_min",
+                              "aid_nms_iou", "aid_use_min", "phone_score_min", "phone_nms_iou") and value > 1:
                     raise ValueError(f"PilotParams.{f.name} is a score / IoU and must be at most 1, got {value!r}")
 
     @staticmethod

@@ -11,11 +11,18 @@ decide(window input, session state, params) is a pure function of its arguments 
 the held decision (open | replace | keep | withdraw | none), scope, rank, withdraw condition, policy values and, in
 shadow mode, the Jev question (jev_stub.ShadowJev records it; the screen follows the rule result). apply() / tick() /
 react() emulate the backend's part of JP 0-1 (held · active · refused · withdrawn) so a replay can run windows in a row.
+The 3-2 phone path (`phone_use`) and the exception that lets only that path through a window that is not
+measurable are not in the backend copy yet (backend/app/modules/decision/rule_table.py); integration work.
 
 Rows (JP scene table; rank = JP 0-3 rank table):
   scene  support                 output (intervention)  rank  opens when                                   Jev
-  3-2    wait_hold_timer         wait (기다림)            2     tag consulting_companion (일행 길; the 고개 숙임  none
-                                                                길 needs a look_down event that does not exist)
+  3-2    wait_hold_timer         wait (기다림)            2     tag consulting_companion (일행 길) or the     none
+                                                                scene tag phone_use (휴대폰 길: the phone at
+                                                                the main user's head, or in the hand while
+                                                                not facing the screen; no touch, body still;
+                                                                only with the phone detector). The 고개 숙임
+                                                                길 (look_down) is not built: it found no
+                                                                phone take
   3-1    remaining_steps_notice  apply (바로 적용)        3     tag looking_back_with_people_behind and steps  2 options: choice;
          (delay_responsibility_notice when the condition switch is on)  left (or unknown)                   1: fit / none
                                                                 (the option defer_big_button_question only
@@ -58,7 +65,12 @@ from ..situation import TAGS, UNKNOWN
 from .jev_stub import JEV_MODEL
 
 QUEUE, BUSY, AROUND = "looking_back_with_people_behind", "consulting_companion", "looking_around"
-SCENE_OF_TAG = {QUEUE: "queue", BUSY: "busy", AROUND: "lost"}   # tree 5-1 index 1 (looking_around: 4-2's aid)
+SCENE_OF_TAG = {QUEUE: "queue", BUSY: "busy", AROUND: "lost",   # tree 5-1 index 1 (looking_around: 4-2's aid)
+                "seated_height": "wheelchair", "face_approach": "lowvision",   # situation.SCENE_TAGS: no rule row
+                "user_changed": "newcustomer", "none_seen": "absence",        # reads them yet (1-2, 2-1, 2-2, absence,
+                "aid_use": "aid",                                             # 1-1)
+                "phone_use": "busy"}                                          # 3-2's phone path: the 3-2 row reads it
+PHONE_USE = "phone_use"
 WAIT, NOTICE, DELAY, BIG, HIGHLIGHT = ("wait_hold_timer", "remaining_steps_notice", "delay_responsibility_notice",
                                        "large_button", "highlight_next_action")
 # DELAY is the encouragement message (격려 메시지); the code name delay_responsibility_notice is kept because the
@@ -104,7 +116,9 @@ CHOICE_CRITERIA = {   # JP 2-2, the 3-1 Choice
 class WindowInput:
     """What one window gives the rule table (JP 0-2 '입력 한 줄': the parts these four scenes read)."""
     t: float                               # window end (s, video time)
-    measurable: bool                       # contract AnalyzeResponse.measurable of this segment
+    measurable: bool                       # contract AnalyzeResponse.measurable of this segment (chain.WindowJudge:
+                                           # a press or a back, or a face seen); a window that is not measurable but
+                                           # has phone_use true opens or keeps the 3-2 wait only (decide 0'')
     situation: dict | None = None          # situation.assess output; None = not judged (no value bundle)
     screen: str | None = None              # screen id at t from the touch log; None = no log
     steps_left: int | None = None          # screens left before the order ends; None = unknown
@@ -239,6 +253,15 @@ def _withdraw_met(condition: str | None, inp: WindowInput) -> bool:
     return False
 
 
+def phone_path(situation: dict | None) -> bool:
+    """3-2's path besides the companion: the window's scene tag phone_use is true (situation.phone_use: the phone at
+    the main user's head, or at the main user while not facing the screen, in min_events segments; no touch in the
+    window, the body still). decide lets it open or keep the 3-2 wait in a window that is not measurable, and nothing
+    else there."""
+    tags = (situation or {}).get("tags") or []
+    return any(t.get("name") == PHONE_USE and t.get("status") is True for t in tags)
+
+
 def candidate_rows(inp: WindowInput, state: SessionState, p, tag: str | None, tag_scope: tuple,
                    screen_scope: tuple) -> list:
     """The rows this window opens, after the JP 0-2 filter (active, refused, the held support, the same scope's
@@ -250,8 +273,12 @@ def candidate_rows(inp: WindowInput, state: SessionState, p, tag: str | None, ta
         return support not in excluded and not _withdrawn(state, support, scope)
 
     rows = []
-    if tag == BUSY and WAIT not in excluded:                     # 3-2: a session action, re-opened at every trigger
-        rows.append(Row(WAIT, "3-2", "wait", 2, True, "touch_resumed", False, cues={"tag": tag}))
+    phone = phone_path(inp.situation)
+    if (tag == BUSY or phone) and WAIT not in excluded:          # 3-2: a session action, re-opened at every trigger
+        # the cues name the paths that hold: the companion tag only on the companion path (another tag of the window
+        # is no cue of this row), the phone path as path; both paths: both named
+        cues = ({"tag": tag} if tag == BUSY else {}) | ({"path": PHONE_USE} if phone else {})
+        rows.append(Row(WAIT, "3-2", "wait", 2, True, "touch_resumed", False, cues=cues))
 
     steps_open = inp.steps_left is None or inp.steps_left > 0
     tremor = None                                                                    # 4-1 (조작 중: steps left)
@@ -340,7 +367,8 @@ def _policy(row: Row, asked: bool, p) -> dict:
 
 
 def decide(inp: WindowInput, state: SessionState, params) -> Decision:
-    """One decision for one window (JP 0-3 check order: 0'' not measurable -> keep / none; ① withdraw; ② no row ->
+    """One decision for one window (JP 0-3 check order: 0'' not measurable -> keep / none, except that the phone path
+    (phone_use true) may open or keep the 3-2 wait there; ① withdraw; ② no row ->
     keep / none; ④ nothing held -> open; ⑤ a held ask stays unless a 3-2 wait ranked ahead comes; otherwise replace
     when the row ranks ahead or a shown quiet notice meets an ask; ⑥ keep)."""
     sit = inp.situation
@@ -353,19 +381,33 @@ def decide(inp: WindowInput, state: SessionState, params) -> Decision:
     meta = {"t": inp.t, "tag": tag, "tag_since": tag_since, "screen": inp.screen, "screen_since": screen_since,
             "situation_known": known}
     held = state.held
-    if not inp.measurable:                                                          # 0''
-        if held is not None and held.status == "shown":
-            return _keep(held, meta, "window not measurable", measurable=False)
-        return Decision("none", meta, reason="window not measurable")
-    if held is not None and _withdraw_met(held.withdraw_on, inp):                   # ①
-        return Decision("withdraw", meta, held.support, None, held.action, held.rank, held.scope, held.withdraw_on,
-                        decision_id=held.decision_id, reason=f"withdraw condition {held.withdraw_on}")
     tag_scope = ("tag", tag, tag_since)
     screen_scope = ("screen", inp.screen, screen_since)
-    rows = candidate_rows(inp, state, params, name if name in TAGS else None, tag_scope, screen_scope)
-    if not rows:                                                                    # ②
-        return _keep(held, meta, "no candidate row", measurable=True) if held is not None else Decision(
-            "none", meta, reason="no candidate row")
+    # The 3-2 phone path (`phone_use`) and the exception that lets only that path through a window that is not
+    # measurable are not in the backend copy yet (backend/app/modules/decision/rule_table.py); integration work.
+    if not inp.measurable:                                                          # 0''
+        # the phone path (phone_use true) is a camera observation of the main user, often with the face lost: it
+        # counts for the 3-2 row and its hold only, never for the other rows
+        phone_rows = []
+        if phone_path(sit):
+            if held is not None and held.support == WAIT:
+                return _keep(held, meta, "window not measurable; the phone path keeps the 3-2 wait", measurable=True)
+            phone_rows = [r for r in candidate_rows(inp, state, params, name if name in TAGS else None, tag_scope,
+                                                    screen_scope) if r.support == WAIT]
+        if not phone_rows:
+            if held is not None and held.status == "shown":
+                return _keep(held, meta, "window not measurable", measurable=False)
+            return Decision("none", meta, reason="window not measurable")
+        rows = phone_rows
+    else:
+        if held is not None and _withdraw_met(held.withdraw_on, inp):               # ①
+            return Decision("withdraw", meta, held.support, None, held.action, held.rank, held.scope,
+                            held.withdraw_on, decision_id=held.decision_id,
+                            reason=f"withdraw condition {held.withdraw_on}")
+        rows = candidate_rows(inp, state, params, name if name in TAGS else None, tag_scope, screen_scope)
+        if not rows:                                                                # ②
+            return _keep(held, meta, "no candidate row", measurable=True) if held is not None else Decision(
+                "none", meta, reason="no candidate row")
     row = min(rows, key=lambda r: r.rank)
     if held is None:                                                                # ④
         transition = "open"
@@ -387,7 +429,9 @@ def decide(inp: WindowInput, state: SessionState, params) -> Decision:
 
 def _keep(held: Held, meta: dict, reason: str, measurable: bool) -> Decision:
     """The held decision again (JP 0-1 item 1): same id, support, scene, policy, cues and execution fields, no new
-    Jev question. A kept 3-2 wait carries {name: hold_timer} in a measurable window only (JP 0-1 item 3)."""
+    Jev question. A kept 3-2 wait carries {name: hold_timer} when measurable is passed true: in a measurable window,
+    and in a window that is not measurable when the phone path keeps the wait (decide 0'', phone_use true); a wait
+    kept in any other window that is not measurable carries none (JP 0-1 item 3)."""
     signal = {"name": HOLD_TIMER} if (held.action == "wait" and measurable) else None
     return replace(held.decision, transition="keep", meta=meta, reason=reason, jev_request=None,
                    session_signal=signal)

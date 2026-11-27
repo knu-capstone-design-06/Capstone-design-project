@@ -2,7 +2,7 @@
 
 Python 3.12 기반 FastAPI 서버입니다. `contract/backend-ai.openapi.yaml`(0.2.0)의 `GET /health`, `POST /v1/analyze`를 제공합니다. backend만 호출하는 내부 서버이며 DB·외부 AI API를 쓰지 않습니다.
 
-판단 모델은 아직 없습니다. `/v1/analyze`는 점수를 계산하지 않고 명세의 예시 값을 그대로 돌려주는 **자리 표시**입니다. 이 결과를 실제 UI 결정에 쓰면 안 됩니다.
+`/v1/analyze`는 점수를 계산하지 않고 명세의 예시 값을 그대로 돌려주는 **자리 표시**입니다. 지원 판단은 backend 판단 층(PR #77)이 규칙표 v0로 하며, 이 자리 표시 결과를 실제 UI 결정에 쓰면 안 됩니다.
 
 ## 로컬 실행 (PowerShell)
 
@@ -36,7 +36,7 @@ backend를 호스트에서 직접 실행해 연결할 때는 backend의 `AI_ENGI
 | 터치(`tap_count`, `back_count`)가 있거나 얼굴이 검출됨(`vision.face_detected=true`) | `measurable=true`, 명세 예시 점수, `model_version=dummy-0.1` |
 | 둘 다 없음 | `measurable=false`, `states=null` |
 
-입력 값에 따라 점수가 달라지지 않습니다. 판단 모델을 붙일 때 `placeholder.py`의 `judge()`를 교체합니다.
+입력 값에 따라 점수가 달라지지 않습니다. 이 판정은 `placeholder.py`의 `judge()` 한 곳에 있고, 지원 판단은 위와 같이 backend 판단 층(PR #77)이 합니다.
 
 ## Docker
 
@@ -67,4 +67,4 @@ python -m unittest discover -s tests -v
 | `app/main.py` | 앱 생성, `/health`, 라우터 등록 |
 | `app/modules/analyze/` | `/v1/analyze` 엔드포인트와 요청·응답 모델 |
 | `app/inference/` | 모델 로딩·추론: `placeholder.py`(판단 자리 표시) · `vision.py`(MediaPipe 3종 불러오기 · 프레임 추론, 비전 모듈이 사용) |
-| `app/modules/vision/` | 비전 관측 뼈대(MediaPipe, 서버 미연결). 실행·테스트는 [모듈 README](app/modules/vision/README.md) |
+| `app/modules/vision/` | 비전 관측, 상황 태그 3개와 장면 태그 6개(MediaPipe, 머리 탐지기, 보조기구 · 휴대폰 탐지기 선택 입력). 실행·테스트는 [모듈 README](app/modules/vision/README.md) |

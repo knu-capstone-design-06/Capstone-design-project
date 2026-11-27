@@ -10,8 +10,15 @@ No AnalyzeResponse is emitted: this chain has no discomfort-state model, while t
 states when measurable=true. Sensor measurability and the pipeline version are proposal-only extension data.
   support           {preset, requires_confirmation, decided_by}: UIPreset and the confirmation flag of the rule table's
                     support (JP 2-5 table); decided_by 'rule_placeholder' (shadow mode: Jev never changes the screen)
-  extension         {measurement: {measurable, basis}, model_version, situation: {...}, decision_meta: {...}};
-                    measurement follows the team placeholder (a tap or back in the segment, or a face).
+  extension         {measurement: {measurable, basis}, model_version, detectors, situation: {...},
+                    decision_meta: {...}};
+                    measurement follows the team placeholder (a tap or back in the segment, or a face); in a window
+                    that is not measurable with the scene tag phone_use true (3-2's phone path, only with the phone
+                    detector) basis adds that the 3-2 wait alone may open or keep its hold_timer in the window (a
+                    measurable window runs every row, phone_use or not, and keeps the plain basis).
+                    detectors = the record's {heads, aids, phones}: which optional detectors ran on the segment's
+                    rows (chain.detectors; model_version stays the same string with or without them).
+                    situation.tags carries the scene tags (name, status, unknown_reason, evidence ids).
                     decision_meta also carries the execution fields of
                     JP 2-5 (steps_left, target_id, message_id) and session_signal ({name: hold_timer} on the 3-2 wait)
 """
@@ -19,21 +26,30 @@ from __future__ import annotations
 
 MODEL_VERSION = "vision-situation-rules_v1+rule_table_v0-shadow"
 DECIDED_BY = "rule_placeholder"     # contract SupportDecision.decided_by enum: rule_placeholder | jev
+BASIS = "A tap or back in the segment, or a face seen in the segment (team placeholder)."
+BASIS_PHONE = ("A tap or back in the segment, or a face seen in the segment (team placeholder). The scene tag "
+               "phone_use is true (the main user's phone seen, no touch, body still): the 3-2 wait alone may open or "
+               "keep its hold_timer in this window.")
 
 
 def to_contract(record: dict, session_id: str) -> dict:
     d = record["decision"]
     sit = record["situation"]
+    phone = any(t.get("name") == "phone_use" and t.get("status") is True for t in sit.get("tags", []))
     return {
         "support": {"preset": d["preset"], "requires_confirmation": bool(d["requires_confirmation"]),
                     "decided_by": DECIDED_BY},
         "extension": {
             "measurement": {"measurable": bool(record["measurable"]),
-                            "basis": "A tap or back in the segment, or a face seen in the segment (team placeholder)."},
+                            "basis": BASIS_PHONE if (phone and not record["measurable"]) else BASIS},
             "model_version": MODEL_VERSION,
+            "detectors": dict(record["detectors"]),
             "situation": {"tag": sit["name"], "display_text": sit["display_text"], "evidence_ids": sit["evidence_ids"],
                           "confidence": sit["confidence"], "alternatives": sit["alternatives"],
-                          "unknown_reason": sit["unknown_reason"], "quality": sit["quality"], "source": sit["source"]},
+                          "unknown_reason": sit["unknown_reason"], "quality": sit["quality"], "source": sit["source"],
+                          "tags": [{"name": t["name"], "status": t["status"], "unknown_reason": t["unknown_reason"],
+                                    "evidence_ids": sorted({e["event_id"] for e in t["evidence"]})}
+                                   for t in sit.get("tags", [])]},
             "decision_meta": {k: d[k] for k in ("decision_id", "withdrawn_id", "support", "scene", "action",
                                                 "intervention", "transition", "scope", "rank", "withdraw_on",
                                                 "policy", "meta", "steps_left", "target_id", "message_id",

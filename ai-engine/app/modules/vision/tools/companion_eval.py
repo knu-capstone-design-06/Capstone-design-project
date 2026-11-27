@@ -66,6 +66,8 @@ ablation the four combinations of cues and tracking on the same recorded H1 boxe
          queue, so it is not an agreement); and fig_e1_paper.png (7.0 x 2.4 in, 300 dpi, fonts 8 pt and up).
 rewindow windows_<bundle>.jsonl beside every RUNS/<take>/rows.csv: the window layer (situation, rule table, the
          'turns' list) run again with a value bundle on the recorded rows, no video (row_from_csv, cmd_rewindow).
+         Rows recorded before the scene-tag columns existed get them filled first (columns.add_main_user_change,
+         columns.add_face_size_ratio: the anchor of a run without a touch log); recorded values are kept.
 inventory inclusion_table.csv (one row per replayed take: scene and people from the scene labels, role instances and
          frames from the person labels and the rows, labelled or not and why) and parameter_sources.csv (every value
          the chain's head part and this tool use, with its source tag). Needs --scenes (the scene label CSV: video,
@@ -516,6 +518,24 @@ def row_from_csv(r: dict) -> dict:
     return row
 
 
+def fill_scene_columns(rows: list, params=None) -> list:
+    """The scene-tag columns (columns.CHANGE_COLUMNS, iod_ratio_user, head_ratio_user, dpitch_user_deg) on recorded
+    rows that lack them, as a run without a touch log would have written them with the chain values params (the
+    bundle's; defaults when None); rows that carry them keep their values. The change columns are written again, all of
+    them, when any one is missing (rows.csv written before a change column was added, such as main_user_stitched)."""
+    from app.modules.vision.columns import (CHANGE_COLUMNS, add_face_size_ratio, add_head_size_ratio,
+                                            add_main_user_change, add_pitch_user)
+    if not all(any(c in r for r in rows) for c in CHANGE_COLUMNS):
+        add_main_user_change(rows, params)
+    if not any("iod_ratio_user" in r for r in rows):
+        add_face_size_ratio(rows, params)
+    if not any("head_ratio_user" in r for r in rows):
+        add_head_size_ratio(rows, params)
+    if not any("dpitch_user_deg" in r for r in rows):
+        add_pitch_user(rows, params)
+    return rows
+
+
 def cmd_rewindow(a) -> int:
     """windows_<bundle>.jsonl next to every RUNS/<take>/rows.csv: the windows the replay would have written with the
     value bundle --params (one every segment_s from the first frame, the input's last stretch as a partial window),
@@ -530,6 +550,7 @@ def cmd_rewindow(a) -> int:
     for take in sorted(d for d in os.listdir(a.runs) if os.path.isfile(os.path.join(a.runs, d, "rows.csv"))):
         with open(os.path.join(a.runs, take, "rows.csv"), encoding="utf-8-sig", newline="") as f:
             rows = [row_from_csv(r) for r in csv.DictReader(f)]
+        fill_scene_columns(rows, bundle.chain)
         judge = WindowJudge(bundle, None, session_id=take)
         records, next_t, start = [], None, 0
 

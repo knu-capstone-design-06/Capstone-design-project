@@ -3,9 +3,12 @@
 Per frame (FrameChain.process): features.Observer row (MediaPipe face / face detector / pose, plus blendshapes when
 on) -> H1 head boxes (app/inference/head.py) -> head tracks, the main user as a track, companion and people behind
 from the tracks' cues, and the main user's P1 direction (columns.py HeadPeople; its state lives as long as the
-FrameChain and starts again when the touch log's sessionId changes) -> the face values blanked where the tracked face
-is someone else's (columns.FACE_VALUE_COLUMNS, face_in_primary False) -> shoulders, mouth_motion ->
-touch counts since the previous row (touch.py). Each part that is not
+FrameChain and starts again when the touch log's sessionId changes, as does the Observer's session-start reference
+of iod_ratio_start / dyaw_start_deg / dpitch_start_deg) -> the face values blanked where the tracked face
+is someone else's (columns.FACE_VALUE_COLUMNS, face_in_primary False) -> shoulders, mouth_motion -> the main user's
+face size against the running reference (iod_ratio_user, columns.FaceSizeRef; it starts again with a new main-user
+track and a new touch-log session) -> the main user's head pitch against that user's first face after the same
+anchors (dpitch_user_deg, columns.PitchRef; the gate of face_approach reads it) -> touch counts since the previous row (touch.py). Each part that is not
 available (no ONNX model, blendshapes off, no touch log) leaves its columns blank or absent, so the events layer treats
 the cue as missing ('모름'), never as 'absent'.
 
@@ -25,7 +28,7 @@ import time
 
 from . import columns as C
 from .contract_view import to_contract
-from .events import SEEN, observe_window
+from .events import SEEN, new_user_rows, observe_window
 from .judgment import rule_table_v0 as R
 from .judgment.jev_stub import ShadowJev
 from .situation import RULES, TAGS, UNKNOWN, assess
@@ -61,30 +64,46 @@ class FrameChain:
     timing (ms_heads, ms_head_dir, ms_chain = wall time of this whole step, cpu_ms_chain = process CPU time)."""
 
     def __init__(self, models, params, heads=None, direction=None, timeline=None, blendshapes: bool = False,
-                 source_kind: str = ""):
+                 source_kind: str = "", aids=None, phones=None):
         from .features import Observer          # OpenCV; imported here so the window part loads without it
         self.capture = _Capture(models)
         self.observer = Observer(self.capture)
         self.p = params
         self.heads, self.direction, self.timeline = heads, direction, timeline
+        self.aids = aids                        # walking-aid detector (app/inference/aid.py) or None: columns absent
+        self.phones = phones                    # phone detector (app/inference/phone.py) or None: columns absent
+        self.phone_k = 0                        # processed frames since the start: the detector runs every
+                                                # params.phone_every-th of them
         self.blendshapes = bool(blendshapes)
         self.source_kind = source_kind
         self.mouth = C.MouthMotion(params.mouth_dials, params.mouth_baseline_s)
         self.people = C.HeadPeople(params)
+        self.size_ref = C.FaceSizeRef(params.approach_ratio_min, params.track_max_gap_s)   # iod_ratio_user
+        self.head_ref = C.HeadSizeRef(params.head_approach_ratio_min, params.track_max_gap_s)  # head_ratio_user
+        self.pitch_ref = C.PitchRef(params.track_max_gap_s)                                  # dpitch_user_deg
+        self.change = C.MainUserChange(params.track_iou_min, params.track_max_gap_s,        # the change columns
+                                       params.role_window_s, params.segment_s,
+                                       params.stitch_shift_max, params.stitch_size_max)
         self.session = None                     # the touch log's sessionId at the previous row
         self.prev_t = None
 
     def process(self, frame) -> dict:
         wall0, cpu0 = time.perf_counter(), time.process_time()
-        row, _ = self.observer.process(frame, source_kind=self.source_kind)
-        inf = self.capture.last
-        t = float(row["t_s"])
+        t = round(frame.t_s, 4)                 # = the row's t_s (features.Observer)
         if self.timeline is not None:           # tree section 4 ①: a new session is judged from the start
             session = self.timeline.session_at(t)
             if session is not None and self.session is not None and session != self.session:
+                self.observer.reset_reference()  # the start-relative columns (iod_ratio_start, d*_start_deg)
                 self.people.reset()
+                self.size_ref.reset()
+                self.head_ref.reset()
+                self.pitch_ref.reset()
+                self.change.reset()
             if session is not None:
                 self.session = session
+        row, _ = self.observer.process(frame, source_kind=self.source_kind)
+        inf = self.capture.last
+        t = float(row["t_s"])
         if self.heads is not None:
             heads = self.heads(frame.image)
             face = C.face_xy(row)
@@ -108,11 +127,31 @@ class FrameChain:
                 for col in C.FACE_VALUE_COLUMNS:
                     if col in row:
                         row[col] = None
+            row.update(self.change.update(row))
             row["ms_heads"] = sum(heads.ms.values())
         row.update(C.shoulder_columns(inf.pose if inf is not None else None))
+        if self.aids is not None:
+            aids = self.aids(frame.image)
+            row.update(C.aid_columns(aids, inf.pose if inf is not None else None, row.get("primary_box"),
+                                     self.heads is not None, self.p.aid_person_min))
+            row["ms_aids"] = sum(aids.ms.values())
+        if self.phones is not None:             # the main user's phone: the head box and the pose's hands
+            if self.phone_k % self.p.phone_every == 0:
+                phones = self.phones(frame.image)
+                row.update(C.phone_columns(phones, inf.pose if inf is not None else None, row.get("primary_box"),
+                                           row.get("head_boxes"), self.p.hand_vis_min))
+                row["ms_phones"] = sum(phones.ms.values())
+            else:                               # not run on this frame: the columns blank (the events skip them)
+                row.update(dict.fromkeys(C.PHONE_COLUMNS))
+                row["ms_phones"] = None
+            self.phone_k += 1
         face_seen = row.get("face_state") == SEEN and row.get("face_in_primary") is not False
         scores = inf.blendshapes if (self.blendshapes and face_seen and inf is not None) else None
         row["mouth_motion"] = self.mouth.update(t, scores)
+        row["iod_ratio_user"] = self.size_ref.update(row, self._pressed(t), self.timeline is not None)
+        row["dpitch_user_deg"] = self.pitch_ref.update(row, self._pressed(t))
+        if self.heads is not None:
+            row["head_ratio_user"] = self.head_ref.update(row, self._pressed(t), self.timeline is not None)
         if self.timeline is not None:
             counts = self.timeline.counts(self.prev_t, t)
             row["tap_count"] = None if counts is None else counts["tap_count"]
@@ -121,6 +160,14 @@ class FrameChain:
         row["ms_chain"] = (time.perf_counter() - wall0) * 1000.0
         row["cpu_ms_chain"] = (time.process_time() - cpu0) * 1000.0
         return row
+
+    def _pressed(self, t: float) -> bool:
+        """Whether the face-size reference collects at t: always without a touch log; with one, once the touch-log
+        session at t has had a press (its first press anchors the reference, so walking up is left out)."""
+        if self.timeline is None:
+            return True
+        press, since = self.timeline.last_press(t), self.timeline.session_since(t)
+        return press is not None and (since is None or press >= since)
 
 
 # --- why a window is 'unknown' (mirrors the rules of situation.py; tests check it against assess) ------------------
@@ -210,21 +257,55 @@ def history_s(bundle) -> float:
     return sp.window_s + 2.0 * sp.gap_s
 
 
-def facing(seg_rows: list, sp) -> bool | None:
+def facing(seg_rows: list, sp, main_only: bool = False) -> bool | None:
     """The rule table's gaze gate (JP 0-2 '고개 방향이 화면 안'): at the last frame of the segment that saw the face or
     the body - True = face seen with |yaw| below offscreen_yaw_deg, False = face seen with |yaw| at or beyond it;
     None = that frame saw the body without the face (the head direction cannot be measured: covered, turned beyond
     the landmarker's range, or lost), no such frame, no yaw, or no situation values. A None window takes the raised
-    criterion of the tap rows (tree section 4 ⑦), not the 'looking away' path."""
+    criterion of the tap rows (tree section 4 ⑦), not the 'looking away' path. main_only (phone_use's hand path): a
+    face counts only when it is the main user's (columns.main_user_face: with the head detector, matched to the main
+    user's head box), and a frame whose face is not confirmed as the main user's is skipped as no direction evidence
+    (the gate goes back to the frame before it). After a change of user inside the segment (events.user_since) only
+    the new user's rows are read: the gate never goes back to the earlier user's face."""
     if sp is None:
         return None
-    for r in reversed(seg_rows):
-        if r.get("face_state") == SEEN:
+    for r in reversed(new_user_rows(seg_rows)):
+        if r.get("face_state") == SEEN and (not main_only or C.main_user_face(r)):
             yaw = finite(r.get("yaw_deg"))
             return None if yaw is None else abs(yaw) < sp.offscreen_yaw_deg
+        if main_only and r.get("face_state") == SEEN:
+            continue                                   # a face not confirmed as the main user's: no direction evidence
         if r.get("body_state") == SEEN:
             return None
     return None
+
+
+def _toward_screen(row: dict, sp) -> bool:
+    """The row's face is not turned off the screen: |yaw| below offscreen_yaw_deg (facing's criterion), or no yaw."""
+    yaw = finite(row.get("yaw_deg"))
+    return yaw is None or abs(yaw) < sp.offscreen_yaw_deg
+
+
+def away_from_screen(seg_rows: list, sp) -> bool | None:
+    """phone_use's hand path: the main user not facing the screen in the segment. The gaze gate here reads only the
+    main user's face (facing with main_only: with the head detector, a face not matched to the main user's head box,
+    face_in_primary None or False, is no direction evidence). True when that gate says so (facing False), or when the
+    segment has rows with the main user's head box and none of them shows the main user's face turned to the screen
+    (columns.main_user_face with |yaw| below offscreen_yaw_deg, the gate's own criterion, or no yaw; the camera sits
+    above the screen: a head seen without its face is not turned to the screen, and a face seen only turned beyond
+    offscreen_yaw_deg is not either) - checked first, so it holds even when the gate says facing; otherwise False when
+    the gate says facing, or a row with the head box shows the main user's face turned to the screen; None otherwise
+    (no row with the head box and the gate cannot tell, or no situation values). After a change of user inside the
+    segment (events.user_since) only the new user's rows are read: the earlier user's do not decide the new user's."""
+    if sp is None:
+        return None
+    seg_rows = new_user_rows(seg_rows)
+    gaze = facing(seg_rows, sp, main_only=True)
+    boxed = [r for r in seg_rows if not C.blank_box(r.get("primary_box"))]
+    face_in_box = any(C.main_user_face(r) and _toward_screen(r, sp) for r in boxed)
+    if gaze is False or (boxed and not face_in_box):
+        return True
+    return False if (gaze is True or face_in_box) else None
 
 
 def _ids(evidence: list) -> list:
@@ -237,17 +318,17 @@ def _ids(evidence: list) -> list:
 
 def situation_view(out: dict | None, reasons: list) -> dict:
     """The situation part of a window record: the assess output with its evidence ids listed apart; alternatives keep
-    name, confidence and evidence ids."""
+    name, confidence and evidence ids; tags = the scene tags as assess gives them (no value bundle: no window, [])."""
     if out is None:
         return {"name": UNKNOWN, "display_text": "", "evidence_ids": [], "evidence": [], "confidence": UNKNOWN,
                 "alternatives": [],
-                "quality": None, "unknown_reason": reasons, "window_s": None, "source": None}
+                "quality": None, "unknown_reason": reasons, "window_s": None, "source": None, "tags": []}
     return {"name": out["name"], "display_text": out["display_text"], "evidence_ids": _ids(out["evidence"]),
             "evidence": out["evidence"], "confidence": out["confidence"],
             "alternatives": [{"name": a["name"], "confidence": a["confidence"], "evidence_ids": _ids(a["evidence"])}
                              for a in out["alternatives"]],
             "quality": out["quality"], "unknown_reason": reasons, "window_s": out["window_s"],
-            "source": out["source"]}
+            "source": out["source"], "tags": out["tags"]}
 
 
 class WindowJudge:
@@ -306,20 +387,28 @@ class WindowJudge:
             rows = [r for r in rows if float(r["t_s"]) >= session_start]
         seg_rows = [r for r in rows if t_end - seg_len < float(r["t_s"]) <= t_end]
         turns = None                                   # head turns of the window (observation only)
+        gaze = facing(seg_rows, sp)                    # the rule table's gaze gate
+        away = away_from_screen(seg_rows, sp)          # phone_use's hand path
         if sp is None:
             out, reasons = None, [{"code": "no_value_bundle"}]
         else:
             out, events = assess(rows, t_end, sp, landmarker_num_faces=LANDMARKER_NUM_FACES,
-                                 baseline_s=p.mouth_baseline_s)
+                                 baseline_s=p.mouth_baseline_s, seated_face_cy_min=p.seated_face_cy_min,
+                                 approach_ratio_min=p.approach_ratio_min, aid_use_min=p.aid_use_min,
+                                 seated_head_cy_min=p.seated_head_cy_min, head_down_pitch_min=p.head_down_pitch_min,
+                                 head_approach_ratio_min=p.head_approach_ratio_min, segment_s=p.segment_s,
+                                 away=away)
             reasons = unknown_reasons(rows, t_end, sp) if out["name"] == UNKNOWN else []
             turns = [{"event_id": e["event_id"], "kind": e["kind"], "t_start": e["t_start"], "t_end": e["t_end"],
                       "obs": e["obs"]} for e in events if e["kind"] in TURN_KINDS]
         situation = situation_view(out, reasons)
         seg, recent, screen, progress, _ = self._touch(t_end, seg_len)
-        face_seen = any(r.get("face_state") == SEEN for r in seg_rows)
+        face_seen = any(r.get("face_state") == SEEN for r in new_user_rows(seg_rows))
         has_touch = seg is not None and (seg["tap_count"] > 0 or seg["back_count"] > 0)
+        # the team placeholder (a press or a back, or a face seen in the segment; after a change of user inside the
+        # segment, the new user's face: events.user_since). The scene tag phone_use true counts for the 3-2 row and its
+        # hold only, in the rule table (rule_table_v0.decide 0''), never for the other rows
         measurable = bool(has_touch or face_seen)
-        gaze = facing(seg_rows, sp)
         self.state, expired = R.tick(self.state, t_end, p)
         held_before = self.state.held.decision_id if self.state.held else None
         inp = R.WindowInput(t=t_end, measurable=measurable, situation=out, screen=screen["name"],
@@ -345,7 +434,8 @@ class WindowJudge:
             "t": round(t_end, 4), "segment_s": [round(t_end - seg_len, 4), round(t_end, 4)],
             "frames": len(seg_rows), "situation": situation, "touch": seg,
             "screen": {**screen, "pause_s": None if screen["pause_s"] is None else round(screen["pause_s"], 3)},
-            "vision": vision_summary(seg_rows, gaze), "turns": turns, "measurable": measurable, "decision": d,
+            "vision": vision_summary(seg_rows, gaze), "detectors": detectors(seg_rows), "turns": turns,
+            "measurable": measurable, "decision": d,
             "session": self.state.snapshot(), "session_reset": session_reset, "jev": jev,
         }
         if seg_len != p.segment_s:
@@ -355,16 +445,32 @@ class WindowJudge:
         return record
 
 
-def vision_summary(seg_rows: list, gaze) -> dict:
-    """What the camera saw in the segment (observation only)."""
-    n = len(seg_rows)
+# a column each optional detector writes on every row while it is on (FrameChain; HEAD_COLUMNS, AID_COLUMNS,
+# PHONE_COLUMNS: phone_owner is blank on the rows phone_every skips, but present)
+DETECTOR_COLUMNS = (("heads", "head_count"), ("aids", "aid_owner"), ("phones", "phone_owner"))
 
-    def mx(key):
-        vals = [v for v in (finite(r.get(key)) for r in seg_rows) if v is not None]
+
+def detectors(seg_rows: list) -> dict:
+    """Which optional detectors ran on the segment's rows: {heads, aids, phones} (the window record's and the contract
+    view's 'detectors'). A detector counts when a row of the segment carries its column (DETECTOR_COLUMNS); a segment
+    without rows gives False for all three (record['frames'] is 0 then)."""
+    return {name: any(column in r for r in seg_rows) for name, column in DETECTOR_COLUMNS}
+
+
+def vision_summary(seg_rows: list, gaze) -> dict:
+    """What the camera saw in the segment (observation only). After a change of user inside the segment
+    (events.user_since) the main user's values - face_seen_ratio, body_seen_ratio, mouth_motion_max - read the new
+    user's rows (the ratios over all the segment's frames); frames and the scene's values - head_count_max,
+    people_behind_max, companion_frames - read every row."""
+    n = len(seg_rows)
+    own = new_user_rows(seg_rows)
+
+    def mx(key, rows):
+        vals = [v for v in (finite(r.get(key)) for r in rows) if v is not None]
         return max(vals) if vals else None
     return {"frames": n,
-            "face_seen_ratio": sum(r.get("face_state") == SEEN for r in seg_rows) / n if n else None,
-            "body_seen_ratio": sum(r.get("body_state") == SEEN for r in seg_rows) / n if n else None,
-            "head_count_max": mx("head_count"), "people_behind_max": mx("people_behind_count"),
+            "face_seen_ratio": sum(r.get("face_state") == SEEN for r in own) / n if n else None,
+            "body_seen_ratio": sum(r.get("body_state") == SEEN for r in own) / n if n else None,
+            "head_count_max": mx("head_count", seg_rows), "people_behind_max": mx("people_behind_count", seg_rows),
             "companion_frames": sum(r.get("companion_box") is not None for r in seg_rows),
-            "mouth_motion_max": mx("mouth_motion"), "facing_screen": gaze}
+            "mouth_motion_max": mx("mouth_motion", own), "facing_screen": gaze}
