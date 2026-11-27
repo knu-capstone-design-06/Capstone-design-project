@@ -15,9 +15,9 @@ async function screenshot(page, name, clipHeight = null) {
     ...(clipHeight ? { clip: { x: 0, y: 0, width: 1080, height: clipHeight } } : {}) });
 }
 
-async function open(steps, pageUrl = url, manualSpeech = false) {
+async function open(steps, pageUrl = url, manualSpeech = false, hasTouch = false) {
   const browser = await chromium.launch({ headless: true, ...(channel === 'default' ? {} : { channel }) });
-  const page = await browser.newPage({ viewport: { width: 1080, height: 1920 } });
+  const page = await browser.newPage({ viewport: { width: 1080, height: 1920 }, hasTouch });
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.addInitScript(manual => {
@@ -672,3 +672,188 @@ test('음성 인식을 지원하지 않는 브라우저에서는 마이크 버�
     fixture.verify();
   } finally { await browser.close(); }
 });
+
+// Frontend-local rehearsal, not an invented voice API payload. Keep the production response unwired.
+async function prepareSettings(page) {
+  return page.evaluate(() => {
+    window.finishVoiceSettings = window.kioskVoiceSettingsDraft.prepare();
+    return typeof window.finishVoiceSettings === 'function';
+  });
+}
+const finishSettings = (page, changes) => page.evaluate(value => window.finishVoiceSettings?.(value) ?? false, changes);
+
+for (const large of [false, true]) {
+  test(`음성 설정 적용부: ${large ? '큰 글씨·큰 버튼·낮은 화면' : '기본 글씨·낮은 화면'} 적용·해제·복귀에도 Cart와 수동 설정을 유지한다`, async () => {
+    const session = `voice-settings-${large}`;
+    const cart = cartResponse(session, 2, [iced(2)]);
+    const { browser, page, errors, fixture } = await open([
+      ...bootstrap(session).slice(0, 2), { method: 'GET', path: `/api/v1/sessions/${session}/cart`, body: cart },
+      voicePost(session), voiceGet(session, voiceStatus('completed', { actions: ['ui_changed'] })),
+    ]);
+    try {
+      const before = await page.evaluate(() => localStorage.getItem('kiosk-ui-settings-v1'));
+      await page.locator('[data-log-target="voice-mode-toggle"]').click();
+      assert(await prepareSettings(page));
+      await page.evaluate(() => window.voiceFakes.at(-1).final('화면을 아래로 내려줘'));
+      await page.locator('[data-log-target="voice-listen"]').waitFor();
+      assert.equal(await page.locator('.kiosk.low-screen').count(), 0, 'ui_changed 이름만으로 적용 내용을 추측하지 않는다');
+      const changes = large ? { largeText: true, largeButton: true, lowScreen: true } : { lowScreen: true };
+      assert(await finishSettings(page, changes));
+      await page.locator(large ? '.kiosk.large-text.large-button.low-screen' : '.kiosk.low-screen').waitFor();
+      assert.equal(await finishSettings(page, changes), false, '같은 응답은 다시 적용하지 않는다');
+      assert.equal(await page.locator('[data-log-target="voice-mode-toggle"]').getAttribute('aria-checked'), 'true');
+      assert.equal(await page.evaluate(() => localStorage.getItem('kiosk-ui-settings-v1')), before);
+      const box = await page.locator('[data-log-target="support-undo"]').boundingBox();
+      assert(box && box.x >= 0 && box.y >= 0 && box.x + box.width <= 1080 && box.y + box.height <= 1920, '복귀 버튼을 화면 안에서 조작한다');
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+      await page.evaluate(() => document.fonts.ready);
+      await page.locator('.voice-state').scrollIntoViewIfNeeded();
+      const voiceBox = await page.locator('.voice-state').boundingBox();
+      await screenshot(page, large ? 'voice-settings-large-low' : 'voice-settings-default-low');
+      assert(voiceBox && voiceBox.y >= 768 && voiceBox.y + voiceBox.height <= 1920, `낮은 화면에서도 음성 상태에 접근한다: ${JSON.stringify(voiceBox)}`);
+      assert(await prepareSettings(page));
+      assert(await finishSettings(page, { lowScreen: false }));
+      await page.waitForFunction(() => !document.querySelector('.kiosk').classList.contains('low-screen'));
+      assert.equal(await page.locator('.kiosk.large-text').count(), large ? 1 : 0, '높이 해제는 다른 음성 설정을 유지');
+      const undo = page.locator('[data-log-target="support-undo"]');
+      assert.equal(await undo.count(), large ? 1 : 0, '음성으로 바꾼 설정이 남을 때만 복귀 버튼 표시');
+      if (large) await undo.click();
+      await page.waitForFunction(() => !document.querySelector('.kiosk').classList.contains('large-text'));
+      assert.equal(await undo.count(), 0);
+      assert.equal(await page.locator('.cart-row').count(), 1);
+      assert.match(await page.locator('.cart-row').innerText(), /아메리카노/);
+      assert.equal(fixture.requests.filter(request => request.path.endsWith('/cart')).length, 1);
+      assert.equal(fixture.requests.filter(request => request.method === 'POST' && /\/cart|\/orders/.test(request.path)).length, 0);
+      const log = await page.evaluate(() => window.kioskTouchLogDraft.read());
+      assert(log.events.some(event => event.kind === 'ui_settings_change' && event.data.after.lowScreen === true));
+      fixture.verify(); assert.deepEqual(errors, []);
+    } finally { await browser.close(); }
+  });
+}
+
+test('음성 설정 적용부: 서버 지원 수락은 같은 설정의 음성 끄기를 해제한다', async () => {
+  const session = 'voice-settings-support-accept';
+  const { browser, page, errors, fixture } = await open(bootstrap(session));
+  try {
+    await page.locator('[data-log-target="support-toggle"]').click();
+    await page.locator('[data-log-target="support:largeText"]').click();
+    await page.locator('[data-log-target="support-close"]').click();
+    await page.locator('.kiosk.large-text').waitFor();
+    await page.locator('[data-log-target="voice-mode-toggle"]').click();
+    assert(await prepareSettings(page));
+    assert(await finishSettings(page, { largeText: false, highContrast: true }));
+    await page.locator('.kiosk.high-contrast:not(.large-text)').waitFor();
+    await page.locator('[data-log-target="voice-mode-toggle"]').click();
+    assert(await page.evaluate(id => window.kioskSupportDraft.receive({ session_id: id, ai_available: true,
+      support: { preset: 'large_text', requires_confirmation: true, decided_by: 'rule_placeholder' },
+    }), session));
+    const offer = page.locator('.support-confirm-sheet');
+    await offer.getByRole('heading', { name: '글씨를 크게 바꿀까요?' }).waitFor();
+    await offer.locator('.support-confirm-actions[data-armed="true"]').waitFor();
+    await offer.locator('[data-log-target="support-confirm:accept"]').click();
+    await offer.waitFor({ state: 'hidden' });
+    assert.equal(await page.locator('.kiosk.large-text.high-contrast').count(), 1, '수락한 큰 글씨를 켜고 음성 고대비는 유지');
+    await page.locator('[data-log-target="support-undo"]').click();
+    await page.locator('.kiosk.large-text:not(.high-contrast)').waitFor();
+    fixture.verify(); assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
+for (const input of ['click', 'tap']) {
+  test(`음성 설정 적용부: 적용 안내 중 원래대로를 누르면 복귀 안내가 남는다 (${input})`, async () => {
+    const { browser, page, errors, fixture } = await open(bootstrap('voice-settings-undo-notice'), url, false, input === 'tap');
+    try {
+      const toggle = page.locator('[data-log-target="voice-mode-toggle"]');
+      await toggle[input]();
+      assert(await prepareSettings(page));
+      assert(await finishSettings(page, { largeText: true, largeButton: true }));
+      await page.getByText('화면 설정을 바꿨어요.', { exact: true }).waitFor();
+      await page.locator('[data-log-target="support-undo"]')[input]();
+      // pointerup이 예약한 안내 닫기가 실행된 뒤에도 새 안내는 남아야 합니다.
+      await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 0)));
+      const restored = page.getByText('음성으로 바꾸기 전 화면으로 돌아갔어요.', { exact: true });
+      assert.equal(await restored.count(), 1, '이전 안내를 닫는 터치가 복귀 안내를 지우지 않음');
+      assert.equal(await page.locator('.kiosk.large-text, .kiosk.large-button').count(), 0);
+      if (input === 'tap') await screenshot(page, 'voice-settings-undo-notice');
+      await toggle[input]();
+      await restored.waitFor({ state: 'hidden', timeout: 1000 });
+      fixture.verify(); assert.deepEqual(errors, []);
+    } finally { await browser.close(); }
+  });
+}
+
+test('음성 설정 적용부: 터치로 바꾼 키가 우선하고 원래대로·초기화·새로고침은 기존 수동 설정을 지킨다', async () => {
+  const session = 'voice-settings-manual';
+  const { browser, page, errors, fixture } = await open([...bootstrap(session), ...bootstrap('voice-settings-reload')]);
+  try {
+    await page.locator('[data-log-target="support-toggle"]').click();
+    await page.locator('[data-log-target="support:highContrast"]').click();
+    await page.locator('[data-log-target="support-close"]').click();
+    await page.locator('[data-log-target="voice-mode-toggle"]').click();
+    assert(await prepareSettings(page));
+    assert(await finishSettings(page, { largeText: true, largeButton: true, lowScreen: true }));
+    await page.locator('.kiosk.large-text.large-button.low-screen.high-contrast').waitFor();
+    await page.locator('[data-log-target="support-toggle"]').click();
+    await page.locator('[data-log-target="support:largeText"]').click();
+    await page.locator('[data-log-target="support-close"]').click();
+    await page.locator('[data-log-target="support-undo"]').click();
+    await page.waitForFunction(() => !document.querySelector('.kiosk').classList.contains('large-button'));
+    assert.equal(await page.locator('.kiosk.high-contrast').count(), 1);
+    assert.equal(await page.locator('.kiosk.large-text,.kiosk.low-screen').count(), 0);
+    assert(await prepareSettings(page));
+    assert(await finishSettings(page, { largeText: true }));
+    await page.locator('.kiosk.large-text').waitFor();
+    await page.locator('[data-log-target="support-toggle"]').click();
+    await page.locator('[data-log-target="support-reset"]').click();
+    await page.waitForFunction(() => !document.querySelector('.kiosk').classList.contains('large-text'));
+    assert.equal(await page.locator('.kiosk.high-contrast').count(), 0, '기본 화면으로는 음성·수동 설정을 함께 해제');
+    await page.locator('[data-log-target="support:highContrast"]').click();
+    await page.locator('[data-log-target="support-close"]').click();
+    assert(await prepareSettings(page));
+    assert(await finishSettings(page, { largeText: true }));
+    await page.locator('.kiosk.large-text').waitFor();
+    await page.reload();
+    await page.locator('[data-log-target="voice-mode-toggle"]:not([disabled])').waitFor();
+    assert.equal(await page.locator('.kiosk.high-contrast').count(), 1);
+    assert.equal(await page.locator('.kiosk.large-text').count(), 0, '음성 시안의 설정은 영구 저장하지 않는다');
+    assert.equal(await page.locator('[data-log-target="support-undo"]').count(), 0);
+    fixture.verify(); assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
+for (const interruption of ['modal', 'manual', 'screen', 'hidden', 'session']) {
+  test(`음성 설정 적용부: ${interruption} 전에 준비한 응답은 늦게 도착해도 버린다`, async () => {
+    const session = `voice-settings-late-${interruption}`;
+    const steps = [...bootstrap(session).slice(0, 2), { method: 'GET', path: `/api/v1/sessions/${session}/cart`, body: cartResponse(session, 1, [iced()]) }];
+    if (interruption === 'session') steps.push(...bootstrap('voice-settings-new'));
+    const { browser, page, errors, fixture } = await open(steps);
+    try {
+      assert.equal(await page.evaluate(() => window.kioskVoiceSettingsDraft.prepare()), null, '음성 모드를 켜기 전에는 적용하지 않는다');
+      await page.locator('[data-log-target="voice-mode-toggle"]').click();
+      assert(await prepareSettings(page));
+      if (interruption === 'modal' || interruption === 'manual') {
+        await page.locator('[data-log-target="support-toggle"]').click();
+        assert.equal(await page.evaluate(() => window.kioskVoiceSettingsDraft.prepare()), null);
+        if (interruption === 'manual') await page.locator('[data-log-target="support:highContrast"]').click();
+        await page.locator('[data-log-target="support-close"]').click();
+      } else if (interruption === 'screen') {
+        await page.locator('[data-log-target="review-open"][data-armed="true"]').waitFor();
+        await page.locator('[data-log-target="review-open"]').click();
+        await page.locator('[data-log-target="review-back"]').click();
+        await page.locator('[data-log-target="voice-mode-toggle"]').click();
+      } else if (interruption === 'hidden') {
+        await page.evaluate(() => { window.dispatchEvent(new Event('pagehide')); window.dispatchEvent(new Event('pageshow')); });
+        await page.locator('[data-log-target="voice-mode-toggle"]').click();
+      } else {
+        await page.locator('[data-log-target="order-restart"][data-armed="true"]').waitFor();
+        await page.locator('[data-log-target="order-restart"]').click();
+        await page.locator('[data-log-target="order-restart-confirm"]').click();
+        await page.locator('[data-log-target="voice-mode-toggle"]:not([disabled])').waitFor();
+        await page.locator('[data-log-target="voice-mode-toggle"]').click();
+      }
+      assert.equal(await finishSettings(page, { largeText: true }), false);
+      assert.equal(await page.locator('.kiosk.large-text').count(), 0);
+      fixture.verify(); assert.deepEqual(errors, []);
+    } finally { await browser.close(); }
+  });
+}

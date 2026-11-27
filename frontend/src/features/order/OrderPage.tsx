@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { backendApi } from '../../shared/api/index.ts';
 import type { CartItem, Product, Temperature } from '../../shared/api/index.ts';
 import { categoryLabels, initialSettings, MAX_QUANTITY, readSettings, settingsStorageKey, temperatureLabel } from './model.ts';
@@ -39,6 +39,7 @@ import { useEnlargementPreview, useSupportDraft } from './hook/useSupportOffer.t
 import { OfferCard } from './components/OfferCard.tsx';
 import { SupportConfirmSheet } from './components/SupportConfirmSheet.tsx';
 import { useBackendSupport } from './hook/useBackendSupport.ts';
+import { useVoiceSettings } from './hook/useVoiceSettings.ts';
 import { clampPage, menuColumns, menuPageSize, pageCount, pageItems, reviewPageSize } from './utils/paging.ts';
 
 const sampleMode = import.meta.env.DEV && import.meta.env.VITE_ORDER_SAMPLE === 'true';
@@ -71,9 +72,16 @@ export function OrderPage() {
     catch { return { ...initialSettings }; }
   });
   const [automaticSettings, setAutomaticSettings] = useState<{ sessionId: string; values: Partial<Settings> }>({ sessionId: '', values: {} });
+  // 프론트 적용부 검토용: 음성 변경은 현재 세션에서만 유지합니다. 정식 저장 정책은 팀 합의 대상입니다.
+  const [voiceSettings, setVoiceSettings] = useState<{ sessionId: string; values: Partial<Settings>; notice: { text: string } | null }>({ sessionId: '', values: {}, notice: null });
   const sessionId = state.session?.session_id ?? null;
   // 고객 설정만 저장합니다. 서버 제안으로 켠 설정은 새 세션·새로고침에서 끝납니다.
-  const settings = useMemo(() => ({ ...manualSettings, ...(automaticSettings.sessionId === sessionId ? automaticSettings.values : {}) }), [manualSettings, automaticSettings, sessionId]);
+  const baseSettings = useMemo(() => ({ ...manualSettings,
+    ...(automaticSettings.sessionId === sessionId ? automaticSettings.values : {}),
+  }), [manualSettings, automaticSettings, sessionId]);
+  const settings = useMemo(() => ({ ...baseSettings,
+    ...(voiceSettings.sessionId === sessionId ? voiceSettings.values : {}),
+  }), [baseSettings, voiceSettings, sessionId]);
   const [screen, setScreen] = useState<'menu' | 'review' | 'complete'>('menu');
   const [category, setCategory] = useState<CategoryFilter>('all');
   const [menuPaging, setMenuPaging] = useState({ key: '', page: 0 });
@@ -101,6 +109,18 @@ export function OrderPage() {
   const restartTrigger = useRef<HTMLButtonElement>(null);
   const actionsRef = useRef<HTMLElement>(null);
   const opener = useRef<HTMLButtonElement | null>(null);
+  const voiceSettingReceiver = useVoiceSettings({ sessionId, screen, settings,
+    available: voice.enabled && voice.error === null && state.status === 'ready' && !state.order && !selected && !supportOpen && !restartOpen && !cartSheetOpen,
+  }, changes => {
+    if (!sessionId) return;
+    setVoiceSettings(current => {
+      const values = { ...(current.sessionId === sessionId ? current.values : {}), ...changes };
+      for (const key of Object.keys(values) as (keyof Settings)[]) {
+        if (values[key] === baseSettings[key]) delete values[key];
+      }
+      return { sessionId, values, notice: { text: '화면 설정을 바꿨어요.' } };
+    });
+  });
   const observation = captureTouchLogObservation(state, selected ? { productId: selected.product_id, temperature, quantity } : null, voice);
   const touchLog = useTouchLog(screen, category === 'all' ? '전체' : categoryLabels[category], selected?.product_id ?? null, settings, state.session?.session_id ?? null, observation, !sampleMode);
   useEffect(() => { void controller.initialize(); }, [controller]);
@@ -185,7 +205,16 @@ export function OrderPage() {
     contextKey: JSON.stringify([sessionId, screen, category, menuPaging, reviewPage, state.cart?.version, settings]),
     canSend: !sampleMode && screen !== 'complete' && !state.order && (state.status === 'ready' || state.status === 'saving'),
     canOffer: canOfferSupport,
-    onApply: key => { if (sessionId) setAutomaticSettings(current => ({ sessionId, values: { ...(current.sessionId === sessionId ? current.values : {}), [key]: true } })); },
+    onApply: key => {
+      if (!sessionId) return;
+      setAutomaticSettings(current => ({ sessionId, values: { ...(current.sessionId === sessionId ? current.values : {}), [key]: true } }));
+      setVoiceSettings(current => {
+        if (current.sessionId !== sessionId || current.values[key] === undefined) return current;
+        const values = { ...current.values };
+        delete values[key];
+        return { ...current, values };
+      });
+    },
   });
   const count = state.cart?.total_quantity ?? 0;
   const sum = state.cart?.total_amount ?? 0;
@@ -200,14 +229,25 @@ export function OrderPage() {
   function toggleCombinedEnlargement() {
     const enabled = !(settings.largeText && settings.largeButton);
     setManualSettings(current => ({ ...current, largeText: enabled, largeButton: enabled }));
-    clearAutomaticSettings(['largeText', 'largeButton']);
+    clearAppliedSettings(['largeText', 'largeButton']);
   }
-  function clearAutomaticSettings(keys: (keyof Settings)[]) {
+  function clearAppliedSettings(keys: (keyof Settings)[]) {
+    voiceSettingReceiver.invalidate();
     setAutomaticSettings(current => {
       const values = { ...current.values };
       for (const key of keys) delete values[key];
       return { ...current, values };
     });
+    setVoiceSettings(current => {
+      const values = { ...current.values };
+      for (const key of keys) delete values[key];
+      return { ...current, values, notice: null };
+    });
+  }
+  const hasVoiceSettings = voiceSettings.sessionId === sessionId && Object.keys(voiceSettings.values).length > 0;
+  function undoVoiceSettings() {
+    voiceSettingReceiver.invalidate();
+    setVoiceSettings({ sessionId: sessionId ?? '', values: {}, notice: { text: '음성으로 바꾸기 전 화면으로 돌아갔어요.' } });
   }
   function closeOptions() { setSelected(null); opener.current?.focus(); }
   function closeRestart() { setRestartOpen(false); restartTrigger.current?.focus(); }
@@ -279,12 +319,18 @@ export function OrderPage() {
   // 고객이 한 일의 알림(담았어요·수량을 바꿨어요·뺐어요·적용)은 잠깐 떴다가 briefNoticeMs가 지나거나 다음 터치에 닫힙니다.
   // 말로 주문이 오래 말이 없어 꺼지면 그 사실도 알림으로 보입니다.
   const autoOffShown = !voice.enabled && voice.autoOff !== null && !autoOffClosed;
-  const appliedNotice = enlargementPreview.applied ? supportCopy.enlarge.applied : '';
+  const voiceSettingsNotice = voiceSettings.sessionId === sessionId ? voiceSettings.notice : null;
+  const clearVoiceNotice = useCallback(() => {
+    if (!voiceSettingsNotice) return;
+    setVoiceSettings(current => current.notice === voiceSettingsNotice ? { ...current, notice: null } : current);
+  }, [voiceSettingsNotice]);
+  const appliedNotice = voiceSettingsNotice?.text ?? (enlargementPreview.applied ? supportCopy.enlarge.applied : '');
   const hintLine = hint && !(hint === 'option-add' && selected) ? hintCopy[hint] : '';
   const notice = screen === 'complete' ? '' : appliedNotice || hintLine || state.notice || (autoOffShown ? voiceAutoOffNotice : '');
   const noticeIcon = appliedNotice ? 'check_circle' : hintLine ? 'pan_tool_alt' : null;
   useNextTouch((appliedNotice !== '' || state.notice !== '' || autoOffShown) && !feedback, touchLog.root, () => {
     controller.clearNotice(); setAutoOffClosed(true); enlargementPreview.closeApplied();
+    clearVoiceNotice();
   });
   // 고리를 둘 조작: 담기 힌트는 옵션 시트의 [담기], 빼기 힌트는 가장 최근 줄의 [삭제](장바구니가 버튼 뒤에 있으면 [담은 메뉴 보기])
   const newestLine = cartLines.find(line => !line.removed)?.item;
@@ -320,9 +366,9 @@ export function OrderPage() {
   const briefShown = !feedback && !hintLine && (appliedNotice !== '' || state.notice !== '');
   useEffect(() => {
     if (!briefShown) return;
-    const timer = setTimeout(() => { controller.clearNotice(); enlargementPreview.closeApplied(); }, briefNoticeMs);
+    const timer = setTimeout(() => { controller.clearNotice(); enlargementPreview.closeApplied(); clearVoiceNotice(); }, briefNoticeMs);
     return () => clearTimeout(timer);
-  }, [briefShown, appliedNotice, state.notice]);
+  }, [briefShown, appliedNotice, state.notice, clearVoiceNotice]);
   const standingTop = standing !== null && settings.largeText;
   // 키오스크의 제안은 시트가 열려 있거나 오류·처리 중 안내가 있는 동안 기다리고, 그 밖의 다음 터치에 닫힙니다.
   const offerCard = enlargementPreview.offer && !sheetOpen && !supportOpen && !restartOpen && !feedback ? <OfferCard onAccept={enlargementPreview.accept} onDecline={enlargementPreview.decline} /> : null;
@@ -353,7 +399,7 @@ export function OrderPage() {
   return <><div ref={touchLog.root} data-order-mode={sampleMode ? 'sample' : 'api'} data-listening={voiceOn && voice.phase === 'listening' ? 'on' : undefined} className={`kiosk ${settings.largeText ? 'large-text' : ''} ${settings.largeButton ? 'large-button' : ''} ${settings.simpleScreen ? 'simple-screen' : ''} ${settings.lowScreen ? 'low-screen' : ''} ${settings.highContrast ? 'high-contrast' : ''}${largeView ? ' large-view' : ''}${voiceOn ? ' voice-on' : ''}`}>
     {settings.lowScreen && <div className="low-screen-banner">
       {/* 낮은 화면의 비어 있는 위쪽 전체가 하나의 누름 자리입니다(화면 위로 올리기). 터치 기록에 남도록 주문 화면 안에 둡니다. */}
-      <button type="button" className="raise-area" data-log-target="screen-position-pad" onClick={() => setManualSettings(current => ({ ...current, lowScreen: false }))}>
+      <button type="button" className="raise-area" data-log-target="screen-position-pad" onClick={() => { setManualSettings(current => ({ ...current, lowScreen: false })); clearAppliedSettings(['lowScreen']); }}>
         <Icon name="arrow_upward" />화면 위로 올리기</button>
       <div className="banner-copy" aria-hidden="true"><p className="store-name">온기 카페</p><StepsBar screen={screen} /></div>
     </div>}
@@ -388,12 +434,12 @@ export function OrderPage() {
           disabled: screen === 'complete' ? busy : !count || writeDisabled,
           onClick: () => { if (screen === 'complete') { enlargementPreview.reset(); void startNewOrder(); } else if (screen === 'menu') openReview(); else void controller.checkout(); } }}
         armed={barArmed} onBlockedPress={() => setBarChange(count => count + 1)} />
-      <EntryRow supportOpen={supportOpen} onToggleSupport={() => setSupportOpen(!supportOpen)} onUndo={enlargementPreview.largeView ? enlargementPreview.reset : null} />
+      <EntryRow supportOpen={supportOpen} onToggleSupport={() => setSupportOpen(!supportOpen)} onUndo={hasVoiceSettings ? undoVoiceSettings : enlargementPreview.largeView ? enlargementPreview.reset : null} />
     </section>
     <HelpSheet ref={helpDialog} settings={settings} combined={combinedEnlargement}
-      onToggle={key => { setManualSettings(current => ({ ...current, [key]: !settings[key] })); clearAutomaticSettings([key]); }}
+      onToggle={key => { setManualSettings(current => ({ ...current, [key]: !settings[key] })); clearAppliedSettings([key]); }}
       onCombined={toggleCombinedEnlargement}
-      onReset={() => { enlargementPreview.reset(); setAutomaticSettings({ sessionId: '', values: {} }); setManualSettings({ ...initialSettings }); }} onClose={() => setSupportOpen(false)}
+      onReset={() => { voiceSettingReceiver.invalidate(); setVoiceSettings({ sessionId: '', values: {}, notice: null }); enlargementPreview.reset(); setAutomaticSettings({ sessionId: '', values: {} }); setManualSettings({ ...initialSettings }); }} onClose={() => setSupportOpen(false)}
       readAloud={<ReadAloudControls root={touchLog.root} voiceController={voiceController} screenKey={`${state.session?.session_id}:${screen}:${selected?.product_id ?? ''}:${restartOpen}:${cartSheetOpen}`} />} />
     <OptionSheet ref={dialog} product={selected} temperature={temperature} quantity={quantity} remaining={remaining} writeDisabled={writeDisabled}
       status={feedback} hint={hint === 'option-add' ? hintCopy['option-add'] : null}
