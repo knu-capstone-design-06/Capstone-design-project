@@ -109,6 +109,8 @@ class FrameChain:
                 self.aid_carry.reset()
                 if self.aid_confirm is not None:   # its hold starts only on rows from here on (aid_confirm.py)
                     self.aid_confirm.reset = (t, session)
+            if self.aid_confirm is not None and session is not None and session != self.session:
+                self.aid_confirm.new_start(t, session)   # --aid-start-only: the session's judgment starts again
             if session is not None:
                 self.session = session
         row, _ = self.observer.process(frame, source_kind=self.source_kind)
@@ -138,9 +140,16 @@ class FrameChain:
                     if col in row:
                         row[col] = None
             row.update(self.change.update(row))
+            if self.aid_confirm is not None:     # --aid-start-only: a counted change of main user starts it again
+                self.aid_confirm.row_change(row, self.session)
             row["ms_heads"] = sum(heads.ms.values())
         row.update(C.shoulder_columns(inf.pose if inf is not None else None))
-        if self.aids is not None:
+        if self.aids is not None and self.aid_confirm is not None and self.aid_confirm.start_skip():
+            # --aid-start-only: the stretch was judged without an aid; the detector does not run (blank columns)
+            row.update(dict.fromkeys(C.AID_COLUMNS + C.AID_HEAD_COLUMNS
+                                     + (C.AID_CARRY_COLUMNS if self.p.aid_rule == HEAD_CENTRE_CARRY else ())))
+            row["ms_aids"] = None
+        elif self.aids is not None:
             aids = self.aids(frame.image)
             row.update(C.aid_columns(aids, inf.pose if inf is not None else None, row.get("primary_box"),
                                      self.heads is not None, self.p.aid_person_min))
@@ -421,7 +430,10 @@ class WindowJudge:
                                  head_approach_ratio_min=p.head_approach_ratio_min, segment_s=p.segment_s,
                                  away=away, aid_rule=p.aid_rule, aid_head_min=p.aid_head_min)
             reasons = unknown_reasons(rows, t_end, sp) if out["name"] == UNKNOWN else []
-            if self.aid_confirm is not None:   # before the rule table reads the tags
+            if self.aid_confirm is not None and self.aid_confirm.start_only:   # the window's session: aid_confirm.py
+                confirm = self.aid_confirm.check_start(out, rows, t_end, sp, p, confirm_images,
+                                                       log_session if confirm_session is None else confirm_session)
+            elif self.aid_confirm is not None:   # before the rule table reads the tags
                 confirm = self.aid_confirm.check(out, rows, t_end, sp, p, confirm_images, session_reset,
                                                  confirm_session)
             turns = [{"event_id": e["event_id"], "kind": e["kind"], "t_start": e["t_start"], "t_end": e["t_end"],

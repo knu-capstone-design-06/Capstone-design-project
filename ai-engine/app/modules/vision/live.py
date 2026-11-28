@@ -54,7 +54,8 @@ From ai-engine/:
   SCORE: as in replay.py (the reading of the walking-aid detector and the aid_use cut of the two head_centre
   readings, which has no default; they override the value bundle and are recorded in meta.json with origin 'option').
 - --aid-confirm-model READER.onnx (repeatable) with --aid-confirm-min SCORE: the wheelchair confirm step, as in
-  replay.py (aid_confirm.py); off without it.
+  replay.py (aid_confirm.py); off without it. --aid-start-only as in replay.py; the session is the one a window's
+  release names (the touch entry's), so without --serve nothing is switched off.
 - A run with neither --seconds nor --out (unbounded, e.g. the kiosk's all-day run) keeps no per-frame or per-window
   timing rows (RunTiming(keep=False)); at exit it prints the frame and window counts, the stop reason and the tag
   sender's counts, with no timing percentiles; with --serve it says so in one start line (unbounded_note). The local
@@ -538,8 +539,10 @@ def main(argv=None) -> int:
     aids, aid_info = load_aids(a.aid_model, bundle.chain, a.threads, print)
     info.update(aid_info)                        # every model file in meta.json, as replay.py writes it
     aid_confirm, confirm_info = load_aid_confirm(a.aid_confirm_model, a.aid_confirm_min, bundle, a.threads, print,
-                                                 a.aid_confirm_hold, a.aid_confirm_hold_user)
+                                                 a.aid_confirm_hold, a.aid_confirm_hold_user, a.aid_start_only)
     info.update(confirm_info)
+    if a.aid_start_only and a.serve is None:
+        print("--aid-start-only: --serve가 없어 세션이 없으므로 보조기구 탐지기를 끄지 않습니다", flush=True)
     phones, phone_info = load_phones(a.phone_model, bundle.chain, a.threads, print)
     info.update(phone_info)
     models = MediaPipeModels(a.models, blendshapes=a.blendshapes)

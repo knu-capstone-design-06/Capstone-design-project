@@ -5159,6 +5159,510 @@ class AidConfirmTests(unittest.TestCase):
         self.assertEqual(user, ["--aid-confirm-hold-user needs --aid-confirm-model"])
         self.assertFalse(ap.parse_args([]).aid_confirm_hold)
 
+    # --- --aid-start-only (aid_confirm.py, 'Start only') ---------------------------------------------------------------
+    def clocked_aids(self, n, sched=None, wheelchair=(), person=None):
+        """Fake inferences that note the frame index, and a stand-in detector that records the frame indices it is
+        called on; wheelchair = frame indices on which its wheelchair box (= the person box) is there, elsewhere only
+        the person box; person(k) = the person box of frame k (default PERSON). Returns (models, aids, called)."""
+        import numpy as np
+        from app.inference.aid import Aids
+        outer, called = self, []
+        empty = (np.zeros((0, 4)), np.zeros(0))
+
+        class Clock(FakeModels):
+            def infer(self, frame):
+                self.k = frame.index
+                return super().infer(frame)
+        models = Clock(sched or [fake_inference() for _ in range(n)])
+
+        def aids(img):
+            called.append(models.k)
+            box = np.array([outer.PERSON if person is None else person(models.k)])
+            wc = (box, np.array([0.6])) if models.k in wheelchair else empty
+            return Aids(box, np.array([0.6]), np.array([[0.1, 0, 0, 0, 0.6]]), outer.CLASSES,
+                        (img.shape[1], img.shape[0]), {"infer": 0.0},
+                        {"crutch": empty, "cane": empty, "walker": empty, "wheelchair": wc})
+        return models, aids, called
+
+    def start_live(self, confirm, n, at, heads=None, sched=None, wheelchair=(), person=None):
+        """run_live on the fake camera with the touch entry; at = touch windows by frame; heads / sched = head boxes and
+        fake inferences per frame (default: one user throughout); wheelchair, person: clocked_aids. Returns (records,
+        meta, the frame indices on which the detector was called)."""
+        from test_vision_links import entry, reporting, timed_frames
+        from app.modules.vision.live import run_live
+        models, aids, called = self.clocked_aids(n, sched, wheelchair, person)
+        folder = tempfile.mkdtemp()
+        b = bundle(aid_rule="head_centre_carry", aid_head_min=0.5)
+        svc = entry(b=b)
+        meta = run_live(reporting(timed_frames(n), svc, at), b, models=models,
+                        detector=ScheduledHeads(heads or [[[0.38, 0.22, 0.62, 0.58]]] * n), aids=aids,
+                        show_window=False, out_dir=folder, print_fn=lambda line: None, entry=svc, aid_confirm=confirm)
+        with open(os.path.join(folder, "windows.jsonl"), encoding="utf-8") as f:
+            return [json.loads(line) for line in f], meta, called
+
+    @staticmethod
+    def touch_at(last, taps=(), session=lambda k: "s1", first=1):
+        """1 s touch windows (k - 1, k] for k = first .. last, sent at frame 10 k; taps = the k with one press."""
+        from test_vision_links import window_body
+        return {10 * k: [window_body(k - 1.0, float(k), tap=int(k in taps), session_id=session(k))]
+                for k in range(first, last + 1)}
+
+    def start_step(self, p=0.9, **flags):
+        from app.modules.vision.aid_confirm import AidConfirm
+        from app.modules.vision.chain import history_s
+        b = bundle(aid_rule="head_centre_carry", aid_head_min=0.5)
+        return AidConfirm(self.Reader(p), 0.5, history_s(b) + b.chain.segment_s, **flags)
+
+    @staticmethod
+    def start_flags(rec):
+        c = rec.get("aid_confirm") or {}
+        return bool(c.get("start_off")), bool(c.get("start_judgment"))
+
+    def test_start_only_switches_off_after_a_press_at_a_judged_false_window(self):
+        """Through run_live, one session, an ordinary user (the engine answers no aid). Without a press nothing changes:
+        the answers equal the plain confirm step's and the detector runs on every frame. With one press at 3 s the
+        first window that answers no aid and whose span starts at or after the press (and after the chain's reset)
+        switches the session off; the windows before it equal the plain step's, the ones after it answer false with
+        start_off and no evidence, and the detector is not called on the frames after the switch."""
+        n = 150
+        plain, _, called_plain = self.start_live(self.start_step(), n, self.touch_at(14))
+        self.assertEqual(called_plain, list(range(n)))
+        recs, meta, called = self.start_live(self.start_step(start_only=True), n, self.touch_at(14))
+        self.assertEqual([self.aid(r) for r in recs], [self.aid(r) for r in plain])
+        self.assertFalse(any(self.start_flags(r) != (False, False) for r in recs))
+        self.assertEqual((len(called), meta["aid_confirm"]["sessions_off"]), (n, 0))
+        step = self.start_step(start_only=True)
+        recs, meta, called = self.start_live(step, n, self.touch_at(14, taps={3}))
+        k = next(i for i, r in enumerate(recs) if self.start_flags(r)[1])
+        judgment = recs[k]
+        window_s = bundle().situation.window_s
+        self.assertGreaterEqual(judgment["t"] - window_s, 3.0 - 1e-6)
+        self.assertGreaterEqual(judgment["t"] - window_s, step.reset[0] - 1e-6)
+        self.assertEqual(self.aid(judgment), (False, None))
+        self.assertEqual([self.aid(r) for r in recs[:k + 1]], [self.aid(r) for r in plain[:k + 1]])
+        self.assertFalse(any(self.start_flags(r)[0] for r in recs[:k + 1]))
+        after = recs[k + 1:]
+        self.assertTrue(after)
+        for r in after:
+            tag = {t["name"]: t for t in r["situation"]["tags"]}["aid_use"]
+            self.assertEqual((r["aid_confirm"], tag["status"], tag["evidence"]),
+                             ({"confirmed": None, "start_off": True}, False, []), r["t"])
+        self.assertLess(len(called), n)
+        self.assertEqual(called, list(range(len(called))))       # every frame up to the switch, none after it
+        # the switch comes from the release worker, so in live it lands on the frame that released the judgment window
+        # or a later one (the exact frame is checked in the replay test, where windows are judged on the frame loop)
+        self.assertGreaterEqual(called[-1], int(round(judgment["t"] / DT)))
+        s = meta["aid_confirm"]
+        self.assertEqual((s["start_only"], s["sessions_off"], s["windows_start_off"], s["frames_aid_skipped"]),
+                         (True, 1, len(after), n - len(called)))
+
+    def start_out(self, status, cls=None, reason=None):
+        return {"tags": [{"name": "aid_use", "status": status, "unknown_reason": reason,
+                          "evidence": [{"event_id": "aid_head@1", "obs": "aid_class", "value": cls, "t": 1.0}]}]}
+
+    def start_rows(self, t_end, press=None):
+        """One row per 0.1 s from 0 to t_end, with a press on the row at time press."""
+        return [{"frame_idx": i, "t_s": round(i * DT, 6), "tap_count": int(press is not None
+                                                                         and abs(i * DT - press) < 1e-6)}
+                for i in range(int(round(t_end / DT)) + 1)]
+
+    def judged_step(self, record):
+        """A start-only step in session s1 from 0 s whose confirm check is replaced by a stand-in: an engine
+        wheelchair window gets aid_use false and the given record (a withdrawal with its reason)."""
+        step = self.start_step(start_only=True)
+        step.new_start(0.0, "s1")
+
+        def check(out, rows, t_end, sp, cp, images=None, *rest):
+            tag = out["tags"][0]
+            if tag["status"] is True and record is not None:
+                tag["status"] = False
+                return dict(record)
+            return None
+        step.check = check
+        return step
+
+    def test_start_only_needs_a_judged_answer(self):
+        """An unknown window, and a wheelchair window withdrawn because of a reader error or of too few reader rows
+        (or no main user box), make no start judgment, also after a press; a wheelchair window the reader read and
+        did not agree with (reason median) does, and so does the engine's own no-aid answer."""
+        from app.modules.vision.params import PilotParams
+        sp, cp = sit_params(), PilotParams()
+        rows = self.start_rows(12.0, press=3.0)
+        step = self.judged_step(None)
+        self.assertIsNone(step.check_start(self.start_out("unknown", reason="too_few_rows"), rows, 10.0, sp, cp,
+                                           session="s1"))
+        self.assertIsNone(step.off)
+        for reason in ("reader_error", "too_few_rows", "no_main_user_box"):
+            step = self.judged_step({"confirmed": False, "reason": reason})
+            for t_end in (9.0, 10.0, 11.0):
+                step.check_start(self.start_out(True, "wheelchair"), rows, t_end, sp, cp, session="s1")
+            self.assertIsNone(step.off, reason)
+        step = self.judged_step({"confirmed": False, "reason": "median"})
+        r = step.check_start(self.start_out(True, "wheelchair"), rows, 9.0, sp, cp, session="s1")
+        self.assertEqual((r["start_judgment"], step.off), (True, (1, "s1", 0.0)))
+        step = self.judged_step(None)
+        self.assertIsNone(step.check_start(self.start_out(False), rows, 8.9, sp, cp, session="s1"))  # before the press
+        self.assertIsNone(step.off)
+        r = step.check_start(self.start_out(False), rows, 9.0, sp, cp, session="s1")
+        self.assertEqual((r, step.off), ({"confirmed": None, "start_judgment": True}, (1, "s1", 0.0)))
+
+    def test_start_only_never_switches_off_a_session_with_an_aid_seen(self):
+        """Through run_live: the user's wheelchair is held by the detector for the first 7 s and the reader agrees,
+        then the engine answers no aid; a press at 3 s. The session is never switched off, though its later windows
+        are false after the press. The same at the judge with a stick-class window."""
+        from app.modules.vision.params import PilotParams
+        n = 200
+        recs, meta, called = self.start_live(self.start_step(start_only=True), n, self.touch_at(19, taps={3}),
+                                             wheelchair=set(range(70)))
+        self.assertIn((True, None), [self.aid(r) for r in recs])
+        self.assertIn((False, None), [self.aid(r) for r in recs if r["t"] > 12.0])
+        self.assertFalse(any(self.start_flags(r) != (False, False) for r in recs))
+        self.assertEqual((len(called), meta["aid_confirm"]["sessions_off"]), (n, 0))
+        sp, cp = sit_params(), PilotParams()
+        rows = self.start_rows(14.0, press=3.0)
+        step = self.judged_step(None)
+        step.check_start(self.start_out(True, "crutch"), rows, 8.0, sp, cp, session="s1")
+        for t_end in (9.0, 10.0, 11.0):
+            self.assertIsNone(step.check_start(self.start_out(False), rows, t_end, sp, cp, session="s1"))
+        self.assertIsNone(step.off)
+
+    def test_start_only_turns_the_detector_on_again_in_the_next_session(self):
+        """Through run_live: session s1 to 12 s with a press at 3 s (switched off), then s2 without a press. The
+        detector is not called on s1's frames after the switch, and is called on every frame from s2's reset on; no s2
+        window answers start_off, and s2's windows whose rows all come after its reset equal the plain step's."""
+        n = 230
+        at = self.touch_at(22, taps={3}, session=lambda k: "s1" if k <= 12 else "s2")
+        plain, _, _ = self.start_live(self.start_step(), n, at)
+        step = self.start_step(start_only=True)
+        recs, meta, called = self.start_live(step, n, at)
+        s1 = [r for r in recs if r["evaluated"]["session_id"] == "s1"]
+        s2 = [r for r in recs if r["evaluated"]["session_id"] == "s2"]
+        self.assertTrue(any(self.start_flags(r)[0] for r in s1))
+        self.assertFalse(any(self.start_flags(r) != (False, False) for r in s2))
+        self.assertEqual((step.reset[1], meta["aid_confirm"]["sessions_off"]), ("s2", 1))
+        first_s2 = int(round(step.reset[0] / DT))
+        self.assertEqual([k for k in called if k >= first_s2], list(range(first_s2, n)))
+        self.assertTrue(set(range(100, 120)).isdisjoint(called))         # s1 frames after the switch
+        window_s = bundle().situation.window_s
+        same = {r["t"]: self.aid(r) for r in plain if r["t"] - window_s >= step.reset[0] - 1e-6}
+        self.assertTrue(same)
+        self.assertEqual({r["t"]: self.aid(r) for r in s2 if r["t"] in same}, same)
+
+    def test_start_only_drops_a_late_off_for_an_earlier_session_or_user(self):
+        """An OFF the judge publishes for a stretch the frame thread has already left (a new session, or a counted
+        change of main user) is not applied: the detector keeps running. An OFF for the current stretch is."""
+        step = self.start_step(start_only=True)
+        step.new_start(1.0, "s1")
+        old = step.start_from
+        step.new_start(5.0, "s2")
+        self.assertFalse(step.switch_off(old[2], "s1", old[0]))
+        self.assertEqual((step.off, step.start_skip()), (None, False))
+        step.row_change(self.change_row(5.5), "s2")
+        self.assertEqual(step.start_from[:2], (5.5, "s2"))
+        self.assertFalse(step.switch_off(old[2] + 1, "s2", 5.0))             # the stretch before the change row
+        self.assertEqual((step.off, step.start_skip()), (None, False))
+        now = step.start_from
+        self.assertTrue(step.switch_off(now[2], "s2", now[0]))
+        self.assertTrue(step.start_skip())
+        self.assertEqual(step.frames_skipped, 1)
+
+    def test_start_only_does_not_count_a_press_placed_before_the_chains_reset(self):
+        """Through run_live: the session's first touch window (with the only press, at 1 s) comes during frame 15, so
+        the chain resets at 1.5 s and the press lies on a row before it: no window switches off. A second press at
+        6 s does, at a window whose span starts at or after the chain's reset."""
+        n = 150
+        at = {15: self.touch_at(1, taps={1})[10], **{k: v for k, v in self.touch_at(14).items() if k > 10}}
+        step = self.start_step(start_only=True)
+        recs, meta, called = self.start_live(step, n, at)
+        self.assertAlmostEqual(step.reset[0], 1.5)
+        self.assertEqual((len(called), meta["aid_confirm"]["sessions_off"]), (n, 0))
+        at = {15: self.touch_at(1, taps={1})[10], **{k: v for k, v in self.touch_at(14, taps={6}).items() if k > 10}}
+        step = self.start_step(start_only=True)
+        recs, meta, _ = self.start_live(step, n, at)
+        judgment = next(r for r in recs if self.start_flags(r)[1])
+        self.assertGreaterEqual(judgment["t"] - bundle().situation.window_s, max(6.0, step.reset[0]) - 1e-6)
+
+    def test_start_only_option_off_or_without_a_session_changes_nothing(self):
+        """Without the option no record or meta carries a start-only key and the step is the plain one. With the
+        option but without a session (replay without a touch log, live with the touch entry but no touch window) every
+        answer, record and detector call equals the plain step's."""
+        from app.modules.vision.aid_confirm import AidConfirm
+        from app.modules.vision.chain import history_s
+        b, _, _ = self.replay_fading(None)
+        keep = history_s(b) + b.chain.segment_s
+        _, plain, meta_plain = self.replay_fading(AidConfirm(self.Reader(0.1), 0.5, keep))
+        for key in ("start_only", "sessions_off", "windows_start_off", "frames_aid_skipped"):
+            self.assertNotIn(key, meta_plain["aid_confirm"])
+        _, start, meta = self.replay_fading(AidConfirm(self.Reader(0.1), 0.5, keep, start_only=True))
+        strip = lambda recs: [{k: v for k, v in r.items() if k != "ms_window"} for r in recs]   # noqa: E731
+        self.assertEqual(strip(start), strip(plain))
+        self.assertEqual((meta["aid_confirm"]["sessions_off"], meta["aid_confirm"]["frames_aid_skipped"]), (0, 0))
+        self.assertTrue(all(not self.start_flags(r)[0] and not self.start_flags(r)[1] for r in start))
+        recs, _, called = self.start_live(self.start_step(start_only=True), 120, {})
+        plain_live, _, _ = self.start_live(self.start_step(), 120, {})
+        self.assertEqual([(self.aid(r), r["aid_confirm"]) for r in recs],
+                         [(self.aid(r), r["aid_confirm"]) for r in plain_live])
+        self.assertEqual(len(called), 120)
+
+    def test_start_only_option_needs_the_confirm_model_and_not_the_holds(self):
+        import argparse
+        from app.modules.vision.replay import add_aid_confirm_options, check_aid_confirm_options
+        ap = argparse.ArgumentParser()
+        ap.add_argument("--aid-model", default=None)
+        add_aid_confirm_options(ap)
+        path = os.path.join(tempfile.mkdtemp(), "reader.onnx")
+        with open(path, "wb") as f:
+            f.write(b"stand-in")
+        self.assertFalse(ap.parse_args([]).aid_start_only)
+        for argv, expected in ((["--aid-start-only"], ["--aid-start-only needs --aid-confirm-model"]),
+                               (["--aid-confirm-model", path, "--aid-start-only", "--aid-confirm-hold"],
+                                ["--aid-start-only cannot be combined with --aid-confirm-hold or "
+                                 "--aid-confirm-hold-user"]),
+                               (["--aid-confirm-model", path, "--aid-start-only", "--aid-confirm-hold-user"],
+                                ["--aid-start-only cannot be combined with --aid-confirm-hold or "
+                                 "--aid-confirm-hold-user"]),
+                               (["--aid-confirm-model", path, "--aid-start-only"], [])):
+            errors = []
+            check_aid_confirm_options(errors.append, ap.parse_args(["--aid-model", "d.onnx"] + argv),
+                                      "head_centre_carry")
+            self.assertEqual(errors, expected, argv)
+
+    @staticmethod
+    def change_row(t, **flags):
+        """A row whose change columns say the main user changed (track 1 to 2); flags override the change's flags."""
+        return {"t_s": t, "primary_track": 2, "main_user_prev_track": 1,
+                **{"main_user_reacquired": False, "main_user_prev_settled": True, "main_user_stitched": False,
+                   **flags}}
+
+    def test_start_only_starts_again_only_at_a_counted_change_of_user(self):
+        """A change row that the engine does not count as a new user (the same user found again in place, a stitched
+        break, or an earlier user who had not settled) leaves the stretch as it is; a counted one starts a new
+        stretch at its row and clears an OFF for the frame thread."""
+        step = self.start_step(start_only=True)
+        step.new_start(1.0, "s1")
+        self.assertTrue(step.switch_off(step.start_from[2], "s1", 1.0))
+        for flags in ({"main_user_reacquired": True}, {"main_user_stitched": True},
+                      {"main_user_prev_settled": False}):
+            step.row_change(self.change_row(9.0, **flags), "s1")
+            self.assertEqual(step.start_from[:2], (1.0, "s1"), flags)
+            self.assertTrue(step.start_skip(), flags)
+        step.row_change({"t_s": 9.0, "primary_track": 2, "main_user_prev_track": None}, "s1")
+        self.assertTrue(step.start_skip())
+        step.row_change(self.change_row(9.5), "s1")
+        self.assertEqual(step.start_from[:2], (9.5, "s1"))
+        self.assertFalse(step.start_skip())
+        self.assertEqual(step.off_until, 9.5)
+
+    def test_start_only_a_new_user_in_an_off_session_is_judged_again(self):
+        """Through run_live, one session: user A (an ordinary user) for 10.5 s with a press at 3 s, nobody for 1.5 s,
+        then user B elsewhere. The session is switched off for A; the chain's counted change of main user at B's
+        first row turns the detector on again from that row, no later window answers start_off, and without a press
+        after the change B is not switched off. With a press at 15 s B is switched off again, at a window whose
+        span starts at or after both the change and that press."""
+        n = 230
+        heads = [[[0.38, 0.22, 0.62, 0.58]]] * 105 + [[]] * 15 + [[[0.05, 0.25, 0.25, 0.55]]] * (n - 120)
+        sched = ([fake_inference() for _ in range(105)] + [fake_inference(face=False, body=False) for _ in range(15)]
+                 + [fake_inference() for _ in range(n - 120)])
+        window_s = bundle().situation.window_s
+        for taps, offs in (({3}, 1), ({3, 15}, 2)):
+            step = self.start_step(start_only=True)
+            recs, meta, called = self.start_live(step, n, self.touch_at(22, taps=taps), heads=heads, sched=sched)
+            change_t = step.start_from[0]
+            self.assertEqual(step.start_from[2], 2, taps)                 # the session's start and the change
+            self.assertGreaterEqual(change_t, 10.5 - 1e-6)
+            first = int(round(change_t / DT))
+            judgments = [r for r in recs if self.start_flags(r)[1]]
+            self.assertEqual(meta["aid_confirm"]["sessions_off"], offs, taps)
+            self.assertLess(judgments[0]["t"], change_t)
+            self.assertTrue(any(self.start_flags(r)[0] for r in recs if r["t"] < change_t), taps)
+            if offs == 1:
+                self.assertFalse(any(self.start_flags(r)[0] for r in recs if r["t"] >= change_t), taps)
+                self.assertEqual([k for k in called if k >= first], list(range(first, n)), taps)
+            else:
+                later = judgments[1]
+                self.assertGreaterEqual(later["t"] - window_s, max(15.0, change_t) - 1e-6)
+                self.assertFalse(any(self.start_flags(r)[0] for r in recs if change_t <= r["t"] <= later["t"]))
+                self.assertTrue(all(self.start_flags(r)[0] for r in recs if r["t"] > later["t"]))
+                self.assertIn(first, called)
+
+    HEAD = [0.38, 0.22, 0.62, 0.58]
+    PRESS = {"target": {"id": "product:1", "kind": "button", "disabled": False}}
+    OPEN = [(-1000, "session_start", "menu", None), (-900, "screen_enter", "menu", None)]
+    TO_S2 = [(12000, "session_end", "menu", {"reason": "server_session_change"}),
+             (12050, "session_start", "menu", {"reason": "server_session_change"}, "s2"),
+             (12050, "screen_enter", "menu", None, "s2")]
+
+    def start_replay(self, confirm, n, events, wheelchair=()):
+        """run_replay with a touch log of these events (touch_log; None = no touch log) and the clocked stand-in
+        detector. Returns (records, meta, the frame indices the detector was called on, rows.csv as dicts)."""
+        import csv
+        from app.modules.vision.replay import run_replay
+        from app.modules.vision.touch import load_timeline
+        models, aids, called = self.clocked_aids(n, wheelchair=wheelchair)
+        folder = tempfile.mkdtemp()
+        video, out = os.path.join(folder, "take.mp4"), os.path.join(folder, "out")
+        b = bundle(aid_rule="head_centre_carry", aid_head_min=0.5)
+        timeline = None if events is None else load_timeline(touch_log(folder, events, video), video)
+        meta = run_replay(frames(n), out, b, timeline=timeline, models=models,
+                          detector=ScheduledHeads([[self.HEAD]] * n), aids=aids, session_id="t", aid_confirm=confirm)
+        with open(os.path.join(out, "windows.jsonl"), encoding="utf-8") as f:
+            recs = [json.loads(line) for line in f]
+        with open(os.path.join(out, "rows.csv"), encoding="utf-8-sig", newline="") as f:
+            rows = list(csv.DictReader(f))
+        return recs, meta, called, rows
+
+    def test_start_only_in_replay_with_a_two_session_touch_log(self):
+        """A replay whose touch log opens session s1 before the first frame, has a press at 3 s and changes to s2 at
+        12.05 s. s1 (whose first row has no chain reset) is switched off at the 9 s window, the first whose span starts
+        at the press; the detector runs on every frame up to the frame that released it and on none after it until
+        s2's first row, from which it runs on every frame. s1's later windows answer start_off; s2's do not, and s2
+        (no press) is not switched off. The windows up to the judgment equal the plain step's. The skipped rows keep
+        every aid column in rows.csv, blank, with ms_aids blank."""
+        from app.modules.vision.columns import AID_CARRY_COLUMNS, AID_COLUMNS, AID_HEAD_COLUMNS
+        n = 230
+        events = self.OPEN + [(3000, "pointer_start", "menu", self.PRESS)] + self.TO_S2
+        plain, _, called_plain, _ = self.start_replay(self.start_step(), n, events)
+        self.assertEqual(called_plain, list(range(n)))
+        step = self.start_step(start_only=True)
+        recs, meta, called, rows = self.start_replay(step, n, events)
+        k = next(i for i, r in enumerate(recs) if self.start_flags(r)[1])
+        self.assertEqual(recs[k]["t"], 9.0)
+        self.assertEqual([self.aid(r) for r in recs[:k + 1]], [self.aid(r) for r in plain[:k + 1]])
+        self.assertEqual(step.reset[1], "s2")
+        first_s2 = int(round(step.reset[0] / DT))
+        self.assertEqual(called, list(range(91)) + list(range(first_s2, n)))
+        for r in recs[k + 1:]:
+            self.assertEqual(self.start_flags(r), (r["t"] < step.reset[0], False), r["t"])
+        self.assertTrue(any(self.start_flags(r)[0] for r in recs))
+        s = meta["aid_confirm"]
+        self.assertEqual((s["sessions_off"], s["frames_aid_skipped"]), (1, first_s2 - 91))
+        skipped = set(range(91, first_s2))
+        for name in AID_COLUMNS + AID_HEAD_COLUMNS + AID_CARRY_COLUMNS + ("ms_aids",):
+            self.assertIn(name, rows[0])
+        for row in rows:
+            blank = {name: row[name] for name in AID_COLUMNS + AID_HEAD_COLUMNS + AID_CARRY_COLUMNS + ("ms_aids",)
+                     if row[name] != ""}
+            if int(row["frame_idx"]) in skipped:
+                self.assertEqual(blank, {}, row["frame_idx"])
+            else:
+                self.assertIn("ms_aids", blank, row["frame_idx"])
+
+    def test_start_only_in_replay_does_not_count_a_press_that_is_the_touch_logs_first_event(self):
+        """A touch log whose first event is the press (no session-opening event before it): the touch log has no count
+        for the stretch before its first event, so that press is never counted and nothing is switched off."""
+        n = 150
+        events = [(3000, "pointer_start", "menu", self.PRESS), (4000, "screen_enter", "review", {"from": "menu"})]
+        recs, meta, called, _ = self.start_replay(self.start_step(start_only=True), n, events)
+        self.assertEqual((meta["aid_confirm"]["sessions_off"], called), (0, list(range(n))))
+        self.assertFalse(any(self.start_flags(r) != (False, False) for r in recs))
+
+    def test_start_only_judges_through_the_real_confirm_check(self):
+        """A replay of a user the detector reads as a wheelchair throughout, a press at 3 s. A reader that reads 0.1
+        withdraws every window with the reason median, and the first one after the press is the judgment that switches
+        the session off. A reader that fails withdraws them with reader_error, which is no judgment: nothing is
+        switched off."""
+        n = 150
+        events = self.OPEN + [(3000, "pointer_start", "menu", self.PRESS)]
+        recs, meta, called, _ = self.start_replay(self.start_step(0.1, start_only=True), n, events,
+                                                  wheelchair=set(range(n)))
+        judgment = next(r for r in recs if self.start_flags(r)[1])
+        self.assertEqual((judgment["t"], judgment["aid_confirm"]["confirmed"], judgment["aid_confirm"]["reason"]),
+                         (9.0, False, "median"))
+        self.assertEqual((meta["aid_confirm"]["sessions_off"], called), (1, list(range(91))))
+
+        class Failing(self.Reader):
+            def probs(self, image):
+                raise RuntimeError("stand-in reader failure")
+        step = self.start_step(start_only=True)
+        step.reader = Failing(0.9)
+        step.log = lambda line: None
+        recs, meta, called, _ = self.start_replay(step, n, events, wheelchair=set(range(n)))
+        reasons = {r["aid_confirm"].get("reason") for r in recs if r["t"] >= 9.0}
+        self.assertEqual(reasons, {"reader_error"})
+        self.assertEqual((meta["aid_confirm"]["sessions_off"], called), (0, list(range(n))))
+
+    def test_start_only_answers_a_wheelchair_newcomer_after_a_switched_off_stretch(self):
+        """After an ordinary user's stretch was switched off, a wheelchair user who comes next is read again and
+        answered true: in a replay as the next session (s2 from 12.05 s), and in live as a counted change of main user
+        in the same session (user B elsewhere from 12 s, with a press at 15 s that does not switch B off)."""
+        n = 230
+        events = self.OPEN + [(3000, "pointer_start", "menu", self.PRESS)] + self.TO_S2
+        step = self.start_step(start_only=True)
+        recs, meta, called, _ = self.start_replay(step, n, events, wheelchair=set(range(121, n)))
+        first_s2 = int(round(step.reset[0] / DT))
+        self.assertEqual([k for k in called if k >= first_s2], list(range(first_s2, n)))
+        s2 = [r for r in recs if r["t"] >= step.reset[0]]
+        self.assertIn(((True, None), True), [(self.aid(r), r["aid_confirm"]["confirmed"]) for r in s2])
+        self.assertEqual(meta["aid_confirm"]["sessions_off"], 1)
+        heads = [[self.HEAD]] * 105 + [[]] * 15 + [[[0.05, 0.25, 0.25, 0.55]]] * (n - 120)
+        sched = ([fake_inference() for _ in range(105)] + [fake_inference(face=False, body=False) for _ in range(15)]
+                 + [fake_inference() for _ in range(n - 120)])
+        step = self.start_step(start_only=True)
+        recs, meta, called = self.start_live(step, n, self.touch_at(22, taps={3, 15}), heads=heads, sched=sched,
+                                             wheelchair=set(range(120, n)),
+                                             person=lambda k: self.PERSON if k < 120 else [0.0, 0.1, 0.32, 0.97])
+        change_t = step.start_from[0]
+        self.assertEqual(step.start_from[2], 2)
+        first = int(round(change_t / DT))
+        self.assertEqual([k for k in called if k >= first], list(range(first, n)))
+        after = [r for r in recs if r["t"] >= change_t]
+        self.assertIn(((True, None), True), [(self.aid(r), (r["aid_confirm"] or {}).get("confirmed")) for r in after])
+        self.assertFalse(any(self.start_flags(r)[0] for r in after))
+        self.assertEqual(meta["aid_confirm"]["sessions_off"], 1)
+
+    def test_start_only_keeps_a_session_on_after_true_windows_that_cross_its_start(self):
+        """Through run_live: the user's wheelchair is read for the first 3.5 s, so the windows answered true are the
+        ones whose span starts before the session's start in the chain; a press at 2 s and no-aid windows after it.
+        Those true windows end inside the session, so the session counts as one with an aid and is never switched
+        off."""
+        n = 160
+        step = self.start_step(start_only=True)
+        recs, meta, called = self.start_live(step, n, self.touch_at(15, taps={2}), wheelchair=set(range(35)))
+        window_s = bundle().situation.window_s
+        true = [r for r in recs if self.aid(r)[0] is True]
+        self.assertTrue(true)
+        self.assertTrue(all(r["t"] - window_s < step.start_from[0] <= r["t"] for r in true))
+        self.assertIn((False, None), [self.aid(r) for r in recs if r["t"] - window_s >= 2.0])
+        self.assertEqual((meta["aid_confirm"]["sessions_off"], called), (0, list(range(n))))
+
+    def test_start_only_option_reaches_the_step_from_both_runners(self):
+        """load_aid_confirm builds the step with start_only and says so at the start; replay.main and live.main pass
+        --aid-start-only to it (off when not given)."""
+        from contextlib import redirect_stdout
+        from unittest import mock
+        from app.modules.vision import live, replay
+        path = os.path.join(tempfile.mkdtemp(), "stand_in.onnx")
+        with open(path, "wb") as f:
+            f.write(b"stand-in")
+
+        class StandIn:
+            def __init__(self, *args, **kwargs):
+                self.classes, self.meta = self.CLASSES, {}
+        StandIn.CLASSES = self.CLASSES
+        lines = []
+        b = bundle(aid_rule="head_centre_carry", aid_head_min=0.5)
+        with mock.patch("app.inference.aid_confirm.AidConfirmReader", StandIn):
+            step, _ = replay.load_aid_confirm([path], 0.5, b, 1, lines.append, start_only=True)
+            plain, _ = replay.load_aid_confirm([path], 0.5, b, 1, lines.append)
+        self.assertEqual((step.start_only, plain.start_only), (True, False))
+        self.assertIn("--aid-start-only", lines[0])
+
+        class Stop(Exception):
+            pass
+        aid = ["--aid-model", path, "--aid-rule", "head_centre_carry", "--aid-head-min", "0.5",
+               "--aid-confirm-model", path]
+        out = os.path.join(tempfile.mkdtemp(), "out")
+        for module, argv in ((replay, ["--video", os.path.join(out, "take.mp4"), "--out", out, "--no-heads"]),
+                             (live, ["--camera", "0", "--no-window", "--seconds", "1", "--no-heads"])):
+            for given in (True, False):
+                seen = mock.Mock(side_effect=Stop)
+                with mock.patch("app.inference.aid.AidDetector", StandIn), \
+                        mock.patch("app.modules.vision.sources.VideoFileSource"), \
+                        mock.patch.object(module, "load_aid_confirm", seen), redirect_stdout(io.StringIO()):
+                    with self.assertRaises(Stop):
+                        module.main(argv + aid + (["--aid-start-only"] if given else []))
+                self.assertIs(seen.call_args.args[-1], given, (module.__name__, given))
+
 
 if __name__ == "__main__":
     unittest.main()

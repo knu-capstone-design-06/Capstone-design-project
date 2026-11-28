@@ -57,6 +57,27 @@ logged once per run and the count goes to the summary. A withdrawn window's aid_
 engine's own window rule's reason (too_few_rows, no_main_user_box), "median" (the median is not above the cut) or
 "reader_error". Loading the files at the start is not covered: a missing or
 unreadable file stops the start (app/inference/aid_confirm.py).
+
+Start only (--aid-start-only, off by default; not with the two holds): the walking aid is judged once at the start of
+a user's stretch. A stretch starts where FrameChain's session changes (the touch log's or the touch entry's session
+id; also the first known one) and at a row whose change columns carry a change of main user that
+events.user_since counts (new_user on events._change_obs of the row); FrameChain calls new_start there, on the frame
+thread, before the row's walking-aid detector would run. Without a session nothing is switched off. WindowJudge calls
+check_start with the window's session (live.py: the session its release names; replay: the touch log's). A window of
+the stretch passes the row test when every row inside its span lies at or after the stretch's start and the hold's
+own test (_after_reset) holds for that session. The first placed press of the stretch is the time of its first row
+at or after the stretch's start with a press (events.window_any_tap on that row). A window of the session answered
+aid_use true (a wheelchair window the reader agreed with, or a stick-class window) whose end lies at or after the
+stretch's start, also one whose span starts before it, marks the stretch as one with an aid, which is never switched
+off. The start judgment is the first passing window whose span starts at or after the first press
+and whose answer is a judged false: the engine's own false, or a wheelchair window the reader read and did not agree
+with (reason "median"); an unknown window and a withdrawal for another reason are no judgment. There, unless the
+stretch is marked, the stretch is switched off: the judge publishes (stretch, session, start) under start_lock, and
+only while the frame thread is still in that stretch (a late one is dropped). While the frame thread's current stretch
+is off, FrameChain does not call the walking-aid detector nor add_row (no crop, no read-ahead; blank aid columns, as
+for a skipped detector), and every window of that session whose end lies in the stretch answers aid_use false with no
+evidence (aid_confirm start_off true). The judgment window's record carries start_judgment true. The next stretch
+starts the judgment again, with the detector on from its first row.
 """
 from __future__ import annotations
 
@@ -65,7 +86,7 @@ import threading
 from concurrent.futures import CancelledError
 
 from .columns import _contains
-from .events import observe_scene
+from .events import _blank, _change_obs, new_user, observe_scene, window_any_tap
 
 WHEELCHAIR = "wheelchair"
 
@@ -103,9 +124,11 @@ def person_box(aids, row: dict):
 class AidConfirm:
     """The confirm step shared by FrameChain (add_row) and WindowJudge (check). reader = an AidConfirmReader (or a
     stand-in with crop(bgr, box_px) and probs(image)); cut = the confirm cut; keep_s = seconds of rows kept; hold /
-    hold_user = the two holds (module docstring; hold_user includes hold)."""
+    hold_user = the two holds (module docstring; hold_user includes hold); start_only = --aid-start-only (module
+    docstring, 'Start only')."""
 
-    def __init__(self, reader, cut: float, keep_s: float, hold: bool = False, hold_user: bool = False, log=None):
+    def __init__(self, reader, cut: float, keep_s: float, hold: bool = False, hold_user: bool = False, log=None,
+                 start_only: bool = False):
         self.reader, self.cut, self.keep_s = reader, float(cut), float(keep_s)
         self.log = log if log is not None else (lambda line: print(line, file=sys.stderr, flush=True))
         self.hold_user = bool(hold_user)
@@ -132,6 +155,18 @@ class AidConfirm:
         self.readahead_from = None            # after a hold ended: read-ahead reads no row before this time
         self.trigger_until = None             # read-ahead goes on for rows up to this time
         self.reset = None                     # FrameChain: (row time, session id) of its last per-session reset
+        self.start_only = bool(start_only)    # start only (module docstring)
+        self.start_lock = threading.Lock()
+        self.stretch = 0                      # start only, frame thread: rises at every new_start
+        self.start_from = None                # start only, frame thread: (row time, session id, stretch) of the last
+        self.off = None                       # start only: (stretch, session id, its start) switched off
+        self.off_until = None                 # start only: the start of the stretch after the one switched off
+        self.judged_stretch = None            # start only, judge: the stretch its press and mark below belong to
+        self.press_t = None                   # start only, judge: the stretch's first placed press
+        self.aid_seen = False                 # start only, judge: the stretch had a window answered aid_use true
+        self.sessions_off = 0                 # start only: stretches switched off
+        self.start_off_windows = 0            # start only: windows answered by start_off
+        self.frames_skipped = 0               # start only: rows on which the walking-aid detector did not run
 
     def start_readahead(self, row_min: float, window_s: float) -> None:
         """Read rows ahead on one reader thread (module docstring); row_min = aid_head_min, window_s = the
@@ -148,7 +183,9 @@ class AidConfirm:
         """The step's counts and the reader's call time (meta.json 'aid_confirm')."""
         ms = sorted(getattr(self.reader, "ms", []))
         waited = sorted(self.waited)
-        return {"cut": self.cut, "hold": self.hold, "hold_user": self.hold_user, "windows_held": self.held_windows,
+        start = ({"start_only": True, "sessions_off": self.sessions_off, "windows_start_off": self.start_off_windows,
+                  "frames_aid_skipped": self.frames_skipped} if self.start_only else {})
+        return {**start, "cut": self.cut, "hold": self.hold, "hold_user": self.hold_user, "windows_held": self.held_windows,
                 "windows_user_held": self.user_held_windows,
                 "windows_checked": self.checked, "windows_withdrawn": self.withdrawn,
                 "hold_ends": dict(self.hold_ends), "reader_errors": self.errors,
@@ -350,3 +387,82 @@ class AidConfirm:
                 "rows": events[0]["obs"]["rows"] if events else 0, "reads": self.reads - before,
                 **({} if confirmed else {"reason": reason or "median"}),
                 **({} if error is None else {"error": error})}
+
+    # --- start only (module docstring, 'Start only') ------------------------------------------------------------------
+    def new_start(self, t: float, session: str) -> None:
+        """FrameChain, frame thread: a new stretch starts at row time t (a new session, or a counted change of main
+        user); an off stretch it ends keeps its windows up to t."""
+        if not self.start_only:
+            return
+        with self.start_lock:
+            if self.off is not None and self.off[0] == self.stretch and self.off_until is None:
+                self.off_until = t
+            self.stretch += 1
+            self.start_from = (t, session, self.stretch)
+
+    def row_change(self, row: dict, session: str | None) -> None:
+        """FrameChain, frame thread, after the row's change columns: a change of main user that events.user_since
+        counts starts a new stretch at that row."""
+        if (self.start_only and session is not None and not _blank(row.get("main_user_prev_track"))
+                and new_user(_change_obs(row))):
+            self.new_start(float(row["t_s"]), session)
+
+    def start_skip(self) -> bool:
+        """FrameChain, frame thread: whether the current stretch is switched off (the row's detector is not run)."""
+        off = self.off
+        if not self.start_only or off is None or off[0] != self.stretch:
+            return False
+        self.frames_skipped += 1
+        return True
+
+    def check_start(self, out: dict, rows: list, t_end: float, situation_params, chain_params,
+                    images: dict | None = None, session: str | None = None) -> dict | None:
+        """check() under --aid-start-only; session = the window's session (None: check() alone). Returns the window
+        record's aid_confirm (None as check() does)."""
+        tag = next(t for t in out["tags"] if t["name"] == "aid_use")
+        with self.start_lock:
+            off, until = self.off, self.off_until
+        if (session is not None and off is not None and off[1] == session and t_end >= off[2]
+                and (until is None or t_end < until)):
+            self.start_off_windows += 1
+            tag.update(status=False, unknown_reason=None, evidence=[])
+            return {"confirmed": None, "start_off": True}
+        status = tag["status"]
+        cls = next((e["value"] for e in tag["evidence"] if e["obs"] == "aid_class"), None)
+        record = self.check(out, rows, t_end, situation_params, chain_params, images)
+        start = self.start_from
+        if session is None or start is None or start[1] != session:
+            return record
+        t0, _, stretch = start
+        if stretch != self.judged_stretch:
+            self.judged_stretch, self.press_t, self.aid_seen = stretch, None, False
+        for r in rows:
+            t = float(r["t_s"])
+            if t >= t0 and (self.press_t is None or t < self.press_t) and window_any_tap([r], (t, t)) is True:
+                self.press_t = t
+        if tag["status"] is True and t_end >= t0:   # an answer true that ends in the stretch keeps it on
+            self.aid_seen = True
+        w0 = t_end - situation_params.window_s
+        inside = [r for r in rows if w0 <= float(r["t_s"]) <= t_end]
+        if (not inside or any(float(r["t_s"]) < t0 for r in inside) or not self._after_reset(inside, session)
+                or (off is not None and off[0] == stretch)):
+            return record
+        if tag["status"] is True:
+            return record
+        judged = status is False or (status is True and cls == WHEELCHAIR and record is not None
+                                     and record.get("reason") == "median")
+        if not judged or self.aid_seen or self.press_t is None or w0 < self.press_t:
+            return record
+        if not self.switch_off(stretch, session, t0):
+            return record
+        return {**(record or {"confirmed": None}), "start_judgment": True}
+
+    def switch_off(self, stretch: int, session: str, t0: float) -> bool:
+        """The judge's OFF for a stretch (start_from's values); dropped when the frame thread has moved on to
+        another stretch meanwhile. Whether it was applied."""
+        with self.start_lock:
+            if self.stretch != stretch:
+                return False
+            self.off, self.off_until = (stretch, session, t0), None
+        self.sessions_off += 1
+        return True

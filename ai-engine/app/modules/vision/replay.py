@@ -28,6 +28,8 @@ From ai-engine/ (runtime environment: requirements.txt + app/modules/vision/requ
   window (--aid-confirm-min SCORE, default 0.5: the reader's own decision point, the cut of every table of the
   measurement); otherwise aid_use becomes false. Several files: the mean of their softmax probabilities. Needs
   --aid-model with --aid-rule head_centre or head_centre_carry. Off without the option: every output as before.
+  --aid-start-only (with it, not with the two holds): the walking aid is judged at the start of each touch session
+  and again after a change of main user the engine counts (aid_confirm.py, 'Start only').
 - Windows: one every segment_s from the first frame; the rows after the last full window get one shorter window at
   the last frame (its record has 'partial': {segment_s}; meta last_window_partial_s), so the end of the take is judged.
 - Outputs in --out: windows.jsonl, rows.csv (one line per processed frame), meta.json (inputs, bundle with sources,
@@ -190,6 +192,12 @@ def add_aid_confirm_options(ap):
                          "answers aid_use true, whatever the engine's own window answer is, until the same four ends "
                          "(a new touch session, a new main user, a window with no main user box or with no rows; "
                          "includes --aid-confirm-hold; aid_confirm.py); needs --aid-confirm-model")
+    ap.add_argument("--aid-start-only", action="store_true",
+                    help="judge the walking aid at the start of each touch session (and again after a change of "
+                         "main user the engine counts): at the first window after a press that answers no aid, "
+                         "unless an aid was seen before, the walking-aid detector is off for the rest of that stretch "
+                         "and its windows answer aid_use false (aid_confirm.py, 'Start only'); needs "
+                         "--aid-confirm-model, not with the two hold options")
 
 
 def check_aid_confirm_options(error, a, bundle_rule: str):
@@ -199,6 +207,11 @@ def check_aid_confirm_options(error, a, bundle_rule: str):
         error("--aid-confirm-hold needs --aid-confirm-model")
     if getattr(a, "aid_confirm_hold_user", False) and not a.aid_confirm_model:
         error("--aid-confirm-hold-user needs --aid-confirm-model")
+    if getattr(a, "aid_start_only", False):
+        if not a.aid_confirm_model:
+            error("--aid-start-only needs --aid-confirm-model")
+        if getattr(a, "aid_confirm_hold", False) or getattr(a, "aid_confirm_hold_user", False):
+            error("--aid-start-only cannot be combined with --aid-confirm-hold or --aid-confirm-hold-user")
     if not a.aid_confirm_model:
         return
     if not a.aid_model:
@@ -212,7 +225,8 @@ def check_aid_confirm_options(error, a, bundle_rule: str):
         error("--aid-confirm-min must lie in [0, 1]")
 
 
-def load_aid_confirm(paths, cut: float, bundle, threads: int, log, hold: bool = False, hold_user: bool = False):
+def load_aid_confirm(paths, cut: float, bundle, threads: int, log, hold: bool = False, hold_user: bool = False,
+                     start_only: bool = False):
     """The wheelchair confirm step of --aid-confirm-model, or None (off without a file). Returns (step or None,
     {file: info})."""
     if not paths:
@@ -220,7 +234,12 @@ def load_aid_confirm(paths, cut: float, bundle, threads: int, log, hold: bool = 
     from app.inference.aid_confirm import AidConfirmReader
     from .aid_confirm import AidConfirm
     reader = AidConfirmReader(paths, threads)
-    step = AidConfirm(reader, cut, history_s(bundle) + bundle.chain.segment_s, hold, hold_user, log=log)
+    step = AidConfirm(reader, cut, history_s(bundle) + bundle.chain.segment_s, hold, hold_user, log=log,
+                      start_only=start_only)
+    if start_only:
+        log("보조기구 시작 판단 켬(--aid-start-only): 세션마다(엔진이 사용자 교체로 센 뒤에도) 첫 누름 뒤 보조기구 "
+            "없음으로 판정한 창에서, 그 전에 보조기구를 본 적이 없으면 그 구간이 끝날 때까지 보조기구 탐지기를 "
+            "끄고 보조기구 사용 아님으로 답합니다")
     log(f"휠체어 확인 분류기 켬: 파일 {len(paths)}개(여러 개면 확률 평균). 휠체어로 판정한 창은 같은 창에서 분류기의 "
         f"휠체어 확률 중앙값이 {cut:g}를 넘을 때만 유지합니다"
         + ("; 한 번 맞으면 같은 사용자의 뒤 휠체어 창은 다시 읽지 않고 유지합니다" if hold and not hold_user else "")
@@ -445,7 +464,7 @@ def main(argv=None) -> int:
     aids, aid_info = load_aids(a.aid_model, bundle.chain, a.threads, print)
     info.update(aid_info)
     aid_confirm, confirm_info = load_aid_confirm(a.aid_confirm_model, a.aid_confirm_min, bundle, a.threads, print,
-                                                 a.aid_confirm_hold, a.aid_confirm_hold_user)
+                                                 a.aid_confirm_hold, a.aid_confirm_hold_user, a.aid_start_only)
     info.update(confirm_info)
     phones, phone_info = load_phones(a.phone_model, bundle.chain, a.threads, print)
     info.update(phone_info)
@@ -454,7 +473,8 @@ def main(argv=None) -> int:
                 "heads": detector is not None, "head_direction": direction is not None, "aids": aids is not None,
                 "phones": phones is not None,
                 **({"aid_confirm": {"files": len(a.aid_confirm_model), "cut": a.aid_confirm_min,
-                                    "hold": a.aid_confirm_hold, "hold_user": a.aid_confirm_hold_user}}
+                                    "hold": a.aid_confirm_hold, "hold_user": a.aid_confirm_hold_user,
+                                    **({"start_only": True} if a.aid_start_only else {})}}
                    if aid_confirm is not None else {}),
                 "face_landmarker": "VIDEO, num_faces=1, transformation matrix on, blendshapes "
                                    + ("on" if a.blendshapes else "off"),
