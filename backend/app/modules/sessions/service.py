@@ -41,7 +41,8 @@ class SessionService:
         if await run_in_threadpool(self._ordering.is_completed, session_id):
             raise SessionCompleted()
         request = AnalyzeRequest(
-            session_id=session_id, **window.model_dump(exclude_unset=True)
+            session_id=session_id,
+            **window.model_dump(exclude_unset=True, exclude={"touch": {"interaction"}}),
         )
         result = await ai.analyze(request)
         # An order may complete while the AI request is in flight.

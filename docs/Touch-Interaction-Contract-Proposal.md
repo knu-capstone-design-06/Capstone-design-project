@@ -1,11 +1,29 @@
 # 터치·상호작용 전체 확장 계약 합의안
 
 - 작성일: 2026-11-16
-- 상태: **팀 검토용 제안 / 미채택 / 서비스 미적용**
+- 상태: **수신·검증·전달 범위 채택 / 아래는 검토 이력**
 - 검토 반영일: 2026-11-18
 - 작성 범위 결정: 백엔드 담당자가 PR #72의 전체 확장에 대한 계약 합의안 작성을 요청했다. 이는 아래 정책의 팀 채택이나 기존 계약 수정 허용을 뜻하지 않는다.
 - 기준: PR #72 병합 커밋 `f316e708a98a5299e48d7fcfcdc3805dd22eb9ca`의 프론트 생산자·전송기와 두 OpenAPI의 TouchFeatures. #77 판단 계층은 해당 PR의 검토 중 변경으로 구분한다.
 - 검토 자료: 이 합의안, [독립 검토 스키마](touch-interaction-contract-proposal.openapi.json), [합성 요청 예시 6종](touch-interaction-contract-examples.json).
+
+## 채택한 수신 계약
+
+1. `touch.interaction`은 필수 27개·선택 5개 필드와 중첩 설정 6개를 받는다. 기존 터치 5개 요청도 지원한다.
+2. 생략과 명시적 `null`을 모두 허용한다. 허용된 필드별 결측값도 그대로 전달한다.
+3. `touch-interaction-pilot-v1`의 미지원 버전, 잘못된 타입·범위, 필수값 누락, 확장 객체나 `ui_settings`의 미정의 속성은 `/features`에서 `422`를 반환한다. `detail` 배열의 `loc`으로 문제 필드를 찾는다. 배포 순서와 세션 전송 복구는 정식 계약에 적는다.
+4. 검증된 창은 백엔드 판단 계층에 전달한다. 내부 `/v1/analyze`와 Jev 질문의 터치 입력은 기존 5개 필드를 사용한다.
+
+5초 집계, `fixes_recent`·`options_open`·`pause_s`의 판단 연결, 확장의 영구 저장과 화면 지원 활성화는 후속 작업이다. 아래 초안의 정책 상태와 독립 검토 스키마는 검토 당시 기록이다. 구현 기준은 프론트↔백엔드 0.5.0과 내부 분석 계약이다. [프론트 의견](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/89#issuecomment-7123687310) · [AI 의견](https://github.com/knu-capstone-design-06/Capstone-design-project/pull/89#issuecomment-7154567898) · [프론트↔백엔드 OpenAPI](../contract/frontend-backend.openapi.yaml) · [내부 분석 OpenAPI](../contract/backend-ai.openapi.yaml)
+
+### 배포 후 확장 전송을 켜기 전 확인
+
+이전 백엔드도 확장 요청에 `200`을 반환하면서 `touch.interaction`을 버릴 수 있다. 프론트에서 실제로 요청을 보내는 백엔드 배포 경로에 다음 점검을 수행한다.
+
+1. 수신을 지원하는 백엔드를 먼저 배포하고 프론트의 확장 전송은 꺼 둔다. 배포된 백엔드의 `/openapi.json`에 접근할 수 있으면 `POST /api/v1/sessions/{session_id}/features`의 JSON 요청에서 `$ref`를 따라 `touch` 아래에 `interaction`이 있는지 확인한다. FastAPI가 표시하는 앱 버전과 저장소의 계약 문서 버전은 별개다. OpenAPI가 비활성화된 환경에서도 다음 두 요청으로 점검한다.
+2. `POST /api/v1/sessions`로 운영 사용자와 분리된 전용 테스트 세션을 만든다. [합성 요청 예시](touch-interaction-contract-examples.json)의 `base_interaction_request`를 복사하고 `window_start`·`window_end`를 최근 2초의 UTC 시각으로 맞춘다. 발급받은 세션 ID로 `POST /api/v1/sessions/{session_id}/features`를 호출해 `200`을 확인한다.
+3. 동일 테스트 세션에 같은 본문을 보내되 `touch.interaction.schema_version`만 `touch-interaction-v2`로 바꾼다. `422`이고 `detail` 배열에 `loc: ["body", "touch", "interaction", "schema_version"]`인 항목이 있는지 확인한다. 검증 실패 요청은 운영 사용자 세션에서 실행하지 않는다.
+4. 유효 요청과 미지원 버전 요청이 각각 예상대로 응답하면 프론트를 `VITE_TOUCH_INTERACTION_DRAFT=true`로 빌드해 확장 전송을 켠다. 기대 결과와 다르면 플래그를 꺼 둔 상태에서 백엔드의 배포 버전과 프론트의 API 경로를 대조한다.
 
 ## 1. 제안하는 결과와 범위
 

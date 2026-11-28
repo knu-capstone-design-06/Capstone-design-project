@@ -24,6 +24,36 @@ WINDOW = {
 }
 SCORES = {"normal": 0.167, "touch_difficulty": 0.833, "navigation_difficulty": 0,
           "visual_difficulty": 0.056, "hesitation": 0.1}
+INTERACTION = {
+    "schema_version": "touch-interaction-pilot-v1",
+    "visit_id": "test-visit",
+    "window_sequence": 1,
+    "outside_tap_ratio": None,
+    "outside_nearest_distance_mean_px": 3.5,
+    "outside_nearest_distance_sample_count": 1,
+    "pointer_cancel_count": 0,
+    "pointer_interrupted_count": 1,
+    "scroll_event_count": 2,
+    "category_change_count": 1,
+    "options_open_count": 0,
+    "options_close_count": 1,
+    "screen_transition_count": 1,
+    "screen_revisit_count": None,
+    "cart_change_count": 0,
+    "selection_change_count": None,
+    "ui_settings_change_count": 1,
+    "voice_state_change_count": 2,
+    "since_last_input_ms": None,
+    "order_busy_ms": 0,
+    "options_open": None,
+    "order_busy": False,
+    "voice_enabled": None,
+    "microphone_active": None,
+    "voice_processing": None,
+    "voice_auto_off": None,
+    "ui_settings": {"large_text": False, "large_button": True, "simple_screen": False,
+                    "step_guide": False, "low_screen": True, "high_contrast": False},
+}
 
 
 class ConnectionTests(unittest.TestCase):
@@ -85,6 +115,66 @@ class ConnectionTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/v1/connectivity").json(),
                          {"backend": "ok", "ai_engine": "unreachable"})
         self.assertEqual(self.client.get("/health").status_code, 200)
+
+    def test_interaction_is_preserved_for_decision_and_excluded_from_internal_request(self):
+        session = self.session()["session_id"]
+        baseline = self.features(session).json()
+        full = {**INTERACTION, "voice_phase": "speaking", "voice_speaking": True,
+                "voice_busy": True, "voice_busy_ms": 150, "since_last_input_excluding_system_busy_ms": None}
+        decision = self.app.state.decision_service
+        with patch.object(decision, "observe", wraps=decision.observe) as observe:
+            for values in (None, INTERACTION, full):
+                with self.subTest(values=values):
+                    response = self.features(session, {
+                        **WINDOW, "touch": {**WINDOW["touch"], "interaction": values},
+                    })
+                    self.assertEqual(response.status_code, 200, response.text)
+                    self.assertEqual(response.json(), baseline)
+                    forwarded = observe.call_args.args[1]
+                    self.assertEqual(forwarded.touch.model_dump(exclude_unset=True)["interaction"], values)
+                    self.assertEqual(json.loads(self.calls[-1].content), {"session_id": session, **WINDOW})
+            self.assertEqual(observe.call_count, 3)
+
+    def test_invalid_interaction_reports_fields_without_calling_ai_or_decision(self):
+        session = self.session()["session_id"]
+        cases = [
+            ({**INTERACTION, "schema_version": "touch-interaction-v2"}, ["schema_version"], "literal_error"),
+            ({key: value for key, value in INTERACTION.items() if key != "visit_id"}, ["visit_id"], "missing"),
+            ({**INTERACTION, "visit_id": ""}, ["visit_id"], "string_too_short"),
+            ({**INTERACTION, "unexpected": True}, ["unexpected"], "extra_forbidden"),
+            ({**INTERACTION, "ui_settings": {**INTERACTION["ui_settings"], "unexpected": True}},
+             ["ui_settings", "unexpected"], "extra_forbidden"),
+            ({**INTERACTION, "order_busy": None}, ["order_busy"], "bool_type"),
+            ({**INTERACTION, "pointer_cancel_count": True}, ["pointer_cancel_count"], "int_type"),
+            ({**INTERACTION, "outside_tap_ratio": 1.1}, ["outside_tap_ratio"], "less_than_equal"),
+            ({**INTERACTION, "voice_busy_ms": -1}, ["voice_busy_ms"], "greater_than_equal"),
+        ]
+        with patch.object(self.app.state.decision_service, "observe") as observe:
+            for values, location, error_type in cases:
+                with self.subTest(location=location, error_type=error_type):
+                    response = self.features(session, {
+                        **WINDOW, "touch": {**WINDOW["touch"], "interaction": values},
+                    })
+                    self.assertEqual(response.status_code, 422, response.text)
+                    issue, = response.json()["detail"]
+                    self.assertEqual(set(issue), {"loc", "msg", "type"})
+                    self.assertEqual(issue["loc"], ["body", "touch", "interaction", *location])
+                    self.assertEqual(issue["type"], error_type)
+            observe.assert_not_called()
+        self.assertEqual(self.calls, [])
+
+    def test_nonfinite_interaction_input_returns_422_without_echoing_value(self):
+        session = self.session()["session_id"]
+        window = {**WINDOW, "touch": {**WINDOW["touch"], "interaction": {
+            **INTERACTION, "outside_nearest_distance_mean_px": float("nan"),
+        }}}
+        response = self.client.post(f"/api/v1/sessions/{session}/features",
+                                    content=json.dumps(window), headers={"Content-Type": "application/json"})
+        self.assertEqual(response.status_code, 422, response.text)
+        issue, = response.json()["detail"]
+        self.assertEqual(issue["loc"], ["body", "touch", "interaction", "outside_nearest_distance_mean_px"])
+        self.assertEqual(set(issue), {"loc", "msg", "type"})
+        self.assertEqual(self.calls, [])
 
     def test_unknown_session_never_calls_ai(self):
         response = self.features("missing")
