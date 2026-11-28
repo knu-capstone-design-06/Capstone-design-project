@@ -5663,6 +5663,228 @@ class AidConfirmTests(unittest.TestCase):
                         module.main(argv + aid + (["--aid-start-only"] if given else []))
                 self.assertIs(seen.call_args.args[-1], given, (module.__name__, given))
 
+    # --- --aid-stick-model (aid_confirm.py, 'Stick at the start') -----------------------------------------------------
+    class BoxReader:
+        """A stand-in confirm reader whose crop image carries the box's left edge in pixels (so a stick reader can
+        tell the users apart) or, with by_frame, the frame's first pixel value (so it can tell the rows apart)."""
+
+        def __init__(self, by_frame=False):
+            import numpy as np
+            self.p, self.ms, self.by_frame = np.array([0.9, 0.0, 0.0, 0.0, 0.1]), [], by_frame
+
+        def crop(self, bgr, box_px):
+            import numpy as np
+            return np.full((8, 8, 3), int(bgr[0, 0, 0]) if self.by_frame else int(box_px[0]) % 256, np.uint8)
+
+        def probs(self, image):
+            self.ms.append(0.0)
+            return self.p
+
+    class StickReader:
+        """A stand-in stick file: reads a stick (P(cane) 0.7) on the crops whose first value is in marks, otherwise
+        P(crutch) 0.3 and P(cane) 0.3 (their sum is above 0.5, their maximum is not); counts its reads."""
+
+        def __init__(self, marks):
+            self.marks, self.calls = set(marks), 0
+
+        def probs(self, image):
+            import numpy as np
+            self.calls += 1
+            if int(image[0, 0, 0]) in self.marks:
+                return np.array([0.2, 0.1, 0.7, 0.0, 0.0])
+            return np.array([0.4, 0.3, 0.3, 0.0, 0.0])
+
+    def stick_step(self, marks, n_min=2):
+        from app.modules.vision.aid_confirm import AidConfirm
+        stick = self.StickReader(marks)
+        step = AidConfirm(self.BoxReader(by_frame=True), 0.5, 100.0, start_only=True, stick=[stick], stick_min=n_min,
+                          stick_row_min=0.5)
+        return step, stick
+
+    def feed(self, step, ks, wheel=()):
+        """add_row for the rows k (time k / 10 s, the main user's head box, frame value k); the rows in wheel are read
+        by the detector as a wheelchair above the cut."""
+        import numpy as np
+        for k in ks:
+            img = np.full((10, 10, 3), k % 256, np.uint8)
+            row = {"frame_idx": k, "t_s": round(k * DT, 6), "primary_box": (0.4, 0.2, 0.6, 0.4),
+                   "aid_head_class": "wheelchair" if k in wheel else None, "aid_head_score": 0.9 if k in wheel else 0.0}
+            step.add_row(row, img, self.aids(img))
+
+    def stick_check(self, step, t_end, press=3.0, out=None):
+        from app.modules.vision.params import PilotParams
+        out = out or self.start_out(False)
+        rec = step.check_start(out, self.start_rows(t_end + 2.0, press=press), t_end, sit_params(), PilotParams(),
+                               session="s1")
+        return out["tags"][0], rec
+
+    def test_stick_answers_cane_with_its_evidence_and_holds_without_reading(self):
+        """Two stick rows (one before the press, one after it) give the cane answer at the first window after the
+        press: aid_use true, evidence aid_head@<frame> aid_class cane, the record's stick fields; the stretch is not
+        switched off, and later windows answer the same without further reads."""
+        step, stick = self.stick_step({10, 50})
+        step.new_start(0.0, "s1")
+        self.feed(step, range(91))
+        tag, rec = self.stick_check(step, 9.0)
+        self.assertEqual((tag["status"], tag["unknown_reason"]), (True, None))
+        self.assertEqual(tag["evidence"], [{"event_id": "aid_head@90", "obs": "aid_class", "value": "cane", "t": 9.0}])
+        self.assertEqual(rec, {"confirmed": None, "stick": True, "stick_frames": 2, "stick_min": 2})
+        self.assertIsNone(step.off)
+        calls = stick.calls
+        self.feed(step, range(91, 120))
+        tag, rec = self.stick_check(step, 11.0)
+        self.assertEqual((tag["status"], rec["stick"], stick.calls), (True, True, calls))
+        s = step.summary()["stick"]
+        self.assertEqual((s["stick_frames"], s["windows_answered"], s["users_answered"], s["stick_frame_t"]),
+                         (2, 2, 1, [1.0, 5.0]))
+
+    def test_stick_needs_its_count_and_the_maximum_of_the_two_classes(self):
+        """One stick row (N - 1) gives no answer, and the start judgment switches the stretch off as before; rows whose
+        P(crutch) + P(cane) is above 0.5 but whose maximum is not are no stick rows."""
+        step, _ = self.stick_step({10})
+        step.new_start(0.0, "s1")
+        self.feed(step, range(91))
+        tag, rec = self.stick_check(step, 9.0)
+        self.assertEqual((tag["status"], rec), (False, {"confirmed": None, "start_judgment": True}))
+        self.assertEqual(step.off, (1, "s1", 0.0))
+        self.assertEqual(step.summary()["stick"]["per_user"], {"0": 1})   # the walk-in key carried into s1
+
+    def test_stick_is_never_answered_for_a_wheelchair(self):
+        """A window the reader agreed is a wheelchair keeps its answer and its user never gets the stick answer. A
+        detector wheelchair row stops the count: stick rows after it never count, and stick rows before it (fewer
+        than N) are cleared."""
+        step, _ = self.stick_step({10, 50, 60})
+        step.new_start(0.0, "s1")
+        step.check = lambda out, *rest, **kw: {"confirmed": True}
+        self.feed(step, range(91))
+        tag, rec = self.stick_check(step, 8.0, out=self.start_out(True, "wheelchair"))
+        self.assertEqual((tag["status"], tag["evidence"][0]["value"], rec), (True, "wheelchair", {"confirmed": True}))
+        step.check = lambda out, *rest, **kw: None
+        tag, rec = self.stick_check(step, 9.0)
+        self.assertEqual((tag["status"], rec), (False, None))
+        for wheel, marks in ((5, {20, 21, 30}), (25, {10, 30, 31, 40})):
+            step, stick = self.stick_step(marks)
+            step.new_start(0.0, "s1")
+            self.feed(step, range(91), wheel={wheel})
+            tag, rec = self.stick_check(step, 9.0)
+            self.assertEqual((tag["status"], rec.get("stick")), (False, None), wheel)
+            self.assertEqual(stick.calls, wheel, wheel)                     # no read from the wheelchair row on
+            self.assertEqual(step.summary()["stick"]["per_user"], {"0": 0}, wheel)
+
+    def test_stick_count_starts_again_per_user_and_keeps_the_walk_in(self):
+        """A counted change of main user starts a new count. The rows before the first session (the walk-in) and a
+        stretch started by a counted change carry into the next session; a session's own stretch does not."""
+        step, _ = self.stick_step({10, 60})
+        step.new_start(0.0, "s1")
+        self.feed(step, range(50))
+        step.row_change({**self.change_row(5.0), "frame_idx": 50}, "s1")
+        self.feed(step, range(50, 131))
+        tag, rec = self.stick_check(step, 13.0, press=6.0)
+        self.assertEqual((tag["status"], (rec or {}).get("stick")), (False, None))
+        step, _ = self.stick_step({60, 61})
+        step.new_start(0.0, "s1")
+        self.feed(step, range(50))
+        step.row_change({**self.change_row(5.0), "frame_idx": 50}, "s1")
+        self.feed(step, range(50, 131))
+        self.assertTrue(self.stick_check(step, 13.0, press=6.0)[1]["stick"])
+        for first, carried in (("walk_in", True), ("user", True), ("session", False)):
+            step, _ = self.stick_step({5, 6})
+            if first == "user":
+                step.new_start(0.0, "s0")
+                step.row_change({**self.change_row(0.05), "frame_idx": 0}, "s0")
+            elif first == "session":
+                step.new_start(0.0, "s0")
+            self.feed(step, range(10))
+            step.new_start(1.0, "s1")
+            self.feed(step, range(10, 91))
+            tag, _ = self.stick_check(step, 9.0)
+            self.assertEqual(tag["status"] is True, carried, first)
+
+    def test_stick_option_off_or_never_stick_changes_nothing(self):
+        """A replay with a stick file that never reads a stick gives the same windows and detector calls as the step
+        without it, and its meta differs only by the 'stick' block (and the read times); a file that reads every crop
+        as a stick answers cane, and the session is never switched off."""
+        n = 150
+        events = self.OPEN + [(3000, "pointer_start", "menu", self.PRESS)]
+        strip = lambda recs: [{k: v for k, v in r.items() if k != "ms_window"} for r in recs]   # noqa: E731
+        plain, meta_plain, called_plain, _ = self.start_replay(self.start_step(start_only=True), n, events)
+        step = self.start_step(start_only=True)
+        step.stick, step.stick_min, step.stick_row_min = [self.StickReader(set())], 2, 0.5
+        never, meta, called, _ = self.start_replay(step, n, events)
+        self.assertEqual(strip(never), strip(plain))
+        self.assertEqual(called, called_plain)
+        stick = meta["aid_confirm"].pop("stick")
+        self.assertEqual(stick["stick_frames"], 0)
+        for m in (meta, meta_plain):
+            for k in ("ms_read_p50", "ms_read_max"):
+                m["aid_confirm"].pop(k)
+        self.assertEqual(meta["aid_confirm"], meta_plain["aid_confirm"])
+        step = self.start_step(start_only=True)
+        step.stick, step.stick_min, step.stick_row_min = [self.StickReader({0})], 2, 0.5
+        recs, meta, called, _ = self.start_replay(step, n, events)
+        self.assertTrue(all(self.aid(r) == (True, None) for r in recs if r["t"] >= 6.0))
+        first = next(r for r in recs if (r["aid_confirm"] or {}).get("stick"))
+        tag = {t["name"]: t for t in first["situation"]["tags"]}["aid_use"]
+        self.assertEqual(tag["evidence"][0]["value"], "cane")
+        self.assertEqual((meta["aid_confirm"]["sessions_off"], called), (0, list(range(n))))
+
+    def test_stick_newcomer_after_a_switched_off_user_is_read_on_arrival(self):
+        """Through run_live, one session: user A (no stick) with a press at 3 s is switched off; A leaves, and user B,
+        whose crops read as a stick, walks in at 12 s without pressing. The engine's counted change of main user
+        turns the detector and the crop on again from B's first row, B's rows are read on the reader thread, and B is
+        answered aid_use true with the class cane."""
+        from app.modules.vision.aid_confirm import AidConfirm
+        from app.modules.vision.chain import history_s
+        n = 230
+        heads = [[self.HEAD]] * 105 + [[]] * 15 + [[[0.05, 0.25, 0.25, 0.55]]] * (n - 120)
+        sched = ([fake_inference() for _ in range(105)] + [fake_inference(face=False, body=False) for _ in range(15)]
+                 + [fake_inference() for _ in range(n - 120)])
+        b = bundle(aid_rule="head_centre_carry", aid_head_min=0.5)
+        stick = self.StickReader({0})                       # B's box starts at the frame's left edge
+        step = AidConfirm(self.BoxReader(), 0.5, history_s(b) + b.chain.segment_s, start_only=True, stick=[stick],
+                          stick_min=2, stick_row_min=0.5)
+        recs, meta, called = self.start_live(step, n, self.touch_at(22, taps={3}), heads=heads, sched=sched,
+                                             person=lambda k: self.PERSON if k < 120 else [0.0, 0.1, 0.32, 0.97])
+        change_t = step.start_from[0]
+        self.assertGreaterEqual(change_t, 10.5 - 1e-6)
+        first = int(round(change_t / DT))
+        self.assertEqual([k for k in called if k >= first], list(range(first, n)))
+        self.assertEqual(meta["aid_confirm"]["sessions_off"], 1)
+        self.assertFalse(any(self.aid(r)[0] is True for r in recs if r["t"] < change_t))
+        answered = [r for r in recs if (r["aid_confirm"] or {}).get("stick")]
+        self.assertTrue(answered)
+        self.assertGreaterEqual(answered[0]["t"], change_t)
+        tag = {t["name"]: t for t in answered[0]["situation"]["tags"]}["aid_use"]
+        self.assertEqual((tag["status"], tag["evidence"][0]["value"]), (True, "cane"))
+        self.assertGreaterEqual(meta["aid_confirm"]["stick"]["stick_frames"], 2)
+
+    def test_stick_options_need_the_start_option_and_both_values(self):
+        import argparse
+        from app.modules.vision.replay import add_aid_confirm_options, check_aid_confirm_options, stick_kwargs
+        ap = argparse.ArgumentParser()
+        ap.add_argument("--aid-model", default=None)
+        add_aid_confirm_options(ap)
+        path = os.path.join(tempfile.mkdtemp(), "reader.onnx")
+        with open(path, "wb") as f:
+            f.write(b"stand-in")
+        a = ap.parse_args([])
+        self.assertEqual((a.aid_stick_model, a.aid_stick_frames, stick_kwargs(a)), (None, None, {}))
+        base = ["--aid-model", "d.onnx", "--aid-confirm-model", path]
+        for argv, expected in ((["--aid-start-only", "--aid-stick-model", path], "go together"),
+                               (["--aid-start-only", "--aid-stick-frames", "2"], "go together"),
+                               (["--aid-stick-model", path, "--aid-stick-frames", "2"], "--aid-start-only"),
+                               (["--aid-start-only", "--aid-stick-model", path, "--aid-stick-frames", "0"],
+                                "at least 1"),
+                               (["--aid-start-only", "--aid-stick-model", path + ".x", "--aid-stick-frames", "2"],
+                                "no file")):
+            errors = []
+            check_aid_confirm_options(errors.append, ap.parse_args(base + argv), "head_centre_carry")
+            self.assertTrue(errors and expected in errors[0], (argv, errors))
+        errors = []
+        a = ap.parse_args(base + ["--aid-start-only", "--aid-stick-model", path, path, "--aid-stick-frames", "2"])
+        check_aid_confirm_options(errors.append, a, "head_centre_carry")
+        self.assertEqual((errors, stick_kwargs(a)), ([], {"stick_paths": [path, path], "stick_frames": 2}))
+
 
 if __name__ == "__main__":
     unittest.main()

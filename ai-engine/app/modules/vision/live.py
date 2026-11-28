@@ -77,7 +77,7 @@ from .judgment.jev_stub import ShadowJev
 from .params import load_bundle, with_options
 from .replay import (MODELS_DIR, TIMING_COLUMNS, add_aid_confirm_options, add_aid_options, add_frame_counts,
                      aid_values, check_aid_confirm_options, check_aid_options, environment, jsonable, load_aid_confirm,
-                     load_aids, load_perception, load_phones, timing_summary)
+                     load_aids, load_perception, load_phones, stick_kwargs, timing_summary)
 from .tag_sender import TagSender, check_base_url, vision_window
 
 WINDOW = "vision chain live (q = stop)"   # ASCII: OpenCV window titles may not show Korean on Windows
@@ -539,7 +539,8 @@ def main(argv=None) -> int:
     aids, aid_info = load_aids(a.aid_model, bundle.chain, a.threads, print)
     info.update(aid_info)                        # every model file in meta.json, as replay.py writes it
     aid_confirm, confirm_info = load_aid_confirm(a.aid_confirm_model, a.aid_confirm_min, bundle, a.threads, print,
-                                                 a.aid_confirm_hold, a.aid_confirm_hold_user, a.aid_start_only)
+                                                 a.aid_confirm_hold, a.aid_confirm_hold_user, a.aid_start_only,
+                                                 **stick_kwargs(a))
     info.update(confirm_info)
     if a.aid_start_only and a.serve is None:
         print("--aid-start-only: --serve가 없어 세션이 없으므로 보조기구 탐지기를 끄지 않습니다", flush=True)

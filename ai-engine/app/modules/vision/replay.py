@@ -29,7 +29,9 @@ From ai-engine/ (runtime environment: requirements.txt + app/modules/vision/requ
   measurement); otherwise aid_use becomes false. Several files: the mean of their softmax probabilities. Needs
   --aid-model with --aid-rule head_centre or head_centre_carry. Off without the option: every output as before.
   --aid-start-only (with it, not with the two holds): the walking aid is judged at the start of each touch session
-  and again after a change of main user the engine counts (aid_confirm.py, 'Start only').
+  and again after a change of main user the engine counts (aid_confirm.py, 'Start only'). --aid-stick-model
+  READER.onnx [...] with --aid-stick-frames N (with --aid-start-only): a user with N stick rows of the person-crop
+  readers is answered aid_use true with the class cane (aid_confirm.py, 'Stick at the start').
 - Windows: one every segment_s from the first frame; the rows after the last full window get one shorter window at
   the last frame (its record has 'partial': {segment_s}; meta last_window_partial_s), so the end of the take is judged.
 - Outputs in --out: windows.jsonl, rows.csv (one line per processed frame), meta.json (inputs, bundle with sources,
@@ -198,6 +200,16 @@ def add_aid_confirm_options(ap):
                          "unless an aid was seen before, the walking-aid detector is off for the rest of that stretch "
                          "and its windows answer aid_use false (aid_confirm.py, 'Start only'); needs "
                          "--aid-confirm-model, not with the two hold options")
+    ap.add_argument("--aid-stick-model", nargs="+", default=None, metavar="READER.onnx",
+                    help="stick at the start: person-crop reader ONNX files (one or more) that read the main user's "
+                         "crop on each row until the user is answered; a row is a stick frame when any file's "
+                         "max(P(crutch), P(cane)) lies above 0.5 (each file's own decision point), and a user with "
+                         "--aid-stick-frames such rows is answered aid_use true with the class cane (aid_confirm.py, "
+                         "'Stick at the start'); optional, off unless given; needs --aid-confirm-model and "
+                         "--aid-start-only")
+    ap.add_argument("--aid-stick-frames", type=int, default=None, metavar="N",
+                    help="the stick frames a user needs for the cane answer (no default: the runner gives it); "
+                         "needs --aid-stick-model")
 
 
 def check_aid_confirm_options(error, a, bundle_rule: str):
@@ -212,6 +224,17 @@ def check_aid_confirm_options(error, a, bundle_rule: str):
             error("--aid-start-only needs --aid-confirm-model")
         if getattr(a, "aid_confirm_hold", False) or getattr(a, "aid_confirm_hold_user", False):
             error("--aid-start-only cannot be combined with --aid-confirm-hold or --aid-confirm-hold-user")
+    stick = getattr(a, "aid_stick_model", None)
+    if stick or getattr(a, "aid_stick_frames", None) is not None:
+        if not stick or getattr(a, "aid_stick_frames", None) is None:
+            error("--aid-stick-model and --aid-stick-frames go together")
+        if not getattr(a, "aid_start_only", False):
+            error("--aid-stick-model needs --aid-confirm-model and --aid-start-only")
+        if a.aid_stick_frames is not None and a.aid_stick_frames < 1:
+            error("--aid-stick-frames must be at least 1")
+        for path in stick or ():
+            if not os.path.isfile(path):
+                error(f"--aid-stick-model: no file {path}")
     if not a.aid_confirm_model:
         return
     if not a.aid_model:
@@ -226,16 +249,30 @@ def check_aid_confirm_options(error, a, bundle_rule: str):
 
 
 def load_aid_confirm(paths, cut: float, bundle, threads: int, log, hold: bool = False, hold_user: bool = False,
-                     start_only: bool = False):
+                     start_only: bool = False, stick_paths=None, stick_frames: int | None = None):
     """The wheelchair confirm step of --aid-confirm-model, or None (off without a file). Returns (step or None,
-    {file: info})."""
+    {file: info}). stick_paths, stick_frames = --aid-stick-model, --aid-stick-frames (aid_confirm.py, 'Stick at the
+    start'; one reader per file, each with the confirm reader's input size)."""
     if not paths:
         return None, {}
     from app.inference.aid_confirm import AidConfirmReader
     from .aid_confirm import AidConfirm
     reader = AidConfirmReader(paths, threads)
+    stick = None
+    if stick_paths:
+        stick = [AidConfirmReader([p], threads) for p in stick_paths]
+        for p, r in zip(stick_paths, stick):
+            size = getattr(r, "size_hw", None)
+            if size is not None and getattr(reader, "size_hw", size) != size:
+                raise ValueError(f"--aid-stick-model {p}: input size {size} differs from the confirm reader's "
+                                 f"{reader.size_hw} (one crop serves both)")
     step = AidConfirm(reader, cut, history_s(bundle) + bundle.chain.segment_s, hold, hold_user, log=log,
-                      start_only=start_only)
+                      start_only=start_only, stick=stick, stick_min=stick_frames if stick else None,
+                      stick_row_min=bundle.chain.aid_head_min if stick else None)
+    if stick:
+        log(f"지팡이 시작 판단 켬(--aid-stick-model): 파일 {len(stick)}개. 주 사용자의 사람 crop을 줄마다 읽어 어느 "
+            f"파일이든 max(P(crutch), P(cane))가 0.5를 넘으면 지팡이 줄로 세고, 지팡이 줄이 {stick_frames}개 이상인 "
+            "사용자는 보조기구 사용 참(지팡이)으로 답합니다. 탐지기가 휠체어로 읽은 줄이 나오면 그 사용자는 세지 않습니다")
     if start_only:
         log("보조기구 시작 판단 켬(--aid-start-only): 세션마다(엔진이 사용자 교체로 센 뒤에도) 첫 누름 뒤 보조기구 "
             "없음으로 판정한 창에서, 그 전에 보조기구를 본 적이 없으면 그 구간이 끝날 때까지 보조기구 탐지기를 "
@@ -245,8 +282,17 @@ def load_aid_confirm(paths, cut: float, bundle, threads: int, log, hold: bool = 
         + ("; 한 번 맞으면 같은 사용자의 뒤 휠체어 창은 다시 읽지 않고 유지합니다" if hold and not hold_user else "")
         + ("; 한 번 맞으면 같은 사용자의 뒤 창은 엔진 답과 관계없이 보조기구 사용 참으로 답합니다" if hold_user else "")
         + ("(새 세션 · 사용자 교체 · 주 사용자 상자 없는 창 · 줄 없는 창에서 끝나고 다시 확인)" if hold or hold_user else ""))
-    return step, {os.path.basename(p): {"bytes": os.path.getsize(p), "sha256": sha256(p), "role": "aid_confirm"}
-                  for p in paths}
+    info = {os.path.basename(p): {"bytes": os.path.getsize(p), "sha256": sha256(p), "role": "aid_confirm"}
+            for p in paths}
+    for p in stick_paths or ():
+        info.setdefault(os.path.basename(p), {"bytes": os.path.getsize(p), "sha256": sha256(p), "role": "aid_stick"})
+    return step, info
+
+
+def stick_kwargs(a) -> dict:
+    """load_aid_confirm's keywords of --aid-stick-model / --aid-stick-frames ({} when not given: the call as before)."""
+    paths = getattr(a, "aid_stick_model", None)
+    return {"stick_paths": paths, "stick_frames": a.aid_stick_frames} if paths else {}
 
 
 def add_aid_options(ap):
@@ -464,7 +510,8 @@ def main(argv=None) -> int:
     aids, aid_info = load_aids(a.aid_model, bundle.chain, a.threads, print)
     info.update(aid_info)
     aid_confirm, confirm_info = load_aid_confirm(a.aid_confirm_model, a.aid_confirm_min, bundle, a.threads, print,
-                                                 a.aid_confirm_hold, a.aid_confirm_hold_user, a.aid_start_only)
+                                                 a.aid_confirm_hold, a.aid_confirm_hold_user, a.aid_start_only,
+                                                 **stick_kwargs(a))
     info.update(confirm_info)
     phones, phone_info = load_phones(a.phone_model, bundle.chain, a.threads, print)
     info.update(phone_info)
@@ -474,7 +521,9 @@ def main(argv=None) -> int:
                 "phones": phones is not None,
                 **({"aid_confirm": {"files": len(a.aid_confirm_model), "cut": a.aid_confirm_min,
                                     "hold": a.aid_confirm_hold, "hold_user": a.aid_confirm_hold_user,
-                                    **({"start_only": True} if a.aid_start_only else {})}}
+                                    **({"start_only": True} if a.aid_start_only else {}),
+                                    **({"stick": {"files": len(a.aid_stick_model), "frames": a.aid_stick_frames}}
+                                       if a.aid_stick_model else {})}}
                    if aid_confirm is not None else {}),
                 "face_landmarker": "VIDEO, num_faces=1, transformation matrix on, blendshapes "
                                    + ("on" if a.blendshapes else "off"),

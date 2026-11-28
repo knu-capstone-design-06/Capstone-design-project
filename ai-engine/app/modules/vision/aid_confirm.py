@@ -78,6 +78,26 @@ is off, FrameChain does not call the walking-aid detector nor add_row (no crop, 
 for a skipped detector), and every window of that session whose end lies in the stretch answers aid_use false with no
 evidence (aid_confirm start_off true). The judgment window's record carries start_judgment true. The next stretch
 starts the judgment again, with the detector on from its first row.
+
+Stick at the start (stick readers given, --aid-stick-model with --aid-stick-frames N; needs start only; off by
+default): every row for which add_row makes the main user's crop is read by each stick file (one person-crop reader
+per file, app/inference/aid_confirm.py) on the reader thread (live, the read-ahead pool) or in place (replay, no pool).
+A row is a stick frame when any file's stick value max(P(crutch), P(cane)) lies above STICK_P. Wheelchair first, at
+row level: the first row of a main user that the detector itself reads as a wheelchair (aid_head_class wheelchair,
+aid_head_score above aid_head_min, the read-ahead's row test) clears that user's count and stops the stick files for
+that user; only rows before it count (on the measured clips of wheelchair users the readers' stick rows all came
+after that row). The stick frames are counted per main user: a stretch started by a counted change of main user
+starts a new count, and so does a new session, except that a new session carries the count of the stretch before it
+when that stretch was the walk-in (rows before the first known
+session, or a stretch started by a counted change of main user): the walk-in before the first press is the same
+user's. In check_start, before the start judgment, a window of the stretch's session that ends in the stretch, whose
+answer is not true after the wheelchair check, that has rows and a main user (its unknown reason not no_frames or
+no_main_user_box) and whose user has at least N stick frames answers aid_use true with the class cane (evidence
+aid_head@<frame> aid_class cane, the form the backend reads); its record's aid_confirm carries stick true,
+stick_frames and stick_min. From then on every such window of the same user answers so without reading (the stick
+files stop for that user), and the stretch counts as one with an aid. A user with a window the reader agreed is a
+wheelchair never gets the stick answer, and the stick files stop for that user. In live the check first waits for the
+stick reads of the rows up to the window's end. A stick reader error is logged once per run; the row is no stick frame.
 """
 from __future__ import annotations
 
@@ -89,6 +109,9 @@ from .columns import _contains
 from .events import _blank, _change_obs, new_user, observe_scene, window_any_tap
 
 WHEELCHAIR = "wheelchair"
+STICK_CLASSES = ("crutch", "cane")    # the stick classes of the person-crop readers' class list
+STICK_CLASS = "cane"                  # the class a stick answer names (module docstring, 'Stick at the start')
+STICK_P = 0.5                         # each stick file's own decision point (the confirm cut's default, CONFIRM_MIN_DEFAULT)
 
 
 def _iou(a, b) -> float:
@@ -128,8 +151,22 @@ class AidConfirm:
     docstring, 'Start only')."""
 
     def __init__(self, reader, cut: float, keep_s: float, hold: bool = False, hold_user: bool = False, log=None,
-                 start_only: bool = False):
+                 start_only: bool = False, stick=None, stick_min: int | None = None,
+                 stick_row_min: float | None = None):
         self.reader, self.cut, self.keep_s = reader, float(cut), float(keep_s)
+        self.stick = list(stick) if stick else None   # stick at the start: one reader per file (module docstring)
+        self.stick_min = None if stick_min is None else int(stick_min)
+        self.stick_row_min = stick_row_min    # stick: aid_head_min, the detector's wheelchair row test
+        self.stick_key = {0: 0}               # stick, frame thread: stretch -> the user whose count it adds to
+        self.stick_kind = {0: "walk_in"}      # stick, frame thread: stretch -> how it started
+        self.stick_counts = {}                # stick: user -> stick frames
+        self.stick_answered = set()           # stick: users answered cane
+        self.stick_wheelchair = set()         # stick: users with a confirmed wheelchair window
+        self.stick_pending = []               # stick, live: (row time, Future) of reads not waited for yet
+        self.stick_times = []                 # stick: row times of the stick frames (summary)
+        self.stick_reads = 0                  # stick: crops read (all files of a row = one)
+        self.stick_errors = 0                 # stick: rows whose read raised
+        self.stick_windows = 0                # stick: windows answered cane
         self.log = log if log is not None else (lambda line: print(line, file=sys.stderr, flush=True))
         self.hold_user = bool(hold_user)
         self.hold = bool(hold) or self.hold_user
@@ -185,6 +222,13 @@ class AidConfirm:
         waited = sorted(self.waited)
         start = ({"start_only": True, "sessions_off": self.sessions_off, "windows_start_off": self.start_off_windows,
                   "frames_aid_skipped": self.frames_skipped} if self.start_only else {})
+        if self.stick is not None:
+            start["stick"] = {"files": len(self.stick), "stick_p": STICK_P, "min_frames": self.stick_min,
+                              "reads": self.stick_reads, "stick_frames": len(self.stick_times),
+                              "stick_frame_t": [round(t, 3) for t in sorted(self.stick_times)],
+                              "per_user": {str(k): v for k, v in sorted(self.stick_counts.items())},
+                              "users_answered": len(self.stick_answered), "windows_answered": self.stick_windows,
+                              "reader_errors": self.stick_errors}
         return {**start, "cut": self.cut, "hold": self.hold, "hold_user": self.hold_user, "windows_held": self.held_windows,
                 "windows_user_held": self.user_held_windows,
                 "windows_checked": self.checked, "windows_withdrawn": self.withdrawn,
@@ -231,6 +275,8 @@ class AidConfirm:
             except Exception as e:            # no image; a window with this row is not confirmed (check)
                 self.failed[int(row["frame_idx"])] = f"{type(e).__name__}: {e}"
                 box = None
+        if self.stick is not None:
+            self._stick_row(row, t, box)
         if self.pool is None or self.held:
             return
         score = row.get("aid_head_score")
@@ -245,6 +291,79 @@ class AidConfirm:
                         self._submit(k, image)
         if self.trigger_until is not None and t <= self.trigger_until and box is not None:
             self._submit(int(row["frame_idx"]), self.images[int(row["frame_idx"])][1])
+
+    # --- stick at the start (module docstring, 'Stick at the start') -------------------------------------------------
+    def _stick_row(self, row: dict, t: float, box) -> None:
+        """add_row, frame thread: the row's wheelchair test and its stick read (queued on the pool, or in place)."""
+        key = self.stick_key.get(self.stretch, self.stretch)
+        if key in self.stick_answered or key in self.stick_wheelchair:
+            return
+        score = row.get("aid_head_score")
+        if (row.get("aid_head_class") == WHEELCHAIR and score is not None and self.stick_row_min is not None
+                and float(score) > self.stick_row_min):
+            with self.lock:                   # wheelchair first: the user's count is cleared and stays so
+                self.stick_wheelchair.add(key)
+                self.stick_counts[key] = 0
+            return
+        if box is None:
+            return
+        image = self.images[int(row["frame_idx"])][1]
+        if self.pool is not None:
+            self.stick_pending.append((t, self.pool.submit(self._stick_read, key, t, image)))
+        else:
+            self._stick_read(key, t, image)
+
+    def _stick_read(self, key, t: float, image) -> None:
+        if key in self.stick_answered or key in self.stick_wheelchair:
+            return                            # the user's answer is settled: no more reads
+        try:
+            values = []
+            for r in self.stick:
+                p = r.probs(image)
+                classes = list(getattr(r, "classes", self.reader_classes()))
+                values.append(max(float(p[classes.index(c)]) for c in STICK_CLASSES))
+        except Exception as e:                # module docstring: the row is no stick frame
+            with self.lock:
+                self.stick_errors += 1
+                first = self.stick_errors == 1
+            if first:
+                self.log(f"지팡이 분류기 오류(이 실행에서 한 번만 찍습니다): {type(e).__name__}: {e}. 이 행은 지팡이 "
+                         "행으로 세지 않습니다.")
+            return
+        with self.lock:
+            self.stick_reads += 1
+            if any(v > STICK_P for v in values) and key not in self.stick_wheelchair:
+                self.stick_counts[key] = self.stick_counts.get(key, 0) + 1
+                self.stick_times.append(t)
+
+    def _stick_answer(self, tag: dict, record, rows: list, t_end: float, stretch: int):
+        """check_start: the window's stick answer (its aid_confirm record), or None (module docstring)."""
+        key = self.stick_key.get(stretch, stretch)
+        if record is not None and record.get("confirmed") is True:
+            self.stick_wheelchair.add(key)    # the reader agreed with a wheelchair: that answer stays
+            return None
+        if key in self.stick_wheelchair or tag["status"] is True:
+            return None
+        if tag["status"] == "unknown" and tag["unknown_reason"] in ("no_frames", "no_main_user_box"):
+            return None
+        if key not in self.stick_answered:
+            pending, self.stick_pending = self.stick_pending, []
+            for t, future in pending:         # live: the reads of the rows up to the window's end
+                if t <= t_end:
+                    future.result()
+                else:
+                    self.stick_pending.append((t, future))
+            if self.stick_counts.get(key, 0) < self.stick_min:
+                return None
+            self.stick_answered.add(key)
+        inside = [r for r in rows if float(r["t_s"]) <= t_end]
+        last = inside[-1] if inside else None
+        tag.update(status=True, unknown_reason=None,
+                   evidence=[{"event_id": f"aid_head@{'' if last is None else last['frame_idx']}", "obs": "aid_class",
+                              "value": STICK_CLASS, "t": t_end if last is None else float(last["t_s"])}])
+        self.stick_windows += 1
+        return {**(record or {"confirmed": None}), "stick": True, "stick_frames": self.stick_counts.get(key, 0),
+                "stick_min": self.stick_min}
 
     def snapshot(self, rows: list) -> dict:
         """{frame_idx: input image} of the rows that have one: taken where the rows are taken (the frame loop), so a
@@ -389,15 +508,21 @@ class AidConfirm:
                 **({} if error is None else {"error": error})}
 
     # --- start only (module docstring, 'Start only') ------------------------------------------------------------------
-    def new_start(self, t: float, session: str) -> None:
-        """FrameChain, frame thread: a new stretch starts at row time t (a new session, or a counted change of main
-        user); an off stretch it ends keeps its windows up to t."""
+    def new_start(self, t: float, session: str, kind: str = "session") -> None:
+        """FrameChain, frame thread: a new stretch starts at row time t (kind session: a new session; user: a counted
+        change of main user); an off stretch it ends keeps its windows up to t. With the stick files a new session
+        keeps the walk-in's count (module docstring, 'Stick at the start')."""
         if not self.start_only:
             return
         with self.start_lock:
             if self.off is not None and self.off[0] == self.stretch and self.off_until is None:
                 self.off_until = t
+            prev = self.stretch
             self.stretch += 1
+            if self.stick is not None:
+                walk_in = kind == "session" and self.stick_kind.get(prev) in ("walk_in", "user")
+                self.stick_key[self.stretch] = self.stick_key.get(prev, prev) if walk_in else self.stretch
+                self.stick_kind[self.stretch] = kind
             self.start_from = (t, session, self.stretch)
 
     def row_change(self, row: dict, session: str | None) -> None:
@@ -405,7 +530,7 @@ class AidConfirm:
         counts starts a new stretch at that row."""
         if (self.start_only and session is not None and not _blank(row.get("main_user_prev_track"))
                 and new_user(_change_obs(row))):
-            self.new_start(float(row["t_s"]), session)
+            self.new_start(float(row["t_s"]), session, "user")
 
     def start_skip(self) -> bool:
         """FrameChain, frame thread: whether the current stretch is switched off (the row's detector is not run)."""
@@ -440,6 +565,10 @@ class AidConfirm:
             t = float(r["t_s"])
             if t >= t0 and (self.press_t is None or t < self.press_t) and window_any_tap([r], (t, t)) is True:
                 self.press_t = t
+        if self.stick is not None and t_end >= t0 and not (off is not None and off[0] == stretch):
+            stick = self._stick_answer(tag, record, rows, t_end, stretch)   # before the start judgment
+            if stick is not None:
+                record = stick
         if tag["status"] is True and t_end >= t0:   # an answer true that ends in the stretch keeps it on
             self.aid_seen = True
         w0 = t_end - situation_params.window_s
